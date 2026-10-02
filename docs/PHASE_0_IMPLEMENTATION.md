@@ -268,3 +268,32 @@ the local stack after validation if it is not otherwise needed.
 None. Any deviation from this specification must be recorded here before implementation
 continues, along with its rationale and any necessary update to broader architecture
 documents.
+
+## Phase 0 Review Remediation (Post-ChatGPT Review)
+
+### Findings addressed
+
+1. **Harden `.env*` secret ignoring**:
+   - Replaced explicit `.env` file listings in `.gitignore` with generic `.env*` pattern.
+   - Explicitly preserved `.env.example` and nested `.env.example` templates with `!.env.example` and `!**/.env.example`.
+   - Verified with `git check-ignore` across `.env`, `.env.local`, `.env.production`, `.env.development`, `.env.test`, and `supabase/.env.production`.
+2. **Server-only boundary enforcement**:
+   - Added `import 'server-only';` as the first import in `lib/supabase/admin.ts`.
+   - Added `server-only` runtime package to `package.json` and committed in lockfile.
+   - Added regression test in `tests/unit/supabase.test.ts` to statically and behaviorally ensure the admin client cannot be imported into Client Components.
+3. **Event-source domain contract correction**:
+   - Added stable `id` and `acquisitionMethod` to `EventSourceAdapter`.
+   - Tracked `AcquisitionMethod` across `CrawlContext`, `RawIngest`, and `SourceProvenance`.
+   - Updated `EventSourceAdapter` methods to `fetch(context): Promise<RawIngest[]>` and `parse(rawIngests): Promise<EventCandidate[]>`, natively supporting multi-request ingestion, pagination, and multi-page responses.
+4. **Removal of premature festival-specific modeling**:
+   - Removed `FestivalDetails` interface and detailed lineup structures from `lib/domain/event-candidate.ts`.
+   - Replaced festival-specific fixtures in `tests/fixtures/fake-source-response.json` with a multi-day concert residency.
+   - Deferred detailed festival schedule and performance modeling to the dedicated festival phase while retaining high-level multi-day and `isFestival` flags.
+5. **Post-build TypeScript validation resilience**:
+   - Verified that `tsc --noEmit` succeeds before and after `next build`.
+   - Added post-build `npm run typecheck` step to GitHub Actions CI workflow to prevent regression of generated route types.
+6. **Deterministic repository-pinned Supabase CLI in CI**:
+   - Replaced unpinned `supabase/setup-cli@v1` with repository-pinned npm CLI (`npm run db:start`, `npm run db:reset`, `npm run db:stop`).
+7. **Real RLS security behavior test**:
+   - Added database-backed integration test in `tests/integration/profiles-rls.test.ts` executed via `npm run test:rls`.
+   - Verifies own-row SELECT, INSERT, UPDATE, cross-user isolation (SELECT and UPDATE affecting 0 rows), spoofed INSERT rejection, and unauthenticated denial against local Supabase instance in CI.

@@ -14,8 +14,10 @@ export type AcquisitionMethod =
 export interface SourceProvenance {
   sourceId: string;
   sourceType: SourceType;
+  acquisitionMethod: AcquisitionMethod;
   sourceUrl: string;
   sourceEventId?: string;
+  rawIngestId?: string;
   fetchedAt: string;
   contentHash: string;
   parserVersion: string;
@@ -25,6 +27,7 @@ export interface SourceProvenance {
 export interface CrawlContext {
   sourceId: string;
   sourceType: SourceType;
+  acquisitionMethod: AcquisitionMethod;
   targetUrl: string;
   crawlStartedAt: string;
   metadata?: Record<string, unknown>;
@@ -34,6 +37,7 @@ export interface RawIngest {
   id?: string;
   sourceId: string;
   sourceUrl: string;
+  acquisitionMethod: AcquisitionMethod;
   fetchedAt: string;
   contentHash: string;
   contentType: string;
@@ -43,13 +47,15 @@ export interface RawIngest {
 }
 
 export interface EventSourceAdapter {
+  readonly id: string;
   readonly name: string;
   readonly sourceType: SourceType;
+  readonly acquisitionMethod: AcquisitionMethod;
   readonly parserVersion: string;
 
-  fetchRaw(context: CrawlContext): Promise<RawIngest>;
-  parseCandidates(raw: RawIngest): Promise<EventCandidate[]>;
+  fetch(context: CrawlContext): Promise<RawIngest[]>;
+  parse(rawIngests: RawIngest[]): Promise<EventCandidate[]>;
   crawl(
     context: CrawlContext,
-  ): Promise<{ raw: RawIngest; candidates: EventCandidate[] }>;
+  ): Promise<{ rawIngests: RawIngest[]; candidates: EventCandidate[] }>;
 }

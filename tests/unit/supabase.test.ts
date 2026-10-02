@@ -1,3 +1,5 @@
+import fs from 'fs';
+import path from 'path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createClient as createBrowserClient } from '@/lib/supabase/browser';
 import { createAdminClient } from '@/lib/supabase/admin';
@@ -46,5 +48,14 @@ describe('Supabase Client Factories', () => {
       // @ts-expect-error cleanup
       delete global.window;
     }
+  });
+
+  it('enforces build-time server-only boundary via server-only import', () => {
+    const adminFilePath = path.resolve(
+      __dirname,
+      '../../lib/supabase/admin.ts',
+    );
+    const content = fs.readFileSync(adminFilePath, 'utf-8');
+    expect(content.startsWith("import 'server-only';")).toBe(true);
   });
 });

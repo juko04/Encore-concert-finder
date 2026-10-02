@@ -1,4 +1,5 @@
 import type {
+  AcquisitionMethod,
   CrawlContext,
   EventSourceAdapter,
   RawIngest,
@@ -27,10 +28,6 @@ interface RawEventPayload {
     currency: string;
   };
   isFestival?: boolean;
-  festivalDetails?: {
-    daysCount?: number;
-    lineupByDay?: Record<string, string[]>;
-  };
   billing?: Array<{
     artistName: string;
     billingPosition?:
@@ -39,81 +36,103 @@ interface RawEventPayload {
   }>;
 }
 
+interface RawPagePayload {
+  page: number;
+  url: string;
+  events: RawEventPayload[];
+}
+
+interface FixturePayload {
+  sourceId: string;
+  pages: RawPagePayload[];
+}
+
 export class FakeVenueSourceAdapter implements EventSourceAdapter {
-  readonly name = 'fake-venue-adapter';
+  readonly id = 'fake-venue-adapter';
+  readonly name = 'Fake Venue Source Adapter';
   readonly sourceType: SourceType = 'venue';
-  readonly parserVersion = '1.0.0';
+  readonly acquisitionMethod: AcquisitionMethod = 'structured_json';
+  readonly parserVersion = '1.1.0';
 
-  private readonly inMemoryPayload: string;
+  private readonly fixture: FixturePayload;
 
-  constructor(payload?: object) {
-    this.inMemoryPayload = JSON.stringify(payload ?? fixtureData);
+  constructor(payload?: FixturePayload) {
+    this.fixture = payload ?? (fixtureData as unknown as FixturePayload);
   }
 
-  async fetchRaw(context: CrawlContext): Promise<RawIngest> {
-    return {
-      sourceId: context.sourceId,
-      sourceUrl: context.targetUrl,
+  async fetch(context: CrawlContext): Promise<RawIngest[]> {
+    return this.fixture.pages.map((page, index) => ({
+      id: `raw_${this.id}_page_${page.page}`,
+      sourceId: context.sourceId || this.id,
+      sourceUrl: page.url,
+      acquisitionMethod: context.acquisitionMethod || this.acquisitionMethod,
       fetchedAt: context.crawlStartedAt,
-      contentHash: 'hash_test_deterministic_123',
+      contentHash: `hash_page_${index + 1}_deterministic`,
       contentType: 'application/json',
-      rawContent: this.inMemoryPayload,
+      rawContent: JSON.stringify(page),
       httpStatus: 200,
       parserVersion: this.parserVersion,
-    };
+    }));
   }
 
-  async parseCandidates(raw: RawIngest): Promise<EventCandidate[]> {
-    const parsed = JSON.parse(raw.rawContent) as { events: RawEventPayload[] };
+  async parse(rawIngests: RawIngest[]): Promise<EventCandidate[]> {
+    const candidates: EventCandidate[] = [];
 
-    return parsed.events.map((evt) => {
-      const provenance: SourceProvenance = {
-        sourceId: raw.sourceId,
-        sourceType: this.sourceType,
-        sourceUrl: raw.sourceUrl,
-        sourceEventId: evt.id,
-        fetchedAt: raw.fetchedAt,
-        contentHash: raw.contentHash,
-        parserVersion: raw.parserVersion,
-        confidence: 0.95,
-      };
+    for (const raw of rawIngests) {
+      const parsed = JSON.parse(raw.rawContent) as RawPagePayload;
 
-      const candidate: EventCandidate = {
-        id: `candidate_${evt.id}`,
-        provenance,
-        title: evt.name,
-        artistNames: evt.artists,
-        venueName: evt.venue,
-        city: evt.city,
-        state: evt.state,
-        country: evt.country,
-        timezone: evt.timezone,
-        startsAt: evt.startsAt,
-        endsAt: evt.endsAt,
-        doorsOpenAt: evt.doorsOpenAt,
-        ticketUrl: evt.ticketUrl,
-        price: evt.price,
-        isFestival: evt.isFestival ?? false,
-        festivalDetails: evt.festivalDetails,
-        performances: evt.billing?.map((b) => ({
-          artistName: b.artistName,
-          billingPosition: b.billingPosition ?? 'unknown',
-          stage: b.stage,
-        })),
-        confidence: 0.95,
-        verificationStatus: 'unverified',
-        rawPayload: { originalId: evt.id },
-      };
+      for (const evt of parsed.events) {
+        const provenance: SourceProvenance = {
+          sourceId: raw.sourceId,
+          sourceType: this.sourceType,
+          acquisitionMethod: raw.acquisitionMethod,
+          sourceUrl: raw.sourceUrl,
+          sourceEventId: evt.id,
+          rawIngestId: raw.id,
+          fetchedAt: raw.fetchedAt,
+          contentHash: raw.contentHash,
+          parserVersion: raw.parserVersion,
+          confidence: 0.95,
+        };
 
-      return candidate;
-    });
+        const candidate: EventCandidate = {
+          id: `candidate_${evt.id}`,
+          provenance,
+          title: evt.name,
+          artistNames: evt.artists,
+          venueName: evt.venue,
+          city: evt.city,
+          state: evt.state,
+          country: evt.country,
+          timezone: evt.timezone,
+          startsAt: evt.startsAt,
+          endsAt: evt.endsAt,
+          doorsOpenAt: evt.doorsOpenAt,
+          ticketUrl: evt.ticketUrl,
+          price: evt.price,
+          isFestival: evt.isFestival ?? false,
+          performances: evt.billing?.map((b) => ({
+            artistName: b.artistName,
+            billingPosition: b.billingPosition ?? 'unknown',
+            stage: b.stage,
+          })),
+          confidence: 0.95,
+          verificationStatus: 'unverified',
+          rawPayload: { originalId: evt.id },
+        };
+
+        candidates.push(candidate);
+      }
+    }
+
+    return candidates;
   }
 
   async crawl(
     context: CrawlContext,
-  ): Promise<{ raw: RawIngest; candidates: EventCandidate[] }> {
-    const raw = await this.fetchRaw(context);
-    const candidates = await this.parseCandidates(raw);
-    return { raw, candidates };
+  ): Promise<{ rawIngests: RawIngest[]; candidates: EventCandidate[] }> {
+    const rawIngests = await this.fetch(context);
+    const candidates = await this.parse(rawIngests);
+    return { rawIngests, candidates };
   }
 }

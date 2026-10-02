@@ -19,12 +19,6 @@ export interface CandidatePrice {
   estimatedFees?: number;
 }
 
-export interface FestivalDetails {
-  daysCount?: number;
-  lineupByDay?: Record<string, string[]>;
-  stages?: string[];
-}
-
 export type CandidateVerificationStatus =
   'unverified' | 'corroborated' | 'rejected';
 
@@ -44,7 +38,6 @@ export interface EventCandidate {
   ticketUrl?: string;
   price?: CandidatePrice;
   isFestival?: boolean;
-  festivalDetails?: FestivalDetails;
   performances?: PerformanceCandidate[];
   confidence: number;
   verificationStatus?: CandidateVerificationStatus;
