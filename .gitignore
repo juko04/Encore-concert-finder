@@ -1,0 +1,31 @@
+# Dependencies
+node_modules/
+
+# Next.js
+.next/
+out/
+
+# Environment / secrets
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Logs
+*.log
+
+# OS/editor
+.DS_Store
+.vscode/
+.idea/
+
+# Test/build artifacts
+coverage/
+playwright-report/
+test-results/
+
+# Local agent/runtime secrets
+.agents/local/
+*.pem
+*.key

@@ -1,0 +1,2417 @@
+CONCERT FINDER / ENCORE - COMPLETE PROJECT SPECIFICATION
+Generated from the current product architecture discussion.
+
+================================================================================
+FILE: README.md
+================================================================================
+# Concert Finder / Encore (working title)
+
+This repository is the shared product and engineering specification for a personalized concert, festival, and live-music discovery application.
+
+The working product goal is simple:
+
+> Help a user decide which live-music experiences are actually worth attending, based on taste, past attendance, venue preferences, price sensitivity, distance, timing, and lineup quality.
+
+This is **not** intended to be another generic event calendar. The product should combine:
+
+- personalized concert recommendations
+- cheap/local discovery
+- larger shows worth planning for
+- festival and multi-day event intelligence
+- ticket/on-sale/watch alerts
+- resilient event ingestion from APIs plus official public web sources
+
+Email/newsletter ingestion is intentionally deferred for now, but must remain on the roadmap and should be reconsidered when alerts, presales, and missing event coverage are implemented.
+
+## Current technical direction
+
+- Frontend / web app: Next.js + TypeScript
+- Styling: Tailwind CSS
+- Database: PostgreSQL via Supabase
+- Authentication: Supabase Auth
+- Music taste: Spotify Web API
+- Baseline event inventory: Ticketmaster Discovery API
+- Supplemental ingestion: official promoter, venue, festival, and ticketing pages
+- Scraping: fetch/HTTP + structured-data parsing + Cheerio; Playwright only when necessary
+- Background work: scheduled jobs/workers
+- Deployment: Vercel for web; Supabase for database/auth; worker deployment to be chosen during implementation
+- Initial delivery format: responsive web app / PWA before any native mobile app
+
+## Documentation map
+
+- `AGENTS.md` — shared instructions for AI coding agents and human contributors
+- `docs/01-product-vision.md` — product scope, user jobs, primary screens
+- `docs/02-system-architecture.md` — application and service architecture
+- `docs/03-data-model.md` — entities and database schema
+- `docs/04-ingestion-and-scraping.md` — APIs, crawlers, normalization, verification, deduplication
+- `docs/05-source-registry.md` — current event-source list and acquisition strategy
+- `docs/06-recommendation-engine.md` — scoring and personalization logic
+- `docs/07-festivals.md` — festival / multi-day behavior
+- `docs/08-alerts-and-watchlists.md` — watches, on-sales, price alerts
+- `docs/09-security-privacy-and-compliance.md` — privacy, secrets, scraping safety, data handling
+- `docs/10-api-and-module-plan.md` — proposed internal modules and API routes
+- `docs/11-roadmap.md` — phased implementation plan
+- `docs/12-decisions.md` — decisions already made vs. open questions
+- `docs/13-agent-collaboration.md` — recommended workflow for ChatGPT/Codex + Antigravity + GitHub
+- `docs/14-future-email-ingestion.md` — deferred email/newsletter ingestion design
+
+## Product principles
+
+1. **Explain recommendations.** A user should understand why a show was recommended.
+2. **Price is personal.** A $70 ticket can be a good value for a favorite artist and a bad value for an unknown artist.
+3. **Local discovery matters.** Small venues, bars, outdoor events, and inexpensive shows are first-class use cases.
+4. **Festivals are not just long concerts.** Lineup depth, day-by-day value, travel, and pass types must be modeled explicitly.
+5. **Use multiple data sources.** APIs provide breadth; official venue/promoter/festival sites provide depth and freshness.
+6. **Verify before trusting.** Social or weak sources may discover an event, but stronger first-party sources should verify it.
+7. **Do not overbuild ML early.** Start with transparent, tunable ranking formulas and learn from explicit feedback.
+8. **Store raw source evidence.** Preserve source snapshots so parsers can be fixed and re-run later.
+9. **Keep the architecture portable.** The recommendation engine and data model should not depend on any single ticketing provider.
+10. **Build web-first.** Prove discovery and recommendation quality before building native mobile apps.
+
+================================================================================
+FILE: AGENTS.md
+================================================================================
+# AGENTS.md
+
+Shared instructions for AI coding agents (ChatGPT/Codex, Google Antigravity, or others) working in this repository.
+
+## Mission
+
+Build a personalized live-music discovery application that ranks concerts, festivals, and local events by how worthwhile they are for an individual user.
+
+Do not reduce the product to a generic event-search UI. Every major feature should support one of these jobs:
+
+- find something good and inexpensive soon
+- find a favorite artist worth paying more to see
+- discover nearby small/local shows
+- identify festivals/multi-day events worth traveling for
+- watch artists/events and alert on meaningful changes
+
+## Current stack
+
+Use unless an ADR/decision document explicitly changes it:
+
+- Next.js
+- TypeScript
+- Tailwind CSS
+- PostgreSQL / Supabase
+- Supabase Auth
+- Spotify Web API
+- Ticketmaster Discovery API as one baseline source
+- source adapters for venue/promoter/festival/ticketing pages
+
+## Coding principles
+
+- Prefer TypeScript across frontend, backend, adapters, and workers.
+- Keep source-specific scraping code isolated behind adapters.
+- Never let page-specific DOM selectors leak into canonical event/domain logic.
+- Normalize all sources into common candidate/event types.
+- Preserve source provenance for every imported fact.
+- Do not silently delete canonical events because one crawler fails.
+- Write idempotent ingestion and worker jobs.
+- Design for reprocessing raw ingests.
+- Prefer explicit and testable recommendation logic over opaque ML.
+- Keep price, artist affinity, venue affinity, distance, and timing as independently inspectable features.
+- Treat festivals and multi-day events as first-class entities.
+- Keep user-private information separate from public event metadata.
+- Do not commit secrets, API keys, cookies, OAuth tokens, or personal user exports.
+
+## Scraping rules
+
+Before scraping a source:
+
+1. Prefer a documented API, feed, JSON-LD, schema.org Event markup, RSS, ICS, or embedded structured JSON.
+2. If needed, use normal HTTP fetch + HTML parsing.
+3. Use Playwright/browser automation only for pages whose data is unavailable otherwise.
+4. Respect applicable terms, robots controls, authentication boundaries, and reasonable crawl rates.
+5. Do not bypass CAPTCHAs, access controls, paywalls, or anti-bot protections.
+6. Do not use fake accounts or authenticated scraping unless explicitly designed and permitted.
+7. Use social media primarily as a discovery signal unless an approved official integration exists.
+8. Record source URL, fetch time, parser version, content hash, and extraction confidence.
+
+## Data integrity
+
+Canonical events must be traceable back to one or more source records.
+
+Do not overwrite higher-confidence data with lower-confidence data without an explicit field-level merge rule.
+
+Every source adapter should have fixture-based parser tests where feasible.
+
+## Product UX principles
+
+Event cards should answer:
+
+- Why is this recommended?
+- How much does it cost?
+- How far / how much effort is it?
+- How strong is the music match?
+- Is anything time-sensitive (presale, on-sale, price change)?
+
+Do not expose a mysterious recommendation score without a human-readable explanation.
+
+## Deferred feature reminder
+
+**Email/newsletter ingestion is intentionally deferred, not rejected.** Revisit it when implementing:
+
+- presale discovery
+- notification quality
+- promoter announcements
+- missing-source coverage
+- user integrations
+
+See `docs/14-future-email-ingestion.md`.
+
+## Collaboration workflow
+
+- GitHub is the source of truth.
+- Prefer one feature/issue per branch.
+- Before large changes, update or reference the relevant spec document.
+- Agents should read `README.md`, `AGENTS.md`, and relevant files in `docs/` before implementation.
+- If code and documentation disagree, flag the inconsistency instead of silently inventing new product behavior.
+- Major architectural changes should update `docs/12-decisions.md`.
+
+================================================================================
+FILE: .env.example
+================================================================================
+# Public application
+NEXT_PUBLIC_APP_URL=http://localhost:3000
+
+# Supabase
+NEXT_PUBLIC_SUPABASE_URL=
+NEXT_PUBLIC_SUPABASE_ANON_KEY=
+SUPABASE_SERVICE_ROLE_KEY=
+
+# Spotify
+SPOTIFY_CLIENT_ID=
+SPOTIFY_CLIENT_SECRET=
+SPOTIFY_REDIRECT_URI=http://localhost:3000/api/spotify/callback
+
+# Ticketmaster
+TICKETMASTER_API_KEY=
+
+# Optional later services
+# MAP_PROVIDER_API_KEY=
+# NOTIFICATION_PROVIDER_API_KEY=
+
+================================================================================
+FILE: .gitignore
+================================================================================
+# Dependencies
+node_modules/
+
+# Next.js
+.next/
+out/
+
+# Environment / secrets
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Logs
+*.log
+
+# OS/editor
+.DS_Store
+.vscode/
+.idea/
+
+# Test/build artifacts
+coverage/
+playwright-report/
+test-results/
+
+# Local agent/runtime secrets
+.agents/local/
+*.pem
+*.key
+
+================================================================================
+FILE: docs/01-product-vision.md
+================================================================================
+# 01 — Product Vision
+
+## Problem
+
+Existing concert discovery products tend to answer "what events exist?" rather than "which events are worth my time and money?"
+
+The app should combine personal music taste, actual live-event behavior, price sensitivity, venue preference, travel effort, timing, and festival lineup quality.
+
+## Core user modes
+
+### 1. Tonight / This Weekend
+Optimized for convenience and spontaneity.
+
+High weight:
+- low price
+- short distance
+- good date/time fit
+- venue fit
+- genre/taste similarity
+
+A user should be able to find a $10–$25 show by an unfamiliar artist if it is nearby and musically plausible.
+
+### 2. Cheap & Nearby
+Focus on:
+- bars
+- clubs
+- small venues
+- outdoor/community shows
+- free events
+- emerging artists
+
+Price and distance may outrank direct artist familiarity.
+
+### 3. Worth Planning For
+Focus on:
+- favorite artists
+- strong affinity matches
+- larger venues
+- shows weeks/months away
+- willingness to pay more or travel farther
+
+### 4. Festivals & Trips
+Focus on:
+- multi-day festivals
+- lineup depth
+- day-by-day value
+- pass type
+- estimated total trip effort/cost
+- artists the user loves vs. likely discoveries
+
+### 5. Watching
+Track:
+- artist tour/show announcements
+- presales
+- general on-sales
+- price thresholds
+- festival lineup changes
+- day splits / set times
+
+## Key user profile signals
+
+- Spotify listening signals
+- manually stated favorite/liked artists
+- prior concerts attended
+- prior venues attended
+- past ticket prices when known
+- explicit feedback in the app
+- saved events
+- ticket-link clicks
+- attendance confirmations
+
+## Core feedback actions
+
+Positive:
+- save
+- share
+- ticket click
+- attended
+- loved it
+- would see again
+
+Negative / corrective:
+- not interested
+- too expensive
+- too far
+- bad date
+- dislike artist
+- dislike venue
+
+Important: "too expensive" must not be interpreted as "bad artist recommendation."
+
+## Recommendation explanation
+
+Each recommendation should include concise reasons, e.g.:
+
+- You listen to this artist frequently.
+- Similar to 4 artists you like.
+- This venue has scored well for you before.
+- Ticket price is below your typical willingness-to-pay for this affinity level.
+- Very close to you this Friday.
+
+## Working visual concept
+
+Home / Discover:
+
+- This Weekend
+- Cheap & Nearby
+- Worth Planning For
+- Festivals & Trips
+- Watching
+
+Event cards should show:
+
+- artist/event
+- venue + date
+- price / price confidence
+- distance or travel effort
+- personalized score
+- 2–3 explanation reasons
+- save / tickets / dismiss actions
+
+## Not in initial scope
+
+- native iOS/Android apps
+- resale-market trading logic
+- fully autonomous purchasing
+- opaque ML model trained on Spotify content
+- broad authenticated social scraping
+- email ingestion (deferred)
+
+================================================================================
+FILE: docs/02-system-architecture.md
+================================================================================
+# 02 — System Architecture
+
+## High-level architecture
+
+```text
+                    External Sources
+     ┌────────────────────────────────────────┐
+     │ Ticketmaster API                        │
+     │ Promoter websites                       │
+     │ Venue calendars                         │
+     │ Festival websites                       │
+     │ Ticketing-platform public pages         │
+     │ Approved social/API signals             │
+     │ (Email ingestion later)                 │
+     └──────────────────┬─────────────────────┘
+                        │
+                        v
+              Ingestion / Source Adapters
+                        │
+                        v
+                  Raw Ingest Store
+                        │
+                        v
+                  Event Candidates
+                        │
+            ┌───────────┴───────────┐
+            │                       │
+      Entity Resolution       Verification
+            │                       │
+            └───────────┬───────────┘
+                        v
+                Canonical Event Store
+                        │
+      ┌─────────────────┼──────────────────┐
+      │                 │                  │
+      v                 v                  v
+  Price History   Recommendation      Watch/Alert Engine
+                       Engine
+      │                 │                  │
+      └─────────────────┼──────────────────┘
+                        v
+                 Next.js Web / PWA
+                        │
+                        v
+                       User
+```
+
+## Application layers
+
+### Web frontend
+
+Responsibilities:
+- onboarding
+- Spotify connection
+- discovery feeds
+- event/festival details
+- feedback
+- watchlist management
+- user preferences
+
+Recommendation:
+- Next.js App Router
+- React Server Components where useful
+- client components only where interaction requires them
+- Tailwind CSS
+
+### Application API / service layer
+
+Responsibilities:
+- authenticated user operations
+- feed endpoints
+- event details
+- feedback ingestion
+- watch rules
+- Spotify sync orchestration
+
+Early MVP may use Next.js route handlers/server actions.
+
+As background jobs grow, keep domain logic in reusable modules so workers can call the same services.
+
+### Database
+
+PostgreSQL/Supabase.
+
+Store:
+- canonical public event data
+- raw ingestion metadata
+- candidate/source records
+- user taste profile
+- user preferences
+- feedback and attendance
+- price snapshots
+- watch rules
+
+### Worker layer
+
+Responsibilities:
+- scheduled source crawling
+- Ticketmaster synchronization
+- normalization
+- deduplication
+- entity resolution
+- price snapshots
+- recommendation feature recalculation
+- watch-rule evaluation
+
+Do not depend on HTTP requests from a user's browser to keep data current.
+
+### Source adapter layer
+
+Every event source should implement a common contract.
+
+Conceptual TypeScript interface:
+
+```ts
+interface EventSourceAdapter {
+  id: string;
+  name: string;
+  sourceType: 'api' | 'promoter' | 'venue' | 'festival' | 'ticketing' | 'social';
+  fetch(context: CrawlContext): Promise<RawIngest[]>;
+  parse(raw: RawIngest): Promise<EventCandidate[]>;
+}
+```
+
+Source-specific details stay inside adapters.
+
+## Deployment direction
+
+Initial:
+- Vercel: Next.js web/API
+- Supabase: PostgreSQL/Auth
+- worker scheduling: Vercel Cron and/or Supabase scheduled/edge jobs where adequate
+
+If crawling becomes heavier:
+- move workers to a dedicated Node runtime/container service
+- preserve the same queue/job interfaces
+
+## Queue/job abstraction
+
+Even if a formal queue is not used on day one, design workers as discrete idempotent jobs:
+
+- `sync-ticketmaster-region`
+- `crawl-source`
+- `parse-raw-ingest`
+- `resolve-event-candidate`
+- `merge-canonical-event`
+- `snapshot-ticket-price`
+- `recompute-user-affinity`
+- `recompute-event-scores`
+- `evaluate-watch-rules`
+
+## Observability
+
+Need from early versions:
+- structured logs
+- crawler last-success time
+- records found / new / changed
+- parser error rate
+- source health status
+- job failures
+- duplicate merge audit
+
+Avoid silent crawler failure.
+
+================================================================================
+FILE: docs/03-data-model.md
+================================================================================
+# 03 — Data Model
+
+This is a conceptual schema. Exact column names/types can change during implementation, but entity boundaries should remain stable unless documented.
+
+## users
+
+```text
+id
+created_at
+home_lat_approx
+home_lng_approx
+default_radius_miles
+max_spontaneous_price
+max_normal_ticket_price
+max_favorite_artist_price
+travel_willingness
+```
+
+Do not require an exact street address.
+
+## artists
+
+```text
+id
+name
+normalized_name
+spotify_id
+ticketmaster_id
+musicbrainz_id (optional)
+genres[]
+image_url
+created_at
+updated_at
+```
+
+## artist_external_ids
+
+Useful if provider count grows:
+
+```text
+artist_id
+provider
+provider_artist_id
+provider_url
+```
+
+## user_artist_affinity
+
+```text
+user_id
+artist_id
+spotify_short_term_score
+spotify_medium_term_score
+spotify_long_term_score
+recent_listening_score
+concert_history_score
+manual_rating
+saved_event_score
+final_affinity_score
+updated_at
+```
+
+## venues
+
+```text
+id
+name
+normalized_name
+city
+state
+country
+latitude
+longitude
+capacity (nullable)
+venue_type
+indoor_outdoor
+website_url
+```
+
+## user_venue_affinity
+
+```text
+user_id
+venue_id
+times_attended
+average_rating
+would_return_score
+venue_affinity
+```
+
+## promoters
+
+```text
+id
+name
+website_url
+calendar_url
+reliability_score
+```
+
+## events
+
+Canonical event record.
+
+```text
+id
+name
+event_type
+start_datetime
+end_datetime
+multi_day
+venue_id
+promoter_id
+city
+state
+country
+latitude
+longitude
+minimum_age
+official_url
+canonical_ticket_url
+status
+announced_at
+created_at
+updated_at
+```
+
+Suggested `event_type`:
+
+```text
+concert
+festival
+multi_day_festival
+club_show
+outdoor_show
+music_series
+free_event
+residency
+```
+
+## event_days
+
+For festivals/multi-day events.
+
+```text
+id
+event_id
+date
+doors_open
+doors_close
+label
+```
+
+## performances
+
+```text
+id
+event_id
+event_day_id nullable
+artist_id
+stage nullable
+start_time nullable
+end_time nullable
+billing_position
+```
+
+Suggested billing positions:
+- headliner
+- subheadliner
+- mid_card
+- support
+- unknown
+
+## ticket_options
+
+```text
+id
+event_id
+provider
+name
+ticket_type
+days_included[]
+face_value nullable
+fees_estimate nullable
+total_price nullable
+currency
+inventory_status
+sale_type
+sale_start
+sale_end
+ticket_url
+last_verified_at
+```
+
+Examples:
+- GA
+- VIP
+- lawn
+- reserved
+- weekend_pass
+- single_day
+- early_bird
+
+## price_snapshots
+
+```text
+id
+ticket_option_id
+captured_at
+price
+fees
+availability
+source_id
+```
+
+## attendance_history
+
+```text
+id
+user_id
+event_id nullable
+artist_id nullable
+venue_id nullable
+attendance_date
+ticket_price nullable
+rating nullable
+would_see_again nullable
+favorite_performance_artist_id nullable
+source
+notes nullable
+```
+
+## user_event_feedback
+
+```text
+id
+user_id
+event_id
+action
+created_at
+metadata jsonb
+```
+
+Actions:
+- viewed
+- opened
+- saved
+- shared
+- tickets_clicked
+- attended
+- not_interested
+- too_expensive
+- too_far
+- bad_date
+- dont_like_artist
+- dont_like_venue
+
+## watch_rules
+
+```text
+id
+user_id
+rule_type
+artist_id nullable
+event_id nullable
+max_price nullable
+max_distance nullable
+trigger_on_announcement
+trigger_on_presale
+trigger_on_onsale
+trigger_on_price_drop
+trigger_on_lineup_change
+enabled
+created_at
+```
+
+## raw_ingests
+
+```text
+id
+source_id
+source_url
+fetched_at
+content_hash
+content_type
+raw_content_or_storage_pointer
+http_status
+parser_version
+```
+
+Large raw pages may eventually live in object storage with a DB pointer.
+
+## event_candidates
+
+```text
+id
+raw_ingest_id
+source_id
+source_event_id nullable
+candidate_payload jsonb
+artist_text
+venue_text
+city_text
+event_date nullable
+sale_date nullable
+presale_date nullable
+ticket_url nullable
+price nullable
+confidence
+verification_status
+created_at
+```
+
+## event_sources
+
+Connect canonical event to supporting source records.
+
+```text
+id
+event_id
+source_id
+source_event_id nullable
+source_url
+confidence
+first_seen_at
+last_seen_at
+```
+
+## sources
+
+```text
+id
+name
+source_type
+base_url
+acquisition_method
+crawl_frequency_minutes nullable
+reliability_score
+active
+last_success_at
+last_failure_at
+health_status
+parser_version
+```
+
+## source_field_evidence (future but valuable)
+
+For field-level provenance:
+
+```text
+id
+event_id
+field_name
+source_id
+raw_ingest_id
+value_hash
+confidence
+observed_at
+```
+
+This allows future debugging of conflicting dates/prices/venues.
+
+================================================================================
+FILE: docs/04-ingestion-and-scraping.md
+================================================================================
+# 04 — Ingestion and Scraping
+
+## Strategy
+
+Use multiple complementary acquisition methods.
+
+APIs are preferred when reliable and permitted, but the product should not depend on APIs alone because local/small venue coverage and announcement freshness may be incomplete.
+
+## Ingestion ladder
+
+For each source, attempt in this order:
+
+1. documented API
+2. structured public feed (RSS, ICS, JSON feed)
+3. JSON-LD / schema.org Event
+4. embedded structured JSON used by the public page
+5. normal HTTP fetch + HTML parsing (Cheerio)
+6. Playwright/browser rendering only when data is not otherwise available
+
+## Do not
+
+- bypass CAPTCHAs
+- bypass login or access controls
+- defeat anti-bot systems
+- impersonate users with fake accounts
+- scrape private/authenticated social content
+- assume a public web page grants unrestricted reuse rights
+
+## Raw ingestion pipeline
+
+```text
+SOURCE
+  -> FETCH
+  -> RAW_INGEST
+  -> PARSE
+  -> EVENT_CANDIDATE
+  -> ENTITY RESOLUTION
+  -> DUPLICATE MATCH
+  -> SOURCE CORROBORATION
+  -> CANONICAL EVENT
+```
+
+## Why raw snapshots matter
+
+Retaining source snapshots allows:
+- parser bug fixes without refetching
+- auditability
+- detecting changed source data
+- replaying old inputs through new parser versions
+
+## Source adapter responsibilities
+
+Each adapter should:
+- fetch one or more public pages/API pages
+- emit raw ingestion records
+- parse to common candidate types
+- include source URL and source IDs
+- expose basic health metrics
+
+It should not:
+- decide personalized ranking
+- write directly to user recommendation tables
+- contain venue-specific logic outside that adapter
+
+## Change detection
+
+Maintain:
+- `content_hash`
+- last fetched time
+- last changed time
+
+When possible, avoid reparsing unchanged content.
+
+If a source supports ETag/Last-Modified, use conditional requests.
+
+## Suggested crawl cadence
+
+These are starting heuristics, not fixed requirements:
+
+- major promoter announcement pages: every 2–4 hours
+- venue event calendars: every 4–8 hours
+- festivals near lineup/on-sale announcements: every 2–6 hours
+- low-volume/static venue pages: daily
+- static venue metadata: weekly/monthly
+
+Back off automatically when sources fail.
+
+## Source health
+
+Track per source:
+
+```text
+last_attempt_at
+last_success_at
+http_failures
+parse_failures
+events_found
+new_events_found
+changed_events_found
+expected_volume_baseline
+health_status
+```
+
+Heuristic parser-break detection example:
+
+- source normally returns 80–120 future events
+- suddenly returns 0 with HTTP 200
+- mark `SUSPECT_PARSER_FAILURE`
+- do not delete canonical events automatically
+
+## Normalization
+
+Normalize:
+- artist names
+- venue names
+- city/state
+- dates/time zones
+- price/currency
+- age restrictions
+- ticket status
+- event types
+
+Preserve the original source text alongside normalized fields.
+
+## Entity resolution
+
+Artist matching signals:
+- exact provider ID
+- normalized name
+- Spotify/Ticketmaster ID mapping
+- alias table
+- lineup context
+
+Venue matching signals:
+- known provider ID
+- normalized name
+- street/city when public
+- coordinates
+
+## Deduplication
+
+A probable duplicate can be identified with weighted features:
+
+- same/near venue
+- same date/time
+- overlapping artists
+- similar event title
+- same ticket URL or provider ID
+
+Never rely on event title alone.
+
+Store merge confidence and supporting sources.
+
+## Source confidence
+
+Illustrative starting confidence values:
+
+```text
+official artist site        1.00
+official festival site      1.00
+official venue site         0.98
+official promoter site      0.98
+primary ticket provider     0.95
+official artist social      0.90
+official venue social       0.90
+reputable local listing     0.75
+unverified social mention   0.35
+```
+
+These are tunable priors, not absolute truth.
+
+## Social strategy
+
+Social media should initially be used primarily for discovery/verification signals, not as the canonical datastore.
+
+Preferred:
+- official platform APIs where available and allowed
+- official public links surfaced by artist/promoter sites
+- public announcement pages mirrored on official sites
+
+Avoid building the MVP around brittle logged-in browser scraping of Instagram/X/etc.
+
+## Field-level conflict resolution
+
+When sources disagree:
+- prefer newer, higher-confidence first-party evidence
+- retain all source evidence
+- do not destroy old observations
+- mark meaningful unresolved conflict for investigation
+
+Examples:
+- changed venue
+- rescheduled date
+- canceled show
+- changed lineup
+
+================================================================================
+FILE: docs/05-source-registry.md
+================================================================================
+# 05 — Source Registry
+
+This is the initial event-source backlog. Acquisition methods may change as source capabilities and terms change.
+
+## Aggregators / artist discovery
+
+### Bandsintown
+Use case:
+- artist tracking
+- broad discovery
+- possible announcement/presale signals
+
+Initial strategy:
+- partnership/API if available and appropriate
+- do not make MVP dependent on unapproved access
+
+### Songkick
+Use case:
+- artist tracking
+- concert/festival discovery
+
+Initial strategy:
+- optional future licensed/approved API
+- do not make MVP dependent on access
+
+### Spotify Live Events / Spotify artist context
+Use case:
+- taste-linked discovery context
+- artist affinity
+
+Initial strategy:
+- Spotify Web API for permitted user music data
+- do not treat Spotify as the sole event inventory
+
+## Major primary ticketing / promoters
+
+### Ticketmaster
+Use case:
+- broad baseline event inventory
+- venues/artists
+- on-sale/presale metadata where available
+
+Strategy:
+- API first
+
+### Live Nation
+Use case:
+- major tour/promoter announcements
+- presales
+
+Strategy:
+- official public pages/feeds where permitted
+- note overlap with Ticketmaster inventory
+
+### AXS
+Use case:
+- AEG-related ticketing and primary event pages
+
+Strategy:
+- evaluate structured public data/official integration options
+- source adapter if permitted
+
+### AEG Presents
+Use case:
+- tour announcements
+- festivals
+- venue network
+
+Strategy:
+- official public promoter/venue pages
+- high-priority source adapter
+
+## Clubs / independent / alternative ticketing
+
+### DICE
+Use case:
+- clubs, DJs, electronic, indie, smaller venues
+
+### Tixr
+Use case:
+- concerts, festivals, independent venues
+
+### Etix
+Use case:
+- clubs, festivals, theaters, independent promoters
+
+### See Tickets
+Use case:
+- festivals / independent venues / promoters
+
+### TicketWeb
+Use case:
+- smaller clubs and independent shows
+
+### Eventbrite
+Use case:
+- very small shows
+- bars
+- DIY events
+- local/community festivals
+
+### SeatGeek
+Use case:
+- official platform for some venues/events
+- resale context where relevant
+
+### Front Gate Tickets
+Use case:
+- festivals and multi-day events
+
+Strategy:
+- use indirect/API coverage when available before direct crawling
+
+### Universe
+Use case:
+- smaller events/ticketing
+
+Strategy:
+- prefer existing upstream API coverage when available
+
+## Artist-direct presale/discovery
+
+### Seated
+Use case:
+- artist-direct fan alerts/presales
+
+Strategy:
+- future approved integration / discovery signal
+
+## High-value local/official venue sources
+
+Venue websites are critical for the product's "cheap nearby discovery" value.
+
+Initial Colorado-oriented examples discussed:
+
+### Red Rocks Amphitheatre
+- official event calendar
+- large outdoor shows
+
+### Mission Ballroom
+- major Denver venue
+- AEG ecosystem
+
+### Bluebird Theater
+- AEG ecosystem / smaller room
+
+### Cervantes' Masterpiece Ballroom
+- detailed lineup/support acts
+- smaller/local/electronic/jam/etc.
+
+### Dazzle
+- jazz / local / touring programming
+- high value for lower-cost discovery
+
+### Levitt Pavilion Denver
+- free and ticketed outdoor music
+
+## Festival sources
+
+Use official festival sites as primary sources for:
+- festival announcement
+- lineup phases
+- daily lineup splits
+- pass types
+- set times
+- venue/location changes
+
+Examples should be added as users encounter them. Up in the Sky / Aspen-style multi-day events are a core motivating use case.
+
+## Promoter / venue source expansion rule
+
+Whenever the system sees repeated canonical events associated with a promoter or venue not yet directly sourced:
+
+1. add it to the source backlog
+2. inspect for structured public calendar data
+3. decide whether direct crawling materially improves freshness/coverage
+4. implement only if useful and permitted
+
+## Email/newsletters
+
+Status: **Deferred.**
+
+Do not implement now. See `14-future-email-ingestion.md`.
+
+================================================================================
+FILE: docs/06-recommendation-engine.md
+================================================================================
+# 06 — Recommendation Engine
+
+## Philosophy
+
+Start with an explainable, tunable ranking model.
+
+Do not build an opaque ML recommender before the product has enough real user feedback to justify one.
+
+## Core event score
+
+Illustrative normal-concert weights:
+
+```text
+Artist Match          35%
+Price Value           20%
+Distance              15%
+Venue Match           10%
+Date Convenience      10%
+Discovery Potential    5%
+Specialness/Novelty    5%
+```
+
+Weights must vary by user intent/mode.
+
+## Artist affinity
+
+Potential inputs:
+- Spotify short-term top artists/tracks
+- Spotify medium-term signals
+- Spotify long-term signals
+- recent listening
+- manual favorite/like rating
+- attendance history
+- would-see-again history
+- saved events
+
+Conceptually normalize to 0–100.
+
+## Dynamic willingness-to-pay
+
+Price value should be relative to artist/event affinity.
+
+Example curve:
+
+```text
+Affinity ~95 -> comfortable price maybe $80–$100
+Affinity ~75 -> maybe $50–$65
+Affinity ~50 -> maybe $25–$35
+Affinity ~20 -> maybe $10–$20
+```
+
+Exact curve is user-specific and learned over time.
+
+A user's explicit defaults seed the curve:
+- max spontaneous price
+- typical concert price
+- favorite-artist ceiling
+
+## Price-value feature
+
+Price value should consider:
+- current known ticket price
+- fees if known
+- user's affinity-adjusted willingness-to-pay
+- event rarity/specialness
+- price history later
+
+Do not confuse "expensive" with "bad recommendation."
+
+## Distance / effort
+
+Early version:
+- straight-line or route distance from approximate home location
+- user radius preference
+
+Later:
+- drive time
+- parking/transit difficulty
+- overnight travel
+- trip cost
+
+## Venue affinity
+
+Inputs:
+- prior attendance count
+- user ratings
+- indoor/outdoor preferences
+- standing/seated preferences
+- repeated positive feedback
+
+## Discovery potential
+
+Unknown artists can rank strongly when:
+- genre/artist-neighbor match is strong
+- venue fit is good
+- price is low
+- distance is short
+- timing is convenient
+
+This is essential to "cheap adventure" mode.
+
+## Mode-specific weights
+
+### This Weekend
+
+Possible weights:
+```text
+Artist Match      25
+Price Value       25
+Distance          20
+Date Convenience  15
+Venue Match       10
+Discovery          5
+```
+
+### Cheap Adventure
+
+Possible weights:
+```text
+Price Value       35
+Distance          25
+Genre/Taste       15
+Venue Match       15
+Artist Match       5
+Discovery          5
+```
+
+### Worth Planning For
+
+Possible weights:
+```text
+Artist Match      45
+Specialness       15
+Price Value       15
+Venue Match       10
+Distance           5
+Date Convenience  10
+```
+
+These are starting points only.
+
+## Recommendation explanation
+
+Store or compute feature contributions so the UI can state reasons.
+
+Example:
+
+```text
+94% match
+- You listen to this artist frequently.
+- You've liked this venue before.
+- Price is below your usual range for an artist you like this much.
+```
+
+## Feedback updates
+
+Examples:
+
+- `dont_like_artist` -> reduce artist affinity / related recommendation confidence
+- `too_expensive` -> lower price tolerance for similar affinity tier, not music affinity
+- `too_far` -> adjust effort/travel preference
+- `dont_like_venue` -> lower venue affinity
+- `saved` -> positive event-level signal
+- `attended + loved` -> strong artist + venue + live-event preference signal
+
+## Evaluation
+
+Before ML, measure:
+- save rate
+- ticket-click rate
+- dismiss rate
+- too-expensive rate
+- attendance confirmations
+- recommendation diversity
+- % recommendations with sufficient source confidence
+
+Do not optimize only for clicks; preserve useful discovery and trust.
+
+================================================================================
+FILE: docs/07-festivals.md
+================================================================================
+# 07 — Festivals and Multi-Day Events
+
+Festivals are first-class event experiences, not ordinary concerts with a long date range.
+
+## Festival-specific data
+
+Need:
+- start/end dates
+- event days
+- stages
+- artist performances
+- billing position
+- ticket/pass types
+- single-day passes
+- lineup phases
+- daily lineup split
+- set times
+- location/travel context
+
+## Lineup match
+
+For each performance/artist:
+- compute user artist affinity
+- optionally infer related-artist / genre match
+- weight headliners/subheadliners more than lower billing, while still valuing lineup depth
+
+Output should include:
+- favorite artists count
+- known/liked artist count
+- likely discoveries
+- lineup match score
+
+## Example artist-level interpretation
+
+```text
+95–100 favorite / must-see
+80–94 strong match
+60–79 likely match
+40–59 plausible discovery
+<40 weak/unknown
+```
+
+## Festival score
+
+Possible feature groups:
+
+```text
+Lineup Match
+Lineup Depth
+Ticket/Pass Value
+Travel Effort
+Venue/Destination Appeal
+Date Convenience
+Uniqueness / Rarity
+```
+
+Do not use normal-concert weights unchanged.
+
+## Day-by-day scoring
+
+If single-day tickets exist, score each day independently.
+
+Example UX:
+
+```text
+Friday lineup match:   48%
+Saturday lineup match: 92%
+
+Recommendation explanation:
+Most of your strongest matches play Saturday. A Saturday pass may provide better value than the weekend pass.
+```
+
+Do not make definitive financial decisions for the user; show the comparative information.
+
+## Total trip cost
+
+Later-stage estimate may include:
+- ticket/pass
+- known fees
+- driving/fuel estimate
+- lodging estimate
+- parking/transit
+
+Display assumptions explicitly.
+
+## Lineup lifecycle
+
+Store festival updates as evolving states:
+
+```text
+festival announced
+phase 1 lineup
+phase 2 lineup
+single-day splits
+new artist added
+pass change
+set times released
+```
+
+This enables meaningful alerts.
+
+## Schedule builder (later)
+
+When set times exist:
+- rank performances by user affinity
+- identify conflicts
+- suggest an itinerary
+- allow user overrides
+
+## Trip mode
+
+Potential travel buckets:
+- local
+- <100 miles
+- 100–300 miles
+- overnight/flight-worthy
+
+Travel willingness is user-specific.
+
+================================================================================
+FILE: docs/08-alerts-and-watchlists.md
+================================================================================
+# 08 — Alerts and Watchlists
+
+## Watchable targets
+
+- artist
+- event
+- festival
+- venue (future)
+- promoter (future)
+
+## Core triggers
+
+Artist/event:
+- new nearby show announced
+- presale announced
+- general on-sale announced
+- price at/below threshold
+- meaningful price drop
+- event canceled/rescheduled
+
+Festival:
+- festival announced
+- early-bird on sale
+- lineup announced
+- favorite artist added
+- daily lineup released
+- single-day passes released
+- set times released
+
+## Discovery digest
+
+Avoid individual push spam for weak/low-stakes recommendations.
+
+A better pattern:
+
+> 3 inexpensive shows this weekend strongly match your taste.
+
+## Notification channels
+
+MVP:
+- in-app
+- email notification may be used as an outbound channel if simple, but this is separate from reading/ingesting the user's inbox
+
+Later:
+- web push / PWA push
+- native push if a native app is ever built
+
+## Watch-rule evaluation
+
+Worker flow:
+
+```text
+new/changed canonical event
+    -> find relevant watch rules
+    -> compare prior state
+    -> determine if trigger is meaningful
+    -> create notification record
+    -> deliver through enabled channel
+```
+
+Avoid repeatedly alerting the same unchanged condition.
+
+## Presale data
+
+Presale metadata may come from:
+- primary ticket provider
+- official artist/promoter/venue page
+- festival site
+- future email ingestion
+
+Private/personal presale codes, if email ingestion is later implemented, must be stored as user-private data rather than public event metadata.
+
+================================================================================
+FILE: docs/09-security-privacy-and-compliance.md
+================================================================================
+# 09 — Security, Privacy, and Compliance
+
+## Principles
+
+- collect the minimum user data needed
+- separate public event data from private user data
+- never store secrets in source control
+- make source provenance explicit
+- prefer coarse location where exact location is unnecessary
+
+## Location
+
+For recommendations, an approximate home point or selected city/radius is sufficient initially.
+
+Do not require or expose an exact home address.
+
+## Spotify
+
+Store only data required for the product and follow current Spotify developer/platform rules.
+
+Do not train an external ML model on Spotify content if prohibited by applicable platform terms.
+
+OAuth tokens:
+- encrypted at rest where supported
+- never logged
+- never committed
+- revocable
+
+## Scraping
+
+Public availability does not imply unrestricted automated use.
+
+Per source:
+- review applicable terms
+- respect robots directives where applicable
+- use reasonable rates
+- do not bypass security/access controls
+- stop/reassess if blocked rather than escalating bypass techniques
+
+## Social media
+
+Avoid authenticated browser scraping as a core architecture.
+
+Prefer:
+- official APIs
+- official public source pages
+- public links surfaced through first-party artist/promoter/venue sites
+
+## Raw content
+
+Raw ingests may contain tracking parameters or incidental data.
+
+Retention policy should eventually:
+- minimize unnecessary personal data
+- strip obvious secrets/tokens from stored URLs where feasible
+- define expiration for raw HTML if long-term retention is unnecessary
+
+## User deletion
+
+Design so a user can delete:
+- account
+- taste profile
+- feedback
+- attendance history
+- watchlist
+- tokens
+
+Public canonical event records do not need deletion when a user leaves.
+
+## Secrets
+
+Use environment variables / secret managers for:
+- Supabase service role key
+- Spotify client secret
+- Ticketmaster/API keys
+- crawler credentials if any approved authenticated integration exists later
+
+Add `.env*` to `.gitignore` except example templates.
+
+================================================================================
+FILE: docs/10-api-and-module-plan.md
+================================================================================
+# 10 — API and Module Plan
+
+## Proposed repository shape
+
+```text
+app/
+  discover/
+  weekend/
+  festivals/
+  watchlist/
+  event/[id]/
+  artist/[id]/
+  profile/
+
+components/
+  EventCard.tsx
+  FestivalCard.tsx
+  MatchScore.tsx
+  PriceBadge.tsx
+  RecommendationReasons.tsx
+  LineupView.tsx
+
+lib/
+  domain/
+  recommendations/
+  pricing/
+  spotify/
+  geo/
+  deduplication/
+  entity-resolution/
+  provenance/
+
+sources/
+  api/
+    ticketmaster.ts
+  promoters/
+    aeg.ts
+    livenation.ts
+  ticketing/
+    axs.ts
+    dice.ts
+    tixr.ts
+    etix.ts
+  venues/
+    ...
+  festivals/
+    ...
+
+workers/
+  crawl-source.ts
+  sync-ticketmaster.ts
+  normalize-events.ts
+  resolve-candidates.ts
+  update-prices.ts
+  calculate-recommendations.ts
+  evaluate-watch-rules.ts
+
+database/
+  migrations/
+  seeds/
+
+tests/
+  fixtures/
+  source-adapters/
+```
+
+## External/API routes
+
+Candidate routes:
+
+```text
+GET  /api/feed
+GET  /api/events/:id
+GET  /api/festivals/:id
+GET  /api/artists/:id
+GET  /api/venues/:id
+
+GET  /api/recommendations/weekend
+GET  /api/recommendations/cheap
+GET  /api/recommendations/planning
+GET  /api/recommendations/festivals
+
+POST /api/events/:id/save
+POST /api/events/:id/feedback
+
+GET  /api/watchlist
+POST /api/watchlist
+DELETE /api/watchlist/:id
+
+GET  /api/profile/music
+POST /api/history/concert
+
+GET  /api/spotify/connect
+GET  /api/spotify/callback
+```
+
+Implementation may prefer server actions for some authenticated UI interactions; the domain/service layer should remain reusable.
+
+## Domain services
+
+Potential service boundaries:
+
+### EventService
+- fetch canonical event
+- merge candidate
+- query upcoming events
+
+### RecommendationService
+- build user context
+- calculate feature values
+- rank event candidates
+- produce explanation reasons
+
+### ArtistAffinityService
+- compute/update user artist affinity
+
+### SourceService
+- source registry
+- fetch scheduling
+- health tracking
+
+### DeduplicationService
+- candidate similarity
+- canonical merge suggestion
+
+### WatchService
+- create/update watch rules
+- evaluate triggers
+
+### FestivalService
+- day score
+- lineup score
+- pass comparison
+
+## Internal event types
+
+Define strict TypeScript domain types separate from database row types.
+
+Examples:
+- `CanonicalEvent`
+- `EventCandidate`
+- `FestivalEvent`
+- `Performance`
+- `TicketOption`
+- `RecommendationFeatures`
+- `RecommendationResult`
+- `SourceEvidence`
+
+This prevents UI code from depending directly on database implementation details.
+
+================================================================================
+FILE: docs/11-roadmap.md
+================================================================================
+# 11 — Roadmap
+
+## Phase 0 — Repository and foundations
+
+- initialize Next.js + TypeScript
+- Tailwind
+- Supabase project
+- environment configuration
+- lint/typecheck/test baseline
+- database migrations
+- CI on pull requests
+- seed/dev data
+
+## Phase 1 — Real event inventory
+
+Goal: a usable event browser with canonical data.
+
+- source registry model
+- Ticketmaster ingestion
+- raw ingest store
+- event candidate model
+- canonical event model
+- artist/venue entities
+- baseline deduplication
+- basic Discover UI
+
+## Phase 2 — Personalized ranking
+
+- Spotify OAuth
+- Spotify artist/taste ingestion
+- user preferences
+- artist affinity
+- price preference curve
+- distance scoring
+- explanation generation
+- This Weekend
+- Cheap & Nearby
+- Worth Planning For
+
+## Phase 3 — Direct public source adapters
+
+Start with a small test set:
+- AEG/promoter source
+- major venue calendar
+- independent venue calendar
+
+Then:
+- adapter fixtures/tests
+- change detection
+- crawler health monitoring
+- parser-failure safeguards
+- source corroboration
+
+Expand only where direct sourcing improves coverage/freshness.
+
+## Phase 4 — Concert history and learning
+
+- manual concert history entry
+- venue affinity
+- event feedback
+- too-expensive / too-far correction logic
+- attendance confirmations
+- ranking tuning
+
+## Phase 5 — Festivals
+
+- festival/event-day/performance schema
+- lineup parsing
+- lineup match
+- daily match
+- ticket/pass modeling
+- festival cards/detail view
+- later: trip-cost estimates
+
+## Phase 6 — Watchlists and alerts
+
+- artist/event watches
+- on-sale/presale changes
+- price thresholds
+- lineup changes
+- in-app notifications
+- outbound notification channel
+
+**At this phase, explicitly revisit email/newsletter ingestion.**
+
+## Phase 7 — Broader discovery
+
+- more independent venues
+- free/community event calendars
+- approved social signals
+- better related-artist discovery
+- price history insights
+
+## Phase 8 — Product hardening
+
+- PWA installation
+- accessibility
+- performance
+- monitoring
+- privacy/account deletion
+- production crawler controls
+- source legal/terms review
+
+## Phase 9 — Possible future work
+
+- email/newsletter ingestion
+- calendar integration
+- festival schedule optimizer
+- native app if justified
+- collaborative plans with friends
+- travel/lodging integrations
+- richer price analytics
+
+================================================================================
+FILE: docs/12-decisions.md
+================================================================================
+# 12 — Decisions and Open Questions
+
+## Decided
+
+### Product
+- Personalized "worth going to" recommender, not generic calendar.
+- Must support cheap spontaneous local discovery and favorite-artist planning.
+- Festivals and multi-day events are first-class.
+- Recommendations must be explainable.
+- Price tolerance depends on affinity; there is not one universal ticket-price ceiling.
+- Venue preference/history is a meaningful signal.
+
+### Data
+- Multi-source ingestion is core architecture.
+- APIs plus official public websites.
+- Social is primarily a discovery/verification signal at first.
+- Preserve raw ingestion evidence.
+- Normalize and deduplicate into canonical events.
+- Track source confidence/provenance.
+
+### Technology
+- Real web app, not single static HTML file.
+- Next.js + TypeScript.
+- Tailwind.
+- PostgreSQL/Supabase.
+- PWA before native apps.
+- TypeScript/Node source adapters/workers.
+- Cheerio/HTTP before Playwright.
+
+### Initial external integrations
+- Spotify for taste profile.
+- Ticketmaster as baseline event inventory.
+- direct official venue/promoter/festival pages to improve depth/freshness.
+
+### Deferred
+- Email/newsletter ingestion is deferred but should be revisited during alerts/presales/source-coverage work.
+
+## Open questions
+
+- Final product name.
+- Exact deployment/runtime for heavier crawlers.
+- Exact geographic launch region for MVP.
+- Whether users manually enter old concerts, import them, or both.
+- Preferred map provider.
+- Notification provider/channel for first production release.
+- Which 3–5 direct source adapters should be implemented immediately after Ticketmaster.
+- Exact user controls for price willingness and travel radius.
+- How aggressively related artists/genre similarity should influence unknown-artist discovery.
+- Whether resale prices should be displayed and, if so, from which authorized sources.
+- How long raw source snapshots should be retained.
+
+================================================================================
+FILE: docs/13-agent-collaboration.md
+================================================================================
+# 13 — Agent Collaboration
+
+## Goal
+
+Use GitHub as the durable shared workspace between humans and multiple AI coding agents.
+
+Do not rely on one model's chat history as project memory.
+
+## Recommended source of truth
+
+```text
+GitHub repository
+  ├── code
+  ├── issues
+  ├── pull requests
+  ├── README.md
+  ├── AGENTS.md
+  └── docs/
+```
+
+Both ChatGPT/Codex and Antigravity should read the repository before making changes.
+
+## Recommended workflow
+
+### 1. Architecture/product work
+Use ChatGPT for:
+- product decisions
+- architecture reviews
+- research
+- ranking design
+- schema reasoning
+- debugging strategy
+- code review
+
+### 2. Implementation
+Use either Codex or Antigravity for repository-level implementation:
+- create/edit files
+- run tests
+- run build/typecheck
+- browser-test flows
+- refactors
+
+### 3. GitHub carries the conversation
+For any meaningful task, create/update one of:
+- GitHub issue
+- implementation plan in PR description
+- architecture doc
+- ADR/decision entry
+
+Agent A does not need to literally chat with Agent B if both can read the same explicit task/state.
+
+## Branch pattern
+
+```text
+main
+feature/ticketmaster-ingestion
+feature/spotify-affinity
+feature/festival-schema
+fix/cervantes-parser
+```
+
+Keep concurrent agents on different branches/worktrees where possible.
+
+## Handoff template
+
+When one agent hands work to another, leave a concise note:
+
+```text
+Goal:
+What changed:
+Files changed:
+Tests run:
+Known problems:
+Next recommended action:
+Relevant issue/PR:
+```
+
+This can be a PR description, issue comment, or `HANDOFF.md` for temporary work.
+
+## Direct agent-to-agent communication
+
+The most reliable initial setup is shared state rather than direct conversational control:
+
+```text
+ChatGPT/Codex <-> GitHub repo/issues/PRs <-> Antigravity
+```
+
+This is auditable and keeps the human in control.
+
+## MCP
+
+Model Context Protocol (MCP) can connect agents to shared tools/services. Antigravity supports MCP. If both environments can access the same GitHub/project-management/database tooling, they can operate on shared external state.
+
+However, MCP does not inherently mean one AI model "controls" another model. A direct agent-to-agent bridge would require a purpose-built service/API/MCP server that exposes one agent as a callable tool to the other, plus authentication, permissions, and guardrails.
+
+That is unnecessary for MVP development and creates extra complexity.
+
+## Recommended practical setup
+
+Start with:
+
+1. GitHub repo as source of truth.
+2. `AGENTS.md` shared rules.
+3. GitHub issues for tasks.
+4. One branch per task/agent.
+5. Pull requests for review/handoff.
+6. CI checks before merge.
+
+Later, add MCP integrations for useful shared tools such as:
+- GitHub
+- Supabase/database inspection
+- deployment logs
+- issue tracker
+
+## Human control
+
+Do not let multiple agents push to `main` without review while the project is young.
+
+Require pull requests for meaningful changes until the codebase and tests are mature.
+
+================================================================================
+FILE: docs/14-future-email-ingestion.md
+================================================================================
+# 14 — Future Email / Newsletter Ingestion
+
+## Status
+
+**Deferred by current product decision.**
+
+Do not build this into the initial architecture as a dependency.
+
+Revisit it when working on:
+- presales
+- promoter announcement freshness
+- alert quality
+- missing-source coverage
+- user integrations
+
+## Why it may be valuable later
+
+Promoter/venue newsletters can contain:
+- early show announcements
+- presale windows
+- ticket links
+- lineup updates
+- festival announcements
+- occasionally user-specific/private presale information
+
+## Preferred privacy-preserving concept
+
+Rather than requiring broad inbox access, consider a unique forwarding address per user, e.g.:
+
+```text
+<user-alias>+events@product-domain.example
+```
+
+Users could forward selected newsletters or create their own email filters.
+
+Alternative later option:
+- explicit Gmail/Outlook integration with narrowly scoped search/label rules, only if users want it and platform permissions make sense.
+
+## Pipeline
+
+```text
+forwarded/authorized message
+   -> private raw message record
+   -> event candidate extraction
+   -> corroborate against first-party web/ticket sources
+   -> canonical public event + private user metadata
+```
+
+## Privacy boundary
+
+Public event facts:
+- artist
+- venue
+- date
+- public ticket URL
+
+Private user-specific facts:
+- personalized presale code
+- private offer link
+- the fact that a particular user received a message
+
+Never publish private email-derived access codes into the global event database.
+
+## Reminder for future agents
+
+When implementing alerts, presales, or source-gap analysis, explicitly ask whether this deferred feature should be activated.
+
+================================================================================
+FILE: docs/15-testing-and-quality.md
+================================================================================
+# 15 — Testing and Quality
+
+## Minimum checks for pull requests
+
+- TypeScript typecheck
+- lint
+- unit tests
+- source-adapter parser tests for touched adapters
+- production build
+
+## Source adapter tests
+
+Scrapers are brittle by nature. Each direct source adapter should ideally include sanitized HTML/JSON fixtures representing the source page.
+
+Test:
+- normal upcoming event
+- support acts
+- multi-day dates
+- sold-out status
+- missing optional price
+- canceled/rescheduled event when represented
+- markup variation where known
+
+A parser test should not hit the live internet.
+
+## Deduplication tests
+
+Include cases such as:
+- same artist/date/venue from Ticketmaster + promoter
+- same festival from ticketing provider + official festival site
+- same artist playing two shows at same venue on consecutive dates
+- similarly named but different artists
+- venue aliases
+
+Prefer false negatives to dangerous false-positive merges early in development. Candidate records can be reconciled later; incorrectly merging two real events is harder to recover from.
+
+## Recommendation tests
+
+Use deterministic fixture users.
+
+Examples:
+- favorite artist at moderate price outranks unknown artist at same price
+- cheap nearby unknown artist can outrank expensive favorite in Cheap Adventure mode
+- `too_expensive` feedback changes price preference but not artist taste
+- disliked venue reduces venue feature without destroying artist affinity
+- festival day with most favorite artists scores above weak day when pass prices are comparable
+
+## Integration tests
+
+Important flows:
+- onboarding -> taste profile -> feed
+- save/dismiss event
+- create watch rule
+- festival detail + day scores
+- Ticketmaster candidate -> canonical event
+
+## Browser tests
+
+Use Playwright for the app itself, independent of whether Playwright is needed by source crawlers.
+
+Initial end-to-end tests:
+- discovery page renders
+- filters/modes change results
+- event detail opens
+- feedback persists
+- festival lineup renders
+
+## Observability tests
+
+Simulate source failure and verify:
+- canonical events are not mass deleted
+- source health changes
+- failure is logged/visible
+
+## CI
+
+GitHub Actions should eventually run:
+
+```text
+install
+lint
+typecheck
+unit tests
+build
+```
+
+Keep live-network crawler checks out of required PR CI. Run them separately as scheduled smoke tests.
+
+================================================================================
+FILE: docs/16-mvp-acceptance-criteria.md
+================================================================================
+# 16 — MVP Acceptance Criteria
+
+The first meaningful MVP is successful when a test user can do all of the following.
+
+## Inventory
+
+- See real upcoming concerts from at least one broad event API.
+- Events are normalized into internal artists, venues, dates, ticket links, and known price ranges.
+- Duplicate source records do not appear as duplicate cards for obvious matches.
+
+## Personalization
+
+- Connect Spotify or use a documented development fixture account/profile.
+- Build an artist-affinity profile.
+- Configure basic ticket-price and travel preferences.
+
+## Discovery
+
+- View This Weekend recommendations.
+- View Cheap & Nearby recommendations.
+- View Worth Planning For recommendations.
+- Understand at least two human-readable reasons for each recommendation.
+
+## Feedback
+
+- Save an event.
+- Dismiss an event.
+- Mark an event too expensive or too far.
+- See that feedback persist.
+
+## Festivals
+
+At least one real or fixture festival can represent:
+- multiple days
+- multiple artists
+- performances assigned to days
+- weekend vs. single-day ticket options when available
+- overall lineup match
+- day-level match
+
+## Direct source ingestion
+
+At least one non-API official public source adapter works end to end:
+
+```text
+fetch -> raw ingest -> parse -> candidate -> canonical event
+```
+
+with a parser fixture test.
+
+## Reliability
+
+- crawler/source errors are logged
+- one failing source does not wipe canonical events
+- source provenance is visible in the database/admin/debug path
+
+## Security
+
+- no secrets are committed
+- `.env.example` exists with blank placeholders
+- Spotify/API tokens are server-side/private where required
+
+## Deferred but remembered
+
+MVP does not require reading user email. Email/newsletter ingestion remains explicitly documented for later consideration.
+
