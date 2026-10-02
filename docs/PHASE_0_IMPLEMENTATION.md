@@ -295,5 +295,18 @@ documents.
 6. **Deterministic repository-pinned Supabase CLI in CI**:
    - Replaced unpinned `supabase/setup-cli@v1` with repository-pinned npm CLI (`npm run db:start`, `npm run db:reset`, `npm run db:stop`).
 7. **Real RLS security behavior test**:
-   - Added database-backed integration test in `tests/integration/profiles-rls.test.ts` executed via `npm run test:rls`.
+   - Added database-backed integration test in `tests/integration/profiles-rls.test.ts` executed via `npm run test:integration`.
    - Verifies own-row SELECT, INSERT, UPDATE, cross-user isolation (SELECT and UPDATE affecting 0 rows), spoofed INSERT rejection, and unauthenticated denial against local Supabase instance in CI.
+
+### CI Pipeline Remediation: Separation of Unit and Database Integration Tests
+
+During CI execution on pull request verification, `npm test` was discovered to execute the database-backed integration test (`tests/integration/profiles-rls.test.ts`) before the local Supabase container was initialized, resulting in a connection failure in CI.
+
+**Remediation applied**:
+1. **Strict Test Separation**:
+   - `vitest.config.ts` is scoped strictly to unit tests (`tests/unit/**/*.{test,spec}.{ts,tsx}`). `npm test` runs only fast, isolated unit tests requiring zero external infrastructure.
+   - `vitest.integration.config.ts` was introduced to configure database-backed integration tests (`tests/integration/**/*.{test,spec}.{ts,tsx}`). Executed via `npm run test:integration`.
+2. **Workflow Ordering in `.github/workflows/ci.yml`**:
+   - Early checks: formatting, linting, pre-build typecheck, fast unit tests (`npm test`), build, post-build typecheck, and Playwright smoke test.
+   - Database validation: local Supabase start (`npm run db:start`), migration reset (`npm run db:reset`), and integration tests (`npm run test:integration`).
+   - Clean shutdown: `npm run db:stop` with `if: always()`.

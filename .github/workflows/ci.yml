@@ -52,8 +52,8 @@ jobs:
           npm run db:start
           npm run db:reset
 
-      - name: Verify Row Level Security (RLS) policies
-        run: npm run test:rls
+      - name: Run database integration tests (RLS)
+        run: npm run test:integration
 
       - name: Stop local Supabase
         if: always()
