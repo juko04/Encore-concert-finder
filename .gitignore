@@ -24,6 +24,7 @@ out/
 coverage/
 playwright-report/
 test-results/
+*.tsbuildinfo
 
 # Local agent/runtime secrets
 .agents/local/

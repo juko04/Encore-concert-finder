@@ -98,3 +98,58 @@ See `docs/14-future-email-ingestion.md`.
 - Only one agent should own an implementation branch/task at a time; other agents may review it.
 - If code and documentation disagree, flag the inconsistency instead of silently inventing new product behavior.
 - Major architectural changes should update `docs/12-decisions.md`.
+
+## Phase implementation documentation rule
+
+Every project phase must have a dedicated implementation specification at:
+
+```text
+docs/PHASE_<NUMBER>_IMPLEMENTATION.md
+```
+
+For example: `docs/PHASE_0_IMPLEMENTATION.md`,
+`docs/PHASE_1_IMPLEMENTATION.md`, and `docs/PHASE_2_IMPLEMENTATION.md`.
+Each file is the persistent source of truth for its phase. It must give another
+agent enough context to implement or review that phase without prior chat history.
+
+### During planning discussions
+
+When a discussion with ChatGPT, Antigravity, or another project agent produces an
+accepted, materially relevant decision, clarification, requirement, constraint,
+implementation detail, acceptance criterion, architecture change, testing
+requirement, or scope change for the active phase, update that phase's
+`PHASE_<NUMBER>_IMPLEMENTATION.md` before ending the materially relevant work.
+
+Do not update a phase specification for casual discussion, unaccepted speculation,
+or irrelevant conversation. If a decision changes the broader architecture, update
+the applicable document in `docs/` as well.
+
+### When a new phase begins
+
+Create a new `docs/PHASE_<NUMBER>_IMPLEMENTATION.md`; never overwrite or repurpose
+the prior phase file. Previous phase specifications remain in the repository as
+historical records of intended and implemented work.
+
+Every phase specification must include at least:
+
+- phase objective and relevant architectural context
+- scope and explicit exclusions
+- implementation checklist and affected modules/files
+- database or API changes, dependencies, and environment-variable changes
+- migration, testing, and CI requirements
+- completion commands and definition of done
+- known risks/open questions, decisions made during the phase, and approved deviations
+
+### Operational handoff
+
+`AI_HANDOFF.md` represents the current operational state. It must always identify:
+
+- current phase, task, branch, active implementing agent, and phase specification file
+- status, completed work, tests run, known issues, unresolved decisions, and next step
+
+Update it whenever ownership changes, implementation finishes, a major blocker is
+found, or the project moves to a new phase.
+
+Important project decisions must not live only in chat history. When working in the
+repository, update the relevant documentation before ending a materially relevant
+discussion.

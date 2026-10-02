@@ -1,0 +1,79 @@
+{
+  "status": "success",
+  "source": "fake-venue-adapter",
+  "generatedAt": "2026-10-02T12:00:00Z",
+  "events": [
+    {
+      "id": "evt-101",
+      "name": "The Mountain Echoes Live",
+      "artists": ["The Mountain Echoes", "River Pines"],
+      "venue": "Red Rock Amphitheatre",
+      "city": "Morrison",
+      "state": "CO",
+      "country": "US",
+      "timezone": "America/Denver",
+      "startsAt": "2026-10-15T19:30:00-06:00",
+      "doorsOpenAt": "2026-10-15T18:00:00-06:00",
+      "ticketUrl": "https://tickets.example.com/evt-101",
+      "price": {
+        "min": 45.0,
+        "max": 85.0,
+        "currency": "USD"
+      },
+      "isFestival": false,
+      "billing": [
+        {
+          "artistName": "The Mountain Echoes",
+          "billingPosition": "headliner"
+        },
+        {
+          "artistName": "River Pines",
+          "billingPosition": "support"
+        }
+      ]
+    },
+    {
+      "id": "evt-102",
+      "name": "Front Range Sound Festival",
+      "artists": ["Solaris", "Luna Wave", "The High Plains Trio"],
+      "venue": "Civic Center Park",
+      "city": "Denver",
+      "state": "CO",
+      "country": "US",
+      "timezone": "America/Denver",
+      "startsAt": "2026-10-24T12:00:00-06:00",
+      "endsAt": "2026-10-25T22:00:00-06:00",
+      "ticketUrl": "https://tickets.example.com/front-range-fest",
+      "price": {
+        "min": 120.0,
+        "max": 250.0,
+        "currency": "USD"
+      },
+      "isFestival": true,
+      "festivalDetails": {
+        "daysCount": 2,
+        "lineupByDay": {
+          "2026-10-24": ["Luna Wave", "Solaris"],
+          "2026-10-25": ["The High Plains Trio"]
+        }
+      },
+      "billing": [
+        {
+          "artistName": "Solaris",
+          "billingPosition": "headliner",
+          "stage": "Main Stage"
+        },
+        {
+          "artistName": "Luna Wave",
+          "billingPosition": "subheadliner",
+          "stage": "Main Stage"
+        },
+        {
+          "artistName": "The High Plains Trio",
+          "billingPosition": "headliner",
+          "stage": "Meadow Stage"
+        }
+      ]
+    }
+  ]
+}
