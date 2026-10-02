@@ -4,12 +4,14 @@
 
 - initialize Next.js + TypeScript
 - Tailwind
+- PWA shell: web manifest, icons, theme metadata, and responsive mobile baseline
 - Supabase project
 - environment configuration
 - lint/typecheck/test baseline
-- database migrations
+- Supabase migration and local-development workflow
+- one private-profile migration with row-level-security policies; no event inventory schema yet
 - CI on pull requests
-- seed/dev data
+- deterministic local fixture/dev data (not real event ingestion)
 
 ## Phase 1 — Real event inventory
 
@@ -93,7 +95,7 @@ Expand only where direct sourcing improves coverage/freshness.
 
 ## Phase 8 — Product hardening
 
-- PWA installation
+- PWA offline behavior and installation validation
 - accessibility
 - performance
 - monitoring

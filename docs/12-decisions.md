@@ -23,9 +23,13 @@
 - Next.js + TypeScript.
 - Tailwind.
 - PostgreSQL/Supabase.
+- Supabase Auth owns identity. Product profile data lives in a separate table keyed to
+  `auth.users`, and user-private tables require row-level security from the first migration.
 - PWA before native apps.
 - TypeScript/Node source adapters/workers.
 - Cheerio/HTTP before Playwright.
+- Store event instants as `timestamptz` and preserve an IANA time zone for event-local
+  date/time interpretation.
 
 ### Initial external integrations
 - Spotify for taste profile.

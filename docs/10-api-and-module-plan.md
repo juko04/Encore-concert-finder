@@ -55,9 +55,10 @@ workers/
   calculate-recommendations.ts
   evaluate-watch-rules.ts
 
-database/
+supabase/
+  config.toml
   migrations/
-  seeds/
+  seed.sql
 
 tests/
   fixtures/

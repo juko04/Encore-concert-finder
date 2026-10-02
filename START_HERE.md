@@ -26,7 +26,13 @@ These are defaults, not hard restrictions. The important rule is that only one a
 4. `docs/12-decisions.md`
 5. `docs/11-roadmap.md`
 6. Documents relevant to the current task
-7. `AI_HANDOFF.md` if work is already in progress
+7. The active `docs/PHASE_<NUMBER>_IMPLEMENTATION.md` file
+8. `AI_HANDOFF.md` if work is already in progress
+
+Phase specifications are persistent implementation records. Read the active phase
+file before planning, implementing, or reviewing work, and update it when an
+accepted material decision changes that phase. See `AGENTS.md` for the required
+phase-documentation and handoff rules.
 
 ## First engineering milestone
 

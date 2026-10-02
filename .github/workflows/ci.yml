@@ -1,0 +1,60 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+jobs:
+  verify:
+    name: Verification and CI
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Check code formatting
+        run: npm run format:check
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Type check (pre-build)
+        run: npm run typecheck
+
+      - name: Run unit tests
+        run: npm test
+
+      - name: Install Playwright Chromium dependencies
+        run: npx playwright install --with-deps chromium
+
+      - name: Build Next.js application
+        run: npm run build
+
+      - name: Type check (post-build regression check)
+        run: npm run typecheck
+
+      - name: Run browser smoke test
+        run: npm run test:e2e
+
+      - name: Start local Supabase and apply migrations
+        run: |
+          npm run db:start
+          npm run db:reset
+
+      - name: Run database integration tests (RLS)
+        run: npm run test:integration
+
+      - name: Stop local Supabase
+        if: always()
+        run: npm run db:stop

@@ -1,0 +1,2 @@
+-- Phase 0: Deterministic seed file.
+-- Canonical event and inventory seeding is excluded from Phase 0 per specification.

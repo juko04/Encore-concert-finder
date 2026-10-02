@@ -2,10 +2,10 @@
 
 This is a conceptual schema. Exact column names/types can change during implementation, but entity boundaries should remain stable unless documented.
 
-## users
+## profiles (private user data)
 
 ```text
-id
+id (references `auth.users.id`)
 created_at
 home_lat_approx
 home_lng_approx
@@ -15,6 +15,12 @@ max_normal_ticket_price
 max_favorite_artist_price
 travel_willingness
 ```
+
+Supabase Auth owns identity, credentials, and tokens. Store only product profile and
+preference data in `public.profiles`; do not mirror credentials or provider tokens
+there. User-private tables must reference `auth.users.id` and use row-level security
+so a user can access only their own rows. Service-role access is reserved for trusted
+server-side jobs.
 
 Do not require an exact street address.
 
@@ -71,6 +77,7 @@ state
 country
 latitude
 longitude
+timezone (IANA name, for example `America/Denver`)
 capacity (nullable)
 venue_type
 indoor_outdoor
@@ -108,6 +115,7 @@ name
 event_type
 start_datetime
 end_datetime
+timezone (IANA name; required whenever a start/end time is known)
 multi_day
 venue_id
 promoter_id
@@ -124,6 +132,9 @@ announced_at
 created_at
 updated_at
 ```
+
+Store instants as `timestamptz`. Preserve the event's IANA time zone so date-only
+and local-time source data can be normalized without changing the intended local day.
 
 Suggested `event_type`:
 
