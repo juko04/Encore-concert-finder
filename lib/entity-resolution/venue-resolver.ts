@@ -1,3 +1,8 @@
+/**
+ * Venue Entity Resolution
+ * Resolves candidate venue references to canonical Venue records.
+ */
+
 import type { Venue } from '@/lib/domain/catalog';
 import { normalizeName } from '@/lib/domain/value-objects';
 import type { ICatalogRepository } from '@/lib/repositories/interfaces';

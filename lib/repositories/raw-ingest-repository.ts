@@ -1,5 +1,10 @@
 import 'server-only';
 
+/**
+ * Raw Ingest Repository Implementation
+ * Server-only repository for storing and querying raw ingestion payloads.
+ */
+
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { RawIngest } from '@/lib/domain/source';
 import { createAdminClient } from '@/lib/supabase/admin';

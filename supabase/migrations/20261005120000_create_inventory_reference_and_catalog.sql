@@ -186,3 +186,4 @@ create table if not exists public.event_ticket_links (
 
 create index if not exists idx_event_ticket_links_normalized on public.event_ticket_links (normalized_url);
 create index if not exists idx_event_ticket_links_event on public.event_ticket_links (event_id);
+

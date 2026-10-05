@@ -71,3 +71,4 @@ grant select on public.public_sources to anon, authenticated;
 -- Operational and provenance tables (raw_ingests, event_candidates, event_sources,
 -- event_field_evidence, candidate_resolutions) have RLS enabled with NO public policies,
 -- restricting all direct read/write operations exclusively to service_role.
+

@@ -12,7 +12,7 @@ import {
 import type { ICatalogRepository } from '@/lib/repositories/interfaces';
 import { ArtistResolver } from './artist-resolver';
 import { EventMatcher } from './event-matcher';
-import { evaluateFieldMerge } from './field-merge';
+import { evaluateFieldMerge, type FieldMergeEvidence } from './field-merge';
 import { VenueResolver } from './venue-resolver';
 
 export interface CanonicalizationResult {
@@ -282,7 +282,7 @@ export class CanonicalizationCoordinator {
           source_url: candidate.provenance?.sourceUrl ?? '',
           confidence: candidate.confidence,
         },
-        evidence: mergeOutcome.evidences.map((ev) => ({
+        evidence: mergeOutcome.evidences.map((ev: FieldMergeEvidence) => ({
           field_name: ev.fieldName,
           source_id: candidate.sourceId,
           raw_ingest_id: candidate.rawIngestId,

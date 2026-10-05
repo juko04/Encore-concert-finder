@@ -1,15 +1,17 @@
 import type { Event, EventStatus } from '@/lib/domain/catalog';
 import type { EventCandidate } from '@/lib/domain/event-candidate';
 
+export interface FieldMergeEvidence {
+  fieldName: string;
+  observedValue: unknown;
+  valueHash: string;
+  confidence: number;
+  parserVersion: string;
+}
+
 export interface FieldMergeOutcome {
   updates: Partial<Omit<Event, 'id' | 'createdAt' | 'updatedAt'>>;
-  evidences: Array<{
-    fieldName: string;
-    observedValue: unknown;
-    valueHash: string;
-    confidence: number;
-    parserVersion: string;
-  }>;
+  evidences: FieldMergeEvidence[];
 }
 
 export function evaluateFieldMerge(

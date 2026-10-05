@@ -82,6 +82,11 @@ Remediation complete — ready for independent re-review
 13. **Removed Empty Placeholder Directories**:
     - Deleted `lib/catalog` and `lib/ingestion`. Maintained clean module exports in `lib/domain/index.ts`, `lib/repositories/index.ts`, `lib/entity-resolution/index.ts`.
 
+14. **TypeScript Language Server Module & Typing Hygiene**:
+    - Exported explicit `FieldMergeEvidence` interface from `lib/entity-resolution/field-merge.ts`.
+    - Strongly typed `ev: FieldMergeEvidence` in `CanonicalizationCoordinator`'s evidence mapping to eliminate implicit `any` diagnostics (`ts(7006)`).
+    - Refreshed module declarations across `field-merge.ts`, `venue-resolver.ts`, `raw-ingest-repository.ts`, and `source-repository.ts`, preserving the strict `server-only` first-line import contract and clearing stale IDE language server AST caches.
+
 ## Tests run
 
 - `npm run format:check` — clean, all files match Prettier style

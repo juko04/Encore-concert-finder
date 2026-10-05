@@ -1,5 +1,10 @@
 import 'server-only';
 
+/**
+ * Source Repository Implementation
+ * Server-only repository for managing data sources and operational health.
+ */
+
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { Source } from '@/lib/domain/source';
 import { createAdminClient } from '@/lib/supabase/admin';
