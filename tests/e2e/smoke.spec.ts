@@ -22,4 +22,14 @@ test.describe('Landing Page Smoke Test', () => {
     // Verify system foundation section
     await expect(page.getByText('System Foundation Status')).toBeVisible();
   });
+
+  test('successfully loads the discover page and displays header', async ({
+    page,
+  }) => {
+    const response = await page.goto('/discover');
+    expect(response?.status()).toBe(200);
+
+    const heading = page.getByRole('heading', { name: 'Discover Live Music' });
+    await expect(heading).toBeVisible();
+  });
 });

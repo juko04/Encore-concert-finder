@@ -15,8 +15,15 @@
 - APIs plus official public websites.
 - Social is primarily a discovery/verification signal at first.
 - Preserve raw ingestion evidence.
+- Store small raw API/HTML payloads in Postgres with hashes and metadata; include
+  an optional external storage reference for future large-payload object storage.
 - Normalize and deduplicate into canonical events.
 - Track source confidence/provenance.
+- Store candidate-resolution status, confidence, matcher provenance, and reasons;
+  defer manual resolution UI to a later operational/admin phase.
+- Normalize URLs conservatively: normalize casing/default ports/trailing slashes,
+  remove fragments and `utm_*`/`gclid`/`fbclid`, and preserve unknown query
+  parameters.
 
 ### Technology
 - Real web app, not single static HTML file.
@@ -29,11 +36,17 @@
 - TypeScript/Node source adapters/workers.
 - Cheerio/HTTP before Playwright.
 - Store event instants as `timestamptz` and preserve an IANA time zone for event-local
-  date/time interpretation.
+  date/time interpretation; validate identifiers in application code and support
+  date-only events whose exact local time is unknown.
+- Use repository abstractions for persistence/catalog reads; UI components do not
+  own database queries. General business services may be added in later phases.
+- Colorado is the initial coverage/testing geography, but is not hard-coded into
+  the data model or architecture.
 
 ### Initial external integrations
 - Spotify for taste profile.
-- Ticketmaster as baseline event inventory.
+- Ticketmaster Discovery is the first real inventory source in Phase 2, proving
+  the fixture-proven Phase 1 ingestion model.
 - direct official venue/promoter/festival pages to improve depth/freshness.
 
 ### Deferred
@@ -43,7 +56,7 @@
 
 - Final product name.
 - Exact deployment/runtime for heavier crawlers.
-- Exact geographic launch region for MVP.
+- Geographic expansion sequence after the initial Colorado coverage/testing area.
 - Whether users manually enter old concerts, import them, or both.
 - Preferred map provider.
 - Notification provider/channel for first production release.

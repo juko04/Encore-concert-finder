@@ -79,7 +79,7 @@ export class FakeVenueSourceAdapter implements EventSourceAdapter {
     const candidates: EventCandidate[] = [];
 
     for (const raw of rawIngests) {
-      const parsed = JSON.parse(raw.rawContent) as RawPagePayload;
+      const parsed = JSON.parse(raw.rawContent || '{}') as RawPagePayload;
 
       for (const evt of parsed.events) {
         const provenance: SourceProvenance = {

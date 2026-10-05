@@ -33,6 +33,22 @@ export interface CrawlContext {
   metadata?: Record<string, unknown>;
 }
 
+export interface Source {
+  id: string;
+  slug: string;
+  name: string;
+  sourceType: SourceType;
+  acquisitionMethod: AcquisitionMethod;
+  baseUrl?: string | null;
+  reliabilityScore: number;
+  active: boolean;
+  parserVersion: string;
+  lastFetchedAt?: string | null;
+  consecutiveFailures: number;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
 export interface RawIngest {
   id?: string;
   sourceId: string;
@@ -41,7 +57,8 @@ export interface RawIngest {
   fetchedAt: string;
   contentHash: string;
   contentType: string;
-  rawContent: string;
+  rawContent?: string | null;
+  externalStorageRef?: string | null;
   httpStatus: number;
   parserVersion: string;
 }

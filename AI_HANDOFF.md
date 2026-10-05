@@ -1,96 +1,87 @@
 # AI Handoff
 
-Use this file only for the **current active handoff** between contributors/agents. Replace its contents when a new major task begins. Durable product decisions belong in `docs/12-decisions.md` or another specification document.
+Use this file only for the **current active handoff** between contributors/agents.
+Replace its contents when a new major task begins. Durable product decisions belong
+in `docs/12-decisions.md` or the active phase specification.
 
 ## Current phase
 
-Phase 0 — Repository and foundations
+Phase 1 — Canonical Inventory and Ingestion Foundation
 
 ## Current task
 
-Phase 0 CI remediation complete. Separated unit tests from database-backed integration tests so CI runs unit tests without infrastructure, boots local Supabase, and executes database integration tests.
+Implement Phase 1 only as specified by docs/PHASE_1_IMPLEMENTATION.md.
+Build canonical inventory and ingestion foundation, migrations, repositories,
+normalization, entity resolution, fixtures, tests, and read-only catalog path.
 
 ## Current phase specification
 
-`docs/PHASE_0_IMPLEMENTATION.md`
+`docs/PHASE_1_IMPLEMENTATION.md`
 
 ## Status
 
-Remediation complete and review-ready — awaiting re-review by ChatGPT / repository owner before opening PR and merging to `main`.
+Ready for ChatGPT review
 
-## Owner / branch
+## Ownership / branch
 
-- Active implementing agent: Antigravity
-- Current branch: `chore/bootstrap-foundation`
-- Issue/PR: Ready for PR to `main`
+- Active planning agent: ChatGPT
+- Current branch: `feature/canonical-inventory-foundation`
+- Implementing agent: Google Antigravity
+- Issue/PR: none assigned
 
-## Remediation work completed
+## Completed work
 
-1. **Separation of Unit Tests and Database Integration Tests**:
-   - Resolved CI failure where `npm test` ran before the local Supabase container was started.
-   - Scoped `vitest.config.ts` exclusively to unit tests (`tests/unit/**/*.{test,spec}.{ts,tsx}`). `npm test` runs fast, completely offline, and never touches Supabase.
-   - Created `vitest.integration.config.ts` scoped exclusively to database integration tests (`tests/integration/**/*.{test,spec}.{ts,tsx}`). Executed via `npm run test:integration`.
-   - Updated `.github/workflows/ci.yml` ordering: `npm test` executes early; container starts with `npm run db:start` and `npm run db:reset`; `npm run test:integration` executes against the running local Supabase stack; followed by `npm run db:stop`.
-2. **Hardened `.env*` Secret Ignoring**:
-   - Replaced specific environment file listings in `.gitignore` with generic `.env*` matching across all directories.
-   - Added explicit tracking retention for `.env.example` templates (`!.env.example`, `!**/.env.example`).
-   - Verified with `git check-ignore` that `.env`, `.env.local`, `.env.production`, `.env.development`, `.env.test`, and `supabase/.env.production` are ignored while `.env.example` remains tracked.
-3. **Server-Only Admin Client Boundary Enforced**:
-   - Added `import 'server-only';` as the first import in `lib/supabase/admin.ts`.
-   - Installed `server-only` package into `package.json` and committed in `package-lock.json`.
-   - Added regression test in `tests/unit/supabase.test.ts` to statically and behaviorally verify build-time and runtime protection against importing the admin client into browser/Client Component graphs.
-4. **Event-Source Domain Contract Aligned**:
-   - Added stable `id` and `acquisitionMethod` to `EventSourceAdapter` contract in `lib/domain/source.ts`.
-   - Recorded `AcquisitionMethod` across `CrawlContext`, `RawIngest`, and `SourceProvenance`.
-   - Updated `EventSourceAdapter` methods to `fetch(context): Promise<RawIngest[]>` and `parse(rawIngests): Promise<EventCandidate[]>`, enabling multi-record ingestion, pagination, and multi-request flows.
-   - Updated `tests/fixtures/fake-source-adapter.ts` and `tests/fixtures/fake-source-response.json` to demonstrate multi-page raw ingestion.
-5. **Removed Premature Festival-Specific Domain Modeling**:
-   - Removed `FestivalDetails` interface and detailed lineup structures from `lib/domain/event-candidate.ts`.
-   - Removed lossy festival fixtures; replaced with a clean multi-day concert residency.
-   - Clarified that detailed festival performance and schedule modeling is intentionally deferred to Phase 5, while generic multi-day dates (`startsAt`, `endsAt`) and `isFestival` flags remain supported.
-6. **Post-Build TypeScript Validation Verified**:
-   - Verified that `npm run typecheck` succeeds both before and after `npm run build`.
-   - Added a post-build `npm run typecheck` step to `.github/workflows/ci.yml` to prevent regression of generated route types.
-7. **Deterministic Supabase CLI in CI**:
-   - Replaced unpinned `supabase/setup-cli@v1` with repository-pinned npm CLI commands (`npm run db:start`, `npm run db:reset`, `npm run db:stop`).
-8. **Database-Backed RLS Security Behavior Test**:
-   - Created integration test in `tests/integration/profiles-rls.test.ts` (`npm run test:integration`).
-   - Verifies with two real authenticated users:
-     - User A can insert, read, and update own profile.
-     - User B cannot read User A's profile (0 rows returned under SELECT policy).
-     - User B cannot update User A's profile (0 rows affected under UPDATE policy).
-     - User B cannot insert a profile with User A's ID (rejected by WITH CHECK policy).
-     - Unauthenticated requests are denied.
+- Finalized Phase 1 decisions in `docs/PHASE_1_IMPLEMENTATION.md` and related docs (`docs/12-decisions.md`, `docs/03-data-model.md`).
+- Implemented forward-only Supabase migrations:
+  - `20261005120000_create_inventory_reference_and_catalog.sql` (`sources`, `artists`, `artist_external_ids`, `venues`, `promoters`, `events`, `event_artists`, `event_promoters`, `event_ticket_links`).
+  - `20261005120001_create_ingest_provenance.sql` (`raw_ingests`, `event_candidates`, `event_sources`, `event_field_evidence`, `candidate_resolutions`).
+  - `20261005120002_secure_inventory_tables.sql` (RLS enabled across all tables; read-only public catalog policies; zero public policies on operational ingestion tables).
+  - Seed source added in `supabase/seed.sql`.
+- Built value objects and normalization in `lib/domain/value-objects.ts`:
+  - Conservative URL normalizer: lowercases host/scheme, removes default ports 80/443, removes trailing slashes, strips fragments, removes `utm_*`, `gclid`, and `fbclid` while preserving and deterministically sorting unknown parameters.
+  - Name normalizer: trims, collapses whitespace, strips leading articles and punctuation.
+  - IANA timezone validator: validates IANA names, rejects abbreviations (MST, EST, etc.).
+  - ISO-4217 currency and price validation.
+- Implemented domain entities and server-only repository interfaces/classes:
+  - `lib/domain/catalog.ts`, `lib/domain/source.ts`, `lib/domain/event-candidate.ts`.
+  - Repository interfaces in `lib/repositories/interfaces.ts`.
+  - Memory repositories in `lib/repositories/memory-repositories.ts` for fast, offline unit testing.
+  - Supabase PostgreSQL repositories in `lib/repositories/` (`catalog-repository.ts`, `source-repository.ts`, `raw-ingest-repository.ts`, `event-candidate-repository.ts`) with `import 'server-only'`.
+- Built entity resolution and canonicalization coordinator in `lib/entity-resolution/`:
+  - `ArtistResolver`: creates or matches artists by normalized name and external provider IDs.
+  - `VenueResolver`: matches venues by normalized name and city with bidirectional suffix/alias handling ("Red Rocks" <-> "Red Rocks Amphitheatre").
+  - `EventMatcher`: conservative match by exact ticket URL or same venue/date with overlapping artists; flags conflicting/ambiguous shows as `needs_review`.
+  - `FieldMerge`: upgrades `date_only` to `instant` precision when time is learned; updates `status` to `cancelled`/`postponed` without deleting the event; preserves evidence.
+  - `CanonicalizationCoordinator`: atomic resolution, field evidence persistence, and idempotent replay.
+- Created deterministic fixtures (`tests/fixtures/phase-1-fixtures.json`) covering single shows, date-only shows, DST boundary, residencies, free events, venue aliases, two-source merges, cancellations, and ambiguous cases.
+- Created read-only Discover experience:
+  - `components/catalog/EventCard.tsx` with date/time, price, ticket link, status, and source attribution (no recommendation scores).
+  - `app/discover/page.tsx` server-rendered page backed by `CatalogRepository`.
+- Built comprehensive test suite:
+  - 61 unit tests across 8 test suites passing in ~1s.
+  - Server-only boundary regression test in `tests/unit/server-boundary.test.ts`.
+  - Database integration tests in `tests/integration/catalog-rls.test.ts`.
+  - Playwright browser smoke tests in `tests/e2e/smoke.spec.ts`.
 
-## Files added or changed in remediation
+## Tests run
 
-- Security & Env: `.gitignore`, `lib/supabase/admin.ts`, `tests/unit/supabase.test.ts`
-- Domain Layer: `lib/domain/source.ts`, `lib/domain/event-candidate.ts`
-- Fixtures & Tests: `tests/fixtures/fake-source-adapter.ts`, `tests/fixtures/fake-source-response.json`, `tests/unit/source-adapter.test.ts`, `tests/integration/profiles-rls.test.ts`, `tests/setup.ts`, `vitest.config.ts`, `vitest.integration.config.ts`
-- Tooling & CI: `package.json`, `package-lock.json`, `.github/workflows/ci.yml`
-- Documentation: `docs/PHASE_0_IMPLEMENTATION.md`, `AI_HANDOFF.md`
-
-## Validation performed
-
-- [x] `git check-ignore -v .env .env.local .env.production .env.development .env.test supabase/.env.production`: all verified ignored
-- [x] `git check-ignore .env.example`: verified NOT ignored (exit code 1)
-- [x] `npm run format:check`: passed (all code files match Prettier style)
-- [x] `npm run lint`: passed (zero ESLint errors or warnings)
-- [x] `npm run typecheck`: passed (zero TypeScript errors)
-- [x] `npm test`: passed (4 unit test suites, 17 tests passed; does NOT touch database)
-- [x] `npm run test:e2e`: passed (Playwright Chromium smoke test verified landing page)
-- [x] `npm run build`: passed (Next.js production build succeeded)
-- [x] `npm run typecheck` (post-build): passed (zero TypeScript errors with generated route types present)
-- [x] `npm run test:integration`: passed (executes RLS integration suite; verifies credentials and checks database availability; required in CI)
+- `npm run format:check` — clean, all files match Prettier style
+- `npm run lint` — 0 errors, 0 warnings
+- `npm run typecheck` (pre-build) — 0 errors
+- `npm test` — 61/61 unit tests passed (8 test files)
+- `npm run build` — compiled successfully, static and dynamic routes generated
+- `npm run typecheck` (post-build) — 0 errors
+- `npm run test:e2e` — 2/2 smoke tests passed
 
 ## Known issues / unresolved decisions
 
-- Local Docker container runtime (Docker Desktop or Podman) is required to run `npm run db:start` / `npm run db:reset` / `npm run test:integration` locally; CI runner automatically provides Docker and executes database startup, reset, and integration test.
-- Launch geography, heavier crawler runtime, raw ingest retention policy, and notification provider remain open product decisions for subsequent phases.
+- Determine raw-ingest retention duration, the exact small-payload size threshold, object-storage provider, and deletion procedure before high-volume ingestion.
+- A future operational/admin phase must define the human workflow and UI for aliases and `needs_review` candidate resolutions.
 
 ## Recommended next step
 
-1. ChatGPT re-review on branch `chore/bootstrap-foundation`.
-2. Open pull request into `main` and verify all CI checks pass.
-3. Merge `chore/bootstrap-foundation` into `main`.
-4. Proceed to Phase 1 (`feature/ticketmaster-ingestion`).
+1. Generate review bundle:
+   `git archive --format=zip --output=../encore-review.zip HEAD`
+   `git diff main...HEAD > ../encore-review.diff`
+2. Provide the diff / bundle to ChatGPT for independent Phase 1 architecture and implementation review.
+3. Address any review findings before merging into `main`.
