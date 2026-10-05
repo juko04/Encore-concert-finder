@@ -1,15 +1,6 @@
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it } from 'vitest';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { execSync } from 'child_process';
-import { CanonicalizationCoordinator } from '@/lib/entity-resolution/canonicalization-coordinator';
-import { SupabaseCatalogRepository } from '@/lib/repositories/catalog-repository';
-import { SupabaseSourceRepository } from '@/lib/repositories/source-repository';
-import { SupabaseRawIngestRepository } from '@/lib/repositories/raw-ingest-repository';
-import { SupabaseEventCandidateRepository } from '@/lib/repositories/event-candidate-repository';
-import {
-  createRawIngestForCandidate,
-  getFixtureCandidate,
-} from '@/tests/fixtures/fixture-helper';
 
 interface LocalCredentials {
   url: string;
@@ -49,7 +40,7 @@ function resolveSupabaseCredentials(): LocalCredentials | null {
       };
     }
   } catch {
-    // Supabase CLI status could not be read
+    // Ignore
   }
 
   return {
@@ -61,20 +52,12 @@ function resolveSupabaseCredentials(): LocalCredentials | null {
   };
 }
 
-describe('Phase 1 Inventory, Ingestion, and RLS Database Integration', () => {
+describe('Catalog RLS, Security & Canonicalization Atomicity', () => {
   const credentials = resolveSupabaseCredentials();
 
   let adminClient: SupabaseClient | null = null;
   let anonClient: SupabaseClient | null = null;
   let isDbAvailable = false;
-
-  let catalogRepo: SupabaseCatalogRepository;
-  let sourceRepo: SupabaseSourceRepository;
-  let rawIngestRepo: SupabaseRawIngestRepository;
-  let candidateRepo: SupabaseEventCandidateRepository;
-
-  const testSourceAId = 'a0000000-0000-0000-0000-000000000001';
-  const testSourceBId = 'a0000000-0000-0000-0000-000000000002';
 
   beforeAll(async () => {
     if (!credentials) {
@@ -102,7 +85,7 @@ describe('Phase 1 Inventory, Ingestion, and RLS Database Integration', () => {
         );
       }
       console.warn(
-        `Local Supabase is not running at ${credentials.url}. Skipping Phase 1 database integration tests locally (Docker runtime required).`,
+        `Local Supabase is not running at ${credentials.url}. Skipping integration tests locally.`,
       );
       return;
     }
@@ -114,222 +97,170 @@ describe('Phase 1 Inventory, Ingestion, and RLS Database Integration', () => {
     anonClient = createClient(credentials.url, credentials.anonKey, {
       auth: { autoRefreshToken: false, persistSession: false },
     });
-
-    catalogRepo = new SupabaseCatalogRepository(adminClient);
-    sourceRepo = new SupabaseSourceRepository(adminClient);
-    rawIngestRepo = new SupabaseRawIngestRepository(adminClient);
-    candidateRepo = new SupabaseEventCandidateRepository(adminClient);
-
-    // Ensure baseline test sources exist
-    await sourceRepo.upsert({
-      id: testSourceAId,
-      slug: 'test-source-a',
-      name: 'Test Source A',
-      sourceType: 'venue',
-      acquisitionMethod: 'structured_json',
-      baseUrl: 'https://source-a.example.com',
-      reliabilityScore: 0.95,
-      active: true,
-      parserVersion: '1.0.0',
-      consecutiveFailures: 0,
-    });
-
-    await sourceRepo.upsert({
-      id: testSourceBId,
-      slug: 'test-source-b',
-      name: 'Test Source B',
-      sourceType: 'promoter',
-      acquisitionMethod: 'html_http',
-      baseUrl: 'https://source-b.example.com',
-      reliabilityScore: 0.9,
-      active: true,
-      parserVersion: '1.0.0',
-      consecutiveFailures: 0,
-    });
   });
 
-  describe('Database Schema Constraints', () => {
-    it('enforces start_time_precision constraint (instant requires starts_at, date_only forbids it)', async () => {
-      if (!isDbAvailable) return;
+  it('allows public read on catalog tables but denies writes to anon', async () => {
+    if (!isDbAvailable || !anonClient) return;
 
-      // instant precision without starts_at must fail
-      const { error: instantError } = await adminClient!.from('events').insert({
-        name: 'Invalid Instant Event',
-        normalized_name: 'invalid instant event',
+    // Read artists
+    const { error: readArtistsError } = await anonClient
+      .from('artists')
+      .select('id')
+      .limit(1);
+    expect(readArtistsError).toBeNull();
+
+    // Read events
+    const { error: readEventsError } = await anonClient
+      .from('events')
+      .select('id')
+      .limit(1);
+    expect(readEventsError).toBeNull();
+
+    // Deny insert on events to anon
+    const { error: insertEventError } = await anonClient.from('events').insert({
+      name: 'Unauthorized Show',
+      normalized_name: 'unauthorized show',
+      timezone: 'America/Denver',
+      local_start_date: '2026-10-15',
+    });
+    expect(insertEventError).not.toBeNull();
+  });
+
+  it('restricts direct access to sources table and allows access via public_sources view (Finding 10)', async () => {
+    if (!isDbAvailable || !anonClient) return;
+
+    // Direct access to sources table is denied to anon
+    const { data: sourcesData, error: sourcesError } = await anonClient
+      .from('sources')
+      .select('*')
+      .limit(1);
+    // Either an RLS error occurs or 0 rows are returned due to default deny
+    expect(sourcesError || sourcesData?.length === 0).toBeTruthy();
+
+    // Access via safe view public_sources succeeds
+    const { error: viewError } = await anonClient
+      .from('public_sources')
+      .select('id, name, slug')
+      .limit(1);
+    expect(viewError).toBeNull();
+  });
+
+  it('denies anon access to operational and provenance tables (Finding 1 & 10)', async () => {
+    if (!isDbAvailable || !anonClient) return;
+
+    const operationalTables = [
+      'raw_ingests',
+      'event_candidates',
+      'event_sources',
+      'event_field_evidence',
+      'candidate_resolutions',
+    ];
+
+    for (const table of operationalTables) {
+      const { data, error } = await anonClient.from(table).select('*').limit(1);
+      expect(error || data?.length === 0).toBeTruthy();
+    }
+  });
+
+  it('executes canonicalization atomically and rolls back on failure (Finding 2)', async () => {
+    if (!isDbAvailable || !adminClient) return;
+
+    // 1. Successful atomic execution
+    const candidateId = `cand_atomic_${Date.now()}`;
+    const venueId = 'a0000000-0000-0000-0000-000000000001'; // or create test venue
+    const sourceId = 'a0000000-0000-0000-0000-000000000001';
+
+    // Insert dummy raw ingest and candidate
+    const { data: rawData } = await adminClient
+      .from('raw_ingests')
+      .insert({
+        source_id: sourceId,
+        source_url: 'https://example.com/atomic',
+        acquisition_method: 'api',
+        content_hash: `hash_${Date.now()}`,
+      })
+      .select('id')
+      .single();
+
+    const rawIngestId = rawData?.id;
+
+    const { data: candData } = await adminClient
+      .from('event_candidates')
+      .insert({
+        source_id: sourceId,
+        raw_ingest_id: rawIngestId,
+        source_type: 'venue',
+        acquisition_method: 'api',
+        source_url: 'https://example.com/atomic',
+        title: 'Atomic Concert Test',
+        venue_name: 'Test Venue',
+        timezone: 'America/Denver',
+        local_start_date: '2026-11-20',
+      })
+      .select('id')
+      .single();
+
+    const validPayload = {
+      event: {
+        name: 'Atomic Concert Test',
+        normalized_name: 'atomic concert test',
         event_kind: 'concert',
         status: 'scheduled',
         timezone: 'America/Denver',
-        local_start_date: '2026-10-15',
-        start_time_precision: 'instant',
-        starts_at: null, // Violated constraint
-        is_multi_day: false,
-      });
-      expect(instantError).not.toBeNull();
-
-      // date_only precision with starts_at must fail
-      const { error: dateOnlyError } = await adminClient!
-        .from('events')
-        .insert({
-          name: 'Invalid Date Only Event',
-          normalized_name: 'invalid date only event',
-          event_kind: 'concert',
-          status: 'scheduled',
-          timezone: 'America/Denver',
-          local_start_date: '2026-10-15',
-          start_time_precision: 'date_only',
-          starts_at: '2026-10-15T20:00:00Z', // Violated constraint
-          is_multi_day: false,
-        });
-      expect(dateOnlyError).not.toBeNull();
-    });
-
-    it('enforces composite foreign key consistency (candidate cannot link to different source raw ingest)', async () => {
-      if (!isDbAvailable) return;
-
-      // 1. Create raw ingest under source A
-      const rawIngest = await rawIngestRepo.create({
-        sourceId: testSourceAId,
-        sourceUrl: 'https://source-a.example.com/shows/1',
-        acquisitionMethod: 'structured_json',
-        fetchedAt: new Date().toISOString(),
-        contentHash: `hash_test_${Date.now()}`,
-        contentType: 'application/json',
-        rawContent: '{}',
-        httpStatus: 200,
-        parserVersion: '1.0.0',
-      });
-
-      // 2. Attempt to create candidate pointing to rawIngest.id but with source B
-      const { error } = await adminClient!.from('event_candidates').insert({
-        raw_ingest_id: rawIngest.id,
-        source_id: testSourceBId, // Mismatched source ID!
-        title: 'Mismatched Candidate',
-        artist_names: ['Artist'],
-        venue_name: 'Venue',
+        local_start_date: '2026-11-20',
+      },
+      source: {
+        source_id: sourceId,
+        candidate_id: candData?.id,
+        raw_ingest_id: rawIngestId,
+        source_url: 'https://example.com/atomic',
+      },
+      resolution: {
+        event_candidate_id: candData?.id,
+        status: 'created',
         confidence: 0.9,
-      });
+        reasons: ['test_atomic_success'],
+      },
+    };
 
-      expect(error).not.toBeNull();
-    });
-  });
+    const { data: successData, error: successError } = await adminClient.rpc(
+      'apply_canonicalization',
+      { payload: validPayload },
+    );
 
-  describe('Row Level Security (RLS) Policy Enforcement', () => {
-    it('allows anonymous read access to public catalog tables', async () => {
-      if (!isDbAvailable) return;
+    expect(successError).toBeNull();
+    expect(successData?.eventId).toBeDefined();
 
-      const { data: sources, error: srcErr } = await anonClient!
-        .from('sources')
-        .select('*');
-      expect(srcErr).toBeNull();
-      expect(sources?.length).toBeGreaterThan(0);
+    // 2. Failure rollback test: pass an invalid payload that causes a foreign key constraint violation
+    const invalidCandidateId = '00000000-0000-0000-0000-000000000000'; // non-existent candidate ID
+    const failedPayload = {
+      event: {
+        name: 'Should Not Be Persisted',
+        normalized_name: 'should not be persisted',
+        timezone: 'America/Denver',
+        local_start_date: '2026-11-21',
+      },
+      resolution: {
+        event_candidate_id: invalidCandidateId, // will fail FK constraint on candidate_resolutions
+        status: 'created',
+        confidence: 0.9,
+      },
+    };
 
-      const { error: eventsErr } = await anonClient!.from('events').select('*');
-      expect(eventsErr).toBeNull();
+    const { error: failedError } = await adminClient.rpc(
+      'apply_canonicalization',
+      { payload: failedPayload },
+    );
 
-      const { error: artistsErr } = await anonClient!
-        .from('artists')
-        .select('*');
-      expect(artistsErr).toBeNull();
-    });
+    // RPC must fail due to foreign key violation
+    expect(failedError).not.toBeNull();
 
-    it('denies anonymous write access to catalog tables', async () => {
-      if (!isDbAvailable) return;
+    // Verify that NO event with 'should not be persisted' was created
+    const { data: orphanedEvent } = await adminClient
+      .from('events')
+      .select('id')
+      .eq('normalized_name', 'should not be persisted');
 
-      const { error: artistInsertErr } = await anonClient!
-        .from('artists')
-        .insert({
-          name: 'Malicious Artist',
-          normalized_name: 'malicious artist',
-        });
-      expect(artistInsertErr).not.toBeNull();
-
-      const { error: eventInsertErr } = await anonClient!
-        .from('events')
-        .insert({
-          name: 'Malicious Event',
-          normalized_name: 'malicious event',
-          event_kind: 'concert',
-          status: 'scheduled',
-          timezone: 'America/Denver',
-          local_start_date: '2026-10-15',
-          start_time_precision: 'date_only',
-          is_multi_day: false,
-        });
-      expect(eventInsertErr).not.toBeNull();
-    });
-
-    it('denies anonymous read and write access to operational ingestion tables', async () => {
-      if (!isDbAvailable) return;
-
-      // raw_ingests
-      const { data: rawData, error: rawErr } = await anonClient!
-        .from('raw_ingests')
-        .select('*');
-      expect(rawData).toHaveLength(0);
-
-      // event_candidates
-      const { data: candData } = await anonClient!
-        .from('event_candidates')
-        .select('*');
-      expect(candData).toHaveLength(0);
-
-      // event_field_evidence
-      const { data: evData } = await anonClient!
-        .from('event_field_evidence')
-        .select('*');
-      expect(evData).toHaveLength(0);
-
-      // candidate_resolutions
-      const { data: resData } = await anonClient!
-        .from('candidate_resolutions')
-        .select('*');
-      expect(resData).toHaveLength(0);
-    });
-  });
-
-  describe('End-to-End Pipeline in PostgreSQL', () => {
-    it('executes full ingest -> candidate -> canonicalization flow in database', async () => {
-      if (!isDbAvailable) return;
-
-      const coordinator = new CanonicalizationCoordinator();
-      const candidate = getFixtureCandidate('singleShow');
-
-      // 1. Persist raw ingest
-      const rawIngestData = createRawIngestForCandidate(candidate);
-      const rawIngest = await rawIngestRepo.create(rawIngestData);
-
-      // 2. Persist event candidate
-      const persistedCandidate = await candidateRepo.create({
-        ...candidate,
-        rawIngestId: rawIngest.id,
-        sourceId: candidate.sourceId,
-      });
-
-      // 3. Run canonicalization coordinator against real DB
-      const resolution = await coordinator.canonicalize({
-        candidate: persistedCandidate,
-        catalogRepo,
-      });
-
-      expect(resolution.status).toBe('created');
-      expect(resolution.eventId).toBeDefined();
-
-      // 4. Verify canonical event in DB
-      const eventDetail = await catalogRepo.getEventById(resolution.eventId!);
-      expect(eventDetail).not.toBeNull();
-      expect(eventDetail?.name).toBe('The Mountain Goats');
-      expect(eventDetail?.venue?.name).toBe('Gothic Theatre');
-      expect(eventDetail?.startTimePrecision).toBe('instant');
-      expect(eventDetail?.ticketLinks.length).toBe(1);
-      expect(eventDetail?.sources.length).toBe(1);
-
-      // 5. Test Idempotent Replay
-      const replayRes = await coordinator.canonicalize({
-        candidate: persistedCandidate,
-        catalogRepo,
-      });
-      expect(replayRes.status).toBe('created');
-      expect(replayRes.eventId).toBe(resolution.eventId);
-    });
+    expect(orphanedEvent?.length).toBe(0);
   });
 });

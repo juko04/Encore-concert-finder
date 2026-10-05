@@ -10,6 +10,7 @@ import type {
   CandidateResolution,
   CanonicalEventDetail,
   CanonicalEventSummary,
+  CanonicalizationPayload,
   Event,
   EventArtist,
   EventFieldEvidence,
@@ -53,7 +54,7 @@ export interface ICatalogRepository {
   ): Promise<Event[]>;
   findEventByTicketUrl(normalizedTicketUrl: string): Promise<Event | null>;
 
-  // Write operations (service role only)
+  // Write operations (service role / transaction boundary)
   createArtist(artist: {
     name: string;
     normalizedName: string;
@@ -101,27 +102,52 @@ export interface ICatalogRepository {
     promoterId: string,
     relationshipType?: PromoterRelationshipType,
   ): Promise<EventPromoter>;
-  addEventTicketLink(
-    link: Omit<EventTicketLink, 'id' | 'createdAt' | 'updatedAt'>,
-  ): Promise<EventTicketLink>;
-  addEventSource(
-    sourceRecord: Omit<EventSourceRecord, 'id' | 'createdAt' | 'updatedAt'>,
-  ): Promise<EventSourceRecord>;
-  findEventSource(
-    eventId: string,
-    sourceId: string,
-    sourceEventId?: string | null,
-  ): Promise<EventSourceRecord | null>;
-  updateEventSourceLastSeen(id: string, lastSeenAt: string): Promise<void>;
-  addEventFieldEvidence(
-    evidence: Omit<EventFieldEvidence, 'id' | 'createdAt'>,
-  ): Promise<EventFieldEvidence>;
-  recordCandidateResolution(
-    resolution: Omit<CandidateResolution, 'id' | 'createdAt'>,
-  ): Promise<CandidateResolution>;
-  getCandidateResolution(
-    candidateId: string,
-  ): Promise<CandidateResolution | null>;
+  linkTicketUrl(ticketLink: {
+    eventId: string;
+    ticketProviderSourceId?: string | null;
+    url: string;
+    normalizedUrl: string;
+    minPrice?: number | null;
+    maxPrice?: number | null;
+    currency?: string | null;
+    inventoryStatus?: EventTicketLink['inventoryStatus'];
+    verifiedAt?: string | null;
+  }): Promise<EventTicketLink>;
+  recordEventSource(sourceRecord: {
+    eventId: string;
+    sourceId: string;
+    candidateId?: string | null;
+    rawIngestId?: string | null;
+    sourceEventId?: string | null;
+    sourceUrl: string;
+    confidence: number;
+  }): Promise<EventSourceRecord>;
+  recordFieldEvidence(evidence: {
+    eventId: string;
+    fieldName: string;
+    eventSourceId?: string;
+    sourceId: string;
+    rawIngestId?: string | null;
+    candidateId?: string | null;
+    observedValue: unknown;
+    valueHash: string;
+    confidence: number;
+    observedAt: string;
+    parserVersion: string;
+  }): Promise<EventFieldEvidence>;
+  recordResolution(resolution: {
+    eventCandidateId: string;
+    eventId?: string | null;
+    status: CandidateResolution['status'];
+    matcherVersion: string;
+    confidence: number;
+    reasons: Record<string, unknown> | string[];
+  }): Promise<CandidateResolution>;
+
+  // Atomic transaction execution for canonicalization (Finding 2)
+  applyCanonicalization(
+    payload: CanonicalizationPayload,
+  ): Promise<{ eventId: string | null; status: string }>;
 }
 
 export interface ISourceRepository {

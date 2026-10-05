@@ -1,7 +1,7 @@
 /**
  * Phase 1 Value Objects and Normalization Rules
  * Includes conservative URL normalization, name normalization, IANA timezone validation,
- * and monetary validation.
+ * local calendar date derivation, and ISO currency formatting.
  */
 
 const KNOWN_TRACKING_PARAMS = new Set(['gclid', 'fbclid']);
@@ -143,6 +143,34 @@ export function validateIanaTimezone(tz: string): boolean {
 }
 
 /**
+ * Derives the local calendar date (YYYY-MM-DD) from a UTC instant and an IANA timezone.
+ * Never uses simple substring(0, 10) on UTC timestamps.
+ */
+export function deriveLocalDateFromInstant(
+  instantIso: string,
+  timeZone: string,
+): string {
+  if (!validateIanaTimezone(timeZone)) {
+    throw new Error(`Invalid IANA timezone: ${timeZone}`);
+  }
+
+  const date = new Date(instantIso);
+  if (isNaN(date.getTime())) {
+    throw new Error(`Invalid instant ISO string: ${instantIso}`);
+  }
+
+  // en-CA produces YYYY-MM-DD in the specified timezone
+  const formatter = new Intl.DateTimeFormat('en-CA', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  });
+
+  return formatter.format(date);
+}
+
+/**
  * Validates ISO-4217 currency code (3 uppercase letters).
  */
 export function validateCurrency(currency: string): boolean {
@@ -164,4 +192,27 @@ export function validatePrice(amount: number): boolean {
  */
 export function formatPrice(amount: number): number {
   return Math.round(amount * 100) / 100;
+}
+
+/**
+ * Formats a monetary amount according to its ISO currency code.
+ * Uses Intl.NumberFormat instead of hardcoding any currency symbol.
+ */
+export function formatCurrencyAmount(
+  amount: number,
+  currency: string = 'USD',
+  locale: string = 'en-US',
+): string {
+  const safeCurrency = validateCurrency(currency)
+    ? currency.toUpperCase()
+    : 'USD';
+  try {
+    return new Intl.NumberFormat(locale, {
+      style: 'currency',
+      currency: safeCurrency,
+      maximumFractionDigits: 2,
+    }).format(amount);
+  } catch {
+    return `${safeCurrency} ${amount.toFixed(2)}`;
+  }
 }

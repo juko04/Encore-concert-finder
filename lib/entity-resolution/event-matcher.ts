@@ -26,7 +26,7 @@ export class EventMatcher {
       };
     }
 
-    // 1. Direct ticket URL match
+    // 1. Direct normalized ticket URL match (strongest identity)
     if (candidate.ticketUrl) {
       try {
         const normUrl = normalizeUrl(candidate.ticketUrl);
@@ -42,7 +42,7 @@ export class EventMatcher {
           }
         }
       } catch {
-        // Ignore invalid URL parsing here; candidate URL validation handled separately
+        // Invalid URL handled by candidate verification
       }
     }
 
@@ -54,6 +54,8 @@ export class EventMatcher {
 
     if (sameVenueEvents.length > 0) {
       const candidateNormArtists = candidate.artistNames.map(normalizeName);
+      const candidatePrimaryNorm = candidateNormArtists[0];
+      const candidatePrimaryId = resolvedArtistIds[0];
 
       for (const existingEvent of sameVenueEvents) {
         const detail = await catalogRepo.getEventById(existingEvent.id);
@@ -62,27 +64,66 @@ export class EventMatcher {
         const existingNormArtists = detail.artists.map((a) =>
           normalizeName(a.name),
         );
+        const existingHeadliner =
+          detail.artists.find((a) => a.billingPosition === 'headliner') ??
+          detail.artists[0];
+        const existingHeadlinerNorm = existingHeadliner
+          ? normalizeName(existingHeadliner.name)
+          : '';
 
-        // Check if any artist overlaps by ID or normalized name
-        const hasArtistOverlap =
-          detail.artists.some((a) => resolvedArtistIds.includes(a.id)) ||
-          candidateNormArtists.some((cName) =>
-            existingNormArtists.includes(cName),
-          );
+        // Check if headliner matches
+        const headlinerMatches =
+          (candidatePrimaryId &&
+            existingHeadliner?.id === candidatePrimaryId) ||
+          (candidatePrimaryNorm &&
+            candidatePrimaryNorm === existingHeadlinerNorm);
 
-        if (hasArtistOverlap) {
+        // Check if all artists match
+        const allArtistsMatch =
+          candidateNormArtists.length > 0 &&
+          candidateNormArtists.every((c) => existingNormArtists.includes(c)) &&
+          existingNormArtists.every((e) => candidateNormArtists.includes(e));
+
+        if (headlinerMatches) {
+          const reasons = ['same_venue_and_date', 'same_primary_artist'];
+          if (allArtistsMatch) {
+            reasons.push('all_artists_match');
+          }
           return {
             decision: 'match',
             matchedEvent: existingEvent,
-            confidence: 0.92,
-            reasons: ['same_venue_and_date', 'overlapping_artists'],
+            confidence: allArtistsMatch ? 0.95 : 0.92,
+            reasons,
+          };
+        }
+
+        if (allArtistsMatch) {
+          return {
+            decision: 'match',
+            matchedEvent: existingEvent,
+            confidence: 0.95,
+            reasons: ['same_venue_and_date', 'all_artists_match'],
+          };
+        }
+
+        // Check if a secondary / opening / supporting artist matches
+        const hasOpeningOverlap =
+          detail.artists.some((a) => resolvedArtistIds.includes(a.id)) ||
+          candidateNormArtists.some((c) => existingNormArtists.includes(c));
+
+        if (hasOpeningOverlap) {
+          // Conservative matching (Finding 6): Supporting artist overlap must NOT auto-merge!
+          return {
+            decision: 'needs_review',
+            confidence: 0.5,
+            reasons: [
+              'same_venue_and_date_opening_artist_overlap_requires_review',
+            ],
           };
         }
       }
 
-      // Events exist on same date at same venue, but artists do not match at all!
-      // This is ambiguous (consecutive shows, multi-room venue, festival vs regular, or error).
-      // Per Decision 5: Ambiguous candidates remain needs_review.
+      // Same venue and date, but completely different artists
       return {
         decision: 'needs_review',
         confidence: 0.5,
@@ -90,7 +131,7 @@ export class EventMatcher {
       };
     }
 
-    // 3. No events at this venue on this date -> Create new canonical event
+    // 3. No existing events on this date at this venue -> Create new canonical event
     return {
       decision: 'create',
       confidence: 0.9,

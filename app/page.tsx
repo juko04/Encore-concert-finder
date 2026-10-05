@@ -25,15 +25,6 @@ export default function HomePage() {
           local events by personalized value.
         </p>
 
-        <div className="mt-6 flex justify-center gap-4">
-          <a
-            href="/discover"
-            className="rounded-lg bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white shadow-md transition hover:bg-indigo-500"
-          >
-            Discover Events
-          </a>
-        </div>
-
         <div className="mt-10 rounded-xl border border-slate-800 bg-slate-900/50 p-6 text-left shadow-xl backdrop-blur sm:p-8">
           <h2 className="text-sm font-semibold uppercase tracking-wider text-slate-400">
             System Foundation Status

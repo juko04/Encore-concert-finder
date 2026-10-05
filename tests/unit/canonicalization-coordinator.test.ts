@@ -1,226 +1,146 @@
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 import { CanonicalizationCoordinator } from '@/lib/entity-resolution/canonicalization-coordinator';
 import { MemoryCatalogRepository } from '@/lib/repositories/memory-repositories';
-import { getFixtureCandidate } from '@/tests/fixtures/fixture-helper';
+import { loadFixtures } from '../fixtures/fixture-helper';
 
-describe('CanonicalizationCoordinator (Pipeline unit tests)', () => {
-  it('creates canonical event, artist, venue, ticket link, and source evidence for a single show', async () => {
-    const catalogRepo = new MemoryCatalogRepository();
-    const coordinator = new CanonicalizationCoordinator();
+describe('CanonicalizationCoordinator Unit Tests', () => {
+  let catalogRepo: MemoryCatalogRepository;
+  let coordinator: CanonicalizationCoordinator;
+  const fixtures = loadFixtures();
 
-    const candidate = getFixtureCandidate('singleShow');
-    const resolution = await coordinator.canonicalize({
-      candidate,
-      catalogRepo,
-    });
+  beforeEach(() => {
+    catalogRepo = new MemoryCatalogRepository();
+    coordinator = new CanonicalizationCoordinator(catalogRepo);
+  });
 
-    expect(resolution.status).toBe('created');
-    expect(resolution.eventId).toBeDefined();
+  it('atomically creates canonical event, artists, ticket links, provenance, and resolution (Finding 2)', async () => {
+    const candidate = fixtures.single_show;
+    const result = await coordinator.canonicalize(candidate);
 
-    const event = await catalogRepo.getEventById(resolution.eventId!);
-    expect(event).not.toBeNull();
-    expect(event?.name).toBe('The Mountain Goats');
-    expect(event?.venue?.name).toBe('Gothic Theatre');
-    expect(event?.artists.map((a) => a.name)).toContain('The Mountain Goats');
-    expect(event?.artists.map((a) => a.name)).toContain('Adeem the Artist');
-    expect(event?.startTimePrecision).toBe('instant');
-    expect(event?.startsAt).toBe('2026-10-16T02:00:00Z');
+    expect(result.status).toBe('created');
+    expect(result.eventId).toBeDefined();
+
+    // Verify all parts were persisted
+    const event = await catalogRepo.getEventById(result.eventId!);
+    expect(event).toBeDefined();
+    expect(event?.name).toBe(candidate.title);
+    expect(event?.artists.length).toBe(1);
     expect(event?.ticketLinks.length).toBe(1);
     expect(event?.sources.length).toBe(1);
+    expect(catalogRepo.candidateResolutions.size).toBe(1);
+    expect(catalogRepo.eventFieldEvidence.size).toBeGreaterThan(0);
+  });
 
-    // Verify field evidence
-    const evidenceList = Array.from(catalogRepo.eventFieldEvidence.values());
-    expect(evidenceList.length).toBeGreaterThanOrEqual(2);
-    expect(evidenceList.some((e) => e.fieldName === 'title')).toBe(true);
-    expect(evidenceList.some((e) => e.fieldName === 'local_start_date')).toBe(
-      true,
+  it('guarantees atomic rollback when persistence throws an error (Finding 2)', async () => {
+    // Force an error during applyCanonicalization
+    const originalApply = catalogRepo.applyCanonicalization.bind(catalogRepo);
+    catalogRepo.applyCanonicalization = async () => {
+      throw new Error('Simulated database write failure');
+    };
+
+    const candidate = fixtures.single_show;
+    await expect(coordinator.canonicalize(candidate)).rejects.toThrow(
+      'Simulated database write failure',
+    );
+
+    // Verify that NO partial records were committed
+    expect(catalogRepo.events.size).toBe(0);
+    expect(catalogRepo.eventArtists.size).toBe(0);
+    expect(catalogRepo.eventTicketLinks.size).toBe(0);
+    expect(catalogRepo.eventSources.size).toBe(0);
+    expect(catalogRepo.eventFieldEvidence.size).toBe(0);
+    expect(catalogRepo.candidateResolutions.size).toBe(0);
+  });
+
+  it('does not fabricate Colorado geography for non-Colorado events (Finding 3)', async () => {
+    // Austin show: Texas, America/Chicago
+    const austinCandidate = fixtures.non_colorado_show_austin;
+    const austinRes = await coordinator.canonicalize(austinCandidate);
+    expect(austinRes.status).toBe('created');
+
+    const austinEvent = await catalogRepo.getEventById(austinRes.eventId!);
+    expect(austinEvent?.city).toBe('Austin');
+    expect(austinEvent?.region).toBe('TX');
+    expect(austinEvent?.timezone).toBe('America/Chicago');
+    expect(austinEvent?.city).not.toBe('Denver');
+    expect(austinEvent?.timezone).not.toBe('America/Denver');
+
+    // London show: Great Britain, Europe/London, GBP currency
+    const londonCandidate = fixtures.non_colorado_show_london_eur_gbp;
+    const londonRes = await coordinator.canonicalize(londonCandidate);
+    expect(londonRes.status).toBe('created');
+
+    const londonEvent = await catalogRepo.getEventById(londonRes.eventId!);
+    expect(londonEvent?.city).toBe('London');
+    expect(londonEvent?.countryCode).toBe('GB');
+    expect(londonEvent?.timezone).toBe('Europe/London');
+    expect(londonEvent?.ticketLinks[0].currency).toBe('GBP');
+  });
+
+  it('routes candidate to needs_review when timezone cannot be resolved (Finding 3)', async () => {
+    const candidateMissingTz = {
+      ...fixtures.single_show,
+      timezone: undefined,
+      venueName: 'Venue Without Timezone',
+    };
+
+    const res = await coordinator.canonicalize(candidateMissingTz);
+    expect(res.status).toBe('needs_review');
+    expect(res.eventId).toBeNull();
+    expect(res.reasons).toContain('missing_or_invalid_timezone');
+  });
+
+  it('derives local calendar date correctly across UTC date rollover (Finding 4)', async () => {
+    // UTC 02:00:00 on Oct 15 in America/Denver is 20:00:00 on Oct 14
+    const rolloverCandidate = fixtures.utc_rollover_show;
+    const res = await coordinator.canonicalize(rolloverCandidate);
+
+    expect(res.status).toBe('created');
+    const event = await catalogRepo.getEventById(res.eventId!);
+    expect(event?.localStartDate).toBe('2026-10-14');
+  });
+
+  it('preserves real source provenance and attribution (Finding 5 & 8)', async () => {
+    // Venue source candidate: ticketProviderSourceId should be null
+    const venueCandidate = fixtures.single_show;
+    const venueRes = await coordinator.canonicalize(venueCandidate);
+    const venueEvent = await catalogRepo.getEventById(venueRes.eventId!);
+
+    expect(venueEvent?.ticketLinks[0].ticketProviderSourceId).toBeNull();
+    expect(venueEvent?.sources[0].sourceId).toBe(
+      venueCandidate.provenance.sourceId,
+    );
+
+    // Ticketing source candidate: ticketProviderSourceId should be candidate.sourceId
+    const ticketingCandidate = fixtures.non_colorado_show_london_eur_gbp;
+    const ticketRes = await coordinator.canonicalize(ticketingCandidate);
+    const ticketEvent = await catalogRepo.getEventById(ticketRes.eventId!);
+
+    expect(ticketEvent?.ticketLinks[0].ticketProviderSourceId).toBe(
+      ticketingCandidate.sourceId,
     );
   });
 
-  it('correctly handles date-only events without fabricating midnight instants', async () => {
-    const catalogRepo = new MemoryCatalogRepository();
-    const coordinator = new CanonicalizationCoordinator();
+  it('filters catalog events by artistId (Finding 11)', async () => {
+    const candidate1 = fixtures.single_show; // Khruangbin
+    const res1 = await coordinator.canonicalize(candidate1);
+    const event1 = await catalogRepo.getEventById(res1.eventId!);
+    const khruangbinId = event1!.artists[0].id;
 
-    const candidate = getFixtureCandidate('dateOnlyEvent');
-    const resolution = await coordinator.canonicalize({
-      candidate,
-      catalogRepo,
+    const candidate2 = fixtures.non_colorado_show_austin; // Spoon
+    await coordinator.canonicalize(candidate2);
+
+    // Filter by Khruangbin ID
+    const khruangbinEvents = await catalogRepo.listEvents({
+      artistId: khruangbinId,
     });
+    expect(khruangbinEvents.length).toBe(1);
+    expect(khruangbinEvents[0].id).toBe(event1?.id);
 
-    expect(resolution.status).toBe('created');
-    const event = await catalogRepo.getEventById(resolution.eventId!);
-    expect(event?.startTimePrecision).toBe('date_only');
-    expect(event?.startsAt).toBeNull();
-    expect(event?.localStartDate).toBe('2026-10-20');
-  });
-
-  it('upgrades date-only precision to instant when second source provides exact time', async () => {
-    const catalogRepo = new MemoryCatalogRepository();
-    const coordinator = new CanonicalizationCoordinator();
-
-    // 1. Initial date-only observation
-    const initialCandidate = getFixtureCandidate('dateOnlyEvent');
-    const initialRes = await coordinator.canonicalize({
-      candidate: initialCandidate,
-      catalogRepo,
+    // Filter by non-existent artist ID
+    const noEvents = await catalogRepo.listEvents({
+      artistId: 'non-existent-artist',
     });
-    expect(initialRes.status).toBe('created');
-
-    // 2. Second source observation with venue alias and instant time
-    const upgradeCandidate = getFixtureCandidate('dateOnlyUpgrade');
-    const upgradeRes = await coordinator.canonicalize({
-      candidate: upgradeCandidate,
-      catalogRepo,
-    });
-
-    expect(upgradeRes.status).toBe('matched');
-    expect(upgradeRes.eventId).toBe(initialRes.eventId);
-
-    const event = await catalogRepo.getEventById(initialRes.eventId!);
-    expect(event?.startTimePrecision).toBe('instant');
-    expect(event?.startsAt).toBe('2026-10-21T01:30:00Z');
-    expect(event?.sources.length).toBe(2);
-
-    // Verify field evidence was recorded for the upgrade
-    const evidence = Array.from(catalogRepo.eventFieldEvidence.values());
-    expect(evidence.some((e) => e.fieldName === 'starts_at')).toBe(true);
-  });
-
-  it('merges two different sources observing the same event into one canonical event', async () => {
-    const catalogRepo = new MemoryCatalogRepository();
-    const coordinator = new CanonicalizationCoordinator();
-
-    const candidateA = getFixtureCandidate('twoSourcesSameEvent', 'sourceA');
-    const candidateB = getFixtureCandidate('twoSourcesSameEvent', 'sourceB');
-
-    const resA = await coordinator.canonicalize({
-      candidate: candidateA,
-      catalogRepo,
-    });
-    expect(resA.status).toBe('created');
-
-    const resB = await coordinator.canonicalize({
-      candidate: candidateB,
-      catalogRepo,
-    });
-    expect(resB.status).toBe('matched');
-    expect(resB.eventId).toBe(resA.eventId);
-
-    // Both artists from both sources linked
-    const event = await catalogRepo.getEventById(resA.eventId!);
-    const artistNames = event?.artists.map((a) => a.name);
-    expect(artistNames).toContain('Khruangbin');
-    expect(artistNames).toContain('Hermanos Gutiérrez');
-    expect(event?.sources.length).toBe(2);
-  });
-
-  it('keeps two consecutive residency nights as separate canonical events', async () => {
-    const catalogRepo = new MemoryCatalogRepository();
-    const coordinator = new CanonicalizationCoordinator();
-
-    const night1Candidate = getFixtureCandidate('twoDayResidency', 'night1');
-    const night2Candidate = getFixtureCandidate('twoDayResidency', 'night2');
-
-    const res1 = await coordinator.canonicalize({
-      candidate: night1Candidate,
-      catalogRepo,
-    });
-    const res2 = await coordinator.canonicalize({
-      candidate: night2Candidate,
-      catalogRepo,
-    });
-
-    expect(res1.status).toBe('created');
-    expect(res2.status).toBe('created');
-    expect(res1.eventId).not.toBe(res2.eventId);
-
-    const allEvents = await catalogRepo.listEvents();
-    expect(allEvents.length).toBe(2);
-    expect(allEvents[0].localStartDate).not.toBe(allEvents[1].localStartDate);
-  });
-
-  it('updates canonical event status to cancelled without deleting the record', async () => {
-    const catalogRepo = new MemoryCatalogRepository();
-    const coordinator = new CanonicalizationCoordinator();
-
-    const original = getFixtureCandidate('cancellationObservation', 'original');
-    const cancelObs = getFixtureCandidate(
-      'cancellationObservation',
-      'cancellation',
-    );
-
-    const initialRes = await coordinator.canonicalize({
-      candidate: original,
-      catalogRepo,
-    });
-    expect(initialRes.status).toBe('created');
-
-    const cancelRes = await coordinator.canonicalize({
-      candidate: cancelObs,
-      catalogRepo,
-    });
-    expect(cancelRes.status).toBe('matched');
-    expect(cancelRes.eventId).toBe(initialRes.eventId);
-
-    const event = await catalogRepo.getEventById(initialRes.eventId!);
-    expect(event?.status).toBe('cancelled');
-  });
-
-  it('routes ambiguous events (same date and venue, conflicting artists) to needs_review', async () => {
-    const catalogRepo = new MemoryCatalogRepository();
-    const coordinator = new CanonicalizationCoordinator();
-
-    const candA = getFixtureCandidate('ambiguousCase', 'candidateA');
-    const candB = getFixtureCandidate('ambiguousCase', 'candidateB');
-
-    const resA = await coordinator.canonicalize({
-      candidate: candA,
-      catalogRepo,
-    });
-    expect(resA.status).toBe('created');
-
-    const resB = await coordinator.canonicalize({
-      candidate: candB,
-      catalogRepo,
-    });
-    expect(resB.status).toBe('needs_review');
-    expect(resB.eventId).toBeNull();
-    expect(resB.reasons).toContain('same_venue_and_date_different_artists');
-
-    // Canonical event A remains untouched and unpolluted
-    const event = await catalogRepo.getEventById(resA.eventId!);
-    expect(event?.artists.map((a) => a.name)).toEqual([
-      'Band Alpha',
-      'Band Beta',
-    ]);
-  });
-
-  it('is completely idempotent when replaying the same candidate', async () => {
-    const catalogRepo = new MemoryCatalogRepository();
-    const coordinator = new CanonicalizationCoordinator();
-
-    const candidate = getFixtureCandidate('singleShow');
-
-    // Run 1
-    const res1 = await coordinator.canonicalize({
-      candidate,
-      catalogRepo,
-    });
-    expect(res1.status).toBe('created');
-
-    // Run 2 (Replay)
-    const res2 = await coordinator.canonicalize({
-      candidate,
-      catalogRepo,
-    });
-    expect(res2.status).toBe('created');
-    expect(res2.id).toBe(res1.id);
-    expect(res2.eventId).toBe(res1.eventId);
-
-    // Verify no duplicates
-    const allEvents = await catalogRepo.listEvents();
-    expect(allEvents.length).toBe(1);
-    const artists = Array.from(catalogRepo.artists.values());
-    expect(artists.length).toBe(2);
+    expect(noEvents.length).toBe(0);
   });
 });

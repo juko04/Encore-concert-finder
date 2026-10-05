@@ -9,6 +9,7 @@ import type {
   CandidateResolution,
   CanonicalEventDetail,
   CanonicalEventSummary,
+  CanonicalizationPayload,
   Event,
   EventArtist,
   EventFieldEvidence,
@@ -21,6 +22,7 @@ import type {
 } from '@/lib/domain/catalog';
 import type { EventCandidate } from '@/lib/domain/event-candidate';
 import type { RawIngest, Source } from '@/lib/domain/source';
+import { normalizeUrl } from '@/lib/domain/value-objects';
 import type {
   EventListFilters,
   ICatalogRepository,
@@ -118,7 +120,10 @@ export class MemoryRawIngestRepository implements IRawIngestRepository {
 }
 
 export class MemoryEventCandidateRepository implements IEventCandidateRepository {
-  private candidates: Map<string, EventCandidate & { id: string }> = new Map();
+  private candidates: Map<
+    string,
+    EventCandidate & { id: string; rawIngestId: string; sourceId: string }
+  > = new Map();
 
   async create(
     candidate: EventCandidate & { rawIngestId: string; sourceId: string },
@@ -158,13 +163,22 @@ export class MemoryEventCandidateRepository implements IEventCandidateRepository
     return results;
   }
 
-  async getById(id: string): Promise<(EventCandidate & { id: string }) | null> {
+  async getById(
+    id: string,
+  ): Promise<
+    | (EventCandidate & { id: string; rawIngestId: string; sourceId: string })
+    | null
+  > {
     return this.candidates.get(id) ?? null;
   }
 
   async getByRawIngestId(
     rawIngestId: string,
-  ): Promise<Array<EventCandidate & { id: string }>> {
+  ): Promise<
+    Array<
+      EventCandidate & { id: string; rawIngestId: string; sourceId: string }
+    >
+  > {
     return Array.from(this.candidates.values()).filter(
       (c) => c.rawIngestId === rawIngestId,
     );
@@ -173,7 +187,10 @@ export class MemoryEventCandidateRepository implements IEventCandidateRepository
   async getBySourceEventId(
     sourceId: string,
     sourceEventId: string,
-  ): Promise<(EventCandidate & { id: string }) | null> {
+  ): Promise<
+    | (EventCandidate & { id: string; rawIngestId: string; sourceId: string })
+    | null
+  > {
     for (const c of this.candidates.values()) {
       if (c.sourceId === sourceId && c.sourceEventId === sourceEventId) {
         return c;
@@ -203,30 +220,26 @@ export class MemoryCatalogRepository implements ICatalogRepository {
     const venue = event.venueId
       ? (this.venues.get(event.venueId) ?? null)
       : null;
+
     const artists: Array<{
       id: string;
       name: string;
       billingPosition: BillingPosition;
     }> = [];
-
     for (const ea of this.eventArtists.values()) {
       if (ea.eventId === id) {
-        const artist = this.artists.get(ea.artistId);
-        if (artist) {
-          artists.push({
-            id: artist.id,
-            name: artist.name,
-            billingPosition: ea.billingPosition,
-          });
-        }
+        const a = this.artists.get(ea.artistId);
+        artists.push({
+          id: ea.artistId,
+          name: a?.name ?? 'Unknown Artist',
+          billingPosition: ea.billingPosition,
+        });
       }
     }
 
     const ticketLinks: EventTicketLink[] = [];
     for (const tl of this.eventTicketLinks.values()) {
-      if (tl.eventId === id) {
-        ticketLinks.push(tl);
-      }
+      if (tl.eventId === id) ticketLinks.push(tl);
     }
 
     const promoters: Array<{
@@ -236,14 +249,12 @@ export class MemoryCatalogRepository implements ICatalogRepository {
     }> = [];
     for (const ep of this.eventPromoters.values()) {
       if (ep.eventId === id) {
-        const promoter = this.promoters.get(ep.promoterId);
-        if (promoter) {
-          promoters.push({
-            id: promoter.id,
-            name: promoter.name,
-            relationshipType: ep.relationshipType,
-          });
-        }
+        const p = this.promoters.get(ep.promoterId);
+        promoters.push({
+          id: ep.promoterId,
+          name: p?.name ?? 'Unknown Promoter',
+          relationshipType: ep.relationshipType,
+        });
       }
     }
 
@@ -262,23 +273,14 @@ export class MemoryCatalogRepository implements ICatalogRepository {
       }
     }
 
-    const minPrice = ticketLinks.reduce<number | null>((min, tl) => {
-      if (tl.minPrice === null || tl.minPrice === undefined) return min;
-      return min === null ? tl.minPrice : Math.min(min, tl.minPrice);
-    }, null);
-
-    const maxPrice = ticketLinks.reduce<number | null>((max, tl) => {
-      if (tl.maxPrice === null || tl.maxPrice === undefined) return max;
-      return max === null ? tl.maxPrice : Math.max(max, tl.maxPrice);
-    }, null);
-
-    const currency = ticketLinks.find((tl) => tl.currency)?.currency ?? null;
+    const fieldEvidence: EventFieldEvidence[] = [];
+    for (const fe of this.eventFieldEvidence.values()) {
+      if (fe.eventId === id) fieldEvidence.push(fe);
+    }
 
     return {
-      id: event.id,
-      name: event.name,
-      eventKind: event.eventKind,
-      status: event.status,
+      ...event,
+      artists,
       venue: venue
         ? {
             id: venue.id,
@@ -287,62 +289,101 @@ export class MemoryCatalogRepository implements ICatalogRepository {
             region: venue.region,
           }
         : null,
-      artists,
-      localStartDate: event.localStartDate,
-      localEndDate: event.localEndDate,
-      startsAt: event.startsAt,
-      timezone: event.timezone,
-      startTimePrecision: event.startTimePrecision,
-      isMultiDay: event.isMultiDay,
-      minPrice,
-      maxPrice,
-      currency,
-      primaryTicketUrl: event.primaryTicketUrl,
-      sources,
       ticketLinks,
       promoters,
-      officialUrl: event.officialUrl,
-      doorsAt: event.doorsAt,
-      endsAt: event.endsAt,
+      sources,
+      fieldEvidence,
     };
   }
 
   async listEvents(
     filters?: EventListFilters,
   ): Promise<CanonicalEventSummary[]> {
-    const results: CanonicalEventSummary[] = [];
+    let result = Array.from(this.events.values());
 
-    for (const event of this.events.values()) {
-      if (filters?.fromDate && event.localStartDate < filters.fromDate)
-        continue;
-      if (filters?.toDate && event.localStartDate > filters.toDate) continue;
-      if (filters?.venueId && event.venueId !== filters.venueId) continue;
-
-      const detail = await this.getEventById(event.id);
-      if (detail) {
-        results.push({
-          id: detail.id,
-          name: detail.name,
-          eventKind: detail.eventKind,
-          status: detail.status,
-          venue: detail.venue,
-          artists: detail.artists,
-          localStartDate: detail.localStartDate,
-          localEndDate: detail.localEndDate,
-          startsAt: detail.startsAt,
-          timezone: detail.timezone,
-          startTimePrecision: detail.startTimePrecision,
-          isMultiDay: detail.isMultiDay,
-          minPrice: detail.minPrice,
-          maxPrice: detail.maxPrice,
-          currency: detail.currency,
-          primaryTicketUrl: detail.primaryTicketUrl,
-          sources: detail.sources,
-        });
+    if (filters?.fromDate) {
+      result = result.filter((e) => e.localStartDate >= filters.fromDate!);
+    }
+    if (filters?.toDate) {
+      result = result.filter((e) => e.localStartDate <= filters.toDate!);
+    }
+    if (filters?.venueId) {
+      result = result.filter((e) => e.venueId === filters.venueId);
+    }
+    if (filters?.city) {
+      const c = filters.city.toLowerCase();
+      result = result.filter((e) => e.city?.toLowerCase().includes(c));
+    }
+    if (filters?.region) {
+      result = result.filter((e) => e.region === filters.region);
+    }
+    if (filters?.artistId) {
+      // Finding 11: filter by artistId
+      const matchingEventIds = new Set<string>();
+      for (const ea of this.eventArtists.values()) {
+        if (ea.artistId === filters.artistId) {
+          matchingEventIds.add(ea.eventId);
+        }
       }
+      result = result.filter((e) => matchingEventIds.has(e.id));
     }
 
-    return results;
+    result.sort((a, b) => a.localStartDate.localeCompare(b.localStartDate));
+
+    const offset = filters?.offset ?? 0;
+    const limit = filters?.limit ?? 50;
+    const paged = result.slice(offset, offset + limit);
+
+    return paged.map((event) => {
+      const venue = event.venueId ? this.venues.get(event.venueId) : null;
+      const artists: Array<{ name: string; billingPosition: BillingPosition }> =
+        [];
+      for (const ea of this.eventArtists.values()) {
+        if (ea.eventId === event.id) {
+          const a = this.artists.get(ea.artistId);
+          artists.push({
+            name: a?.name ?? 'Unknown Artist',
+            billingPosition: ea.billingPosition,
+          });
+        }
+      }
+
+      let minPrice: number | null = null;
+      let maxPrice: number | null = null;
+      let currency: string | null = null;
+
+      for (const tl of this.eventTicketLinks.values()) {
+        if (tl.eventId === event.id) {
+          if (tl.minPrice !== null && tl.minPrice !== undefined) {
+            minPrice =
+              minPrice === null ? tl.minPrice : Math.min(minPrice, tl.minPrice);
+          }
+          if (tl.maxPrice !== null && tl.maxPrice !== undefined) {
+            maxPrice =
+              maxPrice === null ? tl.maxPrice : Math.max(maxPrice, tl.maxPrice);
+          }
+          if (tl.currency) currency = tl.currency;
+        }
+      }
+
+      return {
+        id: event.id,
+        title: event.name,
+        venueName: venue?.name ?? event.name,
+        city: venue?.city ?? event.city ?? undefined,
+        region: venue?.region ?? event.region ?? undefined,
+        localStartDate: event.localStartDate,
+        startsAt: event.startsAt,
+        timezone: event.timezone,
+        startTimePrecision: event.startTimePrecision,
+        status: event.status,
+        artists,
+        ticketUrl: event.primaryTicketUrl,
+        minPrice,
+        maxPrice,
+        currency,
+      };
+    });
   }
 
   async findArtistByName(normalizedName: string): Promise<Artist | null> {
@@ -368,11 +409,11 @@ export class MemoryCatalogRepository implements ICatalogRepository {
     normalizedName: string,
     city: string,
   ): Promise<Venue | null> {
-    const normCity = city.trim().toLowerCase();
+    const normCity = city.toLowerCase().trim();
     for (const venue of this.venues.values()) {
       if (
         venue.normalizedName === normalizedName &&
-        venue.city.trim().toLowerCase() === normCity
+        venue.city.toLowerCase().trim() === normCity
       ) {
         return venue;
       }
@@ -384,24 +425,17 @@ export class MemoryCatalogRepository implements ICatalogRepository {
     localStartDate: string,
     venueId: string,
   ): Promise<Event[]> {
-    const matches: Event[] = [];
-    for (const event of this.events.values()) {
-      if (
-        event.localStartDate === localStartDate &&
-        event.venueId === venueId
-      ) {
-        matches.push(event);
-      }
-    }
-    return matches;
+    return Array.from(this.events.values()).filter(
+      (e) => e.localStartDate === localStartDate && e.venueId === venueId,
+    );
   }
 
   async findEventByTicketUrl(
     normalizedTicketUrl: string,
   ): Promise<Event | null> {
-    for (const tl of this.eventTicketLinks.values()) {
-      if (tl.url === normalizedTicketUrl) {
-        return this.events.get(tl.eventId) ?? null;
+    for (const link of this.eventTicketLinks.values()) {
+      if (link.normalizedUrl === normalizedTicketUrl) {
+        return this.events.get(link.eventId) ?? null;
       }
     }
     return null;
@@ -414,7 +448,7 @@ export class MemoryCatalogRepository implements ICatalogRepository {
   }): Promise<Artist> {
     const id = `art_${Math.random().toString(36).substring(2, 11)}`;
     const now = new Date().toISOString();
-    const record: Artist = {
+    const created: Artist = {
       id,
       name: artist.name,
       normalizedName: artist.normalizedName,
@@ -422,8 +456,8 @@ export class MemoryCatalogRepository implements ICatalogRepository {
       createdAt: now,
       updatedAt: now,
     };
-    this.artists.set(id, record);
-    return record;
+    this.artists.set(id, created);
+    return created;
   }
 
   async addArtistExternalId(externalId: {
@@ -432,14 +466,14 @@ export class MemoryCatalogRepository implements ICatalogRepository {
     externalId: string;
     providerUrl?: string | null;
   }): Promise<ArtistExternalId> {
-    const id = `ext_${Math.random().toString(36).substring(2, 11)}`;
-    const record: ArtistExternalId = {
+    const id = `aext_${Math.random().toString(36).substring(2, 11)}`;
+    const created: ArtistExternalId = {
       id,
       ...externalId,
       createdAt: new Date().toISOString(),
     };
-    this.artistExternalIds.set(id, record);
-    return record;
+    this.artistExternalIds.set(id, created);
+    return created;
   }
 
   async createVenue(venue: {
@@ -456,15 +490,14 @@ export class MemoryCatalogRepository implements ICatalogRepository {
   }): Promise<Venue> {
     const id = `ven_${Math.random().toString(36).substring(2, 11)}`;
     const now = new Date().toISOString();
-    const record: Venue = {
+    const created: Venue = {
       id,
-      countryCode: venue.countryCode ?? 'US',
       ...venue,
       createdAt: now,
       updatedAt: now,
     };
-    this.venues.set(id, record);
-    return record;
+    this.venues.set(id, created);
+    return created;
   }
 
   async createPromoter(promoter: {
@@ -475,14 +508,14 @@ export class MemoryCatalogRepository implements ICatalogRepository {
   }): Promise<Promoter> {
     const id = `pro_${Math.random().toString(36).substring(2, 11)}`;
     const now = new Date().toISOString();
-    const record: Promoter = {
+    const created: Promoter = {
       id,
       ...promoter,
       createdAt: now,
       updatedAt: now,
     };
-    this.promoters.set(id, record);
-    return record;
+    this.promoters.set(id, created);
+    return created;
   }
 
   async createEvent(
@@ -490,14 +523,14 @@ export class MemoryCatalogRepository implements ICatalogRepository {
   ): Promise<Event> {
     const id = `evt_${Math.random().toString(36).substring(2, 11)}`;
     const now = new Date().toISOString();
-    const record: Event = {
-      ...event,
+    const created: Event = {
       id,
+      ...event,
       createdAt: now,
       updatedAt: now,
     };
-    this.events.set(id, record);
-    return record;
+    this.events.set(id, created);
+    return created;
   }
 
   async updateEvent(
@@ -505,9 +538,7 @@ export class MemoryCatalogRepository implements ICatalogRepository {
     updates: Partial<Omit<Event, 'id' | 'createdAt' | 'updatedAt'>>,
   ): Promise<Event> {
     const existing = this.events.get(id);
-    if (!existing) {
-      throw new Error(`Event ${id} not found`);
-    }
+    if (!existing) throw new Error(`Event not found: ${id}`);
     const updated: Event = {
       ...existing,
       ...updates,
@@ -523,17 +554,17 @@ export class MemoryCatalogRepository implements ICatalogRepository {
     billingPosition: BillingPosition = 'unknown',
     sortOrder = 0,
   ): Promise<EventArtist> {
-    const id = `ea_${Math.random().toString(36).substring(2, 11)}`;
-    const record: EventArtist = {
-      id,
+    const key = `${eventId}_${artistId}`;
+    const link: EventArtist = {
+      id: `ea_${Math.random().toString(36).substring(2, 11)}`,
       eventId,
       artistId,
       billingPosition,
       sortOrder,
       createdAt: new Date().toISOString(),
     };
-    this.eventArtists.set(id, record);
-    return record;
+    this.eventArtists.set(key, link);
+    return link;
   }
 
   async linkEventPromoter(
@@ -541,110 +572,304 @@ export class MemoryCatalogRepository implements ICatalogRepository {
     promoterId: string,
     relationshipType: PromoterRelationshipType = 'promoter',
   ): Promise<EventPromoter> {
-    const id = `ep_${Math.random().toString(36).substring(2, 11)}`;
-    const record: EventPromoter = {
-      id,
+    const key = `${eventId}_${promoterId}`;
+    const link: EventPromoter = {
+      id: `ep_${Math.random().toString(36).substring(2, 11)}`,
       eventId,
       promoterId,
       relationshipType,
       createdAt: new Date().toISOString(),
     };
-    this.eventPromoters.set(id, record);
-    return record;
+    this.eventPromoters.set(key, link);
+    return link;
   }
 
-  async addEventTicketLink(
-    link: Omit<EventTicketLink, 'id' | 'createdAt' | 'updatedAt'>,
-  ): Promise<EventTicketLink> {
-    const id = `tl_${Math.random().toString(36).substring(2, 11)}`;
-    const now = new Date().toISOString();
-    const record: EventTicketLink = {
-      ...link,
-      id,
-      createdAt: now,
-      updatedAt: now,
+  async linkTicketUrl(ticketLink: {
+    eventId: string;
+    ticketProviderSourceId?: string | null;
+    url: string;
+    normalizedUrl: string;
+    minPrice?: number | null;
+    maxPrice?: number | null;
+    currency?: string | null;
+    inventoryStatus?: EventTicketLink['inventoryStatus'];
+    verifiedAt?: string | null;
+  }): Promise<EventTicketLink> {
+    const key = `${ticketLink.eventId}_${ticketLink.normalizedUrl}`;
+    const link: EventTicketLink = {
+      id: `tl_${Math.random().toString(36).substring(2, 11)}`,
+      ...ticketLink,
+      inventoryStatus: ticketLink.inventoryStatus ?? 'available',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
     };
-    this.eventTicketLinks.set(id, record);
-    return record;
+    this.eventTicketLinks.set(key, link);
+    return link;
   }
 
-  async addEventSource(
-    sourceRecord: Omit<EventSourceRecord, 'id' | 'createdAt' | 'updatedAt'>,
-  ): Promise<EventSourceRecord> {
-    const id = `es_${Math.random().toString(36).substring(2, 11)}`;
+  async recordEventSource(sourceRecord: {
+    eventId: string;
+    sourceId: string;
+    candidateId?: string | null;
+    rawIngestId?: string | null;
+    sourceEventId?: string | null;
+    sourceUrl: string;
+    confidence: number;
+  }): Promise<EventSourceRecord> {
+    const key = `${sourceRecord.eventId}_${sourceRecord.sourceId}_${sourceRecord.sourceEventId ?? ''}`;
+    const existing = this.eventSources.get(key);
     const now = new Date().toISOString();
     const record: EventSourceRecord = {
+      id: existing?.id ?? `es_${Math.random().toString(36).substring(2, 11)}`,
       ...sourceRecord,
-      id,
-      createdAt: now,
+      firstSeenAt: existing?.firstSeenAt ?? now,
+      lastSeenAt: now,
+      isCurrent: true,
+      createdAt: existing?.createdAt ?? now,
       updatedAt: now,
     };
-    this.eventSources.set(id, record);
+    this.eventSources.set(key, record);
     return record;
   }
 
-  async findEventSource(
-    eventId: string,
-    sourceId: string,
-    sourceEventId?: string | null,
-  ): Promise<EventSourceRecord | null> {
-    for (const es of this.eventSources.values()) {
-      if (
-        es.eventId === eventId &&
-        es.sourceId === sourceId &&
-        (sourceEventId ? es.sourceEventId === sourceEventId : true)
-      ) {
-        return es;
-      }
-    }
-    return null;
-  }
-
-  async updateEventSourceLastSeen(
-    id: string,
-    lastSeenAt: string,
-  ): Promise<void> {
-    const record = this.eventSources.get(id);
-    if (record) {
-      record.lastSeenAt = lastSeenAt;
-      record.updatedAt = new Date().toISOString();
-    }
-  }
-
-  async addEventFieldEvidence(
-    evidence: Omit<EventFieldEvidence, 'id' | 'createdAt'>,
-  ): Promise<EventFieldEvidence> {
-    const id = `efe_${Math.random().toString(36).substring(2, 11)}`;
+  async recordFieldEvidence(evidence: {
+    eventId: string;
+    fieldName: string;
+    eventSourceId?: string;
+    sourceId: string;
+    rawIngestId?: string | null;
+    candidateId?: string | null;
+    observedValue: unknown;
+    valueHash: string;
+    confidence: number;
+    observedAt: string;
+    parserVersion: string;
+  }): Promise<EventFieldEvidence> {
+    const id = `fe_${Math.random().toString(36).substring(2, 11)}`;
     const record: EventFieldEvidence = {
-      ...evidence,
       id,
+      ...evidence,
       createdAt: new Date().toISOString(),
     };
     this.eventFieldEvidence.set(id, record);
     return record;
   }
 
-  async recordCandidateResolution(
-    resolution: Omit<CandidateResolution, 'id' | 'createdAt'>,
-  ): Promise<CandidateResolution> {
-    const id = `res_${Math.random().toString(36).substring(2, 11)}`;
+  async recordResolution(resolution: {
+    eventCandidateId: string;
+    eventId?: string | null;
+    status: CandidateResolution['status'];
+    matcherVersion: string;
+    confidence: number;
+    reasons: Record<string, unknown> | string[];
+  }): Promise<CandidateResolution> {
+    const id = `cr_${Math.random().toString(36).substring(2, 11)}`;
     const record: CandidateResolution = {
-      ...resolution,
       id,
+      ...resolution,
+      resolvedAt: new Date().toISOString(),
       createdAt: new Date().toISOString(),
     };
     this.candidateResolutions.set(id, record);
     return record;
   }
 
-  async getCandidateResolution(
-    candidateId: string,
-  ): Promise<CandidateResolution | null> {
-    for (const res of this.candidateResolutions.values()) {
-      if (res.eventCandidateId === candidateId) {
-        return res;
+  /**
+   * Atomic canonicalization transaction execution.
+   * If any step fails, entire batch is rolled back cleanly.
+   */
+  async applyCanonicalization(
+    payload: CanonicalizationPayload,
+  ): Promise<{ eventId: string | null; status: string }> {
+    // Snapshot state for rollback
+    const snapEvents = new Map(this.events);
+    const snapEventArtists = new Map(this.eventArtists);
+    const snapEventTicketLinks = new Map(this.eventTicketLinks);
+    const snapEventSources = new Map(this.eventSources);
+    const snapEventFieldEvidence = new Map(this.eventFieldEvidence);
+    const snapCandidateResolutions = new Map(this.candidateResolutions);
+
+    try {
+      let eventId: string | null = null;
+
+      if (payload.event) {
+        if (payload.event.id) {
+          eventId = payload.event.id;
+          const existing = this.events.get(eventId);
+          if (existing) {
+            this.events.set(eventId, {
+              ...existing,
+              ...payload.event,
+              id: eventId,
+              name: payload.event.name ?? existing.name,
+              normalizedName:
+                payload.event.normalized_name ?? existing.normalizedName,
+              eventKind: payload.event.event_kind ?? existing.eventKind,
+              status: payload.event.status ?? existing.status,
+              venueId:
+                payload.event.venue_id !== undefined
+                  ? payload.event.venue_id
+                  : existing.venueId,
+              city:
+                payload.event.city !== undefined
+                  ? payload.event.city
+                  : existing.city,
+              region:
+                payload.event.region !== undefined
+                  ? payload.event.region
+                  : existing.region,
+              timezone: payload.event.timezone ?? existing.timezone,
+              localStartDate:
+                payload.event.local_start_date ?? existing.localStartDate,
+              localEndDate:
+                payload.event.local_end_date !== undefined
+                  ? payload.event.local_end_date
+                  : existing.localEndDate,
+              startsAt:
+                payload.event.starts_at !== undefined
+                  ? payload.event.starts_at
+                  : existing.startsAt,
+              endsAt:
+                payload.event.ends_at !== undefined
+                  ? payload.event.ends_at
+                  : existing.endsAt,
+              startTimePrecision:
+                payload.event.start_time_precision ??
+                existing.startTimePrecision,
+              doorsAt:
+                payload.event.doors_at !== undefined
+                  ? payload.event.doors_at
+                  : existing.doorsAt,
+              isMultiDay: payload.event.is_multi_day ?? existing.isMultiDay,
+              officialUrl:
+                payload.event.official_url !== undefined
+                  ? payload.event.official_url
+                  : existing.officialUrl,
+              primaryTicketUrl:
+                payload.event.primary_ticket_url !== undefined
+                  ? payload.event.primary_ticket_url
+                  : existing.primaryTicketUrl,
+              updatedAt: new Date().toISOString(),
+            });
+          }
+        } else {
+          eventId = `evt_${Math.random().toString(36).substring(2, 11)}`;
+          const now = new Date().toISOString();
+          const created: Event = {
+            id: eventId,
+            name: payload.event.name ?? 'Untitled Event',
+            normalizedName: payload.event.normalized_name ?? 'untitled event',
+            eventKind: payload.event.event_kind ?? 'concert',
+            status: payload.event.status ?? 'scheduled',
+            venueId: payload.event.venue_id ?? null,
+            city: payload.event.city ?? null,
+            region: payload.event.region ?? null,
+            countryCode: payload.event.country_code ?? 'US',
+            timezone: payload.event.timezone ?? 'UTC',
+            localStartDate:
+              payload.event.local_start_date ??
+              new Date().toISOString().substring(0, 10),
+            localEndDate: payload.event.local_end_date ?? null,
+            startsAt: payload.event.starts_at ?? null,
+            endsAt: payload.event.ends_at ?? null,
+            startTimePrecision: payload.event.start_time_precision ?? 'instant',
+            doorsAt: payload.event.doors_at ?? null,
+            isMultiDay: payload.event.is_multi_day ?? false,
+            officialUrl: payload.event.official_url ?? null,
+            primaryTicketUrl: payload.event.primary_ticket_url ?? null,
+            announcedAt: null,
+            createdAt: now,
+            updatedAt: now,
+          };
+          this.events.set(eventId, created);
+        }
+
+        // Artists
+        if (payload.artists) {
+          for (const a of payload.artists) {
+            await this.linkEventArtist(
+              eventId,
+              a.artist_id,
+              a.billing_position,
+              a.sort_order,
+            );
+          }
+        }
+
+        // Ticket links
+        if (payload.ticketLinks) {
+          for (const tl of payload.ticketLinks) {
+            await this.linkTicketUrl({
+              eventId,
+              ticketProviderSourceId: tl.ticket_provider_source_id,
+              url: tl.url,
+              normalizedUrl: tl.normalized_url || normalizeUrl(tl.url),
+              minPrice: tl.min_price,
+              maxPrice: tl.max_price,
+              currency: tl.currency,
+              inventoryStatus: tl.inventory_status,
+              verifiedAt: tl.verified_at,
+            });
+          }
+        }
+
+        // Source record
+        if (payload.source) {
+          await this.recordEventSource({
+            eventId,
+            sourceId: payload.source.source_id,
+            candidateId: payload.source.candidate_id,
+            rawIngestId: payload.source.raw_ingest_id,
+            sourceEventId: payload.source.source_event_id,
+            sourceUrl: payload.source.source_url,
+            confidence: payload.source.confidence ?? 0.8,
+          });
+        }
+
+        // Field Evidence
+        if (payload.evidence) {
+          for (const ev of payload.evidence) {
+            await this.recordFieldEvidence({
+              eventId,
+              fieldName: ev.field_name,
+              sourceId: ev.source_id,
+              rawIngestId: ev.raw_ingest_id,
+              candidateId: ev.candidate_id,
+              observedValue: ev.observed_value,
+              valueHash: ev.value_hash ?? 'hash',
+              confidence: ev.confidence ?? 0.8,
+              observedAt: ev.observed_at ?? new Date().toISOString(),
+              parserVersion: ev.parser_version ?? '1.0.0',
+            });
+          }
+        }
       }
+
+      // Resolution
+      if (payload.resolution) {
+        await this.recordResolution({
+          eventCandidateId: payload.resolution.event_candidate_id,
+          eventId,
+          status: payload.resolution.status,
+          matcherVersion: payload.resolution.matcher_version ?? '1.0.0',
+          confidence: payload.resolution.confidence,
+          reasons: payload.resolution.reasons,
+        });
+      }
+
+      return {
+        eventId,
+        status: payload.resolution?.status ?? 'created',
+      };
+    } catch (err) {
+      // Rollback on any failure
+      this.events = snapEvents;
+      this.eventArtists = snapEventArtists;
+      this.eventTicketLinks = snapEventTicketLinks;
+      this.eventSources = snapEventSources;
+      this.eventFieldEvidence = snapEventFieldEvidence;
+      this.candidateResolutions = snapCandidateResolutions;
+      throw err;
     }
-    return null;
   }
 }

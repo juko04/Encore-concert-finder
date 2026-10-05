@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 
-test.describe('Landing Page Smoke Test', () => {
+test.describe('Application Smoke Tests', () => {
   test('successfully loads the landing page and displays title and status', async ({
     page,
   }) => {
@@ -23,13 +23,13 @@ test.describe('Landing Page Smoke Test', () => {
     await expect(page.getByText('System Foundation Status')).toBeVisible();
   });
 
-  test('successfully loads the discover page and displays header', async ({
-    page,
-  }) => {
+  test('successfully loads the discover catalog page', async ({ page }) => {
     const response = await page.goto('/discover');
-    expect(response?.status()).toBe(200);
 
-    const heading = page.getByRole('heading', { name: 'Discover Live Music' });
-    await expect(heading).toBeVisible();
+    expect(response?.status()).toBe(200);
+    await expect(page.getByText('Discover Live Music')).toBeVisible();
+    await expect(
+      page.getByText('Explore upcoming concerts and events'),
+    ).toBeVisible();
   });
 });

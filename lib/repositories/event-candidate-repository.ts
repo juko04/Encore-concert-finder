@@ -7,6 +7,7 @@ import type {
   EventCandidate,
   StartTimePrecision,
 } from '@/lib/domain/event-candidate';
+import type { AcquisitionMethod, SourceType } from '@/lib/domain/source';
 import { createAdminClient } from '@/lib/supabase/admin';
 import type { IEventCandidateRepository } from './interfaces';
 
@@ -15,6 +16,11 @@ interface EventCandidateRow {
   raw_ingest_id: string;
   source_id: string;
   source_event_id: string | null;
+  source_type: SourceType;
+  acquisition_method: AcquisitionMethod;
+  source_url: string;
+  content_hash: string;
+  fetched_at: string;
   title: string;
   artist_names: string[];
   venue_name: string;
@@ -48,13 +54,13 @@ function mapRowToCandidate(
     sourceEventId: row.source_event_id ?? undefined,
     provenance: {
       sourceId: row.source_id,
-      sourceType: 'venue',
-      acquisitionMethod: 'structured_json',
-      sourceUrl: row.ticket_url ?? '',
+      sourceType: row.source_type,
+      acquisitionMethod: row.acquisition_method,
+      sourceUrl: row.source_url,
       sourceEventId: row.source_event_id ?? undefined,
       rawIngestId: row.raw_ingest_id,
-      fetchedAt: row.created_at,
-      contentHash: '',
+      fetchedAt: row.fetched_at,
+      contentHash: row.content_hash,
       parserVersion: row.parser_version,
       confidence: Number(row.confidence),
     },
@@ -88,6 +94,12 @@ function candidateToRow(
     source_id: candidate.sourceId,
     source_event_id:
       candidate.sourceEventId ?? candidate.provenance?.sourceEventId ?? null,
+    source_type: candidate.provenance?.sourceType ?? 'venue',
+    acquisition_method:
+      candidate.provenance?.acquisitionMethod ?? 'structured_json',
+    source_url: candidate.provenance?.sourceUrl ?? '',
+    content_hash: candidate.provenance?.contentHash ?? '',
+    fetched_at: candidate.provenance?.fetchedAt ?? new Date().toISOString(),
     title: candidate.title,
     artist_names: candidate.artistNames,
     venue_name: candidate.venueName,
@@ -99,9 +111,7 @@ function candidateToRow(
     local_end_date: candidate.localEndDate ?? null,
     starts_at: candidate.startsAt ?? null,
     ends_at: candidate.endsAt ?? null,
-    start_time_precision:
-      candidate.startTimePrecision ??
-      (candidate.startsAt ? 'instant' : 'date_only'),
+    start_time_precision: candidate.startTimePrecision ?? 'instant',
     doors_open_at: candidate.doorsOpenAt ?? null,
     ticket_url: candidate.ticketUrl ?? null,
     price: candidate.price ?? null,
@@ -126,7 +136,6 @@ export class SupabaseEventCandidateRepository implements IEventCandidateReposito
     EventCandidate & { id: string; rawIngestId: string; sourceId: string }
   > {
     const row = candidateToRow(candidate);
-
     const { data, error } = await this.client
       .from('event_candidates')
       .insert(row)
@@ -151,19 +160,25 @@ export class SupabaseEventCandidateRepository implements IEventCandidateReposito
     if (candidates.length === 0) return [];
 
     const rows = candidates.map(candidateToRow);
-
     const { data, error } = await this.client
       .from('event_candidates')
       .insert(rows)
       .select('*');
 
     if (error) {
-      throw new Error(`Failed to create event candidates: ${error.message}`);
+      throw new Error(
+        `Failed to create multiple event candidates: ${error.message}`,
+      );
     }
-    return (data as EventCandidateRow[]).map(mapRowToCandidate);
+    return ((data as EventCandidateRow[]) || []).map(mapRowToCandidate);
   }
 
-  async getById(id: string): Promise<(EventCandidate & { id: string }) | null> {
+  async getById(
+    id: string,
+  ): Promise<
+    | (EventCandidate & { id: string; rawIngestId: string; sourceId: string })
+    | null
+  > {
     const { data, error } = await this.client
       .from('event_candidates')
       .select('*')
@@ -178,37 +193,41 @@ export class SupabaseEventCandidateRepository implements IEventCandidateReposito
 
   async getByRawIngestId(
     rawIngestId: string,
-  ): Promise<Array<EventCandidate & { id: string }>> {
+  ): Promise<
+    Array<
+      EventCandidate & { id: string; rawIngestId: string; sourceId: string }
+    >
+  > {
     const { data, error } = await this.client
       .from('event_candidates')
       .select('*')
-      .eq('raw_ingest_id', rawIngestId)
-      .order('created_at', { ascending: true });
+      .eq('raw_ingest_id', rawIngestId);
 
     if (error) {
       throw new Error(
-        `Failed to get event candidates by raw ingest ID: ${error.message}`,
+        `Failed to get candidates by raw ingest ID: ${error.message}`,
       );
     }
-    return (data as EventCandidateRow[]).map(mapRowToCandidate);
+    return ((data as EventCandidateRow[]) || []).map(mapRowToCandidate);
   }
 
   async getBySourceEventId(
     sourceId: string,
     sourceEventId: string,
-  ): Promise<(EventCandidate & { id: string }) | null> {
+  ): Promise<
+    | (EventCandidate & { id: string; rawIngestId: string; sourceId: string })
+    | null
+  > {
     const { data, error } = await this.client
       .from('event_candidates')
       .select('*')
       .eq('source_id', sourceId)
       .eq('source_event_id', sourceEventId)
-      .order('created_at', { ascending: false })
-      .limit(1)
       .maybeSingle();
 
     if (error) {
       throw new Error(
-        `Failed to get event candidate by source event ID: ${error.message}`,
+        `Failed to get candidate by source event ID: ${error.message}`,
       );
     }
     return data ? mapRowToCandidate(data as EventCandidateRow) : null;

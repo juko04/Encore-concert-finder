@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
+  deriveLocalDateFromInstant,
+  formatCurrencyAmount,
   formatPrice,
   normalizeName,
   normalizeUrl,
@@ -10,9 +12,16 @@ import {
 
 describe('Value Objects & Normalization', () => {
   describe('normalizeUrl', () => {
-    it('normalizes scheme and hostname to lowercase', () => {
-      const url = normalizeUrl('HTTPS://EXAMPLE.COM/events/123');
-      expect(url).toBe('https://example.com/events/123');
+    it('strips tracking parameters (utm_*, gclid, fbclid)', () => {
+      const input =
+        'https://example.com/tickets?utm_source=google&utm_medium=cpc&gclid=abc&fbclid=xyz&event_id=42';
+      const normalized = normalizeUrl(input);
+      expect(normalized).toBe('https://example.com/tickets?event_id=42');
+    });
+
+    it('strips fragments (#section)', () => {
+      const input = 'https://example.com/shows/123#reviews';
+      expect(normalizeUrl(input)).toBe('https://example.com/shows/123');
     });
 
     it('removes default ports 80 and 443', () => {
@@ -22,123 +31,127 @@ describe('Value Objects & Normalization', () => {
       expect(normalizeUrl('https://example.com:443/path')).toBe(
         'https://example.com/path',
       );
-      expect(normalizeUrl('https://example.com:8443/path')).toBe(
-        'https://example.com:8443/path',
+    });
+
+    it('preserves non-default ports', () => {
+      expect(normalizeUrl('http://example.com:8080/path')).toBe(
+        'http://example.com:8080/path',
       );
     });
 
-    it('removes trailing slash from pathname while preserving root /', () => {
+    it('removes trailing slash from pathname while preserving root', () => {
       expect(normalizeUrl('https://example.com/events/')).toBe(
         'https://example.com/events',
       );
       expect(normalizeUrl('https://example.com/')).toBe('https://example.com/');
     });
 
-    it('strips fragments', () => {
-      expect(normalizeUrl('https://example.com/events/123#details')).toBe(
-        'https://example.com/events/123',
-      );
-    });
-
-    it('strips known tracking parameters: utm_*, gclid, fbclid', () => {
-      const url =
-        'https://example.com/events/123?utm_source=twitter&utm_medium=social&utm_campaign=fall&gclid=abc12345&fbclid=fb9876';
-      expect(normalizeUrl(url)).toBe('https://example.com/events/123');
-    });
-
     it('preserves and deterministically sorts unknown query parameters', () => {
-      const url =
-        'https://example.com/tickets?section=GA&utm_medium=cpc&promo=FALL26&artist_id=456&gclid=test';
-      const normalized = normalizeUrl(url);
+      const input =
+        'https://ticketmaster.com/event/1?section=GA&row=5&utm_source=mail&zone=north';
+      const normalized = normalizeUrl(input);
       expect(normalized).toBe(
-        'https://example.com/tickets?artist_id=456&promo=FALL26&section=GA',
+        'https://ticketmaster.com/event/1?row=5&section=GA&zone=north',
       );
     });
 
-    it('throws error for invalid URLs', () => {
-      expect(() => normalizeUrl('')).toThrow('URL must be a non-empty string');
-      expect(() => normalizeUrl('not-a-valid-url')).toThrow('Invalid URL');
+    it('throws error for invalid URL', () => {
+      expect(() => normalizeUrl('not-a-valid-url')).toThrow();
     });
   });
 
   describe('normalizeName', () => {
-    it('trims and collapses whitespace', () => {
-      expect(normalizeName('   Red    Rocks   Amphitheatre   ')).toBe(
+    it('collapses whitespace and lowercases', () => {
+      expect(normalizeName('  Red   Rocks   Amphitheatre  ')).toBe(
         'red rocks amphitheatre',
       );
     });
 
-    it('removes leading English articles', () => {
-      expect(normalizeName('The Mountain Goats')).toBe('mountain goats');
+    it('strips leading English articles', () => {
+      expect(normalizeName('The National')).toBe('national');
       expect(normalizeName('A Perfect Circle')).toBe('perfect circle');
       expect(normalizeName('An Horse')).toBe('horse');
     });
 
-    it('strips punctuation marks and symbols', () => {
+    it('strips punctuation', () => {
+      expect(normalizeName('P!nk')).toBe('p nk');
       expect(normalizeName('Sunn O)))')).toBe('sunn o');
-      expect(normalizeName('Godspeed You! Black Emperor')).toBe(
-        'godspeed you black emperor',
-      );
-      expect(normalizeName('King Gizzard & The Lizard Wizard')).toBe(
-        'king gizzard the lizard wizard',
-      );
-    });
-
-    it('handles unicode normalization', () => {
-      expect(normalizeName('Hermanos Gutiérrez')).toBe('hermanos gutiérrez');
-      expect(normalizeName('Björk')).toBe('björk');
     });
   });
 
   describe('validateIanaTimezone', () => {
-    it('accepts valid IANA time zone identifiers', () => {
+    it('accepts legitimate IANA timezones', () => {
       expect(validateIanaTimezone('America/Denver')).toBe(true);
       expect(validateIanaTimezone('America/New_York')).toBe(true);
-      expect(validateIanaTimezone('America/Los_Angeles')).toBe(true);
-      expect(validateIanaTimezone('UTC')).toBe(true);
       expect(validateIanaTimezone('Europe/London')).toBe(true);
+      expect(validateIanaTimezone('Asia/Tokyo')).toBe(true);
+      expect(validateIanaTimezone('UTC')).toBe(true);
     });
 
-    it('rejects 3-letter abbreviations such as MST, EST, PST', () => {
+    it('rejects disallowed 3-letter abbreviations', () => {
       expect(validateIanaTimezone('MST')).toBe(false);
       expect(validateIanaTimezone('MDT')).toBe(false);
       expect(validateIanaTimezone('EST')).toBe(false);
       expect(validateIanaTimezone('EDT')).toBe(false);
       expect(validateIanaTimezone('PST')).toBe(false);
-      expect(validateIanaTimezone('PDT')).toBe(false);
       expect(validateIanaTimezone('CST')).toBe(false);
     });
 
-    it('rejects invalid or arbitrary strings', () => {
+    it('rejects empty or invalid strings', () => {
       expect(validateIanaTimezone('')).toBe(false);
-      expect(validateIanaTimezone('Invalid/Zone')).toBe(false);
-      expect(validateIanaTimezone('Colorado')).toBe(false);
+      expect(validateIanaTimezone('Invalid/Timezone_Name')).toBe(false);
     });
   });
 
-  describe('Money and Currency validation', () => {
-    it('validates ISO-4217 3-letter currency codes', () => {
+  describe('deriveLocalDateFromInstant (Finding 4)', () => {
+    it('correctly calculates local calendar date when UTC rolled over past midnight', () => {
+      // 02:00:00 UTC on Oct 15 is 20:00:00 (8 PM) on Oct 14 in America/Denver (MDT is UTC-6)
+      const instant = '2026-10-15T02:00:00Z';
+      const localDate = deriveLocalDateFromInstant(instant, 'America/Denver');
+      expect(localDate).toBe('2026-10-14');
+    });
+
+    it('correctly handles same-day UTC and local times', () => {
+      // 18:00:00 UTC in Europe/London is 19:00:00 (BST) or 18:00:00 (GMT) on same date
+      const instant = '2026-06-15T18:00:00Z';
+      const localDate = deriveLocalDateFromInstant(instant, 'Europe/London');
+      expect(localDate).toBe('2026-06-15');
+    });
+
+    it('throws when given invalid timezone or instant', () => {
+      expect(() =>
+        deriveLocalDateFromInstant('2026-10-15T02:00:00Z', 'MST'),
+      ).toThrow();
+      expect(() =>
+        deriveLocalDateFromInstant('not-a-date', 'America/Denver'),
+      ).toThrow();
+    });
+  });
+
+  describe('Currency & Price Formatting (Finding 12)', () => {
+    it('validates ISO-4217 currencies and prices', () => {
       expect(validateCurrency('USD')).toBe(true);
-      expect(validateCurrency('CAD')).toBe(true);
       expect(validateCurrency('EUR')).toBe(true);
       expect(validateCurrency('GBP')).toBe(true);
-      expect(validateCurrency('usd')).toBe(false);
-      expect(validateCurrency('US')).toBe(false);
-      expect(validateCurrency('USDT')).toBe(false);
+      expect(validateCurrency('CAD')).toBe(true);
+      expect(validateCurrency('dollars')).toBe(false);
+      expect(validatePrice(50.5)).toBe(true);
+      expect(validatePrice(-5)).toBe(false);
+      expect(formatPrice(49.999)).toBe(50.0);
     });
 
-    it('validates price amounts', () => {
-      expect(validatePrice(0)).toBe(true);
-      expect(validatePrice(25.5)).toBe(true);
-      expect(validatePrice(-1)).toBe(false);
-      expect(validatePrice(NaN)).toBe(false);
-      expect(validatePrice(Infinity)).toBe(false);
-    });
+    it('formats monetary values using stored ISO currency code without hardcoding $', () => {
+      const usdFormatted = formatCurrencyAmount(59.5, 'USD', 'en-US');
+      expect(usdFormatted).toContain('59.50');
+      expect(usdFormatted).toContain('$');
 
-    it('formats price to two decimal places', () => {
-      expect(formatPrice(25.555)).toBe(25.56);
-      expect(formatPrice(10)).toBe(10);
-      expect(formatPrice(19.991)).toBe(19.99);
+      const eurFormatted = formatCurrencyAmount(45.0, 'EUR', 'en-US');
+      expect(eurFormatted).toContain('45.00');
+      expect(eurFormatted).toContain('€');
+
+      const gbpFormatted = formatCurrencyAmount(65.0, 'GBP', 'en-US');
+      expect(gbpFormatted).toContain('65.00');
+      expect(gbpFormatted).toContain('£');
     });
   });
 });

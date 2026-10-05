@@ -346,3 +346,97 @@ are manual/scheduled only.
 None. Record an approved deviation here before implementing it, including its
 rationale, affected tests, and any required update to `docs/12-decisions.md` or
 the roadmap.
+
+---
+
+## Phase 1 Architecture Review Remediation
+
+Following the initial Phase 1 implementation, an independent architecture and code review was conducted. The following findings were resolved in the remediation pass:
+
+### Review Findings and Resolutions
+
+1. **Phase 1 Database Migrations Fully Implemented (Must Fix)**
+   - *Problem*: Migrations were committed empty due to an authoring oversight.
+   - *Resolution*: Implemented all three migrations with full schemas, primary keys, foreign keys, constraints, indexes, RLS policies, and triggers:
+     - `supabase/migrations/20261005120000_create_inventory_reference_and_catalog.sql`: `sources`, `public_sources` view, `artists`, `artist_external_ids`, `artist_aliases`, `venues`, `venue_aliases`, `promoters`, `events`, `event_artists`, `event_promoters`, `event_ticket_links`.
+     - `supabase/migrations/20261005120001_create_ingest_provenance.sql`: `raw_ingests`, `event_candidates`, `event_sources`, `event_field_evidence`, `candidate_resolutions`, and the `apply_canonicalization` PL/pgSQL atomic transaction function.
+     - `supabase/migrations/20261005120002_secure_inventory_tables.sql`: Enabled RLS on all 16 tables. Configured public read-only access on catalog tables, safe public view `public_sources`, and private service-role-only access on all operational ingestion tables.
+
+2. **Atomic Canonicalization Transaction (Must Fix)**
+   - *Problem*: Canonicalization previously performed multiple independent writes in application code, which could leave orphaned records on failure.
+   - *Resolution*: Canonicalization now executes inside a true atomic database transaction:
+     - Implemented PostgreSQL function `apply_canonicalization(payload jsonb)` in `supabase/migrations/20261005120001_create_ingest_provenance.sql`.
+     - `SupabaseCatalogRepository.applyCanonicalization` invokes this RPC within a single atomic PostgreSQL transaction.
+     - `MemoryCatalogRepository.applyCanonicalization` snapshots state and automatically rolls back all Maps upon any thrown error.
+     - Added unit tests in `canonicalization-coordinator.test.ts` and integration tests in `catalog-rls.test.ts` verifying that intentional partial failures leave zero partial records.
+
+3. **Removed Hard-coded Colorado Defaults (Must Fix)**
+   - *Problem*: Missing timezone or geography risked fabricating Denver, CO, or America/Denver.
+   - *Resolution*: Removed any fallback to Colorado defaults:
+     - If candidate or venue timezone is missing or invalid, the candidate is routed to `needs_review` with reason `missing_or_invalid_timezone`.
+     - Preserves actual geography (e.g. Austin, TX; London, GB) and timezones (`America/Chicago`, `Europe/London`).
+     - Added test cases verifying non-Colorado events preserve their exact geography and timezone.
+
+4. **Correct UTC-to-Local Date Derivation (Must Fix)**
+   - *Problem*: Substring on UTC timestamps (`startsAt.substring(0, 10)`) caused date errors when UTC rolled past midnight while local time was still on the prior calendar date.
+   - *Resolution*: Created `deriveLocalDateFromInstant(instantIso, timeZone)` in `lib/domain/value-objects.ts` using `Intl.DateTimeFormat('en-CA', { timeZone })`.
+   - Added unit test proving `2026-10-15T02:00:00Z` in `America/Denver` (UTC-6) correctly resolves to local calendar date `2026-10-14`.
+
+5. **Preserved Real Source Provenance (Must Fix)**
+   - *Problem*: `event-candidate-repository.ts` reconstructed fake provenance with hardcoded `sourceType`, `acquisitionMethod`, and empty `contentHash`.
+   - *Resolution*: Stored `source_type`, `acquisition_method`, `source_url`, `content_hash`, and `fetched_at` directly in `event_candidates` (and joined with `raw_ingests` / `sources`), reconstructing the exact, unmodified provenance on retrieval.
+   - Added round-trip tests for API, structured JSON, and HTML candidates.
+
+6. **Conservative Artist & Event Matching (Must Fix)**
+   - *Problem*: Same-date/same-venue shows sharing any artist were auto-merged, causing false-positive merges for different concerts sharing an opening act.
+   - *Resolution*: Updated `EventMatcher`:
+     - Matches only when primary/headline artist matches or all artists match.
+     - When two shows at the same venue and date share only an opening/supporting artist, the candidate is routed to `needs_review` with reason `same_venue_and_date_opening_artist_overlap_requires_review`.
+     - Added regression tests in `entity-resolution.test.ts`.
+
+7. **Consistent Normalized Ticket URL Matching (Must Fix)**
+   - *Problem*: URLs were normalized for candidate creation but not consistently matched or indexed in the database.
+   - *Resolution*: Persisted both `url` (original) and `normalized_url` (cleaned with tracking params stripped) in `event_ticket_links`.
+   - Indexed `normalized_url` and updated `findEventByTicketUrl` to match on `normalized_url`.
+
+8. **Correct Ticket Provider Attribution (Should Fix)**
+   - *Problem*: `ticketProviderSourceId` was automatically set to `candidate.sourceId`, conflating venue/promoter sources with ticket sellers.
+   - *Resolution*: `ticketProviderSourceId` is set only when the source is explicitly a ticketing provider (`ticketing` or `primary_ticketing`); otherwise it remains `null`.
+
+9. **Per-Observation Evidence Traceability (Should Fix)**
+   - *Problem*: Subsequent observations of the same event by a source risked losing provenance to earlier observations.
+   - *Resolution*: Every observation writes an independent record to `event_field_evidence` carrying the exact `raw_ingest_id`, `candidate_id`, and `source_id` of that observation.
+
+10. **Direct Access to Sources Table Restricted (Should Fix)**
+    - *Problem*: `sources` table RLS could expose internal operational health and retry counters to public clients.
+    - *Resolution*: Restricted `sources` table RLS exclusively to `service_role`. Created safe public view `public_sources` exposing only safe catalog attributes (`id`, `name`, `slug`, `source_type`, `base_url`, `active`) with SELECT access granted to `anon` and `authenticated`.
+
+11. **ArtistId Catalog Filtering Implemented (Should Fix)**
+    - *Problem*: `EventListFilters.artistId` was present in the interface but silently ignored in repository queries.
+    - *Resolution*: Implemented `artistId` filtering across `SupabaseCatalogRepository` and `MemoryCatalogRepository` by querying `event_artists`. Added unit tests.
+
+12. **ISO Currency Formatting (Low-Cost Cleanup)**
+    - *Problem*: Prices displayed with hardcoded `$`.
+    - *Resolution*: Created `formatCurrencyAmount(amount, currency, locale)` using `Intl.NumberFormat`. Updated `EventCard.tsx` and added test cases for USD, EUR, and GBP.
+
+13. **Removed Empty Placeholder Directories (Low-Cost Cleanup)**
+    - *Problem*: Empty placeholder folders `lib/catalog` and `lib/ingestion` existed without code.
+    - *Resolution*: Removed `lib/catalog` and `lib/ingestion`. Maintained clean module boundaries in `lib/domain/index.ts`, `lib/repositories/index.ts`, and `lib/entity-resolution/index.ts`.
+
+---
+
+## Accepted Deferrals
+
+The following items were explicitly reviewed and deferred to subsequent phases:
+
+1. **N+1 Catalog Query Optimization**:
+   - `listEvents` queries artists and ticket links for each returned event. Safe to defer until catalog query volume warrants a consolidated SQL join/view.
+2. **Advanced Venue Aliasing Infrastructure**:
+   - Bidirectional suffix/alias normalization is implemented in application code; a dedicated alias registry table and alias maintenance pipeline is deferred to a future operator tooling phase.
+3. **Manual Resolution Operator UI**:
+   - `needs_review` statuses and reasons are stored in `candidate_resolutions`, but the human-in-the-loop review interface is deferred to a dedicated admin phase.
+4. **Raw-Ingest Retention & Deletion Policy**:
+   - Defining the retention window and pruning cron for raw ingest bodies is deferred to Phase 4 / production operations.
+5. **Object-Storage Provider & Payload Size Threshold**:
+   - Small payloads are stored in PostgreSQL with nullable `external_storage_ref` column in `raw_ingests`; choosing S3/GCS/R2 and offloading large HTML payloads is deferred until high-volume scraping begins.
+

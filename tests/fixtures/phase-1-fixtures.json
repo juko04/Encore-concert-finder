@@ -1,203 +1,290 @@
 {
-  "singleShow": {
-    "title": "The Mountain Goats",
-    "artists": ["The Mountain Goats", "Adeem the Artist"],
-    "venue": "Gothic Theatre",
+  "single_show": {
+    "title": "Khruangbin at Red Rocks",
+    "artistNames": ["Khruangbin"],
+    "venueName": "Red Rocks Amphitheatre",
+    "city": "Morrison",
+    "state": "CO",
+    "country": "US",
+    "timezone": "America/Denver",
+    "localStartDate": "2026-08-15",
+    "startsAt": "2026-08-16T01:30:00Z",
+    "startTimePrecision": "instant",
+    "ticketUrl": "https://www.axs.com/events/10001/khruangbin?utm_source=test&utm_medium=cpc&gclid=12345",
+    "price": {
+      "min": 59.5,
+      "max": 125.0,
+      "currency": "USD"
+    },
+    "confidence": 0.95,
+    "provenance": {
+      "sourceId": "a0000000-0000-0000-0000-000000000001",
+      "sourceType": "venue",
+      "acquisitionMethod": "structured_json",
+      "sourceUrl": "https://redrocksonline.com/event/khruangbin-2026",
+      "fetchedAt": "2026-05-01T12:00:00Z",
+      "contentHash": "hash_khruangbin_single",
+      "parserVersion": "1.0.0",
+      "confidence": 0.95
+    }
+  },
+  "utc_rollover_show": {
+    "title": "Late Night Jam at Bluebird",
+    "artistNames": ["The Midnight Trio"],
+    "venueName": "Bluebird Theater",
+    "city": "Denver",
+    "state": "CO",
+    "country": "US",
+    "timezone": "America/Denver",
+    "startsAt": "2026-10-15T02:00:00Z",
+    "startTimePrecision": "instant",
+    "ticketUrl": "https://www.axs.com/events/10002/midnight-trio",
+    "price": {
+      "min": 25.0,
+      "max": 30.0,
+      "currency": "USD"
+    },
+    "confidence": 0.9,
+    "provenance": {
+      "sourceId": "a0000000-0000-0000-0000-000000000001",
+      "sourceType": "venue",
+      "acquisitionMethod": "structured_json",
+      "sourceUrl": "https://bluebirdtheater.net/events/10002",
+      "fetchedAt": "2026-09-01T10:00:00Z",
+      "contentHash": "hash_rollover_show",
+      "parserVersion": "1.0.0",
+      "confidence": 0.9
+    }
+  },
+  "non_colorado_show_austin": {
+    "title": "Spoon with Heartless Bastards",
+    "artistNames": ["Spoon", "Heartless Bastards"],
+    "venueName": "Moody Amphitheater",
+    "city": "Austin",
+    "state": "TX",
+    "country": "US",
+    "timezone": "America/Chicago",
+    "localStartDate": "2026-10-20",
+    "startsAt": "2026-10-21T01:00:00Z",
+    "startTimePrecision": "instant",
+    "ticketUrl": "https://moodyamphitheater.com/tickets/spoon",
+    "price": {
+      "min": 45.0,
+      "max": 95.0,
+      "currency": "USD"
+    },
+    "confidence": 0.92,
+    "provenance": {
+      "sourceId": "a0000000-0000-0000-0000-000000000002",
+      "sourceType": "venue",
+      "acquisitionMethod": "api",
+      "sourceUrl": "https://api.moodyamphitheater.com/v1/events/spoon",
+      "fetchedAt": "2026-09-10T14:00:00Z",
+      "contentHash": "hash_austin_spoon",
+      "parserVersion": "1.0.0",
+      "confidence": 0.92
+    }
+  },
+  "non_colorado_show_london_eur_gbp": {
+    "title": "Arctic Monkeys at O2 Academy",
+    "artistNames": ["Arctic Monkeys"],
+    "venueName": "O2 Academy Brixton",
+    "city": "London",
+    "country": "GB",
+    "timezone": "Europe/London",
+    "localStartDate": "2026-11-12",
+    "startsAt": "2026-11-12T19:30:00Z",
+    "startTimePrecision": "instant",
+    "ticketUrl": "https://ticketmaster.co.uk/event/arctic-monkeys?fbclid=xyz987",
+    "price": {
+      "min": 45.0,
+      "max": 65.0,
+      "currency": "GBP"
+    },
+    "confidence": 0.96,
+    "provenance": {
+      "sourceId": "a0000000-0000-0000-0000-000000000003",
+      "sourceType": "primary_ticketing",
+      "acquisitionMethod": "api",
+      "sourceUrl": "https://api.ticketmaster.co.uk/events/arctic-monkeys",
+      "fetchedAt": "2026-09-15T09:00:00Z",
+      "contentHash": "hash_london_show",
+      "parserVersion": "1.0.0",
+      "confidence": 0.96
+    }
+  },
+  "venue_alias_red_rocks": {
+    "title": "Khruangbin Night 2",
+    "artistNames": ["Khruangbin"],
+    "venueName": "Red Rocks",
+    "city": "Morrison",
+    "state": "CO",
+    "country": "US",
+    "timezone": "America/Denver",
+    "localStartDate": "2026-08-16",
+    "startsAt": "2026-08-17T01:30:00Z",
+    "startTimePrecision": "instant",
+    "ticketUrl": "https://www.axs.com/events/10003/khruangbin-night-2",
+    "price": {
+      "min": 59.5,
+      "max": 125.0,
+      "currency": "USD"
+    },
+    "confidence": 0.95,
+    "provenance": {
+      "sourceId": "a0000000-0000-0000-0000-000000000001",
+      "sourceType": "venue",
+      "acquisitionMethod": "structured_json",
+      "sourceUrl": "https://redrocksonline.com/event/khruangbin-night2",
+      "fetchedAt": "2026-05-02T12:00:00Z",
+      "contentHash": "hash_khruangbin_alias",
+      "parserVersion": "1.0.0",
+      "confidence": 0.95
+    }
+  },
+  "date_only_show": {
+    "title": "Bon Iver at Mission Ballroom",
+    "artistNames": ["Bon Iver"],
+    "venueName": "Mission Ballroom",
+    "city": "Denver",
+    "state": "CO",
+    "country": "US",
+    "timezone": "America/Denver",
+    "localStartDate": "2026-09-25",
+    "startTimePrecision": "date_only",
+    "ticketUrl": "https://axs.com/events/20001/bon-iver",
+    "price": {
+      "min": 65.0,
+      "max": 150.0,
+      "currency": "USD"
+    },
+    "confidence": 0.88,
+    "provenance": {
+      "sourceId": "a0000000-0000-0000-0000-000000000001",
+      "sourceType": "venue",
+      "acquisitionMethod": "html_http",
+      "sourceUrl": "https://missionballroom.com/event/bon-iver-2026",
+      "fetchedAt": "2026-06-01T15:00:00Z",
+      "contentHash": "hash_bon_iver_date_only",
+      "parserVersion": "1.0.0",
+      "confidence": 0.88
+    }
+  },
+  "time_upgrade_observation": {
+    "title": "Bon Iver (Time Announced)",
+    "artistNames": ["Bon Iver"],
+    "venueName": "Mission Ballroom",
+    "city": "Denver",
+    "state": "CO",
+    "country": "US",
+    "timezone": "America/Denver",
+    "localStartDate": "2026-09-25",
+    "startsAt": "2026-09-26T02:00:00Z",
+    "startTimePrecision": "instant",
+    "doorsOpenAt": "2026-09-26T01:00:00Z",
+    "ticketUrl": "https://axs.com/events/20001/bon-iver?utm_campaign=onsale",
+    "price": {
+      "min": 65.0,
+      "max": 150.0,
+      "currency": "USD"
+    },
+    "confidence": 0.95,
+    "provenance": {
+      "sourceId": "a0000000-0000-0000-0000-000000000001",
+      "sourceType": "venue",
+      "acquisitionMethod": "api",
+      "sourceUrl": "https://api.axs.com/events/20001",
+      "fetchedAt": "2026-07-01T12:00:00Z",
+      "contentHash": "hash_bon_iver_time_upgrade",
+      "parserVersion": "1.0.0",
+      "confidence": 0.95
+    }
+  },
+  "cancelled_show": {
+    "title": "Cancelled Show at Gothic",
+    "artistNames": ["The Staves"],
+    "venueName": "Gothic Theatre",
     "city": "Englewood",
     "state": "CO",
+    "country": "US",
     "timezone": "America/Denver",
-    "localStartDate": "2026-10-15",
-    "startsAt": "2026-10-16T02:00:00Z",
+    "localStartDate": "2026-10-05",
+    "startsAt": "2026-10-06T02:00:00Z",
     "startTimePrecision": "instant",
-    "ticketUrl": "https://tickets.example.com/events/101?utm_source=fb&gclid=123",
-    "price": { "min": 35.0, "max": 45.0, "currency": "USD" },
-    "sourceId": "a0000000-0000-0000-0000-000000000001",
-    "sourceEventId": "show-101"
+    "ticketUrl": "https://gothictheatre.com/events/staves",
+    "price": {
+      "min": 30.0,
+      "currency": "USD"
+    },
+    "rawPayload": {
+      "status": "cancelled"
+    },
+    "confidence": 0.9,
+    "provenance": {
+      "sourceId": "a0000000-0000-0000-0000-000000000001",
+      "sourceType": "venue",
+      "acquisitionMethod": "structured_json",
+      "sourceUrl": "https://gothictheatre.com/events/staves",
+      "fetchedAt": "2026-09-15T12:00:00Z",
+      "contentHash": "hash_staves_cancelled",
+      "parserVersion": "1.0.0",
+      "confidence": 0.9
+    }
   },
-  "dateOnlyEvent": {
-    "title": "Big Thief",
-    "artists": ["Big Thief"],
-    "venue": "Red Rocks Amphitheatre",
-    "city": "Morrison",
-    "state": "CO",
-    "timezone": "America/Denver",
-    "localStartDate": "2026-10-20",
-    "startsAt": null,
-    "startTimePrecision": "date_only",
-    "ticketUrl": "https://tickets.example.com/events/102",
-    "price": { "min": 65.0, "max": 120.0, "currency": "USD" },
-    "sourceId": "a0000000-0000-0000-0000-000000000001",
-    "sourceEventId": "show-102"
-  },
-  "dateOnlyUpgrade": {
-    "title": "Big Thief Live at Red Rocks",
-    "artists": ["Big Thief"],
-    "venue": "Red Rocks",
-    "city": "Morrison",
-    "state": "CO",
-    "timezone": "America/Denver",
-    "localStartDate": "2026-10-20",
-    "startsAt": "2026-10-21T01:30:00Z",
-    "startTimePrecision": "instant",
-    "ticketUrl": "https://promoter.example.com/shows/big-thief-rr?utm_campaign=oct",
-    "price": { "min": 65.0, "max": 120.0, "currency": "USD" },
-    "sourceId": "a0000000-0000-0000-0000-000000000002",
-    "sourceEventId": "promo-bt-2026"
-  },
-  "dstBoundaryEvent": {
-    "title": "Halloween Midnight Rave",
-    "artists": ["DJ Shadow"],
-    "venue": "Ogden Theatre",
+  "early_show_with_shared_opener": {
+    "title": "Early Acoustic Showcase with Local Opener",
+    "artistNames": ["Acoustic Master", "Common Opener"],
+    "venueName": "Larimer Lounge",
     "city": "Denver",
     "state": "CO",
+    "country": "US",
     "timezone": "America/Denver",
-    "localStartDate": "2026-10-31",
-    "startsAt": "2026-11-01T04:00:00Z",
+    "localStartDate": "2026-10-30",
+    "startsAt": "2026-10-31T01:00:00Z",
     "startTimePrecision": "instant",
-    "ticketUrl": "https://tickets.example.com/events/shadow-halloween?fbclid=xyz",
-    "price": { "min": 40.0, "max": 50.0, "currency": "USD" },
-    "sourceId": "a0000000-0000-0000-0000-000000000001",
-    "sourceEventId": "show-shadow-2026"
-  },
-  "twoDayResidency": {
-    "night1": {
-      "title": "LCD Soundsystem - Night 1",
-      "artists": ["LCD Soundsystem", "Peaches"],
-      "venue": "Mission Ballroom",
-      "city": "Denver",
-      "state": "CO",
-      "timezone": "America/Denver",
-      "localStartDate": "2026-11-10",
-      "startsAt": "2026-11-11T03:00:00Z",
-      "startTimePrecision": "instant",
-      "ticketUrl": "https://tickets.example.com/events/lcd-n1?fbclid=abc",
-      "price": { "min": 85.0, "max": 150.0, "currency": "USD" },
-      "sourceId": "a0000000-0000-0000-0000-000000000001",
-      "sourceEventId": "lcd-n1"
+    "ticketUrl": "https://larimerlounge.com/events/early-show",
+    "price": {
+      "min": 15.0,
+      "currency": "USD"
     },
-    "night2": {
-      "title": "LCD Soundsystem - Night 2",
-      "artists": ["LCD Soundsystem", "Shit Robot"],
-      "venue": "Mission Ballroom",
-      "city": "Denver",
-      "state": "CO",
-      "timezone": "America/Denver",
-      "localStartDate": "2026-11-11",
-      "startsAt": "2026-11-12T03:00:00Z",
-      "startTimePrecision": "instant",
-      "ticketUrl": "https://tickets.example.com/events/lcd-n2",
-      "price": { "min": 85.0, "max": 150.0, "currency": "USD" },
+    "confidence": 0.85,
+    "provenance": {
       "sourceId": "a0000000-0000-0000-0000-000000000001",
-      "sourceEventId": "lcd-n2"
+      "sourceType": "venue",
+      "acquisitionMethod": "structured_json",
+      "sourceUrl": "https://larimerlounge.com/events/early-show",
+      "fetchedAt": "2026-10-01T12:00:00Z",
+      "contentHash": "hash_early_show",
+      "parserVersion": "1.0.0",
+      "confidence": 0.85
     }
   },
-  "freeEventNoPrice": {
-    "title": "Civic Center Summer Series",
-    "artists": ["Local Band Showcase"],
-    "venue": "Civic Center Park",
+  "late_show_with_shared_opener": {
+    "title": "Late Night Rock with Local Opener",
+    "artistNames": ["Electric Headliner", "Common Opener"],
+    "venueName": "Larimer Lounge",
     "city": "Denver",
     "state": "CO",
+    "country": "US",
     "timezone": "America/Denver",
-    "localStartDate": "2026-07-04",
-    "startsAt": "2026-07-04T22:00:00Z",
+    "localStartDate": "2026-10-30",
+    "startsAt": "2026-10-31T04:00:00Z",
     "startTimePrecision": "instant",
-    "ticketUrl": null,
-    "price": { "isFree": true, "currency": "USD" },
-    "sourceId": "a0000000-0000-0000-0000-000000000001",
-    "sourceEventId": "free-2026"
-  },
-  "twoSourcesSameEvent": {
-    "sourceA": {
-      "title": "Khruangbin",
-      "artists": ["Khruangbin"],
-      "venue": "Red Rocks Amphitheatre",
-      "city": "Morrison",
-      "state": "CO",
-      "timezone": "America/Denver",
-      "localStartDate": "2026-09-15",
-      "startsAt": "2026-09-16T01:30:00Z",
-      "startTimePrecision": "instant",
-      "ticketUrl": "https://tickets.example.com/events/khru-rr?utm_source=email",
-      "price": { "min": 60.0, "max": 95.0, "currency": "USD" },
-      "sourceId": "a0000000-0000-0000-0000-000000000001",
-      "sourceEventId": "khru-source-1"
+    "ticketUrl": "https://larimerlounge.com/events/late-show",
+    "price": {
+      "min": 20.0,
+      "currency": "USD"
     },
-    "sourceB": {
-      "title": "Khruangbin with Hermanos Gutiérrez",
-      "artists": ["Khruangbin", "Hermanos Gutiérrez"],
-      "venue": "Red Rocks",
-      "city": "Morrison",
-      "state": "CO",
-      "timezone": "America/Denver",
-      "localStartDate": "2026-09-15",
-      "startsAt": "2026-09-16T01:30:00Z",
-      "startTimePrecision": "instant",
-      "ticketUrl": "https://tickets.example.com/events/khru-rr",
-      "price": { "min": 60.0, "max": 95.0, "currency": "USD" },
-      "sourceId": "a0000000-0000-0000-0000-000000000002",
-      "sourceEventId": "khru-source-2"
-    }
-  },
-  "cancellationObservation": {
-    "original": {
-      "title": "Japanese Breakfast",
-      "artists": ["Japanese Breakfast"],
-      "venue": "Gothic Theatre",
-      "city": "Englewood",
-      "state": "CO",
-      "timezone": "America/Denver",
-      "localStartDate": "2026-09-22",
-      "startsAt": "2026-09-23T02:00:00Z",
-      "startTimePrecision": "instant",
-      "ticketUrl": "https://tickets.example.com/events/jbrekkie",
-      "price": { "min": 35.0, "max": 45.0, "currency": "USD" },
+    "confidence": 0.85,
+    "provenance": {
       "sourceId": "a0000000-0000-0000-0000-000000000001",
-      "sourceEventId": "jb-2026"
-    },
-    "cancellation": {
-      "title": "Japanese Breakfast (CANCELLED)",
-      "artists": ["Japanese Breakfast"],
-      "venue": "Gothic Theatre",
-      "city": "Englewood",
-      "state": "CO",
-      "timezone": "America/Denver",
-      "localStartDate": "2026-09-22",
-      "startsAt": "2026-09-23T02:00:00Z",
-      "startTimePrecision": "instant",
-      "ticketUrl": "https://tickets.example.com/events/jbrekkie",
-      "status": "cancelled",
-      "sourceId": "a0000000-0000-0000-0000-000000000001",
-      "sourceEventId": "jb-2026-cancel"
-    }
-  },
-  "ambiguousCase": {
-    "candidateA": {
-      "title": "Indie Night",
-      "artists": ["Band Alpha", "Band Beta"],
-      "venue": "Bluebird Theater",
-      "city": "Denver",
-      "state": "CO",
-      "timezone": "America/Denver",
-      "localStartDate": "2026-10-12",
-      "startsAt": "2026-10-13T02:00:00Z",
-      "startTimePrecision": "instant",
-      "ticketUrl": "https://tickets.example.com/events/indie-1012",
-      "sourceId": "a0000000-0000-0000-0000-000000000001",
-      "sourceEventId": "ambig-a"
-    },
-    "candidateB": {
-      "title": "Comedy Showcase",
-      "artists": ["Comedian X", "Comedian Y"],
-      "venue": "Bluebird Theater",
-      "city": "Denver",
-      "state": "CO",
-      "timezone": "America/Denver",
-      "localStartDate": "2026-10-12",
-      "startsAt": "2026-10-13T02:00:00Z",
-      "startTimePrecision": "instant",
-      "ticketUrl": "https://tickets.example.com/events/comedy-1012",
-      "sourceId": "a0000000-0000-0000-0000-000000000002",
-      "sourceEventId": "ambig-b"
+      "sourceType": "venue",
+      "acquisitionMethod": "structured_json",
+      "sourceUrl": "https://larimerlounge.com/events/late-show",
+      "fetchedAt": "2026-10-01T12:00:00Z",
+      "contentHash": "hash_late_show",
+      "parserVersion": "1.0.0",
+      "confidence": 0.85
     }
   }
 }

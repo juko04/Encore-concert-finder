@@ -1,300 +1,305 @@
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
+import type { Event } from '@/lib/domain/catalog';
 import { ArtistResolver } from '@/lib/entity-resolution/artist-resolver';
-import { VenueResolver } from '@/lib/entity-resolution/venue-resolver';
 import { EventMatcher } from '@/lib/entity-resolution/event-matcher';
 import { evaluateFieldMerge } from '@/lib/entity-resolution/field-merge';
+import { VenueResolver } from '@/lib/entity-resolution/venue-resolver';
 import { MemoryCatalogRepository } from '@/lib/repositories/memory-repositories';
-import type { Event } from '@/lib/domain/catalog';
-import type { EventCandidate } from '@/lib/domain/event-candidate';
+import { loadFixtures } from '../fixtures/fixture-helper';
 
-describe('Entity Resolution Components', () => {
+describe('Entity Resolution Pipeline', () => {
+  let catalogRepo: MemoryCatalogRepository;
+  const fixtures = loadFixtures();
+
+  beforeEach(() => {
+    catalogRepo = new MemoryCatalogRepository();
+  });
+
   describe('ArtistResolver', () => {
-    it('creates a new canonical artist when none exists', async () => {
-      const repo = new MemoryCatalogRepository();
-      const resolver = new ArtistResolver();
+    const resolver = new ArtistResolver();
 
-      const artist = await resolver.resolve(repo, {
-        name: 'The Mountain Goats',
+    it('resolves by stable external ID first', async () => {
+      const created = await catalogRepo.createArtist({
+        name: 'The National',
+        normalizedName: 'national',
       });
-      expect(artist.id).toBeDefined();
-      expect(artist.name).toBe('The Mountain Goats');
-      expect(artist.normalizedName).toBe('mountain goats');
+      await catalogRepo.addArtistExternalId({
+        artistId: created.id,
+        provider: 'spotify',
+        externalId: 'spotify_nat_123',
+      });
 
-      const found = await repo.findArtistByName('mountain goats');
-      expect(found?.id).toBe(artist.id);
+      const result = await resolver.resolve(catalogRepo, {
+        name: 'The National Band',
+        externalIds: [{ provider: 'spotify', externalId: 'spotify_nat_123' }],
+      });
+
+      expect(result.artist.id).toBe(created.id);
+      expect(result.isNew).toBe(false);
+      expect(result.matchMethod).toBe('external_id');
     });
 
-    it('reuses existing artist with matching normalized name', async () => {
-      const repo = new MemoryCatalogRepository();
-      const resolver = new ArtistResolver();
-
-      const artist1 = await resolver.resolve(repo, { name: 'Mountain Goats' });
-      const artist2 = await resolver.resolve(repo, {
-        name: 'The Mountain Goats',
-      });
-
-      expect(artist1.id).toBe(artist2.id);
-    });
-
-    it('resolves and links external provider IDs', async () => {
-      const repo = new MemoryCatalogRepository();
-      const resolver = new ArtistResolver();
-
-      const artist = await resolver.resolve(repo, {
-        name: 'Big Thief',
-        externalId: {
-          provider: 'ticketmaster',
-          externalId: 'tm_12345',
-        },
-      });
-
-      const matchedByExt = await repo.findArtistByExternalId(
-        'ticketmaster',
-        'tm_12345',
-      );
-      expect(matchedByExt?.id).toBe(artist.id);
-    });
-  });
-
-  describe('VenueResolver', () => {
-    it('creates a new venue when none exists', async () => {
-      const repo = new MemoryCatalogRepository();
-      const resolver = new VenueResolver();
-
-      const venue = await resolver.resolve(repo, {
-        name: 'Gothic Theatre',
-        city: 'Englewood',
-        region: 'CO',
-      });
-
-      expect(venue.id).toBeDefined();
-      expect(venue.name).toBe('Gothic Theatre');
-      expect(venue.city).toBe('Englewood');
-    });
-
-    it('reuses existing venue in same city with normalized name', async () => {
-      const repo = new MemoryCatalogRepository();
-      const resolver = new VenueResolver();
-
-      const v1 = await resolver.resolve(repo, {
-        name: 'Gothic Theatre',
-        city: 'Englewood',
-      });
-      const v2 = await resolver.resolve(repo, {
-        name: 'The Gothic Theatre',
-        city: 'Englewood',
-      });
-
-      expect(v1.id).toBe(v2.id);
-    });
-
-    it('resolves common venue aliases in same city', async () => {
-      const repo = new MemoryCatalogRepository();
-      const resolver = new VenueResolver();
-
-      const v1 = await resolver.resolve(repo, {
-        name: 'Red Rocks Amphitheatre',
-        city: 'Morrison',
-      });
-      const v2 = await resolver.resolve(repo, {
-        name: 'Red Rocks',
-        city: 'Morrison',
-      });
-
-      expect(v1.id).toBe(v2.id);
-    });
-
-    it('does not merge venues with same name in different cities', async () => {
-      const repo = new MemoryCatalogRepository();
-      const resolver = new VenueResolver();
-
-      const vDenver = await resolver.resolve(repo, {
-        name: 'Bluebird Theater',
-        city: 'Denver',
-      });
-      const vBloomington = await resolver.resolve(repo, {
-        name: 'Bluebird Nightclub',
-        city: 'Bloomington',
-      });
-
-      expect(vDenver.id).not.toBe(vBloomington.id);
-    });
-  });
-
-  describe('EventMatcher', () => {
-    it('matches by exact normalized ticket URL', async () => {
-      const repo = new MemoryCatalogRepository();
-      const matcher = new EventMatcher();
-
-      const event = await repo.createEvent({
-        name: 'Waxahatchee Live',
-        normalizedName: 'waxahatchee live',
-        eventKind: 'concert',
-        status: 'scheduled',
-        venueId: 'v1',
-        timezone: 'America/Denver',
-        localStartDate: '2026-10-15',
-        startTimePrecision: 'instant',
-        isMultiDay: false,
-      });
-
-      await repo.addEventTicketLink({
-        eventId: event.id,
-        url: 'https://tickets.example.com/events/waxa-1015',
-        inventoryStatus: 'available',
-      });
-
-      const candidate: EventCandidate = {
-        title: 'Waxahatchee at Bluebird',
-        artistNames: ['Waxahatchee'],
-        venueName: 'Bluebird Theater',
-        localStartDate: '2026-10-15',
-        ticketUrl: 'https://tickets.example.com/events/waxa-1015?utm_source=ig',
-        confidence: 0.95,
-        provenance: {} as any,
-      };
-
-      const result = await matcher.match(repo, candidate, 'v1', []);
-      expect(result.decision).toBe('match');
-      expect(result.matchedEvent?.id).toBe(event.id);
-      expect(result.reasons).toContain('exact_ticket_url_match');
-    });
-
-    it('matches when same venue, same date, and artists overlap', async () => {
-      const repo = new MemoryCatalogRepository();
-      const matcher = new EventMatcher();
-
-      const artist = await repo.createArtist({
+    it('resolves by normalized name if external ID is not present', async () => {
+      const created = await catalogRepo.createArtist({
         name: 'Khruangbin',
         normalizedName: 'khruangbin',
       });
 
-      const event = await repo.createEvent({
-        name: 'Khruangbin at Red Rocks',
-        normalizedName: 'khruangbin at red rocks',
-        eventKind: 'concert',
-        status: 'scheduled',
-        venueId: 'v_rr',
-        timezone: 'America/Denver',
-        localStartDate: '2026-09-15',
-        startTimePrecision: 'instant',
-        isMultiDay: false,
+      const result = await resolver.resolve(catalogRepo, {
+        name: '  Khruangbin  ',
       });
 
-      await repo.linkEventArtist(event.id, artist.id, 'headliner', 0);
-
-      const candidate: EventCandidate = {
-        title: 'Khruangbin with Hermanos Gutiérrez',
-        artistNames: ['Khruangbin', 'Hermanos Gutiérrez'],
-        venueName: 'Red Rocks Amphitheatre',
-        localStartDate: '2026-09-15',
-        confidence: 0.95,
-        provenance: {} as any,
-      };
-
-      const result = await matcher.match(repo, candidate, 'v_rr', [artist.id]);
-      expect(result.decision).toBe('match');
-      expect(result.matchedEvent?.id).toBe(event.id);
-      expect(result.reasons).toContain('overlapping_artists');
+      expect(result.artist.id).toBe(created.id);
+      expect(result.isNew).toBe(false);
+      expect(result.matchMethod).toBe('normalized_name');
     });
 
-    it('marks needs_review when same venue and date but artists differ completely', async () => {
-      const repo = new MemoryCatalogRepository();
-      const matcher = new EventMatcher();
-
-      const artistA = await repo.createArtist({
-        name: 'Indie Rock Band',
-        normalizedName: 'indie rock band',
+    it('creates new canonical artist when no match exists', async () => {
+      const result = await resolver.resolve(catalogRepo, {
+        name: 'Unknown New Artist',
       });
 
-      const event = await repo.createEvent({
-        name: 'Indie Rock Show',
-        normalizedName: 'indie rock show',
-        eventKind: 'concert',
-        status: 'scheduled',
-        venueId: 'v_bluebird',
-        timezone: 'America/Denver',
-        localStartDate: '2026-10-12',
-        startTimePrecision: 'instant',
-        isMultiDay: false,
-      });
-
-      await repo.linkEventArtist(event.id, artistA.id, 'headliner', 0);
-
-      const candidate: EventCandidate = {
-        title: 'Standup Comedy Night',
-        artistNames: ['Comedian One', 'Comedian Two'],
-        venueName: 'Bluebird Theater',
-        localStartDate: '2026-10-12',
-        confidence: 0.9,
-        provenance: {} as any,
-      };
-
-      const result = await matcher.match(repo, candidate, 'v_bluebird', []);
-      expect(result.decision).toBe('needs_review');
-      expect(result.reasons).toContain('same_venue_and_date_different_artists');
+      expect(result.isNew).toBe(true);
+      expect(result.artist.name).toBe('Unknown New Artist');
+      expect(result.matchMethod).toBe('created');
     });
   });
 
-  describe('FieldMerge rules', () => {
-    it('upgrades date_only precision to instant when startsAt is provided', () => {
-      const current: Event = {
-        id: 'e1',
-        name: 'Big Thief',
-        normalizedName: 'big thief',
-        eventKind: 'concert',
-        status: 'scheduled',
+  describe('VenueResolver', () => {
+    const resolver = new VenueResolver();
+
+    it('resolves bidirectional alias: suffix to stripped and stripped to suffix', async () => {
+      const venue = await catalogRepo.createVenue({
+        name: 'Red Rocks Amphitheatre',
+        normalizedName: 'red rocks amphitheatre',
+        city: 'Morrison',
+        region: 'CO',
         timezone: 'America/Denver',
-        localStartDate: '2026-10-20',
-        startTimePrecision: 'date_only',
-        isMultiDay: false,
-        createdAt: '2026-10-01T00:00:00Z',
-        updatedAt: '2026-10-01T00:00:00Z',
-      };
+      });
 
-      const candidate: EventCandidate = {
-        title: 'Big Thief Live',
-        artistNames: ['Big Thief'],
-        venueName: 'Red Rocks',
-        startsAt: '2026-10-21T01:30:00Z',
-        confidence: 0.95,
-        provenance: {} as any,
-      };
+      // Query with stripped name
+      const matchStripped = await resolver.resolve(catalogRepo, {
+        name: 'Red Rocks',
+        city: 'Morrison',
+      });
+      expect(matchStripped.id).toBe(venue.id);
 
-      const { updates, evidences } = evaluateFieldMerge(current, candidate);
-      expect(updates.startTimePrecision).toBe('instant');
-      expect(updates.startsAt).toBe('2026-10-21T01:30:00Z');
-      expect(evidences.some((e) => e.fieldName === 'starts_at')).toBe(true);
+      // Query with exact name
+      const matchExact = await resolver.resolve(catalogRepo, {
+        name: 'Red Rocks Amphitheatre',
+        city: 'Morrison',
+      });
+      expect(matchExact.id).toBe(venue.id);
     });
 
-    it('updates status to cancelled without deleting the canonical event', () => {
-      const current: Event = {
-        id: 'e1',
-        name: 'Japanese Breakfast',
-        normalizedName: 'japanese breakfast',
+    it('does not fabricate Colorado geography for non-Colorado venues (Finding 3)', async () => {
+      const austinVenue = await resolver.resolve(catalogRepo, {
+        name: 'Moody Amphitheater',
+        city: 'Austin',
+        region: 'TX',
+        countryCode: 'US',
+        timezone: 'America/Chicago',
+      });
+
+      expect(austinVenue.city).toBe('Austin');
+      expect(austinVenue.region).toBe('TX');
+      expect(austinVenue.timezone).toBe('America/Chicago');
+      expect(austinVenue.city).not.toBe('Denver');
+    });
+  });
+
+  describe('EventMatcher (Finding 6)', () => {
+    const matcher = new EventMatcher();
+
+    it('matches exact normalized ticket URL regardless of query tracking params', async () => {
+      const venue = await catalogRepo.createVenue({
+        name: 'Red Rocks Amphitheatre',
+        normalizedName: 'red rocks amphitheatre',
+        city: 'Morrison',
+        timezone: 'America/Denver',
+      });
+
+      const existingEvent = await catalogRepo.createEvent({
+        name: 'Khruangbin Live',
+        normalizedName: 'khruangbin live',
         eventKind: 'concert',
         status: 'scheduled',
+        venueId: venue.id,
         timezone: 'America/Denver',
-        localStartDate: '2026-09-22',
+        localStartDate: '2026-08-15',
         startTimePrecision: 'instant',
-        startsAt: '2026-09-23T02:00:00Z',
         isMultiDay: false,
-        createdAt: '2026-09-01T00:00:00Z',
-        updatedAt: '2026-09-01T00:00:00Z',
+      });
+
+      await catalogRepo.linkTicketUrl({
+        eventId: existingEvent.id,
+        url: 'https://www.axs.com/events/10001/khruangbin',
+        normalizedUrl: 'https://www.axs.com/events/10001/khruangbin',
+      });
+
+      // Candidate with dirty tracking parameters
+      const candidate = fixtures.single_show;
+      const result = await matcher.match(catalogRepo, candidate, venue.id, [
+        'art_khruangbin',
+      ]);
+
+      expect(result.decision).toBe('match');
+      expect(result.matchedEvent?.id).toBe(existingEvent.id);
+      expect(result.reasons).toContain('exact_ticket_url_match');
+    });
+
+    it('prevents false merges when two shows at same venue and date share only an opening artist (Finding 6)', async () => {
+      const venue = await catalogRepo.createVenue({
+        name: 'Larimer Lounge',
+        normalizedName: 'larimer lounge',
+        city: 'Denver',
+        timezone: 'America/Denver',
+      });
+
+      const opener = await catalogRepo.createArtist({
+        name: 'Common Opener',
+        normalizedName: 'common opener',
+      });
+      const acousticHeadliner = await catalogRepo.createArtist({
+        name: 'Acoustic Master',
+        normalizedName: 'acoustic master',
+      });
+      const rockHeadliner = await catalogRepo.createArtist({
+        name: 'Electric Headliner',
+        normalizedName: 'electric headliner',
+      });
+
+      // Existing Early Show: Acoustic Master (headliner), Common Opener (support)
+      const earlyEvent = await catalogRepo.createEvent({
+        name: 'Early Acoustic Showcase',
+        normalizedName: 'early acoustic showcase',
+        eventKind: 'concert',
+        status: 'scheduled',
+        venueId: venue.id,
+        timezone: 'America/Denver',
+        localStartDate: '2026-10-30',
+        startTimePrecision: 'instant',
+        isMultiDay: false,
+      });
+      await catalogRepo.linkEventArtist(
+        earlyEvent.id,
+        acousticHeadliner.id,
+        'headliner',
+        0,
+      );
+      await catalogRepo.linkEventArtist(earlyEvent.id, opener.id, 'support', 1);
+
+      // Incoming Late Show candidate: Electric Headliner (headliner), Common Opener (support)
+      const lateCandidate = fixtures.late_show_with_shared_opener;
+      const resolvedArtistIds = [rockHeadliner.id, opener.id];
+
+      const result = await matcher.match(
+        catalogRepo,
+        lateCandidate,
+        venue.id,
+        resolvedArtistIds,
+      );
+
+      // Must NOT auto-merge! Must be routed to needs_review
+      expect(result.decision).toBe('needs_review');
+      expect(result.reasons).toContain(
+        'same_venue_and_date_opening_artist_overlap_requires_review',
+      );
+    });
+
+    it('matches when same primary/headline artist is performing at same venue and date', async () => {
+      const venue = await catalogRepo.createVenue({
+        name: 'Red Rocks Amphitheatre',
+        normalizedName: 'red rocks amphitheatre',
+        city: 'Morrison',
+        timezone: 'America/Denver',
+      });
+
+      const artist = await catalogRepo.createArtist({
+        name: 'Khruangbin',
+        normalizedName: 'khruangbin',
+      });
+
+      const existingEvent = await catalogRepo.createEvent({
+        name: 'Khruangbin',
+        normalizedName: 'khruangbin',
+        eventKind: 'concert',
+        status: 'scheduled',
+        venueId: venue.id,
+        timezone: 'America/Denver',
+        localStartDate: '2026-08-15',
+        startTimePrecision: 'instant',
+        isMultiDay: false,
+      });
+      await catalogRepo.linkEventArtist(
+        existingEvent.id,
+        artist.id,
+        'headliner',
+        0,
+      );
+
+      // Candidate has no ticket URL but same venue, date, and headliner
+      const candidate = {
+        ...fixtures.single_show,
+        ticketUrl: undefined,
       };
 
-      const candidate: EventCandidate = {
-        title: 'Japanese Breakfast (CANCELLED)',
-        artistNames: ['Japanese Breakfast'],
-        venueName: 'Gothic Theatre',
-        confidence: 0.95,
-        rawPayload: { status: 'cancelled' },
-        provenance: {} as any,
+      const result = await matcher.match(catalogRepo, candidate, venue.id, [
+        artist.id,
+      ]);
+
+      expect(result.decision).toBe('match');
+      expect(result.matchedEvent?.id).toBe(existingEvent.id);
+      expect(result.reasons).toContain('same_primary_artist');
+    });
+  });
+
+  describe('FieldMerge', () => {
+    it('upgrades date_only precision to instant when time is learned', () => {
+      const current: Event = {
+        id: 'evt_1',
+        name: 'Bon Iver',
+        normalizedName: 'bon iver',
+        eventKind: 'concert',
+        status: 'scheduled',
+        venueId: 'ven_1',
+        timezone: 'America/Denver',
+        localStartDate: '2026-09-25',
+        startTimePrecision: 'date_only',
+        isMultiDay: false,
       };
 
-      const { updates, evidences } = evaluateFieldMerge(current, candidate);
-      expect(updates.status).toBe('cancelled');
-      expect(evidences.some((e) => e.fieldName === 'status')).toBe(true);
+      const candidate = fixtures.time_upgrade_observation;
+      const outcome = evaluateFieldMerge(current, candidate);
+
+      expect(outcome.updates.startTimePrecision).toBe('instant');
+      expect(outcome.updates.startsAt).toBe(candidate.startsAt);
+      expect(outcome.evidences.some((e) => e.fieldName === 'starts_at')).toBe(
+        true,
+      );
+    });
+
+    it('updates status to cancelled without deleting the event', () => {
+      const current: Event = {
+        id: 'evt_2',
+        name: 'The Staves',
+        normalizedName: 'staves',
+        eventKind: 'concert',
+        status: 'scheduled',
+        venueId: 'ven_1',
+        timezone: 'America/Denver',
+        localStartDate: '2026-10-05',
+        startTimePrecision: 'instant',
+        isMultiDay: false,
+      };
+
+      const candidate = fixtures.cancelled_show;
+      const outcome = evaluateFieldMerge(current, candidate);
+
+      expect(outcome.updates.status).toBe('cancelled');
+      expect(outcome.evidences.some((e) => e.fieldName === 'status')).toBe(
+        true,
+      );
     });
   });
 });

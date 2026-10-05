@@ -2,64 +2,101 @@ import type { Artist } from '@/lib/domain/catalog';
 import { normalizeName } from '@/lib/domain/value-objects';
 import type { ICatalogRepository } from '@/lib/repositories/interfaces';
 
-export interface ResolveArtistInput {
+export interface ResolveArtistOptions {
   name: string;
-  externalId?: {
+  externalIds?: Array<{
     provider: string;
     externalId: string;
-    providerUrl?: string;
-  };
+    providerUrl?: string | null;
+  }>;
+}
+
+export interface ResolvedArtistResult {
+  artist: Artist;
+  isNew: boolean;
+  matchMethod: 'external_id' | 'normalized_name' | 'created';
 }
 
 export class ArtistResolver {
   async resolve(
     catalogRepo: ICatalogRepository,
-    input: ResolveArtistInput,
-  ): Promise<Artist> {
-    const rawName = input.name.trim();
-    const normalized = normalizeName(rawName);
+    options: ResolveArtistOptions,
+  ): Promise<ResolvedArtistResult> {
+    const rawName = options.name?.trim();
+    if (!rawName) {
+      throw new Error('Artist name must be a non-empty string');
+    }
 
-    // 1. Check external provider ID if available
-    if (input.externalId) {
-      const existingByExt = await catalogRepo.findArtistByExternalId(
-        input.externalId.provider,
-        input.externalId.externalId,
-      );
-      if (existingByExt) {
-        return existingByExt;
+    // 1. Resolve by stable external identifier first (highest confidence)
+    if (options.externalIds && options.externalIds.length > 0) {
+      for (const ext of options.externalIds) {
+        const matched = await catalogRepo.findArtistByExternalId(
+          ext.provider,
+          ext.externalId,
+        );
+        if (matched) {
+          return {
+            artist: matched,
+            isNew: false,
+            matchMethod: 'external_id',
+          };
+        }
       }
     }
 
-    // 2. Check normalized name
-    const existingByName = await catalogRepo.findArtistByName(normalized);
-    if (existingByName) {
-      if (input.externalId) {
-        await catalogRepo.addArtistExternalId({
-          artistId: existingByName.id,
-          provider: input.externalId.provider,
-          externalId: input.externalId.externalId,
-          providerUrl: input.externalId.providerUrl ?? null,
-        });
+    // 2. Resolve by normalized artist name
+    const normalizedName = normalizeName(rawName);
+    const existing = await catalogRepo.findArtistByName(normalizedName);
+
+    if (existing) {
+      // Attach any new external IDs to the existing artist
+      if (options.externalIds && options.externalIds.length > 0) {
+        for (const ext of options.externalIds) {
+          try {
+            await catalogRepo.addArtistExternalId({
+              artistId: existing.id,
+              provider: ext.provider,
+              externalId: ext.externalId,
+              providerUrl: ext.providerUrl,
+            });
+          } catch {
+            // Unique constraint violation or existing ID is expected and ignored
+          }
+        }
       }
-      return existingByName;
+
+      return {
+        artist: existing,
+        isNew: false,
+        matchMethod: 'normalized_name',
+      };
     }
 
     // 3. Create new canonical artist
     const created = await catalogRepo.createArtist({
       name: rawName,
-      normalizedName: normalized,
-      imageUrl: null,
+      normalizedName,
     });
 
-    if (input.externalId) {
-      await catalogRepo.addArtistExternalId({
-        artistId: created.id,
-        provider: input.externalId.provider,
-        externalId: input.externalId.externalId,
-        providerUrl: input.externalId.providerUrl ?? null,
-      });
+    if (options.externalIds && options.externalIds.length > 0) {
+      for (const ext of options.externalIds) {
+        try {
+          await catalogRepo.addArtistExternalId({
+            artistId: created.id,
+            provider: ext.provider,
+            externalId: ext.externalId,
+            providerUrl: ext.providerUrl,
+          });
+        } catch {
+          // Ignore unique conflicts
+        }
+      }
     }
 
-    return created;
+    return {
+      artist: created,
+      isNew: true,
+      matchMethod: 'created',
+    };
   }
 }

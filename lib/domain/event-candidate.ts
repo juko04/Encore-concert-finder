@@ -1,7 +1,7 @@
+import type { BillingPosition, StartTimePrecision } from './catalog';
 import type { SourceProvenance } from './source';
 
-export type BillingPosition =
-  'headliner' | 'subheadliner' | 'mid_card' | 'support' | 'unknown';
+export type { BillingPosition, StartTimePrecision };
 
 export interface PerformanceCandidate {
   artistName: string;
@@ -24,8 +24,6 @@ export type CandidateVerificationStatus =
 
 export type CandidateResolutionStatus =
   'created' | 'matched' | 'needs_review' | 'rejected';
-
-export type StartTimePrecision = 'instant' | 'date_only';
 
 export interface EventCandidate {
   id?: string;

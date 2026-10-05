@@ -8,6 +8,7 @@ import type {
   CandidateResolution,
   CanonicalEventDetail,
   CanonicalEventSummary,
+  CanonicalizationPayload,
   Event,
   EventArtist,
   EventFieldEvidence,
@@ -19,6 +20,7 @@ import type {
   TicketInventoryStatus,
   Venue,
 } from '@/lib/domain/catalog';
+import { normalizeUrl } from '@/lib/domain/value-objects';
 import { createAdminClient } from '@/lib/supabase/admin';
 import type { EventListFilters, ICatalogRepository } from './interfaces';
 
@@ -109,6 +111,7 @@ interface EventTicketLinkRow {
   event_id: string;
   ticket_provider_source_id: string | null;
   url: string;
+  normalized_url: string;
   min_price: number | string | null;
   max_price: number | string | null;
   currency: string | null;
@@ -138,7 +141,10 @@ interface EventFieldEvidenceRow {
   id: string;
   event_id: string;
   field_name: string;
-  event_source_id: string;
+  event_source_id: string | null;
+  source_id: string;
+  raw_ingest_id: string | null;
+  candidate_id: string | null;
   observed_value: unknown;
   value_hash: string;
   confidence: number | string;
@@ -235,6 +241,7 @@ function mapTicketLinkRow(row: EventTicketLinkRow): EventTicketLink {
     eventId: row.event_id,
     ticketProviderSourceId: row.ticket_provider_source_id,
     url: row.url,
+    normalizedUrl: row.normalized_url,
     minPrice: row.min_price !== null ? Number(row.min_price) : null,
     maxPrice: row.max_price !== null ? Number(row.max_price) : null,
     currency: row.currency,
@@ -269,6 +276,9 @@ function mapFieldEvidenceRow(row: EventFieldEvidenceRow): EventFieldEvidence {
     eventId: row.event_id,
     fieldName: row.field_name,
     eventSourceId: row.event_source_id,
+    sourceId: row.source_id,
+    rawIngestId: row.raw_ingest_id,
+    candidateId: row.candidate_id,
     observedValue: row.observed_value,
     valueHash: row.value_hash,
     confidence: Number(row.confidence),
@@ -377,23 +387,19 @@ export class SupabaseCatalogRepository implements ICatalogRepository {
       confidence: Number(row.confidence),
     }));
 
-    const minPrice = ticketLinks.reduce<number | null>((min, tl) => {
-      if (tl.minPrice === null || tl.minPrice === undefined) return min;
-      return min === null ? tl.minPrice : Math.min(min, tl.minPrice);
-    }, null);
+    // Fetch field evidence
+    const { data: evidenceData } = await this.client
+      .from('event_field_evidence')
+      .select('*')
+      .eq('event_id', id);
 
-    const maxPrice = ticketLinks.reduce<number | null>((max, tl) => {
-      if (tl.maxPrice === null || tl.maxPrice === undefined) return max;
-      return max === null ? tl.maxPrice : Math.max(max, tl.maxPrice);
-    }, null);
-
-    const currency = ticketLinks.find((tl) => tl.currency)?.currency ?? null;
+    const fieldEvidence = ((evidenceData as EventFieldEvidenceRow[]) || []).map(
+      mapFieldEvidenceRow,
+    );
 
     return {
-      id: event.id,
-      name: event.name,
-      eventKind: event.eventKind,
-      status: event.status,
+      ...event,
+      artists,
       venue: venue
         ? {
             id: venue.id,
@@ -402,23 +408,10 @@ export class SupabaseCatalogRepository implements ICatalogRepository {
             region: venue.region,
           }
         : null,
-      artists,
-      localStartDate: event.localStartDate,
-      localEndDate: event.localEndDate,
-      startsAt: event.startsAt,
-      timezone: event.timezone,
-      startTimePrecision: event.startTimePrecision,
-      isMultiDay: event.isMultiDay,
-      minPrice,
-      maxPrice,
-      currency,
-      primaryTicketUrl: event.primaryTicketUrl,
-      sources,
       ticketLinks,
       promoters,
-      officialUrl: event.officialUrl,
-      doorsAt: event.doorsAt,
-      endsAt: event.endsAt,
+      sources,
+      fieldEvidence,
     };
   }
 
@@ -445,6 +438,24 @@ export class SupabaseCatalogRepository implements ICatalogRepository {
     if (filters?.region) {
       query = query.eq('region', filters.region);
     }
+
+    // Finding 11: Artist filtering support
+    if (filters?.artistId) {
+      const { data: ea, error: eaError } = await this.client
+        .from('event_artists')
+        .select('event_id')
+        .eq('artist_id', filters.artistId);
+
+      if (eaError) {
+        throw new Error(`Failed to filter by artist: ${eaError.message}`);
+      }
+      const eventIds = ea?.map((r) => r.event_id) ?? [];
+      if (eventIds.length === 0) {
+        return [];
+      }
+      query = query.in('id', eventIds);
+    }
+
     if (filters?.limit) {
       query = query.limit(filters.limit);
     }
@@ -475,14 +486,13 @@ export class SupabaseCatalogRepository implements ICatalogRepository {
         .order('sort_order', { ascending: true });
 
       const artists = ((artistLinks as unknown as EventArtistRow[]) || []).map(
-        (ea) => ({
-          id: ea.artist_id,
-          name: ea.artists?.name ?? 'Unknown Artist',
-          billingPosition: ea.billing_position,
+        (aRow) => ({
+          name: aRow.artists?.name ?? 'Unknown Artist',
+          billingPosition: aRow.billing_position,
         }),
       );
 
-      // Fetch ticket links for min/max prices
+      // Fetch ticket links for pricing
       const { data: ticketLinksData } = await this.client
         .from('event_ticket_links')
         .select('*')
@@ -504,43 +514,22 @@ export class SupabaseCatalogRepository implements ICatalogRepository {
 
       const currency = ticketLinks.find((tl) => tl.currency)?.currency ?? null;
 
-      // Fetch sources
-      const { data: sourcesData } = await this.client
-        .from('event_sources')
-        .select('*')
-        .eq('event_id', event.id);
-
-      const sources = ((sourcesData as EventSourceRow[]) || []).map((s) => ({
-        sourceId: s.source_id,
-        sourceUrl: s.source_url,
-        confidence: Number(s.confidence),
-      }));
-
       summaries.push({
         id: event.id,
-        name: event.name,
-        eventKind: event.eventKind,
-        status: event.status,
-        venue: venue
-          ? {
-              id: venue.id,
-              name: venue.name,
-              city: venue.city,
-              region: venue.region,
-            }
-          : null,
-        artists,
+        title: event.name,
+        venueName: venue?.name ?? event.name,
+        city: venue?.city ?? event.city ?? undefined,
+        region: venue?.region ?? event.region ?? undefined,
         localStartDate: event.localStartDate,
-        localEndDate: event.localEndDate,
         startsAt: event.startsAt,
         timezone: event.timezone,
         startTimePrecision: event.startTimePrecision,
-        isMultiDay: event.isMultiDay,
+        status: event.status,
+        artists,
+        ticketUrl: event.primaryTicketUrl,
         minPrice,
         maxPrice,
         currency,
-        primaryTicketUrl: event.primaryTicketUrl,
-        sources,
       });
     }
 
@@ -620,21 +609,23 @@ export class SupabaseCatalogRepository implements ICatalogRepository {
   async findEventByTicketUrl(
     normalizedTicketUrl: string,
   ): Promise<Event | null> {
-    const { data: ticketLink } = await this.client
+    // Finding 7: Matches by normalized_url
+    const { data: ticketLink, error } = await this.client
       .from('event_ticket_links')
       .select('event_id')
-      .eq('url', normalizedTicketUrl)
+      .eq('normalized_url', normalizedTicketUrl)
       .maybeSingle();
 
-    if (!ticketLink) return null;
+    if (error || !ticketLink) return null;
 
-    const { data: eventData } = await this.client
+    const { data: eventData, error: eventError } = await this.client
       .from('events')
       .select('*')
       .eq('id', ticketLink.event_id)
       .maybeSingle();
 
-    return eventData ? mapEventRow(eventData as EventRow) : null;
+    if (eventError || !eventData) return null;
+    return mapEventRow(eventData as EventRow);
   }
 
   async createArtist(artist: {
@@ -759,7 +750,7 @@ export class SupabaseCatalogRepository implements ICatalogRepository {
         venue_id: event.venueId ?? null,
         city: event.city ?? null,
         region: event.region ?? null,
-        country_code: event.countryCode ?? null,
+        country_code: event.countryCode ?? 'US',
         lat: event.lat ?? null,
         lng: event.lng ?? null,
         timezone: event.timezone,
@@ -892,36 +883,52 @@ export class SupabaseCatalogRepository implements ICatalogRepository {
     };
   }
 
-  async addEventTicketLink(
-    link: Omit<EventTicketLink, 'id' | 'createdAt' | 'updatedAt'>,
-  ): Promise<EventTicketLink> {
+  async linkTicketUrl(ticketLink: {
+    eventId: string;
+    ticketProviderSourceId?: string | null;
+    url: string;
+    normalizedUrl: string;
+    minPrice?: number | null;
+    maxPrice?: number | null;
+    currency?: string | null;
+    inventoryStatus?: EventTicketLink['inventoryStatus'];
+    verifiedAt?: string | null;
+  }): Promise<EventTicketLink> {
     const { data, error } = await this.client
       .from('event_ticket_links')
-      .insert({
-        event_id: link.eventId,
-        ticket_provider_source_id: link.ticketProviderSourceId ?? null,
-        url: link.url,
-        min_price: link.minPrice ?? null,
-        max_price: link.maxPrice ?? null,
-        currency: link.currency ?? null,
-        inventory_status: link.inventoryStatus,
-        verified_at: link.verifiedAt ?? null,
+      .upsert({
+        event_id: ticketLink.eventId,
+        ticket_provider_source_id: ticketLink.ticketProviderSourceId ?? null,
+        url: ticketLink.url,
+        normalized_url:
+          ticketLink.normalizedUrl || normalizeUrl(ticketLink.url),
+        min_price: ticketLink.minPrice ?? null,
+        max_price: ticketLink.maxPrice ?? null,
+        currency: ticketLink.currency ?? null,
+        inventory_status: ticketLink.inventoryStatus ?? 'available',
+        verified_at: ticketLink.verifiedAt ?? null,
       })
       .select('*')
       .single();
 
     if (error) {
-      throw new Error(`Failed to add event ticket link: ${error.message}`);
+      throw new Error(`Failed to link ticket URL: ${error.message}`);
     }
     return mapTicketLinkRow(data as EventTicketLinkRow);
   }
 
-  async addEventSource(
-    sourceRecord: Omit<EventSourceRecord, 'id' | 'createdAt' | 'updatedAt'>,
-  ): Promise<EventSourceRecord> {
+  async recordEventSource(sourceRecord: {
+    eventId: string;
+    sourceId: string;
+    candidateId?: string | null;
+    rawIngestId?: string | null;
+    sourceEventId?: string | null;
+    sourceUrl: string;
+    confidence: number;
+  }): Promise<EventSourceRecord> {
     const { data, error } = await this.client
       .from('event_sources')
-      .insert({
+      .upsert({
         event_id: sourceRecord.eventId,
         source_id: sourceRecord.sourceId,
         candidate_id: sourceRecord.candidateId ?? null,
@@ -929,69 +936,39 @@ export class SupabaseCatalogRepository implements ICatalogRepository {
         source_event_id: sourceRecord.sourceEventId ?? null,
         source_url: sourceRecord.sourceUrl,
         confidence: sourceRecord.confidence,
-        first_seen_at: sourceRecord.firstSeenAt,
-        last_seen_at: sourceRecord.lastSeenAt,
-        is_current: sourceRecord.isCurrent,
+        last_seen_at: new Date().toISOString(),
       })
       .select('*')
       .single();
 
     if (error) {
-      throw new Error(`Failed to add event source: ${error.message}`);
+      throw new Error(`Failed to record event source: ${error.message}`);
     }
     return mapSourceRecordRow(data as EventSourceRow);
   }
 
-  async findEventSource(
-    eventId: string,
-    sourceId: string,
-    sourceEventId?: string | null,
-  ): Promise<EventSourceRecord | null> {
-    let query = this.client
-      .from('event_sources')
-      .select('*')
-      .eq('event_id', eventId)
-      .eq('source_id', sourceId);
-
-    if (sourceEventId) {
-      query = query.eq('source_event_id', sourceEventId);
-    }
-
-    const { data, error } = await query.maybeSingle();
-    if (error) {
-      throw new Error(`Failed to find event source: ${error.message}`);
-    }
-    return data ? mapSourceRecordRow(data as EventSourceRow) : null;
-  }
-
-  async updateEventSourceLastSeen(
-    id: string,
-    lastSeenAt: string,
-  ): Promise<void> {
-    const { error } = await this.client
-      .from('event_sources')
-      .update({
-        last_seen_at: lastSeenAt,
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', id);
-
-    if (error) {
-      throw new Error(
-        `Failed to update event source last seen: ${error.message}`,
-      );
-    }
-  }
-
-  async addEventFieldEvidence(
-    evidence: Omit<EventFieldEvidence, 'id' | 'createdAt'>,
-  ): Promise<EventFieldEvidence> {
+  async recordFieldEvidence(evidence: {
+    eventId: string;
+    fieldName: string;
+    eventSourceId?: string;
+    sourceId: string;
+    rawIngestId?: string | null;
+    candidateId?: string | null;
+    observedValue: unknown;
+    valueHash: string;
+    confidence: number;
+    observedAt: string;
+    parserVersion: string;
+  }): Promise<EventFieldEvidence> {
     const { data, error } = await this.client
       .from('event_field_evidence')
       .insert({
         event_id: evidence.eventId,
         field_name: evidence.fieldName,
-        event_source_id: evidence.eventSourceId,
+        event_source_id: evidence.eventSourceId ?? null,
+        source_id: evidence.sourceId,
+        raw_ingest_id: evidence.rawIngestId ?? null,
+        candidate_id: evidence.candidateId ?? null,
         observed_value: evidence.observedValue,
         value_hash: evidence.valueHash,
         confidence: evidence.confidence,
@@ -1002,14 +979,21 @@ export class SupabaseCatalogRepository implements ICatalogRepository {
       .single();
 
     if (error) {
-      throw new Error(`Failed to add event field evidence: ${error.message}`);
+      throw new Error(
+        `Failed to record event field evidence: ${error.message}`,
+      );
     }
     return mapFieldEvidenceRow(data as EventFieldEvidenceRow);
   }
 
-  async recordCandidateResolution(
-    resolution: Omit<CandidateResolution, 'id' | 'createdAt'>,
-  ): Promise<CandidateResolution> {
+  async recordResolution(resolution: {
+    eventCandidateId: string;
+    eventId?: string | null;
+    status: CandidateResolution['status'];
+    matcherVersion: string;
+    confidence: number;
+    reasons: Record<string, unknown> | string[];
+  }): Promise<CandidateResolution> {
     const { data, error } = await this.client
       .from('candidate_resolutions')
       .insert({
@@ -1019,7 +1003,7 @@ export class SupabaseCatalogRepository implements ICatalogRepository {
         matcher_version: resolution.matcherVersion,
         confidence: resolution.confidence,
         reasons: resolution.reasons,
-        resolved_at: resolution.resolvedAt,
+        resolved_at: new Date().toISOString(),
       })
       .select('*')
       .single();
@@ -1032,18 +1016,24 @@ export class SupabaseCatalogRepository implements ICatalogRepository {
     return mapResolutionRow(data as CandidateResolutionRow);
   }
 
-  async getCandidateResolution(
-    candidateId: string,
-  ): Promise<CandidateResolution | null> {
-    const { data, error } = await this.client
-      .from('candidate_resolutions')
-      .select('*')
-      .eq('event_candidate_id', candidateId)
-      .maybeSingle();
+  /**
+   * Atomic canonicalization transaction execution (Finding 2).
+   * Executes inside PostgreSQL stored procedure with automatic rollback on error.
+   */
+  async applyCanonicalization(
+    payload: CanonicalizationPayload,
+  ): Promise<{ eventId: string | null; status: string }> {
+    const { data, error } = await this.client.rpc('apply_canonicalization', {
+      payload,
+    });
 
     if (error) {
-      throw new Error(`Failed to get candidate resolution: ${error.message}`);
+      throw new Error(`Failed to apply canonicalization: ${error.message}`);
     }
-    return data ? mapResolutionRow(data as CandidateResolutionRow) : null;
+
+    return {
+      eventId: (data as { eventId?: string | null })?.eventId ?? null,
+      status: (data as { status?: string })?.status ?? 'created',
+    };
   }
 }
