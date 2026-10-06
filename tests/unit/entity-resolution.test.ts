@@ -319,6 +319,73 @@ describe('Entity Resolution Pipeline', () => {
       );
     });
 
+    it('prevents same-name artist false merges when canonical artist IDs disagree (Issue 3)', async () => {
+      const venue = await catalogRepo.createVenue({
+        name: 'Mission Ballroom',
+        normalizedName: 'mission ballroom',
+        city: 'Denver',
+        timezone: 'America/Denver',
+      });
+
+      // Existing event with Artist A ("Ghost" - Sweden, ID A)
+      const artistA = await catalogRepo.createArtist({
+        name: 'Ghost',
+        normalizedName: 'ghost',
+      });
+      await catalogRepo.addArtistExternalId({
+        artistId: artistA.id,
+        provider: 'provider-1',
+        externalId: 'artist-A',
+      });
+
+      const existingEvent = await catalogRepo.createEvent({
+        name: 'Ghost Live',
+        normalizedName: 'ghost live',
+        eventKind: 'concert',
+        status: 'scheduled',
+        venueId: venue.id,
+        timezone: 'America/Denver',
+        localStartDate: '2026-10-31',
+        startTimePrecision: 'instant',
+        isMultiDay: false,
+      });
+      await catalogRepo.linkEventArtist(
+        existingEvent.id,
+        artistA.id,
+        'headliner',
+        0,
+      );
+
+      // Incoming candidate with Artist B ("Ghost" - Japan, ID B)
+      const artistB = await catalogRepo.createArtist({
+        name: 'Ghost',
+        normalizedName: 'ghost',
+      });
+      await catalogRepo.addArtistExternalId({
+        artistId: artistB.id,
+        provider: 'provider-1',
+        externalId: 'artist-B',
+      });
+      expect(artistB.id).not.toBe(artistA.id);
+
+      const candidate = {
+        ...fixtures.single_show,
+        title: 'Ghost Tour',
+        artistNames: ['Ghost'],
+        localStartDate: '2026-10-31',
+      };
+
+      // Matcher receives resolved canonical artist ID for Artist B
+      const result = await matcher.match(catalogRepo, candidate, venue.id, [
+        artistB.id,
+      ]);
+
+      // Must NEVER auto-merge once canonical IDs disagree!
+      expect(result.decision).not.toBe('match');
+      expect(result.decision).toBe('needs_review');
+      expect(result.reasons).toContain('same_venue_and_date_different_artists');
+    });
+
     it('matches when same primary/headline artist is performing at same venue and date', async () => {
       const venue = await catalogRepo.createVenue({
         name: 'Red Rocks Amphitheatre',

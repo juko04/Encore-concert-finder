@@ -126,27 +126,6 @@ export class MemoryRawIngestRepository implements IRawIngestRepository {
     return null;
   }
 
-  async getBySourceAndContentHash(
-    sourceId: string,
-    contentHash: string,
-  ): Promise<(RawIngest & { id: string }) | null> {
-    for (const item of this.ingests.values()) {
-      if (item.sourceId === sourceId && item.contentHash === contentHash) {
-        return item;
-      }
-    }
-    return null;
-  }
-
-  async getByContentHash(
-    contentHash: string,
-  ): Promise<(RawIngest & { id: string }) | null> {
-    for (const item of this.ingests.values()) {
-      if (item.contentHash === contentHash) return item;
-    }
-    return null;
-  }
-
   async getById(id: string): Promise<(RawIngest & { id: string }) | null> {
     return this.ingests.get(id) ?? null;
   }
@@ -207,6 +186,9 @@ export class MemoryEventCandidateRepository implements IEventCandidateRepository
     } = {
       ...candidate,
       id,
+      startTimePrecision:
+        candidate.startTimePrecision ??
+        (candidate.startsAt ? 'instant' : 'date_only'),
       candidateFingerprint: fingerprint,
       artists: candidate.artists ? [...candidate.artists] : undefined,
     };

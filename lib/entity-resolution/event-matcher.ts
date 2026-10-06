@@ -87,18 +87,41 @@ export class EventMatcher {
           ? normalizeName(existingHeadliner.name)
           : '';
 
-        // Check if headliner matches
-        const headlinerMatches =
-          (candidatePrimaryId &&
-            existingHeadliner?.id === candidatePrimaryId) ||
-          (candidatePrimaryNorm &&
-            candidatePrimaryNorm === existingHeadlinerNorm);
+        // Check if headliner matches (canonical artist IDs take absolute precedence)
+        let headlinerMatches = false;
+        let headlinerIdDisagreement = false;
+
+        if (candidatePrimaryId && existingHeadliner?.id) {
+          if (existingHeadliner.id === candidatePrimaryId) {
+            headlinerMatches = true;
+          } else {
+            headlinerIdDisagreement = true;
+          }
+        } else if (candidatePrimaryNorm && existingHeadlinerNorm) {
+          headlinerMatches = candidatePrimaryNorm === existingHeadlinerNorm;
+        }
 
         // Check if all artists match
-        const allArtistsMatch =
+        let allArtistsMatch = false;
+        if (resolvedArtistIds.length > 0 && detail.artists.length > 0) {
+          allArtistsMatch =
+            !headlinerIdDisagreement &&
+            resolvedArtistIds.length === detail.artists.length &&
+            resolvedArtistIds.every((id) =>
+              detail.artists.some((a) => a.id === id),
+            ) &&
+            detail.artists.every((a) => resolvedArtistIds.includes(a.id));
+        } else if (
+          !headlinerIdDisagreement &&
           candidateNormArtists.length > 0 &&
-          candidateNormArtists.every((c) => existingNormArtists.includes(c)) &&
-          existingNormArtists.every((e) => candidateNormArtists.includes(e));
+          existingNormArtists.length > 0
+        ) {
+          allArtistsMatch =
+            candidateNormArtists.every((c) =>
+              existingNormArtists.includes(c),
+            ) &&
+            existingNormArtists.every((e) => candidateNormArtists.includes(e));
+        }
 
         if (headlinerMatches) {
           const reasons = ['same_venue_and_date', 'same_primary_artist'];
@@ -123,9 +146,16 @@ export class EventMatcher {
         }
 
         // Check if a secondary / opening / supporting artist matches
-        const hasOpeningOverlap =
-          detail.artists.some((a) => resolvedArtistIds.includes(a.id)) ||
-          candidateNormArtists.some((c) => existingNormArtists.includes(c));
+        let hasOpeningOverlap = false;
+        if (resolvedArtistIds.length > 0 && detail.artists.length > 0) {
+          hasOpeningOverlap = detail.artists.some((a) =>
+            resolvedArtistIds.includes(a.id),
+          );
+        } else {
+          hasOpeningOverlap = candidateNormArtists.some((c) =>
+            existingNormArtists.includes(c),
+          );
+        }
 
         if (hasOpeningOverlap) {
           // Conservative matching (Finding 6): Supporting artist overlap must NOT auto-merge!

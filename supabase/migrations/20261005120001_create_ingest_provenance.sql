@@ -88,8 +88,8 @@ create table if not exists public.event_sources (
   updated_at timestamptz not null default now(),
   constraint fk_event_sources_raw_ingest_source foreign key (raw_ingest_id, source_id)
     references public.raw_ingests(id, source_id) on delete set null,
-  constraint fk_event_sources_candidate_source foreign key (candidate_id, source_id)
-    references public.event_candidates(id, source_id) on delete set null
+  constraint fk_event_sources_candidate_source_raw foreign key (candidate_id, source_id, raw_ingest_id)
+    references public.event_candidates(id, source_id, raw_ingest_id) on delete set null
 );
 
 create unique index if not exists uq_event_sources_source_event
@@ -121,8 +121,8 @@ create table if not exists public.event_field_evidence (
   created_at timestamptz not null default now(),
   constraint fk_event_field_evidence_raw_ingest_source foreign key (raw_ingest_id, source_id)
     references public.raw_ingests(id, source_id) on delete set null,
-  constraint fk_event_field_evidence_candidate_source foreign key (candidate_id, source_id)
-    references public.event_candidates(id, source_id) on delete set null
+  constraint fk_event_field_evidence_candidate_source_raw foreign key (candidate_id, source_id, raw_ingest_id)
+    references public.event_candidates(id, source_id, raw_ingest_id) on delete set null
 );
 
 create index if not exists idx_event_field_evidence_event on public.event_field_evidence (event_id);

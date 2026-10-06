@@ -132,7 +132,9 @@ function candidateToRow(
     local_end_date: candidate.localEndDate ?? null,
     starts_at: candidate.startsAt ?? null,
     ends_at: candidate.endsAt ?? null,
-    start_time_precision: candidate.startTimePrecision ?? 'instant',
+    start_time_precision:
+      candidate.startTimePrecision ??
+      (candidate.startsAt ? 'instant' : 'date_only'),
     doors_open_at: candidate.doorsOpenAt ?? null,
     ticket_url: candidate.ticketUrl ?? null,
     price: candidate.price ?? null,
@@ -205,20 +207,13 @@ export class SupabaseEventCandidateRepository implements IEventCandidateReposito
       EventCandidate & { id: string; rawIngestId: string; sourceId: string }
     >
   > {
-    if (candidates.length === 0) return [];
-
-    const rows = candidates.map(candidateToRow);
-    const { data, error } = await this.client
-      .from('event_candidates')
-      .insert(rows)
-      .select('*');
-
-    if (error) {
-      throw new Error(
-        `Failed to create multiple event candidates: ${error.message}`,
-      );
+    const results: Array<
+      EventCandidate & { id: string; rawIngestId: string; sourceId: string }
+    > = [];
+    for (const candidate of candidates) {
+      results.push(await this.create(candidate));
     }
-    return ((data as EventCandidateRow[]) || []).map(mapRowToCandidate);
+    return results;
   }
 
   async getById(

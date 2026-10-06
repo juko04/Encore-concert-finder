@@ -173,13 +173,6 @@ export interface ISourceRepository {
 
 export interface IRawIngestRepository {
   create(ingest: Omit<RawIngest, 'id'>): Promise<RawIngest & { id: string }>;
-  getByContentHash(
-    contentHash: string,
-  ): Promise<(RawIngest & { id: string }) | null>;
-  getBySourceAndContentHash(
-    sourceId: string,
-    contentHash: string,
-  ): Promise<(RawIngest & { id: string }) | null>;
   getBySourceUrlAndContentHash(
     sourceId: string,
     sourceUrl: string,

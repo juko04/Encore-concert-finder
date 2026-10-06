@@ -230,13 +230,36 @@ describe('Supabase Golden Path Integration: Full Ingestion & Canonicalization Pi
     expect(eventSources![0].candidate_id).toBe(persistedCandA.id);
     expect(eventSources![0].raw_ingest_id).toBe(persistedRaw1Id);
 
-    // 10. Verify event field evidence recorded
+    // 10. Verify event field evidence recorded with field-level provenance (Issue 1)
     const { data: evidence } = await adminClient
       .from('event_field_evidence')
       .select('*')
       .eq('event_id', canonicalEventAId);
-    expect(evidence?.length).toBeGreaterThanOrEqual(1);
-    expect(evidence!.some((e) => e.field_name === 'title')).toBe(true);
+    expect(evidence).not.toBeNull();
+    expect(evidence!.length).toBeGreaterThanOrEqual(10);
+
+    const fieldNames = evidence!.map((e) => e.field_name);
+    expect(fieldNames).toContain('title');
+    expect(fieldNames).toContain('event_kind');
+    expect(fieldNames).toContain('status');
+    expect(fieldNames).toContain('venue');
+    expect(fieldNames).toContain('city');
+    expect(fieldNames).toContain('region');
+    expect(fieldNames).toContain('country_code');
+    expect(fieldNames).toContain('timezone');
+    expect(fieldNames).toContain('local_start_date');
+    expect(fieldNames).toContain('starts_at');
+    expect(fieldNames).toContain('start_time_precision');
+    expect(fieldNames).toContain('doors_at');
+    expect(fieldNames).toContain('primary_ticket_url');
+    expect(fieldNames).toContain('canonical_event_created');
+
+    // Verify all initial field evidence rows link to correct source, raw ingest, and candidate
+    for (const ev of evidence!) {
+      expect(ev.source_id).toBe(adapter.id);
+      expect(ev.raw_ingest_id).toBe(persistedRaw1Id);
+      expect(ev.candidate_id).toBe(persistedCandA.id);
+    }
   });
 
   it('step 2: handles second observation for Event A (rescheduled date/time, price change) without duplicate canonical event and preserving prior evidence', async () => {
@@ -390,5 +413,377 @@ describe('Supabase Golden Path Integration: Full Ingestion & Canonicalization Pi
           e.externalId === 'spotify_artist_mountain_echoes',
       ),
     ).toBe(true);
+  });
+
+  it('step 6: persists, reloads, and canonicalizes date-only candidate without startsAt (Issue 2)', async () => {
+    if (!isDbAvailable || !adminClient) return;
+
+    // Create raw ingest for date-only show
+    const rawDateOnly = await rawIngestRepo.create({
+      sourceId: adapter.id,
+      sourceUrl: `https://example-venue.com/events/date-only-${Date.now()}`,
+      acquisitionMethod: 'structured_json',
+      fetchedAt: new Date().toISOString(),
+      contentHash: `hash_date_only_${Date.now()}`,
+      contentType: 'application/json',
+      rawContent: JSON.stringify({}),
+      httpStatus: 200,
+      parserVersion: '1.1.0',
+    });
+
+    // Candidate has localStartDate, but NO startsAt and NO explicit startTimePrecision
+    const dateOnlyCandidateInput: EventCandidate & {
+      rawIngestId: string;
+      sourceId: string;
+    } = {
+      rawIngestId: rawDateOnly.id,
+      sourceId: adapter.id,
+      sourceEventId: `tm_date_only_${Date.now()}`,
+      title: 'Acoustic Sunday (Date Only)',
+      artistNames: ['Local Acoustic Duo'],
+      venueName: 'Red Rock Amphitheatre',
+      city: 'Morrison',
+      state: 'CO',
+      country: 'US',
+      timezone: 'America/Denver',
+      localStartDate: '2026-11-05',
+      // NO startsAt!
+      // NO startTimePrecision!
+      confidence: 0.95,
+      verificationStatus: 'unverified',
+      provenance: {
+        sourceId: adapter.id,
+        sourceType: 'venue',
+        acquisitionMethod: 'structured_json',
+        sourceUrl: rawDateOnly.sourceUrl,
+        rawIngestId: rawDateOnly.id,
+        fetchedAt: rawDateOnly.fetchedAt,
+        contentHash: rawDateOnly.contentHash,
+        parserVersion: '1.1.0',
+        confidence: 0.95,
+      },
+    };
+
+    // 1. Persist candidate
+    const persistedDateOnly = await candidateRepo.create(
+      dateOnlyCandidateInput,
+    );
+    expect(persistedDateOnly.id).toBeDefined();
+
+    // 2. Reload candidate from database
+    const reloaded = await candidateRepo.getById(persistedDateOnly.id);
+    expect(reloaded).not.toBeNull();
+    // Verify candidate reloads as date_only
+    expect(reloaded!.startTimePrecision).toBe('date_only');
+    expect(reloaded!.startsAt).toBeUndefined();
+
+    // 3. Canonicalize reloaded candidate
+    const resDateOnly = await coordinator.canonicalize(reloaded!);
+    expect(resDateOnly.status).toBe('created');
+    expect(resDateOnly.eventId).toBeDefined();
+
+    // 4. Verify canonical event in database
+    const { data: dbEvent } = await adminClient
+      .from('events')
+      .select('*')
+      .eq('id', resDateOnly.eventId)
+      .single();
+
+    expect(dbEvent).not.toBeNull();
+    expect(dbEvent.local_start_date).toBe('2026-11-05');
+    expect(dbEvent.starts_at).toBeNull();
+    expect(dbEvent.start_time_precision).toBe('date_only');
+    // Confirms no midnight timestamp was fabricated!
+  });
+
+  it('step 7: prevents same-name artist false merges when canonical artist IDs disagree (Issue 3)', async () => {
+    if (!isDbAvailable || !adminClient) return;
+
+    const testNonce = Date.now();
+    const rawGhost = await rawIngestRepo.create({
+      sourceId: adapter.id,
+      sourceUrl: `https://example-venue.com/events/ghost-${testNonce}`,
+      acquisitionMethod: 'structured_json',
+      fetchedAt: new Date().toISOString(),
+      contentHash: `hash_ghost_${testNonce}`,
+      contentType: 'application/json',
+      rawContent: JSON.stringify({}),
+      httpStatus: 200,
+      parserVersion: '1.1.0',
+    });
+
+    // Show 1: Artist "Ghost" with external ID provider-1 / artist-A
+    const candGhostA = await candidateRepo.create({
+      rawIngestId: rawGhost.id,
+      sourceId: adapter.id,
+      sourceEventId: `ghost_show_A_${testNonce}`,
+      title: 'Ghost Live - Tour A',
+      artistNames: ['Ghost'],
+      artists: [
+        {
+          name: 'Ghost',
+          billingPosition: 'headliner',
+          externalIds: [
+            { provider: 'provider-1', externalId: `artist-A-${testNonce}` },
+          ],
+        },
+      ],
+      venueName: 'Red Rock Amphitheatre',
+      city: 'Morrison',
+      state: 'CO',
+      country: 'US',
+      timezone: 'America/Denver',
+      localStartDate: '2026-11-12',
+      startsAt: '2026-11-12T20:00:00-06:00',
+      confidence: 0.95,
+      verificationStatus: 'unverified',
+      provenance: {
+        sourceId: adapter.id,
+        sourceType: 'venue',
+        acquisitionMethod: 'structured_json',
+        sourceUrl: rawGhost.sourceUrl,
+        rawIngestId: rawGhost.id,
+        fetchedAt: rawGhost.fetchedAt,
+        contentHash: rawGhost.contentHash,
+        parserVersion: '1.1.0',
+        confidence: 0.95,
+      },
+    });
+
+    const resGhostA = await coordinator.canonicalize(candGhostA);
+    expect(resGhostA.status).toBe('created');
+    expect(resGhostA.eventId).toBeDefined();
+
+    // Show 2: Same venue, same local start date, same artist name "Ghost", but different external ID provider-1 / artist-B
+    const candGhostB = await candidateRepo.create({
+      rawIngestId: rawGhost.id,
+      sourceId: adapter.id,
+      sourceEventId: `ghost_show_B_${testNonce}`,
+      title: 'Ghost Live - Tour B',
+      artistNames: ['Ghost'],
+      artists: [
+        {
+          name: 'Ghost',
+          billingPosition: 'headliner',
+          externalIds: [
+            { provider: 'provider-1', externalId: `artist-B-${testNonce}` },
+          ],
+        },
+      ],
+      venueName: 'Red Rock Amphitheatre',
+      city: 'Morrison',
+      state: 'CO',
+      country: 'US',
+      timezone: 'America/Denver',
+      localStartDate: '2026-11-12',
+      startsAt: '2026-11-12T20:00:00-06:00',
+      confidence: 0.95,
+      verificationStatus: 'unverified',
+      provenance: {
+        sourceId: adapter.id,
+        sourceType: 'venue',
+        acquisitionMethod: 'structured_json',
+        sourceUrl: rawGhost.sourceUrl,
+        rawIngestId: rawGhost.id,
+        fetchedAt: rawGhost.fetchedAt,
+        contentHash: rawGhost.contentHash,
+        parserVersion: '1.1.0',
+        confidence: 0.95,
+      },
+    });
+
+    const resGhostB = await coordinator.canonicalize(candGhostB);
+    // Must NOT merge into Event A!
+    expect(resGhostB.status).not.toBe('matched');
+    expect(resGhostB.status).toBe('needs_review');
+    expect(resGhostB.eventId).toBeNull();
+  });
+
+  it('step 8: enforces exact candidate ↔ raw observation composite FK integrity (Issue 4)', async () => {
+    if (!isDbAvailable || !adminClient) return;
+
+    const sourceA = adapter.id;
+
+    // Raw Ingest 1
+    const raw1 = await rawIngestRepo.create({
+      sourceId: sourceA,
+      sourceUrl: `https://example-venue.com/events/raw-1-${Date.now()}`,
+      acquisitionMethod: 'structured_json',
+      fetchedAt: new Date().toISOString(),
+      contentHash: `hash_raw1_${Date.now()}`,
+      contentType: 'application/json',
+      rawContent: '{}',
+      httpStatus: 200,
+      parserVersion: '1.1.0',
+    });
+
+    // Candidate 1 under Raw Ingest 1
+    const cand1 = await candidateRepo.create({
+      rawIngestId: raw1.id,
+      sourceId: sourceA,
+      sourceEventId: `src_ev_fk_${Date.now()}`,
+      title: 'Candidate Under Raw 1',
+      artistNames: ['Artist One'],
+      venueName: 'Red Rock Amphitheatre',
+      city: 'Morrison',
+      state: 'CO',
+      timezone: 'America/Denver',
+      localStartDate: '2026-11-15',
+      confidence: 0.95,
+      verificationStatus: 'unverified',
+      provenance: {
+        sourceId: sourceA,
+        sourceType: 'venue',
+        acquisitionMethod: 'structured_json',
+        sourceUrl: raw1.sourceUrl,
+        rawIngestId: raw1.id,
+        fetchedAt: raw1.fetchedAt,
+        contentHash: raw1.contentHash,
+        parserVersion: '1.1.0',
+        confidence: 0.95,
+      },
+    });
+
+    // Raw Ingest 2 under same Source A
+    const raw2 = await rawIngestRepo.create({
+      sourceId: sourceA,
+      sourceUrl: `https://example-venue.com/events/raw-2-${Date.now()}`,
+      acquisitionMethod: 'structured_json',
+      fetchedAt: new Date().toISOString(),
+      contentHash: `hash_raw2_${Date.now()}`,
+      contentType: 'application/json',
+      rawContent: '{}',
+      httpStatus: 200,
+      parserVersion: '1.1.0',
+    });
+
+    expect(raw1.id).not.toBe(raw2.id);
+
+    // Attempt to insert event_sources mixing Candidate 1 with Raw Ingest 2
+    const { error: crossRawSourceError } = await adminClient
+      .from('event_sources')
+      .insert({
+        event_id: canonicalEventAId,
+        source_id: sourceA,
+        candidate_id: cand1.id,
+        raw_ingest_id: raw2.id, // Mismatch! cand1 belongs to raw1, not raw2
+        source_url: 'https://example.com/cross-raw',
+      });
+
+    expect(crossRawSourceError).not.toBeNull();
+    // 23503 is foreign_key_violation in PostgreSQL
+    expect(crossRawSourceError?.code).toBe('23503');
+    expect(crossRawSourceError?.message).toContain(
+      'fk_event_sources_candidate_source_raw',
+    );
+
+    // Attempt to insert event_field_evidence mixing Candidate 1 with Raw Ingest 2
+    const { error: crossRawEvidenceError } = await adminClient
+      .from('event_field_evidence')
+      .insert({
+        event_id: canonicalEventAId,
+        field_name: 'title',
+        source_id: sourceA,
+        candidate_id: cand1.id,
+        raw_ingest_id: raw2.id, // Mismatch! cand1 belongs to raw1, not raw2
+        observed_value: { title: 'Mismatch' },
+        value_hash: 'hash_mismatch',
+      });
+
+    expect(crossRawEvidenceError).not.toBeNull();
+    expect(crossRawEvidenceError?.code).toBe('23503');
+    expect(crossRawEvidenceError?.message).toContain(
+      'fk_event_field_evidence_candidate_source_raw',
+    );
+  });
+
+  it('step 9: executes createMany() idempotently on batch replay without duplicates (Issue 5)', async () => {
+    if (!isDbAvailable || !adminClient) return;
+
+    const rawBatch = await rawIngestRepo.create({
+      sourceId: adapter.id,
+      sourceUrl: `https://example-venue.com/events/batch-${Date.now()}`,
+      acquisitionMethod: 'structured_json',
+      fetchedAt: new Date().toISOString(),
+      contentHash: `hash_batch_${Date.now()}`,
+      contentType: 'application/json',
+      rawContent: '{}',
+      httpStatus: 200,
+      parserVersion: '1.1.0',
+    });
+
+    const batchInput = [
+      {
+        rawIngestId: rawBatch.id,
+        sourceId: adapter.id,
+        sourceEventId: `batch_show_1_${Date.now()}`,
+        title: 'Batch Show One',
+        artistNames: ['Artist One'],
+        venueName: 'Red Rock Amphitheatre',
+        city: 'Morrison',
+        state: 'CO',
+        timezone: 'America/Denver',
+        localStartDate: '2026-11-20',
+        confidence: 0.95,
+        verificationStatus: 'unverified' as const,
+        provenance: {
+          sourceId: adapter.id,
+          sourceType: 'venue' as const,
+          acquisitionMethod: 'structured_json' as const,
+          sourceUrl: rawBatch.sourceUrl,
+          rawIngestId: rawBatch.id,
+          fetchedAt: rawBatch.fetchedAt,
+          contentHash: rawBatch.contentHash,
+          parserVersion: '1.1.0',
+          confidence: 0.95,
+        },
+      },
+      {
+        rawIngestId: rawBatch.id,
+        sourceId: adapter.id,
+        sourceEventId: `batch_show_2_${Date.now()}`,
+        title: 'Batch Show Two',
+        artistNames: ['Artist Two'],
+        venueName: 'Red Rock Amphitheatre',
+        city: 'Morrison',
+        state: 'CO',
+        timezone: 'America/Denver',
+        localStartDate: '2026-11-21',
+        confidence: 0.95,
+        verificationStatus: 'unverified' as const,
+        provenance: {
+          sourceId: adapter.id,
+          sourceType: 'venue' as const,
+          acquisitionMethod: 'structured_json' as const,
+          sourceUrl: rawBatch.sourceUrl,
+          rawIngestId: rawBatch.id,
+          fetchedAt: rawBatch.fetchedAt,
+          contentHash: rawBatch.contentHash,
+          parserVersion: '1.1.0',
+          confidence: 0.95,
+        },
+      },
+    ];
+
+    // First bulk insert
+    const run1 = await candidateRepo.createMany(batchInput);
+    expect(run1.length).toBe(2);
+    expect(run1[0].id).not.toBe(run1[1].id);
+
+    // Replay identical batch
+    const run2 = await candidateRepo.createMany(batchInput);
+    expect(run2.length).toBe(2);
+
+    // Candidates must reuse existing rows with stable IDs
+    expect(run2[0].id).toBe(run1[0].id);
+    expect(run2[1].id).toBe(run1[1].id);
+
+    // Verify row count in Supabase
+    const { data: dbCandidates } = await adminClient
+      .from('event_candidates')
+      .select('*')
+      .eq('raw_ingest_id', rawBatch.id);
+
+    expect(dbCandidates?.length).toBe(2);
   });
 });

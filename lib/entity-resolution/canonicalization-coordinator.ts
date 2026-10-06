@@ -320,6 +320,83 @@ export class CanonicalizationCoordinator {
         candidate.localEndDate && candidate.localEndDate !== localStartDate,
       );
 
+      const eventData = {
+        name: candidate.title,
+        normalized_name: normalizeName(candidate.title),
+        event_kind:
+          candidate.eventKind ??
+          (candidate.isFestival ? 'festival' : 'concert'),
+        status: (candidate.rawPayload?.status as EventStatus) ?? 'scheduled',
+        venue_id: resolvedVenue.id,
+        city: candidate.city ?? resolvedVenue.city ?? null,
+        region: candidate.state ?? resolvedVenue.region ?? null,
+        country_code: candidate.country ?? resolvedVenue.countryCode ?? null,
+        timezone: resolvedTimezone,
+        local_start_date: localStartDate,
+        local_end_date: candidate.localEndDate ?? null,
+        starts_at: candidate.startsAt ?? null,
+        ends_at: candidate.endsAt ?? null,
+        start_time_precision:
+          candidate.startTimePrecision ??
+          (candidate.startsAt ? 'instant' : 'date_only'),
+        doors_at: candidate.doorsOpenAt ?? null,
+        is_multi_day: isMultiDay,
+        official_url: null,
+        primary_ticket_url: candidate.ticketUrl ?? null,
+      };
+
+      const creationEvidences: NonNullable<
+        CanonicalizationPayload['evidence']
+      > = [
+        {
+          field_name: 'canonical_event_created',
+          source_id: candidate.sourceId,
+          raw_ingest_id: candidate.rawIngestId,
+          candidate_id: candidateId,
+          observed_value: { title: candidate.title },
+          value_hash: `created_${candidateId}`,
+          confidence: candidate.confidence,
+          observed_at:
+            candidate.provenance?.fetchedAt ?? new Date().toISOString(),
+          parser_version: candidate.provenance?.parserVersion ?? '1.0.0',
+        },
+      ];
+
+      const addFieldEvidence = (fieldName: string, value: unknown) => {
+        if (value === null || value === undefined || value === '') return;
+        creationEvidences.push({
+          field_name: fieldName,
+          source_id: candidate.sourceId,
+          raw_ingest_id: candidate.rawIngestId,
+          candidate_id: candidateId,
+          observed_value: value,
+          value_hash: `${fieldName}_${typeof value === 'object' ? JSON.stringify(value) : String(value)}`,
+          confidence: candidate.confidence,
+          observed_at:
+            candidate.provenance?.fetchedAt ?? new Date().toISOString(),
+          parser_version: candidate.provenance?.parserVersion ?? '1.0.0',
+        });
+      };
+
+      addFieldEvidence('title', eventData.name);
+      addFieldEvidence('event_kind', eventData.event_kind);
+      addFieldEvidence('status', eventData.status);
+      addFieldEvidence('venue', {
+        id: resolvedVenue.id,
+        name: resolvedVenue.name,
+      });
+      addFieldEvidence('city', eventData.city);
+      addFieldEvidence('region', eventData.region);
+      addFieldEvidence('country_code', eventData.country_code);
+      addFieldEvidence('timezone', eventData.timezone);
+      addFieldEvidence('local_start_date', eventData.local_start_date);
+      addFieldEvidence('local_end_date', eventData.local_end_date);
+      addFieldEvidence('starts_at', eventData.starts_at);
+      addFieldEvidence('ends_at', eventData.ends_at);
+      addFieldEvidence('start_time_precision', eventData.start_time_precision);
+      addFieldEvidence('doors_at', eventData.doors_at);
+      addFieldEvidence('primary_ticket_url', eventData.primary_ticket_url);
+
       payload = {
         venueToCreate:
           venuePrep.isNew && venuePrep.venueToCreate
@@ -334,30 +411,7 @@ export class CanonicalizationCoordinator {
                 website: venuePrep.venueToCreate.website,
               }
             : null,
-        event: {
-          name: candidate.title,
-          normalized_name: normalizeName(candidate.title),
-          event_kind:
-            candidate.eventKind ??
-            (candidate.isFestival ? 'festival' : 'concert'),
-          status: (candidate.rawPayload?.status as EventStatus) ?? 'scheduled',
-          venue_id: resolvedVenue.id,
-          city: candidate.city ?? resolvedVenue.city ?? null,
-          region: candidate.state ?? resolvedVenue.region ?? null,
-          country_code: candidate.country ?? resolvedVenue.countryCode ?? null,
-          timezone: resolvedTimezone,
-          local_start_date: localStartDate,
-          local_end_date: candidate.localEndDate ?? null,
-          starts_at: candidate.startsAt ?? null,
-          ends_at: candidate.endsAt ?? null,
-          start_time_precision:
-            candidate.startTimePrecision ??
-            (candidate.startsAt ? 'instant' : 'date_only'),
-          doors_at: candidate.doorsOpenAt ?? null,
-          is_multi_day: isMultiDay,
-          official_url: null,
-          primary_ticket_url: candidate.ticketUrl ?? null,
-        },
+        event: eventData,
         artists: artistPayloads,
         ticketLinks: candidate.ticketUrl
           ? [
@@ -381,20 +435,7 @@ export class CanonicalizationCoordinator {
           source_url: candidate.provenance?.sourceUrl ?? '',
           confidence: candidate.confidence,
         },
-        evidence: [
-          {
-            field_name: 'canonical_event_created',
-            source_id: candidate.sourceId,
-            raw_ingest_id: candidate.rawIngestId,
-            candidate_id: candidateId,
-            observed_value: { title: candidate.title },
-            value_hash: `created_${candidateId}`,
-            confidence: candidate.confidence,
-            observed_at:
-              candidate.provenance?.fetchedAt ?? new Date().toISOString(),
-            parser_version: candidate.provenance?.parserVersion ?? '1.0.0',
-          },
-        ],
+        evidence: creationEvidences,
         resolution: {
           event_candidate_id: candidateId,
           status: 'created',

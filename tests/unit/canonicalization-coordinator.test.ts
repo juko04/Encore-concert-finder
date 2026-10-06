@@ -409,5 +409,47 @@ describe('CanonicalizationCoordinator Unit Tests', () => {
       expect(resA2.status).toBe('matched');
       expect(resA2.eventId).toBe(resA1.eventId);
     });
+
+    it('obeys candidate-identity semantics and idempotency on createMany batch replay (Issue 5)', async () => {
+      const { MemoryEventCandidateRepository } =
+        await import('@/lib/repositories/memory-repositories');
+      const candRepo = new MemoryEventCandidateRepository();
+
+      const rawIngestId = '00000000-0000-0000-0000-000000000010';
+      const sourceId = 'a0000000-0000-0000-0000-000000000001';
+
+      const batch = [
+        {
+          ...fixtures.single_show,
+          rawIngestId,
+          sourceId,
+          sourceEventId: 'batch_ev_1',
+          title: 'Batch Event 1',
+        },
+        {
+          ...fixtures.single_show,
+          rawIngestId,
+          sourceId,
+          sourceEventId: 'batch_ev_2',
+          title: 'Batch Event 2',
+        },
+      ];
+
+      // First execution
+      const firstRun = await candRepo.createMany(batch);
+      expect(firstRun.length).toBe(2);
+      expect(firstRun[0].id).not.toBe(firstRun[1].id);
+
+      // Replay identical batch
+      const secondRun = await candRepo.createMany(batch);
+      expect(secondRun.length).toBe(2);
+
+      // Candidate IDs must remain stable and identical (idempotent, no duplicates)
+      expect(secondRun[0].id).toBe(firstRun[0].id);
+      expect(secondRun[1].id).toBe(firstRun[1].id);
+
+      const allInRaw = await candRepo.getByRawIngestId(rawIngestId);
+      expect(allInRaw.length).toBe(2);
+    });
   });
 });

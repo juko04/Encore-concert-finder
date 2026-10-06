@@ -106,42 +106,6 @@ export class SupabaseRawIngestRepository implements IRawIngestRepository {
     return data ? mapRowToRawIngest(data as RawIngestRow) : null;
   }
 
-  async getBySourceAndContentHash(
-    sourceId: string,
-    contentHash: string,
-  ): Promise<(RawIngest & { id: string }) | null> {
-    const { data, error } = await this.client
-      .from('raw_ingests')
-      .select('*')
-      .eq('source_id', sourceId)
-      .eq('content_hash', contentHash)
-      .maybeSingle();
-
-    if (error) {
-      throw new Error(
-        `Failed to get raw ingest by source and content hash: ${error.message}`,
-      );
-    }
-    return data ? mapRowToRawIngest(data as RawIngestRow) : null;
-  }
-
-  async getByContentHash(
-    contentHash: string,
-  ): Promise<(RawIngest & { id: string }) | null> {
-    const { data, error } = await this.client
-      .from('raw_ingests')
-      .select('*')
-      .eq('content_hash', contentHash)
-      .maybeSingle();
-
-    if (error) {
-      throw new Error(
-        `Failed to get raw ingest by content hash: ${error.message}`,
-      );
-    }
-    return data ? mapRowToRawIngest(data as RawIngestRow) : null;
-  }
-
   async getById(id: string): Promise<(RawIngest & { id: string }) | null> {
     const { data, error } = await this.client
       .from('raw_ingests')
