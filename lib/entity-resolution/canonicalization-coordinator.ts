@@ -43,21 +43,28 @@ export class CanonicalizationCoordinator {
     const candidateId =
       candidate.id ?? `cand_${Math.random().toString(36).substring(2, 11)}`;
 
-    // 1. Resolve Venue (does not fabricate Colorado geography)
-    const venue = await this.venueResolver.resolve(this.catalogRepo, {
-      name: candidate.venueName,
-      city: candidate.city ?? '',
-      region: candidate.state,
-      countryCode: candidate.country ?? 'US',
-      timezone: candidate.timezone,
-    });
+    // 1. Resolve Venue (pure in-memory prep, zero upfront writes to DB)
+    const venuePrep = await this.venueResolver.resolveOrPrepare(
+      this.catalogRepo,
+      {
+        name: candidate.venueName,
+        city: candidate.city ?? '',
+        region: candidate.state,
+        countryCode: candidate.country ?? null,
+        timezone: candidate.timezone,
+      },
+    );
+    const resolvedVenue = venuePrep.venue!;
 
     // 2. Resolve Timezone (Finding 3: Never default to America/Denver)
     let resolvedTimezone: string | null = null;
     if (candidate.timezone && validateIanaTimezone(candidate.timezone)) {
       resolvedTimezone = candidate.timezone;
-    } else if (venue.timezone && validateIanaTimezone(venue.timezone)) {
-      resolvedTimezone = venue.timezone;
+    } else if (
+      resolvedVenue.timezone &&
+      validateIanaTimezone(resolvedVenue.timezone)
+    ) {
+      resolvedTimezone = resolvedVenue.timezone;
     }
 
     if (!resolvedTimezone) {
@@ -112,13 +119,59 @@ export class CanonicalizationCoordinator {
       };
     }
 
-    // 4. Resolve Artists
+    // 4. Resolve Artists (Finding 5: In-memory prep with ambiguity detection)
+    const artistPayloads: NonNullable<CanonicalizationPayload['artists']> = [];
     const resolvedArtistIds: string[] = [];
-    for (const artistName of candidate.artistNames) {
-      const resolved = await this.artistResolver.resolve(this.catalogRepo, {
-        name: artistName,
-      });
-      resolvedArtistIds.push(resolved.artist.id);
+
+    for (let index = 0; index < candidate.artistNames.length; index++) {
+      const artistName = candidate.artistNames[index];
+      const resolved = await this.artistResolver.resolveOrPrepare(
+        this.catalogRepo,
+        { name: artistName },
+      );
+
+      if (resolved.status === 'ambiguous') {
+        const reasons = ['ambiguous_artist_identity', ...resolved.reasons];
+        const payload: CanonicalizationPayload = {
+          resolution: {
+            event_candidate_id: candidateId,
+            status: 'needs_review',
+            matcher_version: '1.0.0',
+            confidence: 0.4,
+            reasons,
+          },
+        };
+        await this.catalogRepo.applyCanonicalization(payload);
+        return {
+          eventId: null,
+          status: 'needs_review',
+          reasons,
+        };
+      }
+
+      if (resolved.status === 'matched') {
+        resolvedArtistIds.push(resolved.artistId!);
+        artistPayloads.push({
+          artist_id: resolved.artistId!,
+          billing_position: index === 0 ? 'headliner' : 'support',
+          sort_order: index,
+        });
+      } else if (resolved.status === 'to_create') {
+        const toCreate = resolved.artistToCreate!;
+        resolvedArtistIds.push(toCreate.id);
+        artistPayloads.push({
+          artist_id: toCreate.id,
+          name: toCreate.name,
+          normalized_name: toCreate.normalizedName,
+          external_ids: toCreate.externalIds?.map((e) => ({
+            provider: e.provider,
+            external_id: e.externalId,
+            provider_url: e.providerUrl,
+          })),
+          billing_position: index === 0 ? 'headliner' : 'support',
+          sort_order: index,
+        });
+      }
     }
 
     // 5. Match Event (Finding 6: Conservative matching)
@@ -131,7 +184,7 @@ export class CanonicalizationCoordinator {
     const matchResult = await this.eventMatcher.match(
       this.catalogRepo,
       preparedCandidate,
-      venue.id,
+      resolvedVenue.id,
       resolvedArtistIds,
     );
 
@@ -161,7 +214,7 @@ export class CanonicalizationCoordinator {
       ? candidate.sourceId
       : null;
 
-    // 7. Assemble Atomic Transaction Payload (Finding 2 & 9)
+    // 7. Assemble Atomic Transaction Payload (zero upfront writes)
     let payload: CanonicalizationPayload;
 
     if (matchResult.decision === 'create') {
@@ -170,15 +223,28 @@ export class CanonicalizationCoordinator {
       );
 
       payload = {
+        venueToCreate:
+          venuePrep.isNew && venuePrep.venueToCreate
+            ? {
+                id: venuePrep.venueToCreate.id,
+                name: venuePrep.venueToCreate.name,
+                normalized_name: venuePrep.venueToCreate.normalizedName,
+                city: venuePrep.venueToCreate.city,
+                region: venuePrep.venueToCreate.region,
+                country_code: venuePrep.venueToCreate.countryCode,
+                timezone: venuePrep.venueToCreate.timezone,
+                website: venuePrep.venueToCreate.website,
+              }
+            : null,
         event: {
           name: candidate.title,
           normalized_name: normalizeName(candidate.title),
           event_kind: candidate.isFestival ? 'festival' : 'concert',
           status: (candidate.rawPayload?.status as EventStatus) ?? 'scheduled',
-          venue_id: venue.id,
-          city: candidate.city ?? venue.city ?? null,
-          region: candidate.state ?? venue.region ?? null,
-          country_code: candidate.country ?? venue.countryCode ?? 'US',
+          venue_id: resolvedVenue.id,
+          city: candidate.city ?? resolvedVenue.city ?? null,
+          region: candidate.state ?? resolvedVenue.region ?? null,
+          country_code: candidate.country ?? resolvedVenue.countryCode ?? null,
           timezone: resolvedTimezone,
           local_start_date: localStartDate,
           local_end_date: candidate.localEndDate ?? null,
@@ -192,11 +258,7 @@ export class CanonicalizationCoordinator {
           official_url: null,
           primary_ticket_url: candidate.ticketUrl ?? null,
         },
-        artists: resolvedArtistIds.map((id, index) => ({
-          artist_id: id,
-          billing_position: index === 0 ? 'headliner' : 'support',
-          sort_order: index,
-        })),
+        artists: artistPayloads,
         ticketLinks: candidate.ticketUrl
           ? [
               {
@@ -255,11 +317,7 @@ export class CanonicalizationCoordinator {
           id: existingEvent.id,
           ...mergeOutcome.updates,
         },
-        artists: resolvedArtistIds.map((id, index) => ({
-          artist_id: id,
-          billing_position: index === 0 ? 'headliner' : 'support',
-          sort_order: index,
-        })),
+        artists: artistPayloads,
         ticketLinks: candidate.ticketUrl
           ? [
               {

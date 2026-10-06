@@ -162,22 +162,73 @@ describe('Catalog RLS, Security & Canonicalization Atomicity', () => {
     }
   });
 
-  it('executes canonicalization atomically and rolls back on failure (Finding 2)', async () => {
+  it('proves apply_canonicalization RPC execution is restricted strictly to service_role', async () => {
+    if (!isDbAvailable || !anonClient || !adminClient) return;
+
+    // 1. Anonymous client cannot execute apply_canonicalization
+    const { error: anonRpcError } = await anonClient.rpc(
+      'apply_canonicalization',
+      { payload: {} },
+    );
+    expect(anonRpcError).not.toBeNull();
+    // PostgreSQL error code 42501 is insufficient_privilege / permission denied
+    expect(anonRpcError?.code).toBe('42501');
+
+    // 2. Normal authenticated user cannot execute apply_canonicalization
+    const testEmail = `auth_test_${Date.now()}@example.com`;
+    const { data: userData, error: createError } =
+      await adminClient.auth.admin.createUser({
+        email: testEmail,
+        password: 'TestPassword123!',
+        email_confirm: true,
+      });
+
+    if (!createError && userData.user) {
+      const { data: sessionData } = await anonClient.auth.signInWithPassword({
+        email: testEmail,
+        password: 'TestPassword123!',
+      });
+
+      if (sessionData.session) {
+        const authedUserClient = createClient(
+          credentials!.url,
+          credentials!.anonKey,
+          {
+            global: {
+              headers: {
+                Authorization: `Bearer ${sessionData.session.access_token}`,
+              },
+            },
+            auth: { autoRefreshToken: false, persistSession: false },
+          },
+        );
+
+        const { error: userRpcError } = await authedUserClient.rpc(
+          'apply_canonicalization',
+          { payload: {} },
+        );
+        expect(userRpcError).not.toBeNull();
+        expect(userRpcError?.code).toBe('42501');
+      }
+
+      await adminClient.auth.admin.deleteUser(userData.user.id);
+    }
+  });
+
+  it('executes canonicalization atomically and rolls back venue and artist on failure (Finding 2)', async () => {
     if (!isDbAvailable || !adminClient) return;
 
-    // 1. Successful atomic execution
-    const candidateId = `cand_atomic_${Date.now()}`;
-    const venueId = 'a0000000-0000-0000-0000-000000000001'; // or create test venue
     const sourceId = 'a0000000-0000-0000-0000-000000000001';
+    const timestamp = Date.now();
 
-    // Insert dummy raw ingest and candidate
+    // 1. Successful atomic execution with venue and artists
     const { data: rawData } = await adminClient
       .from('raw_ingests')
       .insert({
         source_id: sourceId,
-        source_url: 'https://example.com/atomic',
+        source_url: 'https://example.com/atomic_success',
         acquisition_method: 'api',
-        content_hash: `hash_${Date.now()}`,
+        content_hash: `hash_success_${timestamp}`,
       })
       .select('id')
       .single();
@@ -191,9 +242,9 @@ describe('Catalog RLS, Security & Canonicalization Atomicity', () => {
         raw_ingest_id: rawIngestId,
         source_type: 'venue',
         acquisition_method: 'api',
-        source_url: 'https://example.com/atomic',
-        title: 'Atomic Concert Test',
-        venue_name: 'Test Venue',
+        source_url: 'https://example.com/atomic_success',
+        title: `Atomic Concert Success ${timestamp}`,
+        venue_name: 'Test Venue Success',
         timezone: 'America/Denver',
         local_start_date: '2026-11-20',
       })
@@ -201,19 +252,34 @@ describe('Catalog RLS, Security & Canonicalization Atomicity', () => {
       .single();
 
     const validPayload = {
+      venueToCreate: {
+        name: `Success Venue ${timestamp}`,
+        normalized_name: `success venue ${timestamp}`,
+        city: 'Denver',
+        region: 'CO',
+        timezone: 'America/Denver',
+      },
       event: {
-        name: 'Atomic Concert Test',
-        normalized_name: 'atomic concert test',
+        name: `Atomic Concert Success ${timestamp}`,
+        normalized_name: `atomic concert success ${timestamp}`,
         event_kind: 'concert',
         status: 'scheduled',
         timezone: 'America/Denver',
         local_start_date: '2026-11-20',
       },
+      artists: [
+        {
+          name: `Success Artist ${timestamp}`,
+          normalized_name: `success artist ${timestamp}`,
+          billing_position: 'headliner',
+          sort_order: 0,
+        },
+      ],
       source: {
         source_id: sourceId,
         candidate_id: candData?.id,
         raw_ingest_id: rawIngestId,
-        source_url: 'https://example.com/atomic',
+        source_url: 'https://example.com/atomic_success',
       },
       resolution: {
         event_candidate_id: candData?.id,
@@ -231,17 +297,33 @@ describe('Catalog RLS, Security & Canonicalization Atomicity', () => {
     expect(successError).toBeNull();
     expect(successData?.eventId).toBeDefined();
 
-    // 2. Failure rollback test: pass an invalid payload that causes a foreign key constraint violation
-    const invalidCandidateId = '00000000-0000-0000-0000-000000000000'; // non-existent candidate ID
+    // 2. Failure rollback test: pass an invalid candidate ID in resolution
+    // causing a foreign key violation; ensure neither venue nor artist are persisted!
+    const rollbackSuffix = `fail_${Date.now()}`;
     const failedPayload = {
+      venueToCreate: {
+        name: `Rollback Venue ${rollbackSuffix}`,
+        normalized_name: `rollback venue ${rollbackSuffix}`,
+        city: 'Denver',
+        region: 'CO',
+        timezone: 'America/Denver',
+      },
+      artists: [
+        {
+          name: `Rollback Artist ${rollbackSuffix}`,
+          normalized_name: `rollback artist ${rollbackSuffix}`,
+          billing_position: 'headliner',
+          sort_order: 0,
+        },
+      ],
       event: {
-        name: 'Should Not Be Persisted',
-        normalized_name: 'should not be persisted',
+        name: `Rollback Event ${rollbackSuffix}`,
+        normalized_name: `rollback event ${rollbackSuffix}`,
         timezone: 'America/Denver',
         local_start_date: '2026-11-21',
       },
       resolution: {
-        event_candidate_id: invalidCandidateId, // will fail FK constraint on candidate_resolutions
+        event_candidate_id: '00000000-0000-0000-0000-000000000000', // invalid candidate FK
         status: 'created',
         confidence: 0.9,
       },
@@ -252,15 +334,127 @@ describe('Catalog RLS, Security & Canonicalization Atomicity', () => {
       { payload: failedPayload },
     );
 
-    // RPC must fail due to foreign key violation
     expect(failedError).not.toBeNull();
 
-    // Verify that NO event with 'should not be persisted' was created
+    // Verify atomic rollback of event, venue, and artist
     const { data: orphanedEvent } = await adminClient
       .from('events')
       .select('id')
-      .eq('normalized_name', 'should not be persisted');
-
+      .eq('normalized_name', `rollback event ${rollbackSuffix}`);
     expect(orphanedEvent?.length).toBe(0);
+
+    const { data: orphanedVenue } = await adminClient
+      .from('venues')
+      .select('id')
+      .eq('normalized_name', `rollback venue ${rollbackSuffix}`);
+    expect(orphanedVenue?.length).toBe(0);
+
+    const { data: orphanedArtist } = await adminClient
+      .from('artists')
+      .select('id')
+      .eq('normalized_name', `rollback artist ${rollbackSuffix}`);
+    expect(orphanedArtist?.length).toBe(0);
+  });
+
+  it('enforces temporal database check constraints', async () => {
+    if (!isDbAvailable || !adminClient) return;
+
+    // Constraint 1: instant precision requires starts_at
+    const { error: instantError } = await adminClient.from('events').insert({
+      name: 'Missing Instant',
+      normalized_name: 'missing instant',
+      start_time_precision: 'instant',
+      starts_at: null,
+      timezone: 'America/Denver',
+      local_start_date: '2026-10-15',
+    });
+    expect(instantError).not.toBeNull();
+
+    // Constraint 2: date_only precision forbids starts_at
+    const { error: dateOnlyError } = await adminClient.from('events').insert({
+      name: 'Invalid Date Only',
+      normalized_name: 'invalid date only',
+      start_time_precision: 'date_only',
+      starts_at: '2026-10-15T20:00:00Z',
+      timezone: 'America/Denver',
+      local_start_date: '2026-10-15',
+    });
+    expect(dateOnlyError).not.toBeNull();
+
+    // Constraint 3: local_end_date cannot precede local_start_date
+    const { error: dateOrderError } = await adminClient.from('events').insert({
+      name: 'Backwards Dates',
+      normalized_name: 'backwards dates',
+      timezone: 'America/Denver',
+      local_start_date: '2026-10-15',
+      local_end_date: '2026-10-14',
+    });
+    expect(dateOrderError).not.toBeNull();
+
+    // Constraint 4: multi_day consistency
+    const { error: multiDayError } = await adminClient.from('events').insert({
+      name: 'Multi Day Inconsistent',
+      normalized_name: 'multi day inconsistent',
+      timezone: 'America/Denver',
+      local_start_date: '2026-10-15',
+      local_end_date: '2026-10-15',
+      is_multi_day: true,
+    });
+    expect(multiDayError).not.toBeNull();
+  });
+
+  it('enforces compound foreign key integrity across candidate and raw ingest sources', async () => {
+    if (!isDbAvailable || !adminClient) return;
+
+    const sourceA = 'a0000000-0000-0000-0000-000000000001';
+    const sourceB = 'b0000000-0000-0000-0000-000000000002';
+
+    // Insert raw ingest for source A
+    const { data: rawA } = await adminClient
+      .from('raw_ingests')
+      .insert({
+        source_id: sourceA,
+        source_url: 'https://example.com/source_a',
+        acquisition_method: 'api',
+        content_hash: `hash_fk_${Date.now()}`,
+      })
+      .select('id')
+      .single();
+
+    // Attempting to create candidate under source B with raw_ingest of source A must fail!
+    const { error: crossSourceError } = await adminClient
+      .from('event_candidates')
+      .insert({
+        source_id: sourceB, // mismatch with raw ingest's source_id
+        raw_ingest_id: rawA?.id,
+        source_type: 'venue',
+        acquisition_method: 'api',
+        source_url: 'https://example.com/source_b',
+        title: 'Cross Source Candidate',
+        venue_name: 'Test Venue',
+        timezone: 'America/Denver',
+        local_start_date: '2026-11-20',
+      });
+
+    expect(crossSourceError).not.toBeNull();
+    // 23503 is foreign_key_violation in PostgreSQL
+    expect(crossSourceError?.code).toBe('23503');
+  });
+
+  it('proves seeded operational tables remain completely hidden from anon users', async () => {
+    if (!isDbAvailable || !adminClient || !anonClient) return;
+
+    // Verify admin can see populated operational tables
+    const { data: adminCandidates } = await adminClient
+      .from('event_candidates')
+      .select('id')
+      .limit(5);
+    expect(adminCandidates && adminCandidates.length > 0).toBeTruthy();
+
+    // Query same table with anonClient: must return 0 rows (RLS blocks read)
+    const { data: anonCandidates, error: anonError } = await anonClient
+      .from('event_candidates')
+      .select('id');
+    expect(anonError || anonCandidates?.length === 0).toBeTruthy();
   });
 });

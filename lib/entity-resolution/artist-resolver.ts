@@ -1,3 +1,9 @@
+/**
+ * Artist Entity Resolution
+ * Resolves candidate artist references to canonical Artist records.
+ * A normalized name is treated as a match aid, never a universal identity key.
+ */
+
 import type { Artist } from '@/lib/domain/catalog';
 import { normalizeName } from '@/lib/domain/value-objects';
 import type { ICatalogRepository } from '@/lib/repositories/interfaces';
@@ -11,6 +17,23 @@ export interface ResolveArtistOptions {
   }>;
 }
 
+export interface ArtistPreparationResult {
+  status: 'matched' | 'to_create' | 'ambiguous';
+  artistId?: string;
+  artist?: Artist;
+  artistToCreate?: {
+    id: string;
+    name: string;
+    normalizedName: string;
+    externalIds?: Array<{
+      provider: string;
+      externalId: string;
+      providerUrl?: string | null;
+    }>;
+  };
+  reasons: string[];
+}
+
 export interface ResolvedArtistResult {
   artist: Artist;
   isNew: boolean;
@@ -18,10 +41,13 @@ export interface ResolvedArtistResult {
 }
 
 export class ArtistResolver {
-  async resolve(
+  /**
+   * Resolves an artist or prepares an atomic creation specification without writing to the database.
+   */
+  async resolveOrPrepare(
     catalogRepo: ICatalogRepository,
     options: ResolveArtistOptions,
-  ): Promise<ResolvedArtistResult> {
+  ): Promise<ArtistPreparationResult> {
     const rawName = options.name?.trim();
     if (!rawName) {
       throw new Error('Artist name must be a non-empty string');
@@ -36,50 +62,135 @@ export class ArtistResolver {
         );
         if (matched) {
           return {
+            status: 'matched',
+            artistId: matched.id,
             artist: matched,
-            isNew: false,
-            matchMethod: 'external_id',
+            reasons: ['exact_external_id_match'],
           };
         }
       }
     }
 
-    // 2. Resolve by normalized artist name
+    // 2. Query all existing artists matching the normalized name
     const normalizedName = normalizeName(rawName);
-    const existing = await catalogRepo.findArtistByName(normalizedName);
+    const existingArtists = await catalogRepo.findArtistsByName(normalizedName);
 
-    if (existing) {
-      // Attach any new external IDs to the existing artist
+    if (existingArtists.length > 1) {
+      // Multiple artists share this name; without a matching external ID, this is ambiguous!
+      return {
+        status: 'ambiguous',
+        reasons: ['multiple_artists_with_same_name_requires_external_id'],
+      };
+    }
+
+    if (existingArtists.length === 1) {
+      const candidateArtist = existingArtists[0];
+
+      // Check for conflicting external IDs (e.g. both have Spotify IDs, but values differ)
+      if (options.externalIds && options.externalIds.length > 0) {
+        const existingExtIds = await catalogRepo.findArtistExternalIds(
+          candidateArtist.id,
+        );
+
+        const hasConflict = options.externalIds.some((incomingExt) => {
+          const conflicting = existingExtIds.find(
+            (e) =>
+              e.provider === incomingExt.provider &&
+              e.externalId !== incomingExt.externalId,
+          );
+          return Boolean(conflicting);
+        });
+
+        if (hasConflict) {
+          // Confirmed distinct artist who happens to share the same name!
+          const newArtistId = `art_${Math.random().toString(36).substring(2, 11)}`;
+          return {
+            status: 'to_create',
+            artistId: newArtistId,
+            artistToCreate: {
+              id: newArtistId,
+              name: rawName,
+              normalizedName,
+              externalIds: options.externalIds,
+            },
+            reasons: ['conflicting_external_id_distinct_artist'],
+          };
+        }
+      }
+
+      return {
+        status: 'matched',
+        artistId: candidateArtist.id,
+        artist: candidateArtist,
+        reasons: ['single_artist_name_match'],
+      };
+    }
+
+    // 3. New artist to create
+    const newArtistId = `art_${Math.random().toString(36).substring(2, 11)}`;
+    return {
+      status: 'to_create',
+      artistId: newArtistId,
+      artistToCreate: {
+        id: newArtistId,
+        name: rawName,
+        normalizedName,
+        externalIds: options.externalIds,
+      },
+      reasons: ['new_artist'],
+    };
+  }
+
+  /**
+   * Standalone resolution method that creates the artist immediately if not existing.
+   */
+  async resolve(
+    catalogRepo: ICatalogRepository,
+    options: ResolveArtistOptions,
+  ): Promise<ResolvedArtistResult> {
+    const outcome = await this.resolveOrPrepare(catalogRepo, options);
+
+    if (outcome.status === 'ambiguous') {
+      throw new Error(
+        `Ambiguous artist identity: multiple artists found named "${options.name}". Strong external ID evidence required.`,
+      );
+    }
+
+    if (outcome.status === 'matched' && outcome.artist) {
+      // Attach any non-conflicting external IDs if needed
       if (options.externalIds && options.externalIds.length > 0) {
         for (const ext of options.externalIds) {
           try {
             await catalogRepo.addArtistExternalId({
-              artistId: existing.id,
+              artistId: outcome.artist.id,
               provider: ext.provider,
               externalId: ext.externalId,
               providerUrl: ext.providerUrl,
             });
           } catch {
-            // Unique constraint violation or existing ID is expected and ignored
+            // Ignore duplicate constraint
           }
         }
       }
 
       return {
-        artist: existing,
+        artist: outcome.artist,
         isNew: false,
-        matchMethod: 'normalized_name',
+        matchMethod: outcome.reasons.includes('exact_external_id_match')
+          ? 'external_id'
+          : 'normalized_name',
       };
     }
 
-    // 3. Create new canonical artist
+    // Create artist standalone
+    const toCreate = outcome.artistToCreate!;
     const created = await catalogRepo.createArtist({
-      name: rawName,
-      normalizedName,
+      name: toCreate.name,
+      normalizedName: toCreate.normalizedName,
     });
 
-    if (options.externalIds && options.externalIds.length > 0) {
-      for (const ext of options.externalIds) {
+    if (toCreate.externalIds && toCreate.externalIds.length > 0) {
+      for (const ext of toCreate.externalIds) {
         try {
           await catalogRepo.addArtistExternalId({
             artistId: created.id,

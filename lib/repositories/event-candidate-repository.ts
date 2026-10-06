@@ -135,6 +135,32 @@ export class SupabaseEventCandidateRepository implements IEventCandidateReposito
   ): Promise<
     EventCandidate & { id: string; rawIngestId: string; sourceId: string }
   > {
+    const sourceEventId =
+      candidate.sourceEventId ?? candidate.provenance?.sourceEventId;
+    if (sourceEventId) {
+      const existing = await this.getBySourceEventId(
+        candidate.sourceId,
+        sourceEventId,
+      );
+      if (existing) {
+        const row = candidateToRow({
+          ...candidate,
+          id: existing.id,
+        });
+        const { data, error } = await this.client
+          .from('event_candidates')
+          .update(row)
+          .eq('id', existing.id)
+          .select('*')
+          .single();
+
+        if (error) {
+          throw new Error(`Failed to update event candidate: ${error.message}`);
+        }
+        return mapRowToCandidate(data as EventCandidateRow);
+      }
+    }
+
     const row = candidateToRow(candidate);
     const { data, error } = await this.client
       .from('event_candidates')

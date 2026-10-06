@@ -75,7 +75,7 @@ create table if not exists public.venues (
   normalized_name text not null,
   city text not null,
   region text,
-  country_code text not null default 'US',
+  country_code text,
   lat numeric,
   lng numeric,
   timezone text,
@@ -86,6 +86,7 @@ create table if not exists public.venues (
 );
 
 create index if not exists idx_venues_lookup on public.venues (normalized_name, city);
+create index if not exists idx_venues_city_region on public.venues (city, region);
 
 -- 7. Venue Aliases
 create table if not exists public.venue_aliases (
@@ -117,12 +118,12 @@ create table if not exists public.events (
   id uuid primary key default gen_random_uuid(),
   name text not null,
   normalized_name text not null,
-  event_kind text not null default 'concert' check (event_kind in ('concert', 'festival', 'club_night', 'comedy', 'other')),
-  status text not null default 'scheduled' check (status in ('scheduled', 'cancelled', 'postponed', 'rescheduled', 'moved')),
+  event_kind text not null default 'concert' check (event_kind in ('concert', 'club_show', 'outdoor_show', 'free_event', 'music_series', 'residency', 'festival', 'multi_day_festival')),
+  status text not null default 'scheduled' check (status in ('scheduled', 'cancelled', 'postponed', 'rescheduled', 'unknown')),
   venue_id uuid references public.venues(id) on delete set null,
   city text,
   region text,
-  country_code text default 'US',
+  country_code text,
   lat numeric,
   lng numeric,
   timezone text not null,
@@ -137,11 +138,23 @@ create table if not exists public.events (
   primary_ticket_url text,
   announced_at timestamptz,
   created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now()
+  updated_at timestamptz not null default now(),
+  constraint check_events_instant_starts_at check (start_time_precision != 'instant' or starts_at is not null),
+  constraint check_events_date_only_no_starts_at check (start_time_precision != 'date_only' or starts_at is null),
+  constraint check_events_local_date_order check (local_end_date is null or local_end_date >= local_start_date),
+  constraint check_events_instant_order check (ends_at is null or starts_at is null or ends_at >= starts_at),
+  constraint check_events_multi_day_consistency check (
+    (local_end_date is not null and local_end_date > local_start_date and is_multi_day = true) or
+    ((local_end_date is null or local_end_date = local_start_date) and is_multi_day = false)
+  )
 );
 
 create index if not exists idx_events_local_start_date on public.events (local_start_date);
 create index if not exists idx_events_venue_date on public.events (venue_id, local_start_date);
+create index if not exists idx_events_starts_at on public.events (starts_at);
+create index if not exists idx_events_status on public.events (status);
+create index if not exists idx_events_event_kind on public.events (event_kind);
+create index if not exists idx_events_city on public.events (city);
 
 -- 10. Event Artists (Billing order and relationship)
 create table if not exists public.event_artists (
@@ -167,6 +180,8 @@ create table if not exists public.event_promoters (
   constraint uq_event_promoter unique (event_id, promoter_id)
 );
 
+create index if not exists idx_event_promoters_promoter on public.event_promoters (promoter_id);
+
 -- 12. Event Ticket Links
 create table if not exists public.event_ticket_links (
   id uuid primary key default gen_random_uuid(),
@@ -186,4 +201,5 @@ create table if not exists public.event_ticket_links (
 
 create index if not exists idx_event_ticket_links_normalized on public.event_ticket_links (normalized_url);
 create index if not exists idx_event_ticket_links_event on public.event_ticket_links (event_id);
+create index if not exists idx_event_ticket_links_provider on public.event_ticket_links (ticket_provider_source_id);
 

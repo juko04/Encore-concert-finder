@@ -22,7 +22,7 @@ import type {
 } from '@/lib/domain/catalog';
 import type { EventCandidate } from '@/lib/domain/event-candidate';
 import type { RawIngest, Source } from '@/lib/domain/source';
-import { normalizeUrl } from '@/lib/domain/value-objects';
+import { normalizeName, normalizeUrl } from '@/lib/domain/value-objects';
 import type {
   EventListFilters,
   ICatalogRepository,
@@ -87,6 +87,14 @@ export class MemoryRawIngestRepository implements IRawIngestRepository {
   async create(
     ingest: Omit<RawIngest, 'id'>,
   ): Promise<RawIngest & { id: string }> {
+    const existing = await this.getBySourceAndContentHash(
+      ingest.sourceId,
+      ingest.contentHash,
+    );
+    if (existing) {
+      return existing;
+    }
+
     const id = `raw_${Math.random().toString(36).substring(2, 11)}`;
     const record: RawIngest & { id: string } = {
       ...ingest,
@@ -94,6 +102,18 @@ export class MemoryRawIngestRepository implements IRawIngestRepository {
     };
     this.ingests.set(id, record);
     return record;
+  }
+
+  async getBySourceAndContentHash(
+    sourceId: string,
+    contentHash: string,
+  ): Promise<(RawIngest & { id: string }) | null> {
+    for (const item of this.ingests.values()) {
+      if (item.sourceId === sourceId && item.contentHash === contentHash) {
+        return item;
+      }
+    }
+    return null;
   }
 
   async getByContentHash(
@@ -130,6 +150,28 @@ export class MemoryEventCandidateRepository implements IEventCandidateRepository
   ): Promise<
     EventCandidate & { id: string; rawIngestId: string; sourceId: string }
   > {
+    const sourceEventId =
+      candidate.sourceEventId ?? candidate.provenance?.sourceEventId;
+    if (sourceEventId) {
+      const existing = await this.getBySourceEventId(
+        candidate.sourceId,
+        sourceEventId,
+      );
+      if (existing) {
+        const updated: EventCandidate & {
+          id: string;
+          rawIngestId: string;
+          sourceId: string;
+        } = {
+          ...existing,
+          ...candidate,
+          id: existing.id,
+        };
+        this.candidates.set(existing.id, updated);
+        return updated;
+      }
+    }
+
     const id =
       candidate.id ??
       `candidate_${Math.random().toString(36).substring(2, 11)}`;
@@ -393,6 +435,14 @@ export class MemoryCatalogRepository implements ICatalogRepository {
     return null;
   }
 
+  async findArtistsByName(normalizedName: string): Promise<Artist[]> {
+    const results: Artist[] = [];
+    for (const artist of this.artists.values()) {
+      if (artist.normalizedName === normalizedName) results.push(artist);
+    }
+    return results;
+  }
+
   async findArtistByExternalId(
     provider: string,
     externalId: string,
@@ -405,6 +455,14 @@ export class MemoryCatalogRepository implements ICatalogRepository {
     return null;
   }
 
+  async findArtistExternalIds(artistId: string): Promise<ArtistExternalId[]> {
+    const results: ArtistExternalId[] = [];
+    for (const ext of this.artistExternalIds.values()) {
+      if (ext.artistId === artistId) results.push(ext);
+    }
+    return results;
+  }
+
   async findVenueByNameAndCity(
     normalizedName: string,
     city: string,
@@ -415,6 +473,39 @@ export class MemoryCatalogRepository implements ICatalogRepository {
         venue.normalizedName === normalizedName &&
         venue.city.toLowerCase().trim() === normCity
       ) {
+        return venue;
+      }
+    }
+    return null;
+  }
+
+  async findVenue(
+    normalizedName: string,
+    city: string,
+    region?: string | null,
+    countryCode?: string | null,
+  ): Promise<Venue | null> {
+    const normCity = city.toLowerCase().trim();
+    for (const venue of this.venues.values()) {
+      if (
+        venue.normalizedName === normalizedName &&
+        venue.city.toLowerCase().trim() === normCity
+      ) {
+        if (
+          region &&
+          venue.region &&
+          venue.region.toLowerCase().trim() !== region.toLowerCase().trim()
+        ) {
+          continue;
+        }
+        if (
+          countryCode &&
+          venue.countryCode &&
+          venue.countryCode.toLowerCase().trim() !==
+            countryCode.toLowerCase().trim()
+        ) {
+          continue;
+        }
         return venue;
       }
     }
@@ -435,6 +526,18 @@ export class MemoryCatalogRepository implements ICatalogRepository {
   ): Promise<Event | null> {
     for (const link of this.eventTicketLinks.values()) {
       if (link.normalizedUrl === normalizedTicketUrl) {
+        return this.events.get(link.eventId) ?? null;
+      }
+    }
+    return null;
+  }
+
+  async findEventBySourceEventId(
+    sourceId: string,
+    sourceEventId: string,
+  ): Promise<Event | null> {
+    for (const link of this.eventSources.values()) {
+      if (link.sourceId === sourceId && link.sourceEventId === sourceEventId) {
         return this.events.get(link.eventId) ?? null;
       }
     }
@@ -481,7 +584,7 @@ export class MemoryCatalogRepository implements ICatalogRepository {
     normalizedName: string;
     city: string;
     region?: string | null;
-    countryCode?: string;
+    countryCode?: string | null;
     lat?: number | null;
     lng?: number | null;
     timezone?: string | null;
@@ -493,6 +596,7 @@ export class MemoryCatalogRepository implements ICatalogRepository {
     const created: Venue = {
       id,
       ...venue,
+      countryCode: venue.countryCode ?? null,
       createdAt: now,
       updatedAt: now,
     };
@@ -526,6 +630,7 @@ export class MemoryCatalogRepository implements ICatalogRepository {
     const created: Event = {
       id,
       ...event,
+      countryCode: event.countryCode ?? null,
       createdAt: now,
       updatedAt: now,
     };
@@ -681,7 +786,10 @@ export class MemoryCatalogRepository implements ICatalogRepository {
   async applyCanonicalization(
     payload: CanonicalizationPayload,
   ): Promise<{ eventId: string | null; status: string }> {
-    // Snapshot state for rollback
+    // Snapshot full state for atomic rollback
+    const snapArtists = new Map(this.artists);
+    const snapArtistExternalIds = new Map(this.artistExternalIds);
+    const snapVenues = new Map(this.venues);
     const snapEvents = new Map(this.events);
     const snapEventArtists = new Map(this.eventArtists);
     const snapEventTicketLinks = new Map(this.eventTicketLinks);
@@ -691,8 +799,31 @@ export class MemoryCatalogRepository implements ICatalogRepository {
 
     try {
       let eventId: string | null = null;
+      let createdVenueId: string | null = null;
+
+      // 1. Create venue if specified in transaction payload
+      if (payload.venueToCreate) {
+        createdVenueId =
+          payload.venueToCreate.id ??
+          `ven_${Math.random().toString(36).substring(2, 11)}`;
+        const vNow = new Date().toISOString();
+        this.venues.set(createdVenueId, {
+          id: createdVenueId,
+          name: payload.venueToCreate.name,
+          normalizedName: payload.venueToCreate.normalized_name,
+          city: payload.venueToCreate.city,
+          region: payload.venueToCreate.region ?? null,
+          countryCode: payload.venueToCreate.country_code ?? null,
+          timezone: payload.venueToCreate.timezone ?? null,
+          website: payload.venueToCreate.website ?? null,
+          createdAt: vNow,
+          updatedAt: vNow,
+        });
+      }
 
       if (payload.event) {
+        const venueIdToUse = payload.event.venue_id ?? createdVenueId ?? null;
+
         if (payload.event.id) {
           eventId = payload.event.id;
           const existing = this.events.get(eventId);
@@ -707,9 +838,7 @@ export class MemoryCatalogRepository implements ICatalogRepository {
               eventKind: payload.event.event_kind ?? existing.eventKind,
               status: payload.event.status ?? existing.status,
               venueId:
-                payload.event.venue_id !== undefined
-                  ? payload.event.venue_id
-                  : existing.venueId,
+                venueIdToUse !== undefined ? venueIdToUse : existing.venueId,
               city:
                 payload.event.city !== undefined
                   ? payload.event.city
@@ -761,10 +890,10 @@ export class MemoryCatalogRepository implements ICatalogRepository {
             normalizedName: payload.event.normalized_name ?? 'untitled event',
             eventKind: payload.event.event_kind ?? 'concert',
             status: payload.event.status ?? 'scheduled',
-            venueId: payload.event.venue_id ?? null,
+            venueId: venueIdToUse,
             city: payload.event.city ?? null,
             region: payload.event.region ?? null,
-            countryCode: payload.event.country_code ?? 'US',
+            countryCode: payload.event.country_code ?? null,
             timezone: payload.event.timezone ?? 'UTC',
             localStartDate:
               payload.event.local_start_date ??
@@ -784,15 +913,44 @@ export class MemoryCatalogRepository implements ICatalogRepository {
           this.events.set(eventId, created);
         }
 
-        // Artists
+        // 2. Artists (link existing or create new inside the transaction)
         if (payload.artists) {
           for (const a of payload.artists) {
-            await this.linkEventArtist(
-              eventId,
-              a.artist_id,
-              a.billing_position,
-              a.sort_order,
-            );
+            let artistId = a.artist_id;
+            if (a.name && (!artistId || !this.artists.has(artistId))) {
+              artistId =
+                artistId ??
+                `art_${Math.random().toString(36).substring(2, 11)}`;
+              const artNow = new Date().toISOString();
+              this.artists.set(artistId, {
+                id: artistId,
+                name: a.name,
+                normalizedName: a.normalized_name ?? normalizeName(a.name),
+                createdAt: artNow,
+                updatedAt: artNow,
+              });
+              if (a.external_ids) {
+                for (const ext of a.external_ids) {
+                  const extId = `aext_${Math.random().toString(36).substring(2, 11)}`;
+                  this.artistExternalIds.set(extId, {
+                    id: extId,
+                    artistId,
+                    provider: ext.provider,
+                    externalId: ext.external_id,
+                    providerUrl: ext.provider_url,
+                    createdAt: artNow,
+                  });
+                }
+              }
+            }
+            if (artistId) {
+              await this.linkEventArtist(
+                eventId,
+                artistId,
+                a.billing_position,
+                a.sort_order,
+              );
+            }
           }
         }
 
@@ -862,7 +1020,10 @@ export class MemoryCatalogRepository implements ICatalogRepository {
         status: payload.resolution?.status ?? 'created',
       };
     } catch (err) {
-      // Rollback on any failure
+      // Rollback EVERYTHING on any failure
+      this.artists = snapArtists;
+      this.artistExternalIds = snapArtistExternalIds;
+      this.venues = snapVenues;
       this.events = snapEvents;
       this.eventArtists = snapEventArtists;
       this.eventTicketLinks = snapEventTicketLinks;

@@ -63,6 +63,50 @@ describe('Entity Resolution Pipeline', () => {
       expect(result.artist.name).toBe('Unknown New Artist');
       expect(result.matchMethod).toBe('created');
     });
+
+    it('detects ambiguity when multiple artists share the same normalized name (Finding 5)', async () => {
+      await catalogRepo.createArtist({
+        name: 'Ghost (Swedish Metal)',
+        normalizedName: 'ghost',
+      });
+      await catalogRepo.createArtist({
+        name: 'Ghost (Japanese Psych Rock)',
+        normalizedName: 'ghost',
+      });
+
+      const outcome = await resolver.resolveOrPrepare(catalogRepo, {
+        name: 'Ghost',
+      });
+
+      expect(outcome.status).toBe('ambiguous');
+      expect(outcome.reasons).toContain(
+        'multiple_artists_with_same_name_requires_external_id',
+      );
+    });
+
+    it('detects distinct artist when candidate external ID disagrees with existing artist external ID (Finding 5)', async () => {
+      const existing = await catalogRepo.createArtist({
+        name: 'Aurora',
+        normalizedName: 'aurora',
+      });
+      await catalogRepo.addArtistExternalId({
+        artistId: existing.id,
+        provider: 'spotify',
+        externalId: 'spotify_aurora_original',
+      });
+
+      const outcome = await resolver.resolveOrPrepare(catalogRepo, {
+        name: 'Aurora',
+        externalIds: [
+          { provider: 'spotify', externalId: 'spotify_aurora_different' },
+        ],
+      });
+
+      expect(outcome.status).toBe('to_create');
+      expect(outcome.reasons).toContain(
+        'conflicting_external_id_distinct_artist',
+      );
+    });
   });
 
   describe('VenueResolver', () => {
@@ -106,10 +150,76 @@ describe('Entity Resolution Pipeline', () => {
       expect(austinVenue.timezone).toBe('America/Chicago');
       expect(austinVenue.city).not.toBe('Denver');
     });
+
+    it('distinguishes identically named venues across different cities and regions', async () => {
+      const sfVenue = await catalogRepo.createVenue({
+        name: 'The Fillmore',
+        normalizedName: 'the fillmore',
+        city: 'San Francisco',
+        region: 'CA',
+        countryCode: 'US',
+      });
+
+      const outcome = await resolver.resolveOrPrepare(catalogRepo, {
+        name: 'The Fillmore',
+        city: 'Detroit',
+        region: 'MI',
+        countryCode: 'US',
+      });
+
+      // Must NOT match San Francisco venue
+      expect(outcome.isNew).toBe(true);
+      expect(outcome.venue?.id).not.toBe(sfVenue.id);
+    });
   });
 
   describe('EventMatcher (Finding 6)', () => {
     const matcher = new EventMatcher();
+
+    it('matches stable upstream sourceEventId as step 0 (Finding 7)', async () => {
+      const venue = await catalogRepo.createVenue({
+        name: 'Bluebird Theater',
+        normalizedName: 'bluebird theater',
+        city: 'Denver',
+        timezone: 'America/Denver',
+      });
+
+      const existingEvent = await catalogRepo.createEvent({
+        name: 'Local Show',
+        normalizedName: 'local show',
+        eventKind: 'concert',
+        status: 'scheduled',
+        venueId: venue.id,
+        timezone: 'America/Denver',
+        localStartDate: '2026-09-01',
+        startTimePrecision: 'instant',
+        isMultiDay: false,
+      });
+
+      // Record source record with sourceEventId
+      await catalogRepo.recordEventSource({
+        eventId: existingEvent.id,
+        sourceId: 'src_upstream_provider',
+        sourceEventId: 'event_998877',
+        sourceUrl: 'https://example.com/events/998877',
+        confidence: 0.95,
+      });
+
+      const candidate = {
+        ...fixtures.single_show,
+        sourceId: 'src_upstream_provider',
+        sourceEventId: 'event_998877',
+        localStartDate: '2026-09-01',
+      };
+
+      const result = await matcher.match(catalogRepo, candidate, venue.id, [
+        'art_artist',
+      ]);
+      expect(result.decision).toBe('match');
+      expect(result.matchedEvent?.id).toBe(existingEvent.id);
+      expect(result.reasons).toContain('exact_source_event_id_match');
+      expect(result.confidence).toBe(1.0);
+    });
 
     it('matches exact normalized ticket URL regardless of query tracking params', async () => {
       const venue = await catalogRepo.createVenue({

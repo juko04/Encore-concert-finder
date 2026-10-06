@@ -551,6 +551,20 @@ export class SupabaseCatalogRepository implements ICatalogRepository {
     return data ? mapArtistRow(data as ArtistRow) : null;
   }
 
+  async findArtistsByName(normalizedName: string): Promise<Artist[]> {
+    const { data, error } = await this.client
+      .from('artists')
+      .select('*')
+      .eq('normalized_name', normalizedName);
+
+    if (error) {
+      throw new Error(
+        `Failed to find artists by normalized name: ${error.message}`,
+      );
+    }
+    return ((data as ArtistRow[]) || []).map(mapArtistRow);
+  }
+
   async findArtistByExternalId(
     provider: string,
     externalId: string,
@@ -569,6 +583,34 @@ export class SupabaseCatalogRepository implements ICatalogRepository {
     return mapArtistRow(data.artists as unknown as ArtistRow);
   }
 
+  async findArtistExternalIds(artistId: string): Promise<ArtistExternalId[]> {
+    const { data, error } = await this.client
+      .from('artist_external_ids')
+      .select('*')
+      .eq('artist_id', artistId);
+
+    if (error) {
+      throw new Error(`Failed to find artist external IDs: ${error.message}`);
+    }
+    return (
+      (data as Array<{
+        id: string;
+        artist_id: string;
+        provider: string;
+        external_id: string;
+        provider_url: string | null;
+        created_at: string;
+      }>) || []
+    ).map((row) => ({
+      id: row.id,
+      artistId: row.artist_id,
+      provider: row.provider,
+      externalId: row.external_id,
+      providerUrl: row.provider_url,
+      createdAt: row.created_at,
+    }));
+  }
+
   async findVenueByNameAndCity(
     normalizedName: string,
     city: string,
@@ -584,6 +626,32 @@ export class SupabaseCatalogRepository implements ICatalogRepository {
       throw new Error(
         `Failed to find venue by name and city: ${error.message}`,
       );
+    }
+    return data ? mapVenueRow(data as VenueRow) : null;
+  }
+
+  async findVenue(
+    normalizedName: string,
+    city: string,
+    region?: string | null,
+    countryCode?: string | null,
+  ): Promise<Venue | null> {
+    let query = this.client
+      .from('venues')
+      .select('*')
+      .eq('normalized_name', normalizedName)
+      .ilike('city', city.trim());
+
+    if (region) {
+      query = query.ilike('region', region.trim());
+    }
+    if (countryCode) {
+      query = query.ilike('country_code', countryCode.trim());
+    }
+
+    const { data, error } = await query.maybeSingle();
+    if (error) {
+      throw new Error(`Failed to find venue: ${error.message}`);
     }
     return data ? mapVenueRow(data as VenueRow) : null;
   }
@@ -622,6 +690,29 @@ export class SupabaseCatalogRepository implements ICatalogRepository {
       .from('events')
       .select('*')
       .eq('id', ticketLink.event_id)
+      .maybeSingle();
+
+    if (eventError || !eventData) return null;
+    return mapEventRow(eventData as EventRow);
+  }
+
+  async findEventBySourceEventId(
+    sourceId: string,
+    sourceEventId: string,
+  ): Promise<Event | null> {
+    const { data, error } = await this.client
+      .from('event_sources')
+      .select('event_id')
+      .eq('source_id', sourceId)
+      .eq('source_event_id', sourceEventId)
+      .maybeSingle();
+
+    if (error || !data) return null;
+
+    const { data: eventData, error: eventError } = await this.client
+      .from('events')
+      .select('*')
+      .eq('id', data.event_id)
       .maybeSingle();
 
     if (eventError || !eventData) return null;
@@ -698,7 +789,7 @@ export class SupabaseCatalogRepository implements ICatalogRepository {
         normalized_name: venue.normalizedName,
         city: venue.city,
         region: venue.region ?? null,
-        country_code: venue.countryCode ?? 'US',
+        country_code: venue.countryCode ?? null,
         lat: venue.lat ?? null,
         lng: venue.lng ?? null,
         timezone: venue.timezone ?? null,
@@ -750,7 +841,7 @@ export class SupabaseCatalogRepository implements ICatalogRepository {
         venue_id: event.venueId ?? null,
         city: event.city ?? null,
         region: event.region ?? null,
-        country_code: event.countryCode ?? 'US',
+        country_code: event.countryCode ?? null,
         lat: event.lat ?? null,
         lng: event.lng ?? null,
         timezone: event.timezone,

@@ -43,13 +43,68 @@ describe('CanonicalizationCoordinator Unit Tests', () => {
       'Simulated database write failure',
     );
 
-    // Verify that NO partial records were committed
+    // Verify that NO partial records were committed (including zero upfront venue or artist writes)
     expect(catalogRepo.events.size).toBe(0);
+    expect(catalogRepo.venues.size).toBe(0);
+    expect(catalogRepo.artists.size).toBe(0);
     expect(catalogRepo.eventArtists.size).toBe(0);
     expect(catalogRepo.eventTicketLinks.size).toBe(0);
     expect(catalogRepo.eventSources.size).toBe(0);
     expect(catalogRepo.eventFieldEvidence.size).toBe(0);
     expect(catalogRepo.candidateResolutions.size).toBe(0);
+  });
+
+  it('correctly replays and updates an existing canonical event on subsequent ingest (Finding 7)', async () => {
+    const candidate1 = {
+      ...fixtures.single_show,
+      sourceEventId: 'upstream_evt_456',
+      price: { min: 45, max: 80, currency: 'USD' },
+    };
+    const res1 = await coordinator.canonicalize(candidate1);
+    expect(res1.status).toBe('created');
+    expect(res1.eventId).toBeDefined();
+
+    // Second ingest: same source and sourceEventId, but price increased to 50-95
+    const candidate2 = {
+      ...fixtures.single_show,
+      sourceEventId: 'upstream_evt_456',
+      price: { min: 50, max: 95, currency: 'USD' },
+    };
+    const res2 = await coordinator.canonicalize(candidate2);
+    expect(res2.status).toBe('matched');
+    expect(res2.eventId).toBe(res1.eventId);
+
+    // Only ONE event exists in repository
+    expect(catalogRepo.events.size).toBe(1);
+
+    // Ticket link updated with new price
+    const event = await catalogRepo.getEventById(res1.eventId!);
+    expect(event?.ticketLinks[0].minPrice).toBe(50);
+    expect(event?.ticketLinks[0].maxPrice).toBe(95);
+  });
+
+  it('routes candidate to needs_review when artist name is ambiguous across multiple entities (Finding 5)', async () => {
+    // Pre-create two distinct artists with the same normalized name
+    await catalogRepo.createArtist({
+      name: 'Ghost (Swedish Metal)',
+      normalizedName: 'ghost',
+    });
+    await catalogRepo.createArtist({
+      name: 'Ghost (Japanese Psych Rock)',
+      normalizedName: 'ghost',
+    });
+
+    const ambiguousCandidate = {
+      ...fixtures.single_show,
+      artistNames: ['Ghost'],
+      title: 'Ghost Live in Concert',
+    };
+
+    const res = await coordinator.canonicalize(ambiguousCandidate);
+    expect(res.status).toBe('needs_review');
+    expect(res.eventId).toBeNull();
+    expect(res.reasons).toContain('ambiguous_artist_identity');
+    expect(catalogRepo.events.size).toBe(0);
   });
 
   it('does not fabricate Colorado geography for non-Colorado events (Finding 3)', async () => {

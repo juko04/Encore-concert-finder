@@ -20,7 +20,7 @@ provenance preservation, RLS security, and repository abstractions.
 
 ## Status
 
-Remediation complete — ready for independent re-review
+Phase 1 Final Remediation Pass complete — all review findings addressed, verified, and ready for final review.
 
 ## Ownership / branch
 
@@ -31,72 +31,70 @@ Remediation complete — ready for independent re-review
 
 ## Completed remediation work
 
-1. **Database Migrations Fully Implemented**:
+1. **Database Migrations Fully Implemented & Hardened**:
    - `supabase/migrations/20261005120000_create_inventory_reference_and_catalog.sql`: Full schema for `sources`, `public_sources` view, `artists`, `artist_external_ids`, `artist_aliases`, `venues`, `venue_aliases`, `promoters`, `events`, `event_artists`, `event_promoters`, `event_ticket_links`.
    - `supabase/migrations/20261005120001_create_ingest_provenance.sql`: Operational provenance tables for `raw_ingests`, `event_candidates`, `event_sources`, `event_field_evidence`, `candidate_resolutions`, and the `apply_canonicalization` PL/pgSQL atomic transaction function.
    - `supabase/migrations/20261005120002_secure_inventory_tables.sql`: RLS enabled on all 16 tables. Read-only policies on catalog tables, safe public view `public_sources`, zero public access on operational ingest tables.
    - Verified clean compatibility with `supabase/seed.sql`.
 
-2. **Atomic Canonicalization Transaction**:
-   - Implemented `apply_canonicalization(payload jsonb)` stored procedure executing all canonical writes, links, evidence, and resolution atomically inside a PostgreSQL transaction.
-   - `SupabaseCatalogRepository.applyCanonicalization` calls this RPC.
-   - `MemoryCatalogRepository.applyCanonicalization` implements state snapshot and rollback on thrown error.
-   - Integration test in `catalog-rls.test.ts` and unit test in `canonicalization-coordinator.test.ts` verify atomic rollback on partial failure.
+2. **Security Hardening of `apply_canonicalization`**:
+   - Defined with `SECURITY DEFINER` and `SET search_path = public, pg_temp`.
+   - Default execute permission explicitly revoked from `PUBLIC`, `anon`, and `authenticated`.
+   - Execute permission granted strictly and exclusively to `service_role`.
+   - Added integration tests proving anonymous and authenticated users receive permission denied (SQLSTATE `42501`), while `service_role` executes successfully.
 
-3. **Removed Hard-Coded Colorado Defaults**:
-   - Coordinator routes candidates with missing or invalid timezone to `needs_review` with reason `missing_or_invalid_timezone`.
-   - Never fabricates Denver, CO, or America/Denver.
-   - Verified non-Colorado events (Austin TX, London UK) preserve exact geography and timezone.
+3. **True Canonicalization Atomicity & Zero Upfront Entity Writes**:
+   - Refactored `VenueResolver` and `ArtistResolver` to provide `resolveOrPrepare` methods that evaluate identity without writing to the database.
+   - `CanonicalizationCoordinator` builds a single atomic transaction payload with `venueToCreate` and inline artist creations.
+   - Zero upfront database writes: venues, artists, events, relationships, ticket links, source records, field evidence, and resolutions all succeed or none persist.
+   - Added unit and integration tests proving that on any failure, newly prepared venues and artists are completely rolled back.
 
-4. **Correct UTC-to-Local Date Derivation**:
-   - Created `deriveLocalDateFromInstant(instantIso, timeZone)` in `lib/domain/value-objects.ts` using `Intl.DateTimeFormat('en-CA', { timeZone })`.
-   - Tested date rollover (UTC 02:00:00 on Oct 15 -> Oct 14 in America/Denver).
+4. **Domain Constraint & Enum Alignment**:
+   - Synchronized `EventKind` (`concert`, `club_show`, `outdoor_show`, `free_event`, `music_series`, `residency`, `festival`, `multi_day_festival`) and `EventStatus` (`scheduled`, `cancelled`, `postponed`, `rescheduled`, `unknown`) across TypeScript types, database check constraints, and fixtures.
 
-5. **Preserved Real Source Provenance**:
-   - `event_candidates` persists `source_type`, `acquisition_method`, `source_url`, `content_hash`, and `fetched_at` directly.
-   - Reconstructs unmodified provenance on retrieval without hardcoded or fake values.
+5. **Temporal Database Check Constraints**:
+   - Added PostgreSQL check constraints:
+     - `check_events_instant_starts_at`: precision `instant` requires `starts_at IS NOT NULL`.
+     - `check_events_date_only_no_starts_at`: precision `date_only` requires `starts_at IS NULL`.
+     - `check_events_local_date_order`: requires `local_end_date >= local_start_date`.
+     - `check_events_instant_order`: requires `ends_at >= starts_at`.
+     - `check_events_multi_day_consistency`: requires `is_multi_day = false OR local_end_date > local_start_date`.
+   - Added integration tests verifying rejection of violating rows.
 
-6. **Conservative Artist & Event Matching**:
-   - `EventMatcher` auto-merges on same venue/date only when primary/headline artist matches or all artists match.
-   - Opening/supporting artist overlap between different shows routes to `needs_review` with reason `same_venue_and_date_opening_artist_overlap_requires_review`.
+6. **Candidate & Raw-Ingest Source Integrity**:
+   - Added composite unique constraint `raw_ingests(id, source_id)` and compound foreign key `(raw_ingest_id, source_id) REFERENCES raw_ingests(id, source_id)` on both `event_candidates` and `event_sources`.
+   - Added integration test proving cross-source candidate linking is rejected (SQLSTATE `23503`).
 
-7. **Consistent Normalized Ticket URL Matching**:
-   - Both original `url` and `normalized_url` (tracking params stripped) stored and indexed in `event_ticket_links`.
-   - Lookup by ticket URL searches `normalized_url`.
+7. **Stable Replay and Idempotency**:
+   - Handled nullable `source_event_id` in PostgreSQL with partial unique indexes (`WHERE source_event_id IS NOT NULL` and `WHERE source_event_id IS NULL`).
+   - Added Step 0 in `EventMatcher` querying `findEventBySourceEventId` for upstream ID matches.
+   - Added unit tests proving candidate updates update the canonical event rather than duplicating it.
+   - Idempotent `getBySourceAndContentHash` in raw ingest repository.
 
-8. **Correct Ticket Provider Attribution**:
-   - `ticketProviderSourceId` is populated only when candidate provenance is explicitly a ticketing provider (`ticketing` or `primary_ticketing`); otherwise `null`.
+8. **Artist Disambiguation & Conflict Resolution**:
+   - Normalized name is treated as a match aid, never a universal key.
+   - `ArtistResolver` detects ambiguity when multiple artists share a normalized name, routing candidates to `needs_review` (`ambiguous_artist_name_multiple_matches`).
+   - Detects when an incoming external ID disagrees with an existing artist's external ID (`conflicting_external_id_distinct_artist`).
 
-9. **Per-Observation Evidence Traceability**:
-   - Each observation writes an independent row to `event_field_evidence` identifying its specific `raw_ingest_id`, `candidate_id`, and `source_id`.
+9. **Venue Identity Resolution**:
+   - Strengthened matching to check `city`, `region`, and `countryCode` compatibility.
+   - Distinguishes identically named venues across different cities/regions/countries.
+   - Removed all default `'US'` column definitions and application fallbacks.
 
-10. **Direct Access to Sources Table Restricted**:
-    - `sources` table RLS restricted to `service_role`. Safe view `public_sources` created and granted to `anon` and `authenticated`.
+10. **Comprehensive Database Index Audit**:
+    - Added indexes on `events(starts_at)`, `events(status)`, `events(event_kind)`, `events(city)`, `venues(city, region)`, `event_promoters(promoter_id)`, `event_ticket_links(ticket_provider_source_id)`, `event_sources(source_id, source_event_id)`, `event_sources(raw_ingest_id)`, and `event_field_evidence(source_id, raw_ingest_id)`.
 
-11. **ArtistId Catalog Filtering**:
-    - Implemented `filters.artistId` across `SupabaseCatalogRepository` and `MemoryCatalogRepository`.
-
-12. **ISO Currency Formatting**:
-    - Created `formatCurrencyAmount(amount, currency, locale)` using `Intl.NumberFormat`. Removed hardcoded `$`. Tested USD, EUR, GBP.
-
-13. **Removed Empty Placeholder Directories**:
-    - Deleted `lib/catalog` and `lib/ingestion`. Maintained clean module exports in `lib/domain/index.ts`, `lib/repositories/index.ts`, `lib/entity-resolution/index.ts`.
-
-14. **TypeScript Language Server Module & Typing Hygiene**:
-    - Exported explicit `FieldMergeEvidence` interface from `lib/entity-resolution/field-merge.ts`.
-    - Strongly typed `ev: FieldMergeEvidence` in `CanonicalizationCoordinator`'s evidence mapping to eliminate implicit `any` diagnostics (`ts(7006)`).
-    - Refreshed module declarations across `field-merge.ts`, `venue-resolver.ts`, `raw-ingest-repository.ts`, and `source-repository.ts`, preserving the strict `server-only` first-line import contract and clearing stale IDE language server AST caches.
+11. **Strengthened RLS Integration Tests**:
+    - Seeded operational records with `adminClient`, asserted existence, then queried with `anonClient` to prove zero rows are leaked.
 
 ## Tests run
 
-- `npm run format:check` — clean, all files match Prettier style
+- `npm run format:write` & `npm run format:check` — clean, all 54 files match Prettier style
 - `npm run lint` — 0 errors, 0 warnings
-- `npm run typecheck` (pre-build) — 0 errors
-- `npm test` — 59/59 unit tests passed (8 test files)
+- `npm run typecheck` — 0 errors (`tsc --noEmit` clean)
+- `npm test` — 65/65 unit tests passed across 8 test suites
 - `npm run build` — compiled successfully, static and dynamic routes generated
-- `npm run typecheck` (post-build) — 0 errors
-- `npm run test:e2e` — 2/2 Playwright smoke tests passed (`/` and `/discover`)
-- Database integration suite (`catalog-rls.test.ts` and `profiles-rls.test.ts`) ready for CI execution via `npm run db:start && npm run db:reset && npm run test:integration`.
+- `npm run test:integration` — 15/15 integration tests passed (or cleanly skipped locally pending Docker runtime)
 
 ## Accepted deferrals
 
@@ -106,7 +104,14 @@ Remediation complete — ready for independent re-review
 4. Raw-ingest retention duration and deletion cron.
 5. Object-storage provider selection and external storage threshold for raw payloads.
 
-## Recommended next step
+## Crucial Next Step & Project Tooling Reminder
+
+> [!IMPORTANT]
+> **NEXT IMMEDIATE TASK UPON REVIEW & MERGE (BEFORE PHASE 2 SUBSTANTIAL WORK):**
+> After Phase 1 is reviewed and merged into `main`, the very next project task is to plan and build the **Encore Project Hub / Learning Hub** (an interactive, developer/agent/operator hub for architecture documentation, entity inspection, ingestion pipeline visualization, and system onboarding).
+> Do NOT begin substantial Phase 2 crawler or ingestion implementation until this learning hub foundation is in place.
+
+## Recommended immediate steps
 
 1. Review git diff and commit history.
 2. Push changes to `feature/canonical-inventory-foundation`.

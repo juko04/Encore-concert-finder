@@ -40,19 +40,31 @@ export interface ICatalogRepository {
   getEventById(id: string): Promise<CanonicalEventDetail | null>;
   listEvents(filters?: EventListFilters): Promise<CanonicalEventSummary[]>;
   findArtistByName(normalizedName: string): Promise<Artist | null>;
+  findArtistsByName(normalizedName: string): Promise<Artist[]>;
   findArtistByExternalId(
     provider: string,
     externalId: string,
   ): Promise<Artist | null>;
+  findArtistExternalIds(artistId: string): Promise<ArtistExternalId[]>;
   findVenueByNameAndCity(
     normalizedName: string,
     city: string,
+  ): Promise<Venue | null>;
+  findVenue(
+    normalizedName: string,
+    city: string,
+    region?: string | null,
+    countryCode?: string | null,
   ): Promise<Venue | null>;
   findEventsOnDateAtVenue(
     localStartDate: string,
     venueId: string,
   ): Promise<Event[]>;
   findEventByTicketUrl(normalizedTicketUrl: string): Promise<Event | null>;
+  findEventBySourceEventId(
+    sourceId: string,
+    sourceEventId: string,
+  ): Promise<Event | null>;
 
   // Write operations (service role / transaction boundary)
   createArtist(artist: {
@@ -71,7 +83,7 @@ export interface ICatalogRepository {
     normalizedName: string;
     city: string;
     region?: string | null;
-    countryCode?: string;
+    countryCode?: string | null;
     lat?: number | null;
     lng?: number | null;
     timezone?: string | null;
@@ -162,6 +174,10 @@ export interface ISourceRepository {
 export interface IRawIngestRepository {
   create(ingest: Omit<RawIngest, 'id'>): Promise<RawIngest & { id: string }>;
   getByContentHash(
+    contentHash: string,
+  ): Promise<(RawIngest & { id: string }) | null>;
+  getBySourceAndContentHash(
+    sourceId: string,
     contentHash: string,
   ): Promise<(RawIngest & { id: string }) | null>;
   getById(id: string): Promise<(RawIngest & { id: string }) | null>;

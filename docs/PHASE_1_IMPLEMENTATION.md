@@ -423,6 +423,49 @@ Following the initial Phase 1 implementation, an independent architecture and co
     - *Problem*: Empty placeholder folders `lib/catalog` and `lib/ingestion` existed without code.
     - *Resolution*: Removed `lib/catalog` and `lib/ingestion`. Maintained clean module boundaries in `lib/domain/index.ts`, `lib/repositories/index.ts`, and `lib/entity-resolution/index.ts`.
 
+14. **Security Hardening of apply_canonicalization (Final Remediation)**
+    - *Problem*: `apply_canonicalization` RPC was SECURITY DEFINER but retained default execute permissions for PUBLIC, anon, and authenticated users, and lacked an explicit search path.
+    - *Resolution*: Hardened `apply_canonicalization` with `SECURITY DEFINER` and `SET search_path = public, pg_temp`. Revoked execute from `PUBLIC`, `anon`, and `authenticated`, and granted execute strictly to `service_role`.
+    - Added integration tests proving anonymous and standard authenticated users receive permission denied (SQLSTATE `42501`), while `service_role` executes successfully.
+
+15. **Full Canonicalization Atomicity & Zero Upfront Entity Writes (Final Remediation)**
+    - *Problem*: Venues and artists were being written to the database before the event transaction, leaving orphaned venue/artist records if event creation subsequently failed.
+    - *Resolution*: Updated `VenueResolver` and `ArtistResolver` with `resolveOrPrepare` methods that evaluate identity in-memory without upfront database writes. The coordinator passes `venueToCreate` and inline artist creation payloads into `apply_canonicalization`.
+    - The stored procedure (and memory repository) creates or updates the venue, artists, event, event_artists, ticket links, event_sources, field evidence, and candidate resolution in a single database transaction. If any step fails, all mutations are rolled back.
+    - Added unit and integration tests asserting zero orphaned venues, artists, or events on failure.
+
+16. **Domain Constraint & Enum Alignment (Final Remediation)**
+    - *Problem*: Domain union types and database check constraints diverged from the specification on event kinds and statuses.
+    - *Resolution*: Aligned `EventKind` to `'concert' | 'club_show' | 'outdoor_show' | 'free_event' | 'music_series' | 'residency' | 'festival' | 'multi_day_festival'`. Aligned `EventStatus` to `'scheduled' | 'cancelled' | 'postponed' | 'rescheduled' | 'unknown'`. Synchronized domain types, database check constraints, and test fixtures.
+
+17. **Temporal Database Check Constraints (Final Remediation)**
+    - *Problem*: Missing database-level constraints allowed inconsistent timestamps, invalid date ranges, or multi-day mismatches.
+    - *Resolution*: Added PostgreSQL check constraints:
+      - `check_events_instant_starts_at`: precision `instant` requires `starts_at IS NOT NULL`.
+      - `check_events_date_only_no_starts_at`: precision `date_only` requires `starts_at IS NULL`.
+      - `check_events_local_date_order`: requires `local_end_date >= local_start_date`.
+      - `check_events_instant_order`: requires `ends_at >= starts_at`.
+      - `check_events_multi_day_consistency`: requires `is_multi_day = false OR local_end_date > local_start_date`.
+    - Added integration tests verifying rejection of violating rows.
+
+18. **Candidate & Raw-Ingest Source Integrity (Final Remediation)**
+    - *Problem*: `event_candidates` could reference a `raw_ingest_id` belonging to a different `source_id`.
+    - *Resolution*: Added compound unique constraint `raw_ingests(id, source_id)` and compound foreign key `(raw_ingest_id, source_id) REFERENCES raw_ingests(id, source_id)` on both `event_candidates` and `event_sources`.
+    - Added integration test proving cross-source candidate linking is rejected (SQLSTATE `23503`).
+
+19. **Stable Replay and Idempotency (Final Remediation)**
+    - *Problem*: Nullable `source_event_id` in PostgreSQL standard unique constraints treated `NULL` as distinct, risking duplicate source links, and candidate replays did not check upstream source event IDs first.
+    - *Resolution*: Replaced simple unique constraint with two partial unique indexes (`WHERE source_event_id IS NOT NULL` and `WHERE source_event_id IS NULL`). Added Step 0 in `EventMatcher` querying `findEventBySourceEventId` for upstream ID matches.
+    - Added unit tests proving candidate updates update the canonical event rather than duplicating it.
+
+20. **Artist Disambiguation & Conflict Resolution (Final Remediation)**
+    - *Problem*: Normalized name was treated as a universal match key, causing false merges when multiple artists share a name or have conflicting external IDs.
+    - *Resolution*: `ArtistResolver` detects ambiguity when multiple artists share a normalized name, routing candidates to `needs_review` (`ambiguous_artist_name_multiple_matches`). Detects when incoming external ID disagrees with an existing artist's external ID (`conflicting_external_id_distinct_artist`).
+
+21. **Removal of Fabricated Geography Defaults (Final Remediation)**
+    - *Problem*: Database migrations had `DEFAULT 'US'` on `venues.country_code` and `events.country_code`.
+    - *Resolution*: Removed all default `'US'` column definitions and application fallbacks. Preserved nullable `country_code` representing true source knowledge.
+
 ---
 
 ## Accepted Deferrals
@@ -439,4 +482,5 @@ The following items were explicitly reviewed and deferred to subsequent phases:
    - Defining the retention window and pruning cron for raw ingest bodies is deferred to Phase 4 / production operations.
 5. **Object-Storage Provider & Payload Size Threshold**:
    - Small payloads are stored in PostgreSQL with nullable `external_storage_ref` column in `raw_ingests`; choosing S3/GCS/R2 and offloading large HTML payloads is deferred until high-volume scraping begins.
+
 

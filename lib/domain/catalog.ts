@@ -4,10 +4,17 @@
  */
 
 export type EventKind =
-  'concert' | 'festival' | 'club_night' | 'comedy' | 'other';
+  | 'concert'
+  | 'club_show'
+  | 'outdoor_show'
+  | 'free_event'
+  | 'music_series'
+  | 'residency'
+  | 'festival'
+  | 'multi_day_festival';
 
 export type EventStatus =
-  'scheduled' | 'cancelled' | 'postponed' | 'rescheduled' | 'moved';
+  'scheduled' | 'cancelled' | 'postponed' | 'rescheduled' | 'unknown';
 
 export type StartTimePrecision = 'instant' | 'date_only';
 
@@ -52,7 +59,7 @@ export interface Venue {
   normalizedName: string;
   city: string;
   region?: string | null;
-  countryCode?: string;
+  countryCode?: string | null;
   lat?: number | null;
   lng?: number | null;
   timezone?: string | null;
@@ -233,6 +240,16 @@ export interface CanonicalEventDetail extends Event {
  * All operations execute within a single database transaction.
  */
 export interface CanonicalizationPayload {
+  venueToCreate?: {
+    id?: string;
+    name: string;
+    normalized_name: string;
+    city: string;
+    region?: string | null;
+    country_code?: string | null;
+    timezone?: string | null;
+    website?: string | null;
+  } | null;
   event?: {
     id?: string;
     name?: string;
@@ -242,7 +259,7 @@ export interface CanonicalizationPayload {
     venue_id?: string | null;
     city?: string | null;
     region?: string | null;
-    country_code?: string;
+    country_code?: string | null;
     timezone?: string;
     local_start_date?: string;
     local_end_date?: string | null;
@@ -255,9 +272,16 @@ export interface CanonicalizationPayload {
     primary_ticket_url?: string | null;
   } | null;
   artists?: Array<{
-    artist_id: string;
+    artist_id?: string;
+    name?: string;
+    normalized_name?: string;
     billing_position?: BillingPosition;
     sort_order?: number;
+    external_ids?: Array<{
+      provider: string;
+      external_id: string;
+      provider_url?: string | null;
+    }>;
   }>;
   ticketLinks?: Array<{
     ticket_provider_source_id?: string | null;

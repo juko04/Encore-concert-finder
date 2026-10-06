@@ -26,6 +26,22 @@ export class EventMatcher {
       };
     }
 
+    // 0. Direct source event ID match (stable upstream event identity across replays/updates)
+    if (candidate.sourceId && candidate.sourceEventId) {
+      const matchBySourceEvent = await catalogRepo.findEventBySourceEventId(
+        candidate.sourceId,
+        candidate.sourceEventId,
+      );
+      if (matchBySourceEvent) {
+        return {
+          decision: 'match',
+          matchedEvent: matchBySourceEvent,
+          confidence: 1.0,
+          reasons: ['exact_source_event_id_match'],
+        };
+      }
+    }
+
     // 1. Direct normalized ticket URL match (strongest identity)
     if (candidate.ticketUrl) {
       try {
