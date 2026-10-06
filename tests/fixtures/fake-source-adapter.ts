@@ -6,7 +6,11 @@ import type {
   SourceProvenance,
   SourceType,
 } from '@/lib/domain/source';
-import type { EventCandidate } from '@/lib/domain/event-candidate';
+import type {
+  CandidateArtist,
+  CandidateArtistExternalId,
+  EventCandidate,
+} from '@/lib/domain/event-candidate';
 import fixtureData from './fake-source-response.json';
 
 interface RawEventPayload {
@@ -32,7 +36,7 @@ interface RawEventPayload {
     artistName: string;
     billingPosition?:
       'headliner' | 'subheadliner' | 'mid_card' | 'support' | 'unknown';
-    stage?: string;
+    externalIds?: CandidateArtistExternalId[];
   }>;
 }
 
@@ -48,7 +52,8 @@ interface FixturePayload {
 }
 
 export class FakeVenueSourceAdapter implements EventSourceAdapter {
-  readonly id = 'fake-venue-adapter';
+  readonly id = 'a0000000-0000-0000-0000-000000000001';
+  readonly slug = 'fake-venue-adapter';
   readonly name = 'Fake Venue Source Adapter';
   readonly sourceType: SourceType = 'venue';
   readonly acquisitionMethod: AcquisitionMethod = 'structured_json';
@@ -62,7 +67,7 @@ export class FakeVenueSourceAdapter implements EventSourceAdapter {
 
   async fetch(context: CrawlContext): Promise<RawIngest[]> {
     return this.fixture.pages.map((page, index) => ({
-      id: `raw_${this.id}_page_${page.page}`,
+      id: crypto.randomUUID(),
       sourceId: context.sourceId || this.id,
       sourceUrl: page.url,
       acquisitionMethod: context.acquisitionMethod || this.acquisitionMethod,
@@ -95,11 +100,29 @@ export class FakeVenueSourceAdapter implements EventSourceAdapter {
           confidence: 0.95,
         };
 
+        const artists: CandidateArtist[] = evt.billing
+          ? evt.billing.map((b, i) => ({
+              name: b.artistName,
+              billingPosition:
+                b.billingPosition ?? (i === 0 ? 'headliner' : 'support'),
+              sortOrder: i,
+              externalIds: b.externalIds ?? [],
+            }))
+          : evt.artists.map((name, i) => ({
+              name,
+              billingPosition: i === 0 ? 'headliner' : 'support',
+              sortOrder: i,
+            }));
+
         const candidate: EventCandidate = {
-          id: `candidate_${evt.id}`,
+          id: crypto.randomUUID(),
+          rawIngestId: raw.id,
+          sourceId: raw.sourceId,
+          sourceEventId: evt.id,
           provenance,
           title: evt.name,
           artistNames: evt.artists,
+          artists,
           venueName: evt.venue,
           city: evt.city,
           state: evt.state,
@@ -111,11 +134,6 @@ export class FakeVenueSourceAdapter implements EventSourceAdapter {
           ticketUrl: evt.ticketUrl,
           price: evt.price,
           isFestival: evt.isFestival ?? false,
-          performances: evt.billing?.map((b) => ({
-            artistName: b.artistName,
-            billingPosition: b.billingPosition ?? 'unknown',
-            stage: b.stage,
-          })),
           confidence: 0.95,
           verificationStatus: 'unverified',
           rawPayload: { originalId: evt.id },

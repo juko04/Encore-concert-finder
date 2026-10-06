@@ -201,7 +201,7 @@ describe('Entity Resolution Pipeline', () => {
       // Record source record with sourceEventId
       await catalogRepo.recordEventSource({
         eventId: existingEvent.id,
-        sourceId: 'src_upstream_provider',
+        sourceId: 'a0000000-0000-0000-0000-000000000001',
         sourceEventId: 'event_998877',
         sourceUrl: 'https://example.com/events/998877',
         confidence: 0.95,
@@ -209,13 +209,13 @@ describe('Entity Resolution Pipeline', () => {
 
       const candidate = {
         ...fixtures.single_show,
-        sourceId: 'src_upstream_provider',
+        sourceId: 'a0000000-0000-0000-0000-000000000001',
         sourceEventId: 'event_998877',
         localStartDate: '2026-09-01',
       };
 
       const result = await matcher.match(catalogRepo, candidate, venue.id, [
-        'art_artist',
+        '30000000-0000-0000-0000-000000000001',
       ]);
       expect(result.decision).toBe('match');
       expect(result.matchedEvent?.id).toBe(existingEvent.id);
@@ -252,7 +252,7 @@ describe('Entity Resolution Pipeline', () => {
       // Candidate with dirty tracking parameters
       const candidate = fixtures.single_show;
       const result = await matcher.match(catalogRepo, candidate, venue.id, [
-        'art_khruangbin',
+        '30000000-0000-0000-0000-000000000002',
       ]);
 
       expect(result.decision).toBe('match');
@@ -369,12 +369,12 @@ describe('Entity Resolution Pipeline', () => {
   describe('FieldMerge', () => {
     it('upgrades date_only precision to instant when time is learned', () => {
       const current: Event = {
-        id: 'evt_1',
+        id: '10000000-0000-0000-0000-000000000001',
         name: 'Bon Iver',
         normalizedName: 'bon iver',
         eventKind: 'concert',
         status: 'scheduled',
-        venueId: 'ven_1',
+        venueId: '20000000-0000-0000-0000-000000000001',
         timezone: 'America/Denver',
         localStartDate: '2026-09-25',
         startTimePrecision: 'date_only',
@@ -393,12 +393,12 @@ describe('Entity Resolution Pipeline', () => {
 
     it('updates status to cancelled without deleting the event', () => {
       const current: Event = {
-        id: 'evt_2',
+        id: '10000000-0000-0000-0000-000000000002',
         name: 'The Staves',
         normalizedName: 'staves',
         eventKind: 'concert',
         status: 'scheduled',
-        venueId: 'ven_1',
+        venueId: '20000000-0000-0000-0000-000000000001',
         timezone: 'America/Denver',
         localStartDate: '2026-10-05',
         startTimePrecision: 'instant',
@@ -416,12 +416,12 @@ describe('Entity Resolution Pipeline', () => {
 
     it('handles rescheduling merge from Friday 8 PM to Saturday 9 PM and emits distinct evidence', () => {
       const current: Event = {
-        id: 'evt_reschedule_1',
+        id: '10000000-0000-0000-0000-000000000003',
         name: 'The Smile',
         normalizedName: 'the smile',
         eventKind: 'concert',
         status: 'scheduled',
-        venueId: 'ven_1',
+        venueId: '20000000-0000-0000-0000-000000000001',
         timezone: 'America/Denver',
         localStartDate: '2026-10-16', // Friday
         startsAt: '2026-10-17T02:00:00Z', // Friday 8 PM MDT

@@ -197,15 +197,21 @@ export function formatPrice(amount: number): number {
 /**
  * Formats a monetary amount according to its ISO currency code.
  * Uses Intl.NumberFormat instead of hardcoding any currency symbol.
+ * If currency is unknown, missing, or invalid, formats a neutral numeric amount without assigning USD semantics.
  */
 export function formatCurrencyAmount(
   amount: number,
-  currency: string = 'USD',
+  currency?: string | null,
   locale: string = 'en-US',
 ): string {
-  const safeCurrency = validateCurrency(currency)
-    ? currency.toUpperCase()
-    : 'USD';
+  if (!currency || !validateCurrency(currency)) {
+    return new Intl.NumberFormat(locale, {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    }).format(amount);
+  }
+
+  const safeCurrency = currency.trim().toUpperCase();
   try {
     return new Intl.NumberFormat(locale, {
       style: 'currency',
@@ -215,4 +221,35 @@ export function formatCurrencyAmount(
   } catch {
     return `${safeCurrency} ${amount.toFixed(2)}`;
   }
+}
+
+/**
+ * Computes a deterministic candidate fingerprint distinguishing event candidates extracted
+ * from a single raw observation.
+ */
+export function computeCandidateFingerprint(candidate: {
+  sourceEventId?: string | null;
+  title: string;
+  artistNames?: string[];
+  venueName: string;
+  localStartDate?: string | null;
+  startsAt?: string | null;
+  ticketUrl?: string | null;
+}): string {
+  if (candidate.sourceEventId && candidate.sourceEventId.trim()) {
+    return `src_evt:${candidate.sourceEventId.trim()}`;
+  }
+
+  const normTitle = normalizeName(candidate.title || '');
+  const normArtists = (candidate.artistNames || [])
+    .map(normalizeName)
+    .sort()
+    .join('+');
+  const normVenue = normalizeName(candidate.venueName || '');
+  const dateOrTime =
+    candidate.localStartDate ||
+    (candidate.startsAt ? candidate.startsAt.substring(0, 10) : '');
+  const normUrl = candidate.ticketUrl ? normalizeUrl(candidate.ticketUrl) : '';
+
+  return `cand:${normTitle}|${normArtists}|${normVenue}|${dateOrTime}|${normUrl}`;
 }

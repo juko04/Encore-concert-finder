@@ -22,7 +22,11 @@ import type {
 } from '@/lib/domain/catalog';
 import type { EventCandidate } from '@/lib/domain/event-candidate';
 import type { RawIngest, Source } from '@/lib/domain/source';
-import { normalizeName, normalizeUrl } from '@/lib/domain/value-objects';
+import {
+  computeCandidateFingerprint,
+  normalizeName,
+  normalizeUrl,
+} from '@/lib/domain/value-objects';
 import type {
   EventListFilters,
   ICatalogRepository,
@@ -87,8 +91,9 @@ export class MemoryRawIngestRepository implements IRawIngestRepository {
   async create(
     ingest: Omit<RawIngest, 'id'>,
   ): Promise<RawIngest & { id: string }> {
-    const existing = await this.getBySourceAndContentHash(
+    const existing = await this.getBySourceUrlAndContentHash(
       ingest.sourceId,
+      ingest.sourceUrl,
       ingest.contentHash,
     );
     if (existing) {
@@ -102,6 +107,23 @@ export class MemoryRawIngestRepository implements IRawIngestRepository {
     };
     this.ingests.set(id, record);
     return record;
+  }
+
+  async getBySourceUrlAndContentHash(
+    sourceId: string,
+    sourceUrl: string,
+    contentHash: string,
+  ): Promise<(RawIngest & { id: string }) | null> {
+    for (const item of this.ingests.values()) {
+      if (
+        item.sourceId === sourceId &&
+        item.sourceUrl === sourceUrl &&
+        item.contentHash === contentHash
+      ) {
+        return item;
+      }
+    }
+    return null;
   }
 
   async getBySourceAndContentHash(
@@ -150,7 +172,34 @@ export class MemoryEventCandidateRepository implements IEventCandidateRepository
   ): Promise<
     EventCandidate & { id: string; rawIngestId: string; sourceId: string }
   > {
-    const id = candidate.id ?? crypto.randomUUID();
+    const fingerprint =
+      candidate.candidateFingerprint ??
+      computeCandidateFingerprint({
+        sourceEventId: candidate.sourceEventId,
+        title: candidate.title,
+        artistNames: candidate.artistNames,
+        venueName: candidate.venueName,
+        localStartDate: candidate.localStartDate,
+        startsAt: candidate.startsAt,
+        ticketUrl: candidate.ticketUrl,
+      });
+
+    // Check unique constraints within same raw observation
+    for (const existing of this.candidates.values()) {
+      if (existing.rawIngestId === candidate.rawIngestId) {
+        if (
+          candidate.sourceEventId &&
+          existing.sourceEventId === candidate.sourceEventId
+        ) {
+          return existing;
+        }
+        if (fingerprint && existing.candidateFingerprint === fingerprint) {
+          return existing;
+        }
+      }
+    }
+
+    const id = crypto.randomUUID();
     const record: EventCandidate & {
       id: string;
       rawIngestId: string;
@@ -158,6 +207,8 @@ export class MemoryEventCandidateRepository implements IEventCandidateRepository
     } = {
       ...candidate,
       id,
+      candidateFingerprint: fingerprint,
+      artists: candidate.artists ? [...candidate.artists] : undefined,
     };
     this.candidates.set(id, record);
     return record;
@@ -202,19 +253,30 @@ export class MemoryEventCandidateRepository implements IEventCandidateRepository
     );
   }
 
-  async getBySourceEventId(
+  async listBySourceEventId(
+    sourceId: string,
+    sourceEventId: string,
+  ): Promise<
+    Array<
+      EventCandidate & { id: string; rawIngestId: string; sourceId: string }
+    >
+  > {
+    return Array.from(this.candidates.values()).filter(
+      (c) => c.sourceId === sourceId && c.sourceEventId === sourceEventId,
+    );
+  }
+
+  async getLatestBySourceEventId(
     sourceId: string,
     sourceEventId: string,
   ): Promise<
     | (EventCandidate & { id: string; rawIngestId: string; sourceId: string })
     | null
   > {
-    for (const c of this.candidates.values()) {
-      if (c.sourceId === sourceId && c.sourceEventId === sourceEventId) {
-        return c;
-      }
-    }
-    return null;
+    const matches = Array.from(this.candidates.values()).filter(
+      (c) => c.sourceId === sourceId && c.sourceEventId === sourceEventId,
+    );
+    return matches.length > 0 ? matches[matches.length - 1] : null;
   }
 }
 

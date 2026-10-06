@@ -22,7 +22,7 @@ export type BillingPosition =
   'headliner' | 'subheadliner' | 'mid_card' | 'support' | 'unknown';
 
 export type PromoterRelationshipType =
-  'promoter' | 'co_promoter' | 'presenter' | 'producer' | 'unknown';
+  'promoter' | 'presenter' | 'producer' | 'unknown';
 
 export type TicketInventoryStatus =
   'available' | 'low_inventory' | 'sold_out' | 'cancelled' | 'unknown';

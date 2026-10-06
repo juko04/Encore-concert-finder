@@ -180,6 +180,11 @@ export interface IRawIngestRepository {
     sourceId: string,
     contentHash: string,
   ): Promise<(RawIngest & { id: string }) | null>;
+  getBySourceUrlAndContentHash(
+    sourceId: string,
+    sourceUrl: string,
+    contentHash: string,
+  ): Promise<(RawIngest & { id: string }) | null>;
   getById(id: string): Promise<(RawIngest & { id: string }) | null>;
   listBySource(
     sourceId: string,
@@ -202,12 +207,32 @@ export interface IEventCandidateRepository {
       EventCandidate & { id: string; rawIngestId: string; sourceId: string }
     >
   >;
-  getById(id: string): Promise<(EventCandidate & { id: string }) | null>;
+  getById(
+    id: string,
+  ): Promise<
+    | (EventCandidate & { id: string; rawIngestId: string; sourceId: string })
+    | null
+  >;
   getByRawIngestId(
     rawIngestId: string,
-  ): Promise<Array<EventCandidate & { id: string }>>;
-  getBySourceEventId(
+  ): Promise<
+    Array<
+      EventCandidate & { id: string; rawIngestId: string; sourceId: string }
+    >
+  >;
+  listBySourceEventId(
     sourceId: string,
     sourceEventId: string,
-  ): Promise<(EventCandidate & { id: string }) | null>;
+  ): Promise<
+    Array<
+      EventCandidate & { id: string; rawIngestId: string; sourceId: string }
+    >
+  >;
+  getLatestBySourceEventId(
+    sourceId: string,
+    sourceEventId: string,
+  ): Promise<
+    | (EventCandidate & { id: string; rawIngestId: string; sourceId: string })
+    | null
+  >;
 }

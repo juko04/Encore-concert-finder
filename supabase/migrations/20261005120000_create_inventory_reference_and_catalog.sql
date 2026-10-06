@@ -175,7 +175,7 @@ create table if not exists public.event_promoters (
   id uuid primary key default gen_random_uuid(),
   event_id uuid not null references public.events(id) on delete cascade,
   promoter_id uuid not null references public.promoters(id) on delete cascade,
-  relationship_type text not null default 'promoter' check (relationship_type in ('promoter', 'co_promoter', 'presenter', 'producer', 'unknown')),
+  relationship_type text not null default 'promoter' check (relationship_type in ('promoter', 'presenter', 'producer', 'unknown')),
   created_at timestamptz not null default now(),
   constraint uq_event_promoter unique (event_id, promoter_id)
 );

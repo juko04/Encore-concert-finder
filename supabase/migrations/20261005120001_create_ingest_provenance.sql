@@ -17,7 +17,7 @@ create table if not exists public.raw_ingests (
   parser_version text not null default '1.0.0',
   created_at timestamptz not null default now(),
   constraint uq_raw_ingests_id_source unique (id, source_id),
-  constraint uq_raw_ingests_source_hash unique (source_id, content_hash)
+  constraint uq_raw_ingests_source_url_hash unique (source_id, source_url, content_hash)
 );
 
 create index if not exists idx_raw_ingests_content_hash on public.raw_ingests (content_hash);
@@ -34,9 +34,11 @@ create table if not exists public.event_candidates (
   acquisition_method text not null,
   source_url text not null,
   content_hash text not null default '',
+  candidate_fingerprint text not null default '',
   fetched_at timestamptz not null default now(),
   title text not null,
   artist_names text[] not null default '{}',
+  candidate_artists jsonb not null default '[]'::jsonb,
   venue_name text not null,
   city text,
   state text,
@@ -51,21 +53,23 @@ create table if not exists public.event_candidates (
   ticket_url text,
   price jsonb,
   is_festival boolean not null default false,
-  event_kind text not null default 'concert' check (event_kind in ('concert', 'club_show', 'outdoor_show', 'free_event', 'music_series', 'residency', 'festival', 'multi_day_festival', 'comedy', 'sports', 'theatre', 'arts_theatre', 'family', 'other')),
+  event_kind text not null default 'concert' check (event_kind in ('concert', 'club_show', 'outdoor_show', 'free_event', 'music_series', 'residency', 'festival', 'multi_day_festival')),
   confidence numeric not null default 0.8,
   verification_status text not null default 'unverified',
   parser_version text not null default '1.0.0',
   raw_payload jsonb,
   created_at timestamptz not null default now(),
   constraint fk_event_candidates_raw_ingest_source foreign key (raw_ingest_id, source_id)
-    references public.raw_ingests(id, source_id) on delete cascade
+    references public.raw_ingests(id, source_id) on delete cascade,
+  constraint uq_event_candidates_id_source unique (id, source_id),
+  constraint uq_event_candidates_id_source_raw unique (id, source_id, raw_ingest_id)
 );
 
 create index if not exists idx_event_candidates_raw_ingest on public.event_candidates (raw_ingest_id);
 create index if not exists idx_event_candidates_source on public.event_candidates (source_id);
 create index if not exists idx_event_candidates_source_event_id on public.event_candidates (source_id, source_event_id);
 create unique index if not exists uq_event_candidates_raw_source_event on public.event_candidates (raw_ingest_id, source_event_id) where source_event_id is not null;
-create unique index if not exists uq_event_candidates_raw_content_hash on public.event_candidates (raw_ingest_id, content_hash);
+create unique index if not exists uq_event_candidates_raw_fingerprint on public.event_candidates (raw_ingest_id, candidate_fingerprint) where candidate_fingerprint != '';
 
 -- 3. Event Sources (Provenance links between canonical events and sources)
 create table if not exists public.event_sources (
@@ -83,7 +87,9 @@ create table if not exists public.event_sources (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   constraint fk_event_sources_raw_ingest_source foreign key (raw_ingest_id, source_id)
-    references public.raw_ingests(id, source_id) on delete set null
+    references public.raw_ingests(id, source_id) on delete set null,
+  constraint fk_event_sources_candidate_source foreign key (candidate_id, source_id)
+    references public.event_candidates(id, source_id) on delete set null
 );
 
 create unique index if not exists uq_event_sources_source_event
@@ -114,7 +120,9 @@ create table if not exists public.event_field_evidence (
   parser_version text not null default '1.0.0',
   created_at timestamptz not null default now(),
   constraint fk_event_field_evidence_raw_ingest_source foreign key (raw_ingest_id, source_id)
-    references public.raw_ingests(id, source_id) on delete set null
+    references public.raw_ingests(id, source_id) on delete set null,
+  constraint fk_event_field_evidence_candidate_source foreign key (candidate_id, source_id)
+    references public.event_candidates(id, source_id) on delete set null
 );
 
 create index if not exists idx_event_field_evidence_event on public.event_field_evidence (event_id);
@@ -160,6 +168,7 @@ declare
   v_res_item jsonb;
   v_source_record_id uuid;
   v_existing_event boolean := false;
+  v_existing_event_id uuid;
   v_ext_id_item jsonb;
 begin
   -- 1. Create Venue if specified in transaction payload
@@ -356,6 +365,21 @@ begin
     v_source_item := payload->'source';
     if v_source_item is not null and v_source_item != 'null'::jsonb then
       if v_source_item->>'source_event_id' is not null then
+        -- Invariant 4 & Point 8: Upstream stable identity must NEVER silently move between canonical events
+        select event_id into v_existing_event_id
+        from public.event_sources
+        where source_id = (v_source_item->>'source_id')::uuid
+          and source_event_id = v_source_item->>'source_event_id';
+
+        if v_existing_event_id is not null and v_existing_event_id <> v_event_id then
+          raise exception 'Cannot reassign existing source_event_id % for source % from canonical event % to %',
+            v_source_item->>'source_event_id',
+            v_source_item->>'source_id',
+            v_existing_event_id,
+            v_event_id
+            using errcode = '23505';
+        end if;
+
         insert into public.event_sources (
           event_id,
           source_id,
@@ -380,7 +404,6 @@ begin
           true
         )
         on conflict (source_id, source_event_id) where source_event_id is not null do update set
-          event_id = excluded.event_id,
           candidate_id = excluded.candidate_id,
           raw_ingest_id = excluded.raw_ingest_id,
           source_url = excluded.source_url,

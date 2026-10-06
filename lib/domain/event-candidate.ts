@@ -16,14 +16,6 @@ export interface CandidateArtist {
   externalIds?: CandidateArtistExternalId[];
 }
 
-export interface PerformanceCandidate {
-  artistName: string;
-  billingPosition?: BillingPosition;
-  stage?: string;
-  startTime?: string;
-  endTime?: string;
-}
-
 export interface CandidatePrice {
   min?: number;
   max?: number;
@@ -44,6 +36,7 @@ export interface EventCandidate {
   sourceId?: string;
   sourceEventId?: string;
   sourceType?: string;
+  candidateFingerprint?: string;
   provenance: SourceProvenance;
   title: string;
   artistNames: string[];
@@ -63,7 +56,6 @@ export interface EventCandidate {
   price?: CandidatePrice;
   isFestival?: boolean;
   eventKind?: EventKind;
-  performances?: PerformanceCandidate[];
   confidence: number;
   verificationStatus?: CandidateVerificationStatus;
   resolutionStatus?: CandidateResolutionStatus;

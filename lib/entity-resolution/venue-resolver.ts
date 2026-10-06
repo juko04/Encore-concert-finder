@@ -57,8 +57,14 @@ export class VenueResolver {
     catalogRepo: ICatalogRepository,
     input: ResolveVenueInput,
   ): Promise<VenuePreparationResult> {
-    const rawName = input.name.trim();
-    const city = input.city.trim();
+    const rawName = input.name?.trim();
+    const city = input.city?.trim();
+    if (!rawName) {
+      throw new Error('Venue name is required');
+    }
+    if (!city) {
+      throw new Error('Venue city is required and cannot be empty');
+    }
     const normalized = normalizeName(rawName);
 
     // 1. Direct match on normalized name, city, region, and country

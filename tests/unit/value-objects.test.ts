@@ -153,5 +153,80 @@ describe('Value Objects & Normalization', () => {
       expect(gbpFormatted).toContain('65.00');
       expect(gbpFormatted).toContain('£');
     });
+
+    it('renders neutral numeric amount without fabricating USD when currency is invalid or missing (Finding 16)', () => {
+      // Invalid code
+      const invalidFormatted = formatCurrencyAmount(50.0, 'INVALID', 'en-US');
+      expect(invalidFormatted).toBe('50.00');
+      expect(invalidFormatted).not.toContain('$');
+      expect(invalidFormatted).not.toContain('USD');
+
+      // Missing code (null)
+      const nullFormatted = formatCurrencyAmount(75.5, null, 'en-US');
+      expect(nullFormatted).toBe('75.50');
+      expect(nullFormatted).not.toContain('$');
+      expect(nullFormatted).not.toContain('USD');
+
+      // Missing code (undefined)
+      const undefinedFormatted = formatCurrencyAmount(30.0, undefined, 'en-US');
+      expect(undefinedFormatted).toBe('30.00');
+      expect(undefinedFormatted).not.toContain('$');
+      expect(undefinedFormatted).not.toContain('USD');
+    });
+  });
+
+  describe('Candidate Fingerprint Computation', () => {
+    it('uses sourceEventId when present for stable upstream identity', async () => {
+      const { computeCandidateFingerprint } =
+        await import('@/lib/domain/value-objects');
+      const fp = computeCandidateFingerprint({
+        sourceEventId: 'upstream_123',
+        title: 'Some Concert',
+        venueName: 'Some Venue',
+      });
+      expect(fp).toBe('src_evt:upstream_123');
+    });
+
+    it('computes deterministic fingerprint based on normalized attributes when sourceEventId is missing', async () => {
+      const { computeCandidateFingerprint } =
+        await import('@/lib/domain/value-objects');
+      const fp1 = computeCandidateFingerprint({
+        title: 'The National Live',
+        artistNames: ['The National', 'Bartees Strange'],
+        venueName: 'Mission Ballroom',
+        localStartDate: '2026-10-15',
+        ticketUrl: 'https://tickets.example.com/events/101?utm_source=fb',
+      });
+
+      const fp2 = computeCandidateFingerprint({
+        title: '  the national live  ',
+        artistNames: ['Bartees Strange', 'The National'],
+        venueName: '  mission ballroom  ',
+        localStartDate: '2026-10-15',
+        ticketUrl: 'https://tickets.example.com/events/101?utm_campaign=winter',
+      });
+
+      expect(fp1).toBe(fp2);
+    });
+
+    it('produces distinct fingerprints for different events in the same raw observation', async () => {
+      const { computeCandidateFingerprint } =
+        await import('@/lib/domain/value-objects');
+      const fpA = computeCandidateFingerprint({
+        title: 'Event A',
+        artistNames: ['Artist A'],
+        venueName: 'Venue V',
+        localStartDate: '2026-10-15',
+      });
+
+      const fpB = computeCandidateFingerprint({
+        title: 'Event B',
+        artistNames: ['Artist B'],
+        venueName: 'Venue V',
+        localStartDate: '2026-10-16',
+      });
+
+      expect(fpA).not.toBe(fpB);
+    });
   });
 });

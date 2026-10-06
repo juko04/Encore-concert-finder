@@ -320,4 +320,94 @@ describe('CanonicalizationCoordinator Unit Tests', () => {
     expect(res.eventId).toBeNull();
     expect(res.reasons).toContain('ambiguous_artist_identity');
   });
+
+  it('rejects candidate entering canonicalization without valid persisted UUID IDs (Point 6)', async () => {
+    // Missing id
+    const candidateNoId = {
+      ...fixtures.single_show,
+      id: undefined as unknown as string,
+    };
+    await expect(coordinator.canonicalize(candidateNoId)).rejects.toThrow(
+      /Candidate must be persisted with valid UUID/,
+    );
+
+    // Non-UUID string
+    const candidateInvalidId = {
+      ...fixtures.single_show,
+      id: 'candidate_custom_string',
+    };
+    await expect(coordinator.canonicalize(candidateInvalidId)).rejects.toThrow(
+      /Candidate must be persisted with valid UUID/,
+    );
+  });
+
+  it('safely routes candidate with missing or empty venue locality to needs_review (Point 9)', async () => {
+    const candidateEmptyCity = {
+      ...fixtures.single_show,
+      city: '   ',
+    };
+    const res = await coordinator.canonicalize(candidateEmptyCity);
+    expect(res.status).toBe('needs_review');
+    expect(res.eventId).toBeNull();
+    expect(res.reasons).toContain('missing_venue_locality');
+
+    // Verify zero venues created with empty string
+    expect(catalogRepo.venues.size).toBe(0);
+  });
+
+  describe('Candidate Identity Model (Point 5)', () => {
+    it('satisfies all 4 candidate identity and replay invariants', async () => {
+      const { MemoryEventCandidateRepository } =
+        await import('@/lib/repositories/memory-repositories');
+      const candRepo = new MemoryEventCandidateRepository();
+
+      const rawIngestId1 = '00000000-0000-0000-0000-000000000001';
+      const rawIngestId2 = '00000000-0000-0000-0000-000000000002';
+      const sourceId = 'a0000000-0000-0000-0000-000000000001';
+
+      // Case 1: same raw observation + same extracted event -> no duplicate candidate
+      const candA1 = await candRepo.create({
+        ...fixtures.single_show,
+        rawIngestId: rawIngestId1,
+        sourceId,
+        sourceEventId: 'event_alpha',
+        title: 'Event Alpha',
+      });
+      const candA1Replay = await candRepo.create({
+        ...fixtures.single_show,
+        rawIngestId: rawIngestId1,
+        sourceId,
+        sourceEventId: 'event_alpha',
+        title: 'Event Alpha',
+      });
+      expect(candA1Replay.id).toBe(candA1.id);
+
+      // Case 2: same raw observation + different extracted event -> separate candidates
+      const candB1 = await candRepo.create({
+        ...fixtures.single_show,
+        rawIngestId: rawIngestId1,
+        sourceId,
+        sourceEventId: 'event_beta',
+        title: 'Event Beta',
+      });
+      expect(candB1.id).not.toBe(candA1.id);
+
+      // Case 3: new raw observation + same source_event_id -> new immutable candidate
+      const candA2 = await candRepo.create({
+        ...fixtures.single_show,
+        rawIngestId: rawIngestId2,
+        sourceId,
+        sourceEventId: 'event_alpha',
+        title: 'Event Alpha (Rescheduled)',
+      });
+      expect(candA2.id).not.toBe(candA1.id);
+
+      // Case 4: those candidates -> resolve to same canonical event
+      const resA1 = await coordinator.canonicalize(candA1);
+      expect(resA1.status).toBe('created');
+      const resA2 = await coordinator.canonicalize(candA2);
+      expect(resA2.status).toBe('matched');
+      expect(resA2.eventId).toBe(resA1.eventId);
+    });
+  });
 });

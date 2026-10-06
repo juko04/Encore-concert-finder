@@ -44,14 +44,48 @@ export class CanonicalizationCoordinator {
   async canonicalize(
     candidate: EventCandidate & { rawIngestId: string; sourceId: string },
   ): Promise<CanonicalizationResult> {
-    const candidateId = candidate.id ?? crypto.randomUUID();
+    const uuidRegex =
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (
+      !candidate.id ||
+      !candidate.rawIngestId ||
+      !candidate.sourceId ||
+      !uuidRegex.test(candidate.id) ||
+      !uuidRegex.test(candidate.rawIngestId) ||
+      !uuidRegex.test(candidate.sourceId)
+    ) {
+      throw new Error(
+        'Candidate must be persisted with valid UUID id, rawIngestId, and sourceId prior to canonicalization.',
+      );
+    }
+    const candidateId = candidate.id;
+
+    // Validate locality before resolving venue (Point 9: Empty city is not valid unknown geography)
+    const trimmedCity = candidate.city?.trim();
+    if (!trimmedCity) {
+      const payload: CanonicalizationPayload = {
+        resolution: {
+          event_candidate_id: candidateId,
+          status: 'needs_review',
+          matcher_version: '1.0.0',
+          confidence: 0.4,
+          reasons: ['missing_venue_locality'],
+        },
+      };
+      await this.catalogRepo.applyCanonicalization(payload);
+      return {
+        eventId: null,
+        status: 'needs_review',
+        reasons: ['missing_venue_locality'],
+      };
+    }
 
     // 1. Resolve Venue (pure in-memory prep, zero upfront writes to DB)
     const venuePrep = await this.venueResolver.resolveOrPrepare(
       this.catalogRepo,
       {
         name: candidate.venueName,
-        city: candidate.city ?? '',
+        city: trimmedCity,
         region: candidate.state,
         countryCode: candidate.country ?? null,
         timezone: candidate.timezone,

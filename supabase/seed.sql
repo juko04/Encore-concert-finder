@@ -22,3 +22,25 @@ insert into public.sources (
   true,
   '1.1.0'
 ) on conflict (slug) do nothing;
+
+insert into public.sources (
+  id,
+  slug,
+  name,
+  source_type,
+  acquisition_method,
+  base_url,
+  reliability_score,
+  active,
+  parser_version
+) values (
+  'b0000000-0000-0000-0000-000000000002',
+  'fake-secondary-adapter',
+  'Fake Secondary Source Adapter',
+  'promoter',
+  'structured_json',
+  'https://secondary.example.com',
+  0.90,
+  true,
+  '1.0.0'
+) on conflict (slug) do nothing;

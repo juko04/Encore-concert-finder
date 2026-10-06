@@ -48,12 +48,12 @@ describe('EventCard Component', () => {
     render(
       <EventCard
         event={{
-          id: 'evt_test_1',
+          id: '10000000-0000-0000-0000-000000000001',
           name: 'The Mountain Goats',
           normalizedName: 'the mountain goats',
           eventKind: 'concert',
           status: 'scheduled',
-          venueId: 'ven_1',
+          venueId: '20000000-0000-0000-0000-000000000001',
           timezone: 'America/Denver',
           localStartDate: '2026-10-15',
           startsAt: '2026-10-16T02:00:00Z',
@@ -61,27 +61,27 @@ describe('EventCard Component', () => {
           isMultiDay: false,
           primaryTicketUrl: 'https://tickets.example.com/events/101',
           venue: {
-            id: 'ven_1',
+            id: '20000000-0000-0000-0000-000000000001',
             name: 'Gothic Theatre',
             city: 'Englewood',
             region: 'CO',
           },
           artists: [
             {
-              id: 'art_1',
+              id: '30000000-0000-0000-0000-000000000001',
               name: 'The Mountain Goats',
               billingPosition: 'headliner',
             },
             {
-              id: 'art_2',
+              id: '30000000-0000-0000-0000-000000000002',
               name: 'Adeem the Artist',
               billingPosition: 'support',
             },
           ],
           ticketLinks: [
             {
-              id: 'tl_1',
-              eventId: 'evt_test_1',
+              id: '40000000-0000-0000-0000-000000000001',
+              eventId: '10000000-0000-0000-0000-000000000001',
               url: 'https://tickets.example.com/events/101',
               normalizedUrl: 'https://tickets.example.com/events/101',
               minPrice: 35.0,
@@ -93,7 +93,7 @@ describe('EventCard Component', () => {
           promoters: [],
           sources: [
             {
-              sourceId: 'src_1',
+              sourceId: 'a0000000-0000-0000-0000-000000000001',
               sourceUrl: 'https://venue.example.com',
               confidence: 0.95,
             },
@@ -122,24 +122,28 @@ describe('EventCard Component', () => {
     render(
       <EventCard
         event={{
-          id: 'evt_test_2',
+          id: '10000000-0000-0000-0000-000000000002',
           name: 'Big Thief',
           normalizedName: 'big thief',
           eventKind: 'concert',
           status: 'scheduled',
-          venueId: 'ven_2',
+          venueId: '20000000-0000-0000-0000-000000000002',
           timezone: 'America/Denver',
           localStartDate: '2026-10-20',
           startsAt: null,
           startTimePrecision: 'date_only',
           isMultiDay: false,
           venue: {
-            id: 'ven_2',
+            id: '20000000-0000-0000-0000-000000000002',
             name: 'Red Rocks',
             city: 'Morrison',
           },
           artists: [
-            { id: 'art_bt', name: 'Big Thief', billingPosition: 'headliner' },
+            {
+              id: '30000000-0000-0000-0000-000000000003',
+              name: 'Big Thief',
+              billingPosition: 'headliner',
+            },
           ],
           ticketLinks: [],
           promoters: [],
@@ -158,33 +162,33 @@ describe('EventCard Component', () => {
     render(
       <EventCard
         event={{
-          id: 'evt_test_unknown_currency',
+          id: '10000000-0000-0000-0000-000000000003',
           name: 'Local Showcase',
           normalizedName: 'local showcase',
           eventKind: 'concert',
           status: 'scheduled',
-          venueId: 'ven_3',
+          venueId: '20000000-0000-0000-0000-000000000003',
           timezone: 'America/Denver',
           localStartDate: '2026-10-25',
           startsAt: '2026-10-26T01:00:00Z',
           startTimePrecision: 'instant',
           isMultiDay: false,
           venue: {
-            id: 'ven_3',
+            id: '20000000-0000-0000-0000-000000000003',
             name: 'Hi-Dive',
             city: 'Denver',
           },
           artists: [
             {
-              id: 'art_local',
+              id: '30000000-0000-0000-0000-000000000004',
               name: 'Local Band',
               billingPosition: 'headliner',
             },
           ],
           ticketLinks: [
             {
-              id: 'tl_unknown',
-              eventId: 'evt_test_unknown_currency',
+              id: '40000000-0000-0000-0000-000000000002',
+              eventId: '10000000-0000-0000-0000-000000000003',
               url: 'https://tickets.example.com/events/local',
               normalizedUrl: 'https://tickets.example.com/events/local',
               minPrice: 15.0,

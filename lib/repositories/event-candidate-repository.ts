@@ -2,12 +2,14 @@ import 'server-only';
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type {
+  CandidateArtist,
   CandidatePrice,
   CandidateVerificationStatus,
   EventCandidate,
   StartTimePrecision,
 } from '@/lib/domain/event-candidate';
 import type { AcquisitionMethod, SourceType } from '@/lib/domain/source';
+import { computeCandidateFingerprint } from '@/lib/domain/value-objects';
 import { createAdminClient } from '@/lib/supabase/admin';
 import type { IEventCandidateRepository } from './interfaces';
 
@@ -20,9 +22,11 @@ interface EventCandidateRow {
   acquisition_method: AcquisitionMethod;
   source_url: string;
   content_hash: string;
+  candidate_fingerprint: string;
   fetched_at: string;
   title: string;
   artist_names: string[];
+  candidate_artists: Record<string, unknown>[] | null;
   venue_name: string;
   city: string | null;
   state: string | null;
@@ -53,6 +57,7 @@ function mapRowToCandidate(
     rawIngestId: row.raw_ingest_id,
     sourceId: row.source_id,
     sourceEventId: row.source_event_id ?? undefined,
+    candidateFingerprint: row.candidate_fingerprint,
     provenance: {
       sourceId: row.source_id,
       sourceType: row.source_type,
@@ -67,6 +72,8 @@ function mapRowToCandidate(
     },
     title: row.title,
     artistNames: row.artist_names,
+    artists:
+      (row.candidate_artists as unknown as CandidateArtist[]) ?? undefined,
     venueName: row.venue_name,
     city: row.city ?? undefined,
     state: row.state ?? undefined,
@@ -101,9 +108,21 @@ function candidateToRow(
       candidate.provenance?.acquisitionMethod ?? 'structured_json',
     source_url: candidate.provenance?.sourceUrl ?? '',
     content_hash: candidate.provenance?.contentHash ?? '',
+    candidate_fingerprint:
+      candidate.candidateFingerprint ??
+      computeCandidateFingerprint({
+        sourceEventId: candidate.sourceEventId,
+        title: candidate.title,
+        artistNames: candidate.artistNames,
+        venueName: candidate.venueName,
+        localStartDate: candidate.localStartDate,
+        startsAt: candidate.startsAt,
+        ticketUrl: candidate.ticketUrl,
+      }),
     fetched_at: candidate.provenance?.fetchedAt ?? new Date().toISOString(),
     title: candidate.title,
     artist_names: candidate.artistNames,
+    candidate_artists: candidate.artists ?? [],
     venue_name: candidate.venueName,
     city: candidate.city ?? null,
     state: candidate.state ?? null,
@@ -140,6 +159,31 @@ export class SupabaseEventCandidateRepository implements IEventCandidateReposito
     EventCandidate & { id: string; rawIngestId: string; sourceId: string }
   > {
     const row = candidateToRow(candidate);
+
+    if (row.source_event_id) {
+      const { data: existing } = await this.client
+        .from('event_candidates')
+        .select('*')
+        .eq('raw_ingest_id', row.raw_ingest_id)
+        .eq('source_event_id', row.source_event_id)
+        .maybeSingle();
+
+      if (existing) {
+        return mapRowToCandidate(existing as EventCandidateRow);
+      }
+    } else if (row.candidate_fingerprint) {
+      const { data: existing } = await this.client
+        .from('event_candidates')
+        .select('*')
+        .eq('raw_ingest_id', row.raw_ingest_id)
+        .eq('candidate_fingerprint', row.candidate_fingerprint)
+        .maybeSingle();
+
+      if (existing) {
+        return mapRowToCandidate(existing as EventCandidateRow);
+      }
+    }
+
     const { data, error } = await this.client
       .from('event_candidates')
       .insert(row)
@@ -215,7 +259,30 @@ export class SupabaseEventCandidateRepository implements IEventCandidateReposito
     return ((data as EventCandidateRow[]) || []).map(mapRowToCandidate);
   }
 
-  async getBySourceEventId(
+  async listBySourceEventId(
+    sourceId: string,
+    sourceEventId: string,
+  ): Promise<
+    Array<
+      EventCandidate & { id: string; rawIngestId: string; sourceId: string }
+    >
+  > {
+    const { data, error } = await this.client
+      .from('event_candidates')
+      .select('*')
+      .eq('source_id', sourceId)
+      .eq('source_event_id', sourceEventId)
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      throw new Error(
+        `Failed to list candidates by source event ID: ${error.message}`,
+      );
+    }
+    return ((data as EventCandidateRow[]) || []).map(mapRowToCandidate);
+  }
+
+  async getLatestBySourceEventId(
     sourceId: string,
     sourceEventId: string,
   ): Promise<
@@ -227,13 +294,15 @@ export class SupabaseEventCandidateRepository implements IEventCandidateReposito
       .select('*')
       .eq('source_id', sourceId)
       .eq('source_event_id', sourceEventId)
-      .maybeSingle();
+      .order('created_at', { ascending: false })
+      .limit(1);
 
     if (error) {
       throw new Error(
-        `Failed to get candidate by source event ID: ${error.message}`,
+        `Failed to get latest candidate by source event ID: ${error.message}`,
       );
     }
-    return data ? mapRowToCandidate(data as EventCandidateRow) : null;
+    const rows = (data as EventCandidateRow[]) || [];
+    return rows.length > 0 ? mapRowToCandidate(rows[0]) : null;
   }
 }

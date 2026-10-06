@@ -62,7 +62,7 @@ Phase 1 Final Convergence Pass complete — all invariants enforced in schema an
    - Aligned check constraints on `event_candidates` and `events` across all 8 canonical kinds.
 
 8. **Promoter Relationship & Ticket Links Schema Alignment (Invariants 12 & 16)**:
-   - Added `'unknown'` to `PromoterRelationshipType` check constraint and domain enum.
+   - Added `'unknown'` to `PromoterRelationshipType` check constraint and domain enum; removed `'co_promoter'`.
    - Explicitly constrained `min_price` and `max_price` to `numeric(12,2)`.
    - Added composite index on `raw_ingests(source_id, fetched_at desc)`.
 
@@ -70,27 +70,37 @@ Phase 1 Final Convergence Pass complete — all invariants enforced in schema an
    - Removed default `'USD'` fallback in `components/catalog/EventCard.tsx`.
    - Unknown currencies render numerical prices without appending USD or `$`.
 
-10. **Test Suite Expansion & Integrity**:
-    - Corrected temporal attributes in integration test control payloads to satisfy `chk_event_temporal_validity`.
-    - Added tests for UUID validation, candidate observation immutability, duplicate source identity collision rejection, non-concert kind preservation, artist ambiguity, and unknown currency rendering.
+10. **Multi-Event Page Crawl & Raw URL Separation**:
+    - `raw_ingests` compound unique constraint changed to `(source_id, source_url, content_hash)`. Identical payloads across different URLs persist cleanly.
+    - Added `candidate_fingerprint text` to `event_candidates` and unique partial indexes on `(raw_ingest_id, source_event_id)` and `(raw_ingest_id, candidate_fingerprint)`. Multi-event page crawls persist distinct candidates under a single raw ingest without collisions.
+
+11. **Candidate Artist Survival & External ID Round-Trip**:
+    - Added `candidate_artists jsonb NOT NULL DEFAULT '[]'::jsonb` to `event_candidates`.
+    - Repositories serialize `CandidateArtist[]` to/from JSONB, preserving structured artist data and external IDs from crawler adapter -> candidate table -> entity resolution -> `artist_external_ids`.
+
+12. **Strict Locality & Zero Empty-String Venue Creation**:
+    - `VenueResolver` requires non-empty city strings and throws on empty string.
+    - `CanonicalizationCoordinator` detects missing or whitespace-only venue city and safely routes candidates to `needs_review` with reason `missing_venue_locality`. Zero empty-string venues are created.
+
+13. **Upstream Source Event Reassignment Rejection**:
+    - Stored procedure `apply_canonicalization` and repository enforce upstream stable identity immutability: attempting to reassign `(source_id, source_event_id)` to a different canonical event raises exception with SQLSTATE `23505`.
+
+14. **Database Golden-Path Integration Test**:
+    - Added `tests/integration/golden-path.test.ts` executing the complete real pipeline against Supabase: multi-event crawl page -> raw ingest -> distinct candidates -> canonicalization -> artist external IDs -> rescheduled observation -> immutable candidate observation -> field evidence accumulation without deleting historical evidence -> upstream identity conflict rejection (23505) -> raw ingest URL separation.
 
 ## Tests run & local vs CI execution status
 
 - `npm run format:write` & `npm run format:check` — clean, all files match Prettier style
 - `npm run lint` — 0 errors, 0 warnings
-- `npm run typecheck` — 0 errors (`tsc --noEmit` clean)
-- `npm test` — 72/72 unit tests passed across 8 test suites
+- `npm run typecheck` — 0 errors (`tsc --noEmit` clean, pre- and post-build)
+- `npm test` — 79/79 unit tests passed across 8 test suites
 - `npm run build` — Next.js 15.5 production build compiled successfully
-- `npm run test:integration` — 16/16 integration tests passing.
-  *Note on local vs CI*: When Docker is unavailable locally in macOS sandbox, Vitest gracefully reports: `Local Supabase is not running. Skipping integration tests locally.` Database-backed validation strictly executes in GitHub Actions CI where the local Supabase container stack is started.
+- `npm run test:integration` — 21 integration tests across 3 suites (`golden-path.test.ts`, `catalog-rls.test.ts`, `profiles-rls.test.ts`).
+  *Execution environment clarification*:
+  - Local execution: Database tests gracefully skip with warning `Local Supabase is not running. Skipping integration tests locally.` because Docker is unavailable in the local environment.
+  - CI execution: GitHub Actions CI runs `npm run db:start && npm run db:reset && npm run test:integration` where all 21 tests execute against the live PostgreSQL / Supabase container stack.
 
 ## Accepted deferrals
-
-1. N+1 catalog-query optimization (consolidated SQL joins/views deferred to future phase).
-2. Advanced venue alias registry table and operator pipeline.
-3. Manual-resolution operator UI for `needs_review` candidates.
-4. Raw-ingest retention duration and deletion cron.
-5. Object-storage provider selection and external storage threshold for raw payloads.
 
 1. N+1 catalog-query optimization (consolidated SQL joins/views deferred to future phase).
 2. Advanced venue alias registry table and operator pipeline.
