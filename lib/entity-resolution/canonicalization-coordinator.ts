@@ -1,6 +1,7 @@
 import type {
   CanonicalEventDetail,
   CanonicalizationPayload,
+  Event,
   EventStatus,
 } from '@/lib/domain/catalog';
 import type {
@@ -23,6 +24,77 @@ export interface CanonicalizationResult {
   eventId: string | null;
   status: 'created' | 'matched' | 'needs_review' | 'rejected';
   reasons: Record<string, unknown> | string[];
+}
+
+/**
+ * Maps camelCase domain Event updates to the snake_case RPC schema
+ * expected by CanonicalizationPayload['event'] and PostgreSQL.
+ * Only keys explicitly present in updates (and not undefined) are included.
+ */
+export function mapEventUpdatesToCanonicalizationPayload(
+  updates: Partial<Event> & { id?: string },
+): NonNullable<CanonicalizationPayload['event']> {
+  const result: NonNullable<CanonicalizationPayload['event']> = {};
+
+  if (updates.id !== undefined) result.id = updates.id;
+  if ('name' in updates && updates.name !== undefined)
+    result.name = updates.name;
+  if ('normalizedName' in updates && updates.normalizedName !== undefined) {
+    result.normalized_name = updates.normalizedName;
+  }
+  if ('eventKind' in updates && updates.eventKind !== undefined) {
+    result.event_kind = updates.eventKind;
+  }
+  if ('status' in updates && updates.status !== undefined) {
+    result.status = updates.status;
+  }
+  if ('venueId' in updates && updates.venueId !== undefined) {
+    result.venue_id = updates.venueId;
+  }
+  if ('city' in updates && updates.city !== undefined) {
+    result.city = updates.city;
+  }
+  if ('region' in updates && updates.region !== undefined) {
+    result.region = updates.region;
+  }
+  if ('countryCode' in updates && updates.countryCode !== undefined) {
+    result.country_code = updates.countryCode;
+  }
+  if ('timezone' in updates && updates.timezone !== undefined) {
+    result.timezone = updates.timezone;
+  }
+  if ('localStartDate' in updates && updates.localStartDate !== undefined) {
+    result.local_start_date = updates.localStartDate;
+  }
+  if ('localEndDate' in updates && updates.localEndDate !== undefined) {
+    result.local_end_date = updates.localEndDate;
+  }
+  if ('startsAt' in updates && updates.startsAt !== undefined) {
+    result.starts_at = updates.startsAt;
+  }
+  if ('endsAt' in updates && updates.endsAt !== undefined) {
+    result.ends_at = updates.endsAt;
+  }
+  if (
+    'startTimePrecision' in updates &&
+    updates.startTimePrecision !== undefined
+  ) {
+    result.start_time_precision = updates.startTimePrecision;
+  }
+  if ('doorsAt' in updates && updates.doorsAt !== undefined) {
+    result.doors_at = updates.doorsAt;
+  }
+  if ('isMultiDay' in updates && updates.isMultiDay !== undefined) {
+    result.is_multi_day = updates.isMultiDay;
+  }
+  if ('officialUrl' in updates && updates.officialUrl !== undefined) {
+    result.official_url = updates.officialUrl;
+  }
+  if ('primaryTicketUrl' in updates && updates.primaryTicketUrl !== undefined) {
+    result.primary_ticket_url = updates.primaryTicketUrl;
+  }
+
+  return result;
 }
 
 export class CanonicalizationCoordinator {
@@ -454,10 +526,10 @@ export class CanonicalizationCoordinator {
       );
 
       payload = {
-        event: {
+        event: mapEventUpdatesToCanonicalizationPayload({
           id: existingEvent.id,
           ...mergeOutcome.updates,
-        },
+        }),
         artists: artistPayloads,
         ticketLinks: candidate.ticketUrl
           ? [

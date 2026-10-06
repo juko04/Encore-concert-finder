@@ -76,7 +76,7 @@ create table if not exists public.event_sources (
   id uuid primary key default gen_random_uuid(),
   event_id uuid not null references public.events(id) on delete cascade,
   source_id uuid not null references public.sources(id) on delete cascade,
-  candidate_id uuid references public.event_candidates(id) on delete set null,
+  candidate_id uuid,
   raw_ingest_id uuid,
   source_event_id text,
   source_url text not null,
@@ -87,9 +87,9 @@ create table if not exists public.event_sources (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   constraint fk_event_sources_raw_ingest_source foreign key (raw_ingest_id, source_id)
-    references public.raw_ingests(id, source_id) on delete set null,
+    references public.raw_ingests(id, source_id) on delete restrict,
   constraint fk_event_sources_candidate_source_raw foreign key (candidate_id, source_id, raw_ingest_id)
-    references public.event_candidates(id, source_id, raw_ingest_id) on delete set null
+    references public.event_candidates(id, source_id, raw_ingest_id) on delete restrict
 );
 
 create unique index if not exists uq_event_sources_source_event
@@ -112,7 +112,7 @@ create table if not exists public.event_field_evidence (
   event_source_id uuid references public.event_sources(id) on delete set null,
   source_id uuid not null references public.sources(id) on delete cascade,
   raw_ingest_id uuid,
-  candidate_id uuid references public.event_candidates(id) on delete set null,
+  candidate_id uuid,
   observed_value jsonb,
   value_hash text not null,
   confidence numeric not null default 0.8,
@@ -120,9 +120,9 @@ create table if not exists public.event_field_evidence (
   parser_version text not null default '1.0.0',
   created_at timestamptz not null default now(),
   constraint fk_event_field_evidence_raw_ingest_source foreign key (raw_ingest_id, source_id)
-    references public.raw_ingests(id, source_id) on delete set null,
+    references public.raw_ingests(id, source_id) on delete restrict,
   constraint fk_event_field_evidence_candidate_source_raw foreign key (candidate_id, source_id, raw_ingest_id)
-    references public.event_candidates(id, source_id, raw_ingest_id) on delete set null
+    references public.event_candidates(id, source_id, raw_ingest_id) on delete restrict
 );
 
 create index if not exists idx_event_field_evidence_event on public.event_field_evidence (event_id);

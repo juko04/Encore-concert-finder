@@ -863,7 +863,6 @@ export class MemoryCatalogRepository implements ICatalogRepository {
           if (existing) {
             this.events.set(eventId, {
               ...existing,
-              ...payload.event,
               id: eventId,
               name: payload.event.name ?? existing.name,
               normalizedName:

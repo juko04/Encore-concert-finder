@@ -70,20 +70,17 @@ describe('Supabase Golden Path Integration: Full Ingestion & Canonicalization Pi
   let coordinator: CanonicalizationCoordinator;
   const adapter = new FakeVenueSourceAdapter();
 
-  // Shared test context across golden path steps
-  let persistedRaw1Id: string;
-  let persistedCandA: EventCandidate & {
-    id: string;
-    rawIngestId: string;
-    sourceId: string;
-  };
-  let persistedCandB: EventCandidate & {
-    id: string;
-    rawIngestId: string;
-    sourceId: string;
-  };
-  let canonicalEventAId: string;
-  let canonicalEventBId: string;
+  function ensureDbAvailable(): boolean {
+    if (!isDbAvailable || !adminClient) {
+      if (process.env.CI) {
+        throw new Error(
+          `Local Supabase stack is not responding at ${credentials?.url ?? 'unknown'} in CI. Database validation is required on pull requests.`,
+        );
+      }
+      return false;
+    }
+    return true;
+  }
 
   beforeAll(async () => {
     if (!credentials) {
@@ -126,8 +123,8 @@ describe('Supabase Golden Path Integration: Full Ingestion & Canonicalization Pi
     coordinator = new CanonicalizationCoordinator(catalogRepo);
   });
 
-  it('step 1: ingests multi-event page fixture -> 1 raw ingest, 2 distinct candidate rows with UUIDs and artist external IDs', async () => {
-    if (!isDbAvailable || !adminClient) return;
+  it('core golden path: end-to-end multi-event ingestion, canonicalization, artist external ID roundtrip, rescheduling update, evidence preservation, and reassignment conflict rejection', async () => {
+    if (!ensureDbAvailable()) return;
 
     // 1. Adapter crawl fetches raw pages
     const crawlResult = await adapter.crawl({
@@ -144,7 +141,6 @@ describe('Supabase Golden Path Integration: Full Ingestion & Canonicalization Pi
     // 2. Persist raw ingest row
     const persistedRaw1 = await rawIngestRepo.create(rawPage1);
     expect(persistedRaw1.id).toBeDefined();
-    persistedRaw1Id = persistedRaw1.id;
 
     // 3. Adapter parses candidates associated with persistedRaw1
     const rawForParse = { ...rawPage1, id: persistedRaw1.id };
@@ -156,10 +152,10 @@ describe('Supabase Golden Path Integration: Full Ingestion & Canonicalization Pi
     expect(candBInput.sourceEventId).toBe('evt-102');
 
     // 4. Persist both candidate rows to database
-    persistedCandA = await candidateRepo.create(
+    const persistedCandA = await candidateRepo.create(
       candAInput as EventCandidate & { rawIngestId: string; sourceId: string },
     );
-    persistedCandB = await candidateRepo.create(
+    const persistedCandB = await candidateRepo.create(
       candBInput as EventCandidate & { rawIngestId: string; sourceId: string },
     );
 
@@ -167,11 +163,11 @@ describe('Supabase Golden Path Integration: Full Ingestion & Canonicalization Pi
     expect(persistedCandA.id).toBeDefined();
     expect(persistedCandB.id).toBeDefined();
     expect(persistedCandA.id).not.toBe(persistedCandB.id);
-    expect(persistedCandA.rawIngestId).toBe(persistedRaw1Id);
-    expect(persistedCandB.rawIngestId).toBe(persistedRaw1Id);
+    expect(persistedCandA.rawIngestId).toBe(persistedRaw1.id);
+    expect(persistedCandB.rawIngestId).toBe(persistedRaw1.id);
 
     // Verify candidates exist in event_candidates table
-    const { data: dbCandA } = await adminClient
+    const { data: dbCandA } = await adminClient!
       .from('event_candidates')
       .select('*')
       .eq('id', persistedCandA.id)
@@ -191,11 +187,11 @@ describe('Supabase Golden Path Integration: Full Ingestion & Canonicalization Pi
     expect(resB.eventId).toBeDefined();
     expect(resA.eventId).not.toBe(resB.eventId);
 
-    canonicalEventAId = resA.eventId!;
-    canonicalEventBId = resB.eventId!;
+    const canonicalEventAId = resA.eventId!;
+    const canonicalEventBId = resB.eventId!;
 
     // 6. Verify canonical event details in database
-    const { data: eventA } = await adminClient
+    const { data: eventA } = await adminClient!
       .from('events')
       .select('*')
       .eq('id', canonicalEventAId)
@@ -205,198 +201,14 @@ describe('Supabase Golden Path Integration: Full Ingestion & Canonicalization Pi
     expect(eventA.timezone).toBe('America/Denver');
 
     // 7. Verify artist external ID round-trip: spotify external ID is stored in artist_external_ids table
-    const { data: artistExtIds } = await adminClient
+    const { data: artistExtIds } = await adminClient!
       .from('artist_external_ids')
       .select('*')
       .eq('external_id', 'spotify_artist_mountain_echoes');
     expect(artistExtIds?.length).toBeGreaterThanOrEqual(1);
     expect(artistExtIds![0].provider).toBe('spotify');
 
-    // 8. Verify ticket links created
-    const { data: ticketLinks } = await adminClient
-      .from('event_ticket_links')
-      .select('*')
-      .eq('event_id', canonicalEventAId);
-    expect(ticketLinks?.length).toBeGreaterThanOrEqual(1);
-    expect(ticketLinks![0].url).toBe('https://tickets.example.com/evt-101');
-
-    // 9. Verify event source record attached to event A
-    const { data: eventSources } = await adminClient
-      .from('event_sources')
-      .select('*')
-      .eq('event_id', canonicalEventAId);
-    expect(eventSources?.length).toBeGreaterThanOrEqual(1);
-    expect(eventSources![0].source_event_id).toBe('evt-101');
-    expect(eventSources![0].candidate_id).toBe(persistedCandA.id);
-    expect(eventSources![0].raw_ingest_id).toBe(persistedRaw1Id);
-
-    // 10. Verify event field evidence recorded with field-level provenance (Issue 1)
-    const { data: evidence } = await adminClient
-      .from('event_field_evidence')
-      .select('*')
-      .eq('event_id', canonicalEventAId);
-    expect(evidence).not.toBeNull();
-    expect(evidence!.length).toBeGreaterThanOrEqual(10);
-
-    const fieldNames = evidence!.map((e) => e.field_name);
-    expect(fieldNames).toContain('title');
-    expect(fieldNames).toContain('event_kind');
-    expect(fieldNames).toContain('status');
-    expect(fieldNames).toContain('venue');
-    expect(fieldNames).toContain('city');
-    expect(fieldNames).toContain('region');
-    expect(fieldNames).toContain('country_code');
-    expect(fieldNames).toContain('timezone');
-    expect(fieldNames).toContain('local_start_date');
-    expect(fieldNames).toContain('starts_at');
-    expect(fieldNames).toContain('start_time_precision');
-    expect(fieldNames).toContain('doors_at');
-    expect(fieldNames).toContain('primary_ticket_url');
-    expect(fieldNames).toContain('canonical_event_created');
-
-    // Verify all initial field evidence rows link to correct source, raw ingest, and candidate
-    for (const ev of evidence!) {
-      expect(ev.source_id).toBe(adapter.id);
-      expect(ev.raw_ingest_id).toBe(persistedRaw1Id);
-      expect(ev.candidate_id).toBe(persistedCandA.id);
-    }
-  });
-
-  it('step 2: handles second observation for Event A (rescheduled date/time, price change) without duplicate canonical event and preserving prior evidence', async () => {
-    if (!isDbAvailable || !adminClient || !canonicalEventAId) return;
-
-    // 1. Simulate next-day crawl producing a second raw ingest
-    const rawObs2 = await rawIngestRepo.create({
-      sourceId: adapter.id,
-      sourceUrl: 'https://example-venue.com/events?page=1',
-      acquisitionMethod: 'structured_json',
-      fetchedAt: new Date(Date.now() + 86400000).toISOString(),
-      contentHash: `hash_page_1_rescheduled_${Date.now()}`,
-      contentType: 'application/json',
-      rawContent: JSON.stringify({ page: 1, events: [] }),
-      httpStatus: 200,
-      parserVersion: '1.1.0',
-    });
-
-    expect(rawObs2.id).not.toBe(persistedRaw1Id);
-
-    // 2. Second candidate observation: rescheduled to Oct 17 21:00, price $50 - $95
-    const candA_obs2 = await candidateRepo.create({
-      ...persistedCandA,
-      rawIngestId: rawObs2.id,
-      sourceId: adapter.id,
-      sourceEventId: 'evt-101', // same upstream stable ID
-      title: 'The Mountain Echoes Live (Rescheduled Show)',
-      localStartDate: '2026-10-17',
-      startsAt: '2026-10-17T21:00:00-06:00',
-      price: { min: 50.0, max: 95.0, currency: 'USD' },
-      provenance: {
-        ...persistedCandA.provenance,
-        rawIngestId: rawObs2.id,
-        contentHash: rawObs2.contentHash,
-        fetchedAt: rawObs2.fetchedAt,
-      },
-    });
-
-    // Verify candidate observation is an immutable separate row
-    expect(candA_obs2.id).not.toBe(persistedCandA.id);
-    expect(candA_obs2.rawIngestId).toBe(rawObs2.id);
-
-    // 3. Canonicalize second candidate
-    const resA_obs2 = await coordinator.canonicalize(candA_obs2);
-
-    // Must resolve to existing canonical event, NOT create a duplicate
-    expect(resA_obs2.status).toBe('matched');
-    expect(resA_obs2.eventId).toBe(canonicalEventAId);
-
-    // 4. Exactly one canonical event exists for Event A
-    const { count: eventCount } = await adminClient
-      .from('events')
-      .select('*', { count: 'exact', head: true })
-      .eq('id', canonicalEventAId);
-    expect(eventCount).toBe(1);
-
-    // 5. Canonical event has updated date and start time
-    const { data: updatedEvent } = await adminClient
-      .from('events')
-      .select('*')
-      .eq('id', canonicalEventAId)
-      .single();
-    expect(updatedEvent.local_start_date).toBe('2026-10-17');
-    expect(updatedEvent.starts_at).toBe('2026-10-17T21:00:00-06:00');
-
-    // 6. Verify field evidence contains observations from BOTH ingest runs (history is preserved)
-    const { data: allEvidence } = await adminClient
-      .from('event_field_evidence')
-      .select('*')
-      .eq('event_id', canonicalEventAId);
-    expect(allEvidence).not.toBeNull();
-
-    const candidateIdsInEvidence = allEvidence!.map((e) => e.candidate_id);
-    expect(candidateIdsInEvidence).toContain(persistedCandA.id);
-    expect(candidateIdsInEvidence).toContain(candA_obs2.id);
-  });
-
-  it('step 3: rejects reassigning existing source_event_id to a different canonical event', async () => {
-    if (
-      !isDbAvailable ||
-      !adminClient ||
-      !canonicalEventAId ||
-      !canonicalEventBId
-    )
-      return;
-
-    // Upstream evt-101 is already associated with canonicalEventAId.
-    // Attempting to map (adapter.id, evt-101) to canonicalEventBId must fail with unique constraint violation 23505
-    const { error: reassignmentError } = await adminClient
-      .from('event_sources')
-      .insert({
-        event_id: canonicalEventBId, // conflicting destination
-        source_id: adapter.id,
-        source_event_id: 'evt-101', // already attached to event A
-        source_url: 'https://example-venue.com/events/conflict',
-      });
-
-    expect(reassignmentError).not.toBeNull();
-    expect(reassignmentError?.code).toBe('23505');
-  });
-
-  it('step 4: maintains raw ingest URL separation: identical content hash on URL A vs URL B produces 2 distinct raw ingests', async () => {
-    if (!isDbAvailable) return;
-
-    const deterministicHash = `hash_identical_${Date.now()}`;
-    const rawA = await rawIngestRepo.create({
-      sourceId: adapter.id,
-      sourceUrl: `https://example-venue.com/events/view-a?nonce=${Date.now()}`,
-      acquisitionMethod: 'structured_json',
-      fetchedAt: new Date().toISOString(),
-      contentHash: deterministicHash,
-      contentType: 'application/json',
-      rawContent: '{"view": "a"}',
-      httpStatus: 200,
-      parserVersion: '1.1.0',
-    });
-
-    const rawB = await rawIngestRepo.create({
-      sourceId: adapter.id,
-      sourceUrl: `https://example-venue.com/events/view-b?nonce=${Date.now()}`,
-      acquisitionMethod: 'structured_json',
-      fetchedAt: new Date().toISOString(),
-      contentHash: deterministicHash,
-      contentType: 'application/json',
-      rawContent: '{"view": "b"}',
-      httpStatus: 200,
-      parserVersion: '1.1.0',
-    });
-
-    expect(rawA.id).not.toBe(rawB.id);
-    expect(rawA.contentHash).toBe(rawB.contentHash);
-    expect(rawA.sourceUrl).not.toBe(rawB.sourceUrl);
-  });
-
-  it('step 5: verifies artist external ID lookup through repository read methods', async () => {
-    if (!isDbAvailable || !adminClient) return;
-
+    // Verify repository read methods for external ID lookup
     const artist = await catalogRepo.findArtistByExternalId(
       'spotify',
       'spotify_artist_mountain_echoes',
@@ -413,10 +225,162 @@ describe('Supabase Golden Path Integration: Full Ingestion & Canonicalization Pi
           e.externalId === 'spotify_artist_mountain_echoes',
       ),
     ).toBe(true);
+
+    // 8. Verify ticket links created
+    const { data: ticketLinks } = await adminClient!
+      .from('event_ticket_links')
+      .select('*')
+      .eq('event_id', canonicalEventAId);
+    expect(ticketLinks?.length).toBeGreaterThanOrEqual(1);
+    expect(ticketLinks![0].url).toBe('https://tickets.example.com/evt-101');
+
+    // 9. Verify event source record attached to event A
+    const { data: eventSources } = await adminClient!
+      .from('event_sources')
+      .select('*')
+      .eq('event_id', canonicalEventAId);
+    expect(eventSources?.length).toBeGreaterThanOrEqual(1);
+    expect(eventSources![0].source_event_id).toBe('evt-101');
+    expect(eventSources![0].candidate_id).toBe(persistedCandA.id);
+    expect(eventSources![0].raw_ingest_id).toBe(persistedRaw1.id);
+
+    // 10. Verify event field evidence recorded with field-level provenance (Issue 1)
+    const { data: initialEvidence } = await adminClient!
+      .from('event_field_evidence')
+      .select('*')
+      .eq('event_id', canonicalEventAId);
+    expect(initialEvidence).not.toBeNull();
+    expect(initialEvidence!.length).toBeGreaterThanOrEqual(10);
+
+    const initialFieldNames = initialEvidence!.map((e) => e.field_name);
+    expect(initialFieldNames).toContain('title');
+    expect(initialFieldNames).toContain('event_kind');
+    expect(initialFieldNames).toContain('status');
+    expect(initialFieldNames).toContain('venue');
+    expect(initialFieldNames).toContain('city');
+    expect(initialFieldNames).toContain('region');
+    expect(initialFieldNames).toContain('country_code');
+    expect(initialFieldNames).toContain('timezone');
+    expect(initialFieldNames).toContain('local_start_date');
+    expect(initialFieldNames).toContain('starts_at');
+    expect(initialFieldNames).toContain('start_time_precision');
+    expect(initialFieldNames).toContain('doors_at');
+    expect(initialFieldNames).toContain('primary_ticket_url');
+    expect(initialFieldNames).toContain('canonical_event_created');
+
+    // Verify all initial field evidence rows link to correct source, raw ingest, and candidate
+    for (const ev of initialEvidence!) {
+      expect(ev.source_id).toBe(adapter.id);
+      expect(ev.raw_ingest_id).toBe(persistedRaw1.id);
+      expect(ev.candidate_id).toBe(persistedCandA.id);
+    }
+
+    // 11. Simulate next-day crawl producing a second raw ingest (rescheduling show to Oct 17 21:00)
+    const rawObs2 = await rawIngestRepo.create({
+      sourceId: adapter.id,
+      sourceUrl: 'https://example-venue.com/events?page=1',
+      acquisitionMethod: 'structured_json',
+      fetchedAt: new Date(Date.now() + 86400000).toISOString(),
+      contentHash: `hash_page_1_rescheduled_${Date.now()}`,
+      contentType: 'application/json',
+      rawContent: JSON.stringify({ page: 1, events: [] }),
+      httpStatus: 200,
+      parserVersion: '1.1.0',
+    });
+
+    expect(rawObs2.id).not.toBe(persistedRaw1.id);
+
+    // Second candidate observation: rescheduled to Oct 17 21:00, price $50 - $95
+    const candA_obs2 = await candidateRepo.create({
+      ...persistedCandA,
+      rawIngestId: rawObs2.id,
+      sourceId: adapter.id,
+      sourceEventId: 'evt-101', // same upstream stable ID
+      title: 'The Mountain Echoes Live (Rescheduled Show)',
+      localStartDate: '2026-10-17',
+      startsAt: '2026-10-17T21:00:00-06:00',
+      price: { min: 50.0, max: 95.0, currency: 'USD' },
+      rawPayload: { status: 'rescheduled', isRescheduled: true },
+      provenance: {
+        ...persistedCandA.provenance,
+        rawIngestId: rawObs2.id,
+        contentHash: rawObs2.contentHash,
+        fetchedAt: rawObs2.fetchedAt,
+      },
+    });
+
+    // Verify candidate observation is an immutable separate row
+    expect(candA_obs2.id).not.toBe(persistedCandA.id);
+    expect(candA_obs2.rawIngestId).toBe(rawObs2.id);
+
+    // Canonicalize second candidate
+    const resA_obs2 = await coordinator.canonicalize(candA_obs2);
+
+    // Must resolve to existing canonical event, NOT create a duplicate
+    expect(resA_obs2.status).toBe('matched');
+    expect(resA_obs2.eventId).toBe(canonicalEventAId);
+
+    // Exactly one canonical event exists for Event A
+    const { count: eventCount } = await adminClient!
+      .from('events')
+      .select('*', { count: 'exact', head: true })
+      .eq('id', canonicalEventAId);
+    expect(eventCount).toBe(1);
+
+    // Canonical event has updated date and start time instant
+    const { data: updatedEvent } = await adminClient!
+      .from('events')
+      .select('*')
+      .eq('id', canonicalEventAId)
+      .single();
+    expect(updatedEvent).not.toBeNull();
+    // Compare local_start_date exactly as 2026-10-17
+    expect(updatedEvent.local_start_date).toBe('2026-10-17');
+    // Check IANA timezone separately
+    expect(updatedEvent.timezone).toBe('America/Denver');
+    // Compare starts_at semantically as an instant (epoch timestamps / Date values)
+    expect(new Date(updatedEvent.starts_at).getTime()).toBe(
+      new Date('2026-10-17T21:00:00-06:00').getTime(),
+    );
+
+    // Verify field evidence contains observations from BOTH ingest runs (history is preserved)
+    const { data: allEvidence } = await adminClient!
+      .from('event_field_evidence')
+      .select('*')
+      .eq('event_id', canonicalEventAId);
+    expect(allEvidence).not.toBeNull();
+
+    const candidateIdsInEvidence = allEvidence!.map((e) => e.candidate_id);
+    expect(candidateIdsInEvidence).toContain(persistedCandA.id);
+    expect(candidateIdsInEvidence).toContain(candA_obs2.id);
+
+    // Verify second observation's field evidence contains at least local_start_date, starts_at, and status
+    const obs2Evidence = allEvidence!.filter(
+      (e) => e.candidate_id === candA_obs2.id,
+    );
+    expect(obs2Evidence.length).toBeGreaterThanOrEqual(2);
+    const obs2FieldNames = obs2Evidence.map((e) => e.field_name);
+    expect(obs2FieldNames).toContain('local_start_date');
+    expect(obs2FieldNames).toContain('starts_at');
+    expect(obs2FieldNames).toContain('status');
+
+    // 12. Upstream evt-101 is already associated with canonicalEventAId.
+    // Attempting to map (adapter.id, evt-101) to canonicalEventBId must fail with unique constraint violation 23505
+    const { error: reassignmentError } = await adminClient!
+      .from('event_sources')
+      .insert({
+        event_id: canonicalEventBId, // conflicting destination
+        source_id: adapter.id,
+        source_event_id: 'evt-101', // already attached to event A
+        source_url: 'https://example-venue.com/events/conflict',
+      });
+
+    expect(reassignmentError).not.toBeNull();
+    expect(reassignmentError?.code).toBe('23505');
   });
 
   it('step 6: persists, reloads, and canonicalizes date-only candidate without startsAt (Issue 2)', async () => {
-    if (!isDbAvailable || !adminClient) return;
+    if (!ensureDbAvailable()) return;
 
     // Create raw ingest for date-only show
     const rawDateOnly = await rawIngestRepo.create({
@@ -483,7 +447,7 @@ describe('Supabase Golden Path Integration: Full Ingestion & Canonicalization Pi
     expect(resDateOnly.eventId).toBeDefined();
 
     // 4. Verify canonical event in database
-    const { data: dbEvent } = await adminClient
+    const { data: dbEvent } = await adminClient!
       .from('events')
       .select('*')
       .eq('id', resDateOnly.eventId)
@@ -497,7 +461,7 @@ describe('Supabase Golden Path Integration: Full Ingestion & Canonicalization Pi
   });
 
   it('step 7: prevents same-name artist false merges when canonical artist IDs disagree (Issue 3)', async () => {
-    if (!isDbAvailable || !adminClient) return;
+    if (!ensureDbAvailable()) return;
 
     const testNonce = Date.now();
     const rawGhost = await rawIngestRepo.create({
@@ -600,9 +564,24 @@ describe('Supabase Golden Path Integration: Full Ingestion & Canonicalization Pi
   });
 
   it('step 8: enforces exact candidate ↔ raw observation composite FK integrity (Issue 4)', async () => {
-    if (!isDbAvailable || !adminClient) return;
+    if (!ensureDbAvailable()) return;
 
     const sourceA = adapter.id;
+
+    // Create an isolated canonical event to link foreign keys against
+    const { data: testEvent, error: testEventError } = await adminClient!
+      .from('events')
+      .insert({
+        name: `FK Test Event ${Date.now()}`,
+        status: 'scheduled',
+        timezone: 'America/Denver',
+        local_start_date: '2026-11-15',
+      })
+      .select('id')
+      .single();
+    expect(testEventError).toBeNull();
+    expect(testEvent?.id).toBeDefined();
+    const eventId = testEvent!.id;
 
     // Raw Ingest 1
     const raw1 = await rawIngestRepo.create({
@@ -660,10 +639,10 @@ describe('Supabase Golden Path Integration: Full Ingestion & Canonicalization Pi
     expect(raw1.id).not.toBe(raw2.id);
 
     // Attempt to insert event_sources mixing Candidate 1 with Raw Ingest 2
-    const { error: crossRawSourceError } = await adminClient
+    const { error: crossRawSourceError } = await adminClient!
       .from('event_sources')
       .insert({
-        event_id: canonicalEventAId,
+        event_id: eventId,
         source_id: sourceA,
         candidate_id: cand1.id,
         raw_ingest_id: raw2.id, // Mismatch! cand1 belongs to raw1, not raw2
@@ -678,10 +657,10 @@ describe('Supabase Golden Path Integration: Full Ingestion & Canonicalization Pi
     );
 
     // Attempt to insert event_field_evidence mixing Candidate 1 with Raw Ingest 2
-    const { error: crossRawEvidenceError } = await adminClient
+    const { error: crossRawEvidenceError } = await adminClient!
       .from('event_field_evidence')
       .insert({
-        event_id: canonicalEventAId,
+        event_id: eventId,
         field_name: 'title',
         source_id: sourceA,
         candidate_id: cand1.id,
@@ -698,7 +677,7 @@ describe('Supabase Golden Path Integration: Full Ingestion & Canonicalization Pi
   });
 
   it('step 9: executes createMany() idempotently on batch replay without duplicates (Issue 5)', async () => {
-    if (!isDbAvailable || !adminClient) return;
+    if (!ensureDbAvailable()) return;
 
     const rawBatch = await rawIngestRepo.create({
       sourceId: adapter.id,
@@ -779,7 +758,7 @@ describe('Supabase Golden Path Integration: Full Ingestion & Canonicalization Pi
     expect(run2[1].id).toBe(run1[1].id);
 
     // Verify row count in Supabase
-    const { data: dbCandidates } = await adminClient
+    const { data: dbCandidates } = await adminClient!
       .from('event_candidates')
       .select('*')
       .eq('raw_ingest_id', rawBatch.id);

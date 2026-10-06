@@ -540,6 +540,26 @@ Following the initial Phase 1 implementation, an independent architecture and co
     - *Problem*: Obsolete APIs `getBySourceAndContentHash` and `getByContentHash` existed on `IRawIngestRepository`, conflicting with the URL-aware unique constraint `(source_id, source_url, content_hash)`.
     - *Resolution*: Removed obsolete APIs from `IRawIngestRepository`, `SupabaseRawIngestRepository`, and `MemoryRawIngestRepository`. Standardized all raw ingest deduplication lookups on `getBySourceUrlAndContentHash`.
 
+32. **Domain → RPC Snake-Case Payload Mapping (CI Closeout Pass)**
+    - *Problem*: `evaluateFieldMerge` generated camelCase update keys (`localStartDate`, `startsAt`, etc.), which `apply_canonicalization` ignored because it expects snake_case keys (`local_start_date`, `starts_at`). This caused canonical event fields to fail to update on rescheduled observations in PostgreSQL.
+    - *Resolution*: Implemented `mapEventUpdatesToCanonicalizationPayload` in `CanonicalizationCoordinator` to explicitly map all domain event fields into snake_case database columns without mutating domain objects. Preserves explicit nulls and omits unsupplied properties without fabricating nulls. Tested in `canonicalization-coordinator.test.ts`.
+
+33. **Semantic Instant Equality & Non-Brittle Timezone Assertions (CI Closeout Pass)**
+    - *Problem*: String matching `starts_at` directly against ISO strings in PostgreSQL integration tests caused test failures due to database/client time zone formatting offsets (`-06:00` vs `+00:00` vs `Z`).
+    - *Resolution*: Assertions compare `local_start_date` as `'2026-10-17'`, `timezone` as `'America/Denver'`, and `starts_at` semantically as an instant (`new Date(updatedEvent.starts_at).getTime() === new Date(...).getTime()`), guaranteeing rock-solid date/time assertion fidelity.
+
+34. **Artist External ID Precedence Over Contextual Disambiguation (CI Closeout Pass)**
+    - *Problem*: `ArtistResolver.resolveOrPrepare` could silently retain a contextual artist if names matched, even if an incoming observation carried a strong external ID that conflicted with or pointed to a different artist.
+    - *Resolution*: External IDs are checked first. If an incoming external ID conflicts with the contextual artist's registered external IDs or identifies a distinct artist in the catalog, it is routed to `ambiguous` with reason `conflicting_external_id_contextual_mismatch`. Added regression tests in `entity-resolution.test.ts`.
+
+35. **Composite Foreign Key Delete Behavior - ON DELETE RESTRICT (CI Closeout Pass)**
+    - *Problem*: Composite foreign keys `(candidate_id, source_id, raw_ingest_id)` with `ON DELETE SET NULL` on `event_sources` and `event_field_evidence` violated the `NOT NULL` constraint on `source_id` if a candidate were deleted.
+    - *Resolution*: Updated composite foreign keys to `ON DELETE RESTRICT`, matching the immutable observation model of Phase 1.
+
+36. **Independent Golden Path Integration Tests & CI Guard (CI Closeout Pass)**
+    - *Problem*: Shared mutable variables across steps in `golden-path.test.ts` risked test ordering dependencies, and steps could silently return if database was unavailable in CI.
+    - *Resolution*: Consolidated sequential steps 1-5 into a single self-contained `core golden path` test, gave step 8 its own isolated test event, and implemented `ensureDbAvailable()` which throws loudly when running in CI (`process.env.CI`), ensuring zero silent skips on pull requests.
+
 ---
 
 ## Accepted Deferrals

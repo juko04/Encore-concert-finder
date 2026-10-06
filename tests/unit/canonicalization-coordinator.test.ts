@@ -1,5 +1,8 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { CanonicalizationCoordinator } from '@/lib/entity-resolution/canonicalization-coordinator';
+import {
+  CanonicalizationCoordinator,
+  mapEventUpdatesToCanonicalizationPayload,
+} from '@/lib/entity-resolution/canonicalization-coordinator';
 import { MemoryCatalogRepository } from '@/lib/repositories/memory-repositories';
 import { loadFixtures } from '../fixtures/fixture-helper';
 
@@ -450,6 +453,103 @@ describe('CanonicalizationCoordinator Unit Tests', () => {
 
       const allInRaw = await candRepo.getByRawIngestId(rawIngestId);
       expect(allInRaw.length).toBe(2);
+    });
+  });
+
+  describe('mapEventUpdatesToCanonicalizationPayload', () => {
+    it('converts camelCase domain event updates into exact snake_case RPC schema', () => {
+      const domainUpdates = {
+        id: 'event-uuid-123',
+        name: 'New Event Title',
+        normalizedName: 'new event title',
+        eventKind: 'club_show' as const,
+        status: 'rescheduled' as const,
+        venueId: 'venue-uuid-456',
+        city: 'Denver',
+        region: 'CO',
+        countryCode: 'US',
+        timezone: 'America/Denver',
+        localStartDate: '2026-10-17',
+        localEndDate: '2026-10-18',
+        startsAt: '2026-10-17T21:00:00-06:00',
+        endsAt: '2026-10-18T01:00:00-06:00',
+        startTimePrecision: 'instant' as const,
+        doorsAt: '2026-10-17T20:00:00-06:00',
+        isMultiDay: true,
+        officialUrl: 'https://example.com/event',
+        primaryTicketUrl: 'https://tickets.example.com/123',
+      };
+
+      const mapped = mapEventUpdatesToCanonicalizationPayload(domainUpdates);
+
+      expect(mapped).toEqual({
+        id: 'event-uuid-123',
+        name: 'New Event Title',
+        normalized_name: 'new event title',
+        event_kind: 'club_show',
+        status: 'rescheduled',
+        venue_id: 'venue-uuid-456',
+        city: 'Denver',
+        region: 'CO',
+        country_code: 'US',
+        timezone: 'America/Denver',
+        local_start_date: '2026-10-17',
+        local_end_date: '2026-10-18',
+        starts_at: '2026-10-17T21:00:00-06:00',
+        ends_at: '2026-10-18T01:00:00-06:00',
+        start_time_precision: 'instant',
+        doors_at: '2026-10-17T20:00:00-06:00',
+        is_multi_day: true,
+        official_url: 'https://example.com/event',
+        primary_ticket_url: 'https://tickets.example.com/123',
+      });
+    });
+
+    it('only includes keys present in domain updates and does not fabricate nulls for missing keys', () => {
+      const partialReschedule = {
+        id: 'event-uuid-789',
+        localStartDate: '2026-10-17',
+        startsAt: '2026-10-17T21:00:00-06:00',
+      };
+
+      const mapped =
+        mapEventUpdatesToCanonicalizationPayload(partialReschedule);
+
+      expect(mapped).toEqual({
+        id: 'event-uuid-789',
+        local_start_date: '2026-10-17',
+        starts_at: '2026-10-17T21:00:00-06:00',
+      });
+
+      // Assert non-provided keys are undefined, not set to null or default
+      expect(mapped.status).toBeUndefined();
+      expect(mapped.doors_at).toBeUndefined();
+      expect(mapped.venue_id).toBeUndefined();
+      expect(mapped.primary_ticket_url).toBeUndefined();
+      expect('status' in mapped).toBe(false);
+      expect('doors_at' in mapped).toBe(false);
+    });
+
+    it('preserves explicitly supplied null values without dropping them', () => {
+      const clearOptionalFields = {
+        id: 'event-uuid-999',
+        endsAt: null,
+        doorsAt: null,
+        primaryTicketUrl: null,
+      };
+
+      const mapped =
+        mapEventUpdatesToCanonicalizationPayload(clearOptionalFields);
+
+      expect(mapped).toEqual({
+        id: 'event-uuid-999',
+        ends_at: null,
+        doors_at: null,
+        primary_ticket_url: null,
+      });
+      expect(mapped.ends_at).toBeNull();
+      expect(mapped.doors_at).toBeNull();
+      expect(mapped.primary_ticket_url).toBeNull();
     });
   });
 });

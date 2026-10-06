@@ -109,6 +109,77 @@ describe('Entity Resolution Pipeline', () => {
         'conflicting_external_id_distinct_artist',
       );
     });
+
+    it('never silently retains contextual artist when incoming strong external ID identifies a different artist', async () => {
+      // Existing artist A ("Ghost" - Sweden, ID A)
+      const artistA = await catalogRepo.createArtist({
+        name: 'Ghost',
+        normalizedName: 'ghost',
+      });
+      await catalogRepo.addArtistExternalId({
+        artistId: artistA.id,
+        provider: 'spotify',
+        externalId: 'spotify_ghost_sweden',
+      });
+
+      // Existing artist B ("Ghost" - Japan, ID B)
+      const artistB = await catalogRepo.createArtist({
+        name: 'Ghost',
+        normalizedName: 'ghost',
+      });
+      await catalogRepo.addArtistExternalId({
+        artistId: artistB.id,
+        provider: 'spotify',
+        externalId: 'spotify_ghost_japan',
+      });
+
+      // Later observation of the same source event has displayed name "Ghost",
+      // contextual disambiguatedArtistId pointing to Artist A, but trusted external ID identifying Artist B
+      const outcome = await resolver.resolveOrPrepare(catalogRepo, {
+        name: 'Ghost',
+        disambiguatedArtistId: artistA.id,
+        externalIds: [
+          { provider: 'spotify', externalId: 'spotify_ghost_japan' },
+        ],
+      });
+
+      // Must NEVER silently match Artist A solely because the names match!
+      expect(outcome.artistId).not.toBe(artistA.id);
+      expect(outcome.status).toBe('ambiguous');
+      expect(outcome.reasons).toContain(
+        'conflicting_external_id_contextual_mismatch',
+      );
+    });
+
+    it('rejects contextual match when incoming candidate has a conflicting external ID not yet in catalog', async () => {
+      // Existing artist A has Spotify ID A
+      const artistA = await catalogRepo.createArtist({
+        name: 'Ghost',
+        normalizedName: 'ghost',
+      });
+      await catalogRepo.addArtistExternalId({
+        artistId: artistA.id,
+        provider: 'spotify',
+        externalId: 'spotify_ghost_sweden',
+      });
+
+      // Incoming observation for same event has displayed name "Ghost", disambiguatedArtistId = artistA,
+      // but carries Spotify ID C (different ID not yet in catalog)
+      const outcome = await resolver.resolveOrPrepare(catalogRepo, {
+        name: 'Ghost',
+        disambiguatedArtistId: artistA.id,
+        externalIds: [
+          { provider: 'spotify', externalId: 'spotify_ghost_unregistered' },
+        ],
+      });
+
+      // Must NEVER silently retain Artist A!
+      expect(outcome.artistId).not.toBe(artistA.id);
+      expect(outcome.status).toBe('ambiguous');
+      expect(outcome.reasons).toContain(
+        'conflicting_external_id_contextual_mismatch',
+      );
+    });
   });
 
   describe('VenueResolver', () => {

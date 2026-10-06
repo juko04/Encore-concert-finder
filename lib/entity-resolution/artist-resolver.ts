@@ -54,24 +54,6 @@ export class ArtistResolver {
       throw new Error('Artist name must be a non-empty string');
     }
 
-    // 0. Contextual disambiguation signal (e.g. artist already linked to this existing event)
-    if (options.disambiguatedArtistId) {
-      const existing = await catalogRepo.findArtistsByName(
-        normalizeName(rawName),
-      );
-      const matched = existing.find(
-        (a) => a.id === options.disambiguatedArtistId,
-      );
-      if (matched) {
-        return {
-          status: 'matched',
-          artistId: matched.id,
-          artist: matched,
-          reasons: ['existing_canonical_event_artist_match'],
-        };
-      }
-    }
-
     // 1. Resolve by stable external identifier first (highest confidence)
     if (options.externalIds && options.externalIds.length > 0) {
       for (const ext of options.externalIds) {
@@ -80,6 +62,18 @@ export class ArtistResolver {
           ext.externalId,
         );
         if (matched) {
+          // If a contextual event artist was provided, verify it does not conflict
+          if (
+            options.disambiguatedArtistId &&
+            matched.id !== options.disambiguatedArtistId
+          ) {
+            // Strong external ID points to Artist B, conflicting with contextual Artist A!
+            return {
+              status: 'ambiguous',
+              reasons: ['conflicting_external_id_contextual_mismatch'],
+            };
+          }
+
           return {
             status: 'matched',
             artistId: matched.id,
@@ -87,6 +81,44 @@ export class ArtistResolver {
             reasons: ['exact_external_id_match'],
           };
         }
+      }
+    }
+
+    // 2. Contextual disambiguation signal (only when it does not conflict with strong external-ID evidence)
+    if (options.disambiguatedArtistId) {
+      const existing = await catalogRepo.findArtistsByName(
+        normalizeName(rawName),
+      );
+      const matched = existing.find(
+        (a) => a.id === options.disambiguatedArtistId,
+      );
+      if (matched) {
+        // If incoming candidate provided strong external IDs, verify they don't conflict with matched artist's external IDs
+        if (options.externalIds && options.externalIds.length > 0) {
+          const matchedExtIds = await catalogRepo.findArtistExternalIds(
+            matched.id,
+          );
+          const hasConflict = options.externalIds.some((incomingExt) =>
+            matchedExtIds.some(
+              (e) =>
+                e.provider === incomingExt.provider &&
+                e.externalId !== incomingExt.externalId,
+            ),
+          );
+          if (hasConflict) {
+            return {
+              status: 'ambiguous',
+              reasons: ['conflicting_external_id_contextual_mismatch'],
+            };
+          }
+        }
+
+        return {
+          status: 'matched',
+          artistId: matched.id,
+          artist: matched,
+          reasons: ['existing_canonical_event_artist_match'],
+        };
       }
     }
 
