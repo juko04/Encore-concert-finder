@@ -122,8 +122,10 @@ describe('Catalog RLS, Security & Canonicalization Atomicity', () => {
       normalized_name: 'unauthorized show',
       timezone: 'America/Denver',
       local_start_date: '2026-10-15',
+      start_time_precision: 'date_only',
     });
     expect(insertEventError).not.toBeNull();
+    expect(insertEventError?.code).toBe('42501');
   });
 
   it('restricts direct access to sources table and allows access via public_sources view (Finding 10)', async () => {
@@ -266,6 +268,8 @@ describe('Catalog RLS, Security & Canonicalization Atomicity', () => {
         status: 'scheduled',
         timezone: 'America/Denver',
         local_start_date: '2026-11-20',
+        starts_at: '2026-11-21T03:00:00Z',
+        start_time_precision: 'instant',
       },
       artists: [
         {
@@ -321,6 +325,8 @@ describe('Catalog RLS, Security & Canonicalization Atomicity', () => {
         normalized_name: `rollback event ${rollbackSuffix}`,
         timezone: 'America/Denver',
         local_start_date: '2026-11-21',
+        starts_at: '2026-11-22T03:00:00Z',
+        start_time_precision: 'instant',
       },
       resolution: {
         event_candidate_id: '00000000-0000-0000-0000-000000000000', // invalid candidate FK
@@ -456,5 +462,63 @@ describe('Catalog RLS, Security & Canonicalization Atomicity', () => {
       .from('event_candidates')
       .select('id');
     expect(anonError || anonCandidates?.length === 0).toBeTruthy();
+  });
+
+  it('rejects mapping the same upstream (source_id, source_event_id) to multiple canonical events (Invariant 4)', async () => {
+    if (!isDbAvailable || !adminClient) return;
+
+    const sourceId = 'a0000000-0000-0000-0000-000000000001';
+    const upstreamId = `tm_unique_test_${Date.now()}`;
+
+    // Create event 1
+    const { data: event1 } = await adminClient
+      .from('events')
+      .insert({
+        name: 'Event 1',
+        normalized_name: 'event 1',
+        timezone: 'America/Denver',
+        local_start_date: '2026-11-20',
+        start_time_precision: 'date_only',
+      })
+      .select('id')
+      .single();
+
+    // Create event 2
+    const { data: event2 } = await adminClient
+      .from('events')
+      .insert({
+        name: 'Event 2',
+        normalized_name: 'event 2',
+        timezone: 'America/Denver',
+        local_start_date: '2026-11-20',
+        start_time_precision: 'date_only',
+      })
+      .select('id')
+      .single();
+
+    // Insert source link for event 1
+    const { error: link1Error } = await adminClient
+      .from('event_sources')
+      .insert({
+        event_id: event1?.id,
+        source_id: sourceId,
+        source_event_id: upstreamId,
+        source_url: 'https://example.com/e1',
+      });
+    expect(link1Error).toBeNull();
+
+    // Attempt to insert duplicate source link with SAME source_id and source_event_id to event 2
+    const { error: duplicateLinkError } = await adminClient
+      .from('event_sources')
+      .insert({
+        event_id: event2?.id,
+        source_id: sourceId,
+        source_event_id: upstreamId,
+        source_url: 'https://example.com/e2',
+      });
+
+    expect(duplicateLinkError).not.toBeNull();
+    // 23505 is unique_violation in PostgreSQL
+    expect(duplicateLinkError?.code).toBe('23505');
   });
 });

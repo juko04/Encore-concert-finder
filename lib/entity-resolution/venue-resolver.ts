@@ -102,7 +102,7 @@ export class VenueResolver {
     }
 
     // 3. New canonical venue specification (deferred atomic creation)
-    const newVenueId = `ven_${Math.random().toString(36).substring(2, 11)}`;
+    const newVenueId = crypto.randomUUID();
     const newVenue: Venue = {
       id: newVenueId,
       name: rawName,

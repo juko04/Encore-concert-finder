@@ -198,4 +198,126 @@ describe('CanonicalizationCoordinator Unit Tests', () => {
     });
     expect(noEvents.length).toBe(0);
   });
+
+  it('guarantees all persisted entities use valid UUID identifiers (Invariant 1)', async () => {
+    const candidate = fixtures.single_show;
+    const res = await coordinator.canonicalize(candidate);
+    expect(res.status).toBe('created');
+
+    const uuidRegex =
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+    const event = await catalogRepo.getEventById(res.eventId!);
+    expect(event?.id).toMatch(uuidRegex);
+    expect(event?.venueId).toMatch(uuidRegex);
+    expect(event?.artists[0].id).toMatch(uuidRegex);
+    expect(event?.ticketLinks[0].id).toMatch(uuidRegex);
+    expect(event?.sources[0].sourceId).toMatch(uuidRegex);
+
+    for (const fe of catalogRepo.eventFieldEvidence.values()) {
+      expect(fe.id).toMatch(uuidRegex);
+      expect(fe.eventId).toMatch(uuidRegex);
+    }
+
+    for (const cr of catalogRepo.candidateResolutions.values()) {
+      expect(cr.id).toMatch(uuidRegex);
+      expect(cr.eventId).toMatch(uuidRegex);
+    }
+  });
+
+  it('preserves non-concert eventKind through canonicalization (Invariant 5)', async () => {
+    const clubShowCandidate = {
+      ...fixtures.single_show,
+      title: 'Late Night Club Showcase',
+      eventKind: 'club_show' as const,
+      isFestival: false,
+    };
+
+    const res = await coordinator.canonicalize(clubShowCandidate);
+    expect(res.status).toBe('created');
+
+    const event = await catalogRepo.getEventById(res.eventId!);
+    expect(event?.eventKind).toBe('club_show');
+  });
+
+  it('enforces candidate observation immutability across repeated ingestion (Invariant 3)', async () => {
+    const { MemoryEventCandidateRepository } =
+      await import('@/lib/repositories/memory-repositories');
+    const candidateRepo = new MemoryEventCandidateRepository();
+
+    const candidate1 = {
+      ...fixtures.single_show,
+      sourceEventId: 'upstream_obs_123',
+      rawIngestId: '00000000-0000-0000-0000-000000000001',
+      sourceId: 'a0000000-0000-0000-0000-000000000001',
+    };
+
+    const record1 = await candidateRepo.create(candidate1);
+    expect(record1.id).toBeDefined();
+
+    // Second observation (e.g. crawl run next day with new rawIngestId)
+    const candidate2 = {
+      ...fixtures.single_show,
+      sourceEventId: 'upstream_obs_123',
+      rawIngestId: '00000000-0000-0000-0000-000000000002',
+      sourceId: 'a0000000-0000-0000-0000-000000000001',
+      title: 'Khruangbin at Red Rocks (Updated Title)',
+    };
+
+    const record2 = await candidateRepo.create(candidate2);
+    expect(record2.id).toBeDefined();
+
+    // Must be two distinct candidate rows, not overwritten!
+    expect(record1.id).not.toBe(record2.id);
+    const fetched1 = await candidateRepo.getById(record1.id);
+    const fetched2 = await candidateRepo.getById(record2.id);
+    expect(fetched1?.title).toBe('Khruangbin at Red Rocks');
+    expect(fetched2?.title).toBe('Khruangbin at Red Rocks (Updated Title)');
+  });
+
+  it('rejects mapping an upstream source_event_id to multiple canonical events (Invariant 4)', async () => {
+    const sourceId = 'a0000000-0000-0000-0000-000000000001';
+    const upstreamEventId = 'ticketmaster_ev_999';
+
+    // Link upstream event to event 1
+    await catalogRepo.recordEventSource({
+      eventId: '11111111-1111-1111-1111-111111111111',
+      sourceId,
+      sourceEventId: upstreamEventId,
+      sourceUrl: 'https://tm.com/event/999',
+      confidence: 0.9,
+    });
+
+    // Attempting to link the SAME upstream identity to event 2 must be rejected
+    await expect(
+      catalogRepo.recordEventSource({
+        eventId: '22222222-2222-2222-2222-222222222222',
+        sourceId,
+        sourceEventId: upstreamEventId,
+        sourceUrl: 'https://tm.com/event/999',
+        confidence: 0.9,
+      }),
+    ).rejects.toThrow(/duplicate key value violates unique constraint/);
+  });
+
+  it('routes to needs_review when candidate artist matches existing artist by name alone without external IDs (Invariant 7)', async () => {
+    // Pre-seed an existing artist named "Ghost"
+    await catalogRepo.createArtist({
+      name: 'Ghost',
+      normalizedName: 'ghost',
+    });
+
+    // Incoming candidate has artist "Ghost" but NO external ID disambiguation
+    const candidate = {
+      ...fixtures.single_show,
+      title: 'Ghost Live',
+      artistNames: ['Ghost'],
+      artists: [{ name: 'Ghost' }],
+    };
+
+    const res = await coordinator.canonicalize(candidate);
+    expect(res.status).toBe('needs_review');
+    expect(res.eventId).toBeNull();
+    expect(res.reasons).toContain('ambiguous_artist_identity');
+  });
 });

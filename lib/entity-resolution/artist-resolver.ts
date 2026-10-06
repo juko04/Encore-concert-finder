@@ -10,6 +10,7 @@ import type { ICatalogRepository } from '@/lib/repositories/interfaces';
 
 export interface ResolveArtistOptions {
   name: string;
+  disambiguatedArtistId?: string;
   externalIds?: Array<{
     provider: string;
     externalId: string;
@@ -51,6 +52,24 @@ export class ArtistResolver {
     const rawName = options.name?.trim();
     if (!rawName) {
       throw new Error('Artist name must be a non-empty string');
+    }
+
+    // 0. Contextual disambiguation signal (e.g. artist already linked to this existing event)
+    if (options.disambiguatedArtistId) {
+      const existing = await catalogRepo.findArtistsByName(
+        normalizeName(rawName),
+      );
+      const matched = existing.find(
+        (a) => a.id === options.disambiguatedArtistId,
+      );
+      if (matched) {
+        return {
+          status: 'matched',
+          artistId: matched.id,
+          artist: matched,
+          reasons: ['existing_canonical_event_artist_match'],
+        };
+      }
     }
 
     // 1. Resolve by stable external identifier first (highest confidence)
@@ -103,7 +122,7 @@ export class ArtistResolver {
 
         if (hasConflict) {
           // Confirmed distinct artist who happens to share the same name!
-          const newArtistId = `art_${Math.random().toString(36).substring(2, 11)}`;
+          const newArtistId = crypto.randomUUID();
           return {
             status: 'to_create',
             artistId: newArtistId,
@@ -118,16 +137,17 @@ export class ArtistResolver {
         }
       }
 
+      // Disallow name-only matching against existing artist without external ID or disambiguation signal
       return {
-        status: 'matched',
-        artistId: candidateArtist.id,
-        artist: candidateArtist,
-        reasons: ['single_artist_name_match'],
+        status: 'ambiguous',
+        reasons: [
+          'name_only_match_against_existing_artist_requires_external_id_disambiguation',
+        ],
       };
     }
 
     // 3. New artist to create
-    const newArtistId = `art_${Math.random().toString(36).substring(2, 11)}`;
+    const newArtistId = crypto.randomUUID();
     return {
       status: 'to_create',
       artistId: newArtistId,

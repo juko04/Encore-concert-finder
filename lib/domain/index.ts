@@ -4,6 +4,8 @@
 
 export * from './catalog';
 export type {
+  CandidateArtist,
+  CandidateArtistExternalId,
   CandidatePrice,
   CandidateResolutionStatus,
   CandidateVerificationStatus,

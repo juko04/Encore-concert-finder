@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import type { Event } from '@/lib/domain/catalog';
+import type { EventCandidate } from '@/lib/domain/event-candidate';
 import { ArtistResolver } from '@/lib/entity-resolution/artist-resolver';
 import { EventMatcher } from '@/lib/entity-resolution/event-matcher';
 import { evaluateFieldMerge } from '@/lib/entity-resolution/field-merge';
@@ -39,19 +40,20 @@ describe('Entity Resolution Pipeline', () => {
       expect(result.matchMethod).toBe('external_id');
     });
 
-    it('resolves by normalized name if external ID is not present', async () => {
-      const created = await catalogRepo.createArtist({
+    it('disallows name-only matching against existing artist without external ID (routes to ambiguous)', async () => {
+      await catalogRepo.createArtist({
         name: 'Khruangbin',
         normalizedName: 'khruangbin',
       });
 
-      const result = await resolver.resolve(catalogRepo, {
+      const outcome = await resolver.resolveOrPrepare(catalogRepo, {
         name: '  Khruangbin  ',
       });
 
-      expect(result.artist.id).toBe(created.id);
-      expect(result.isNew).toBe(false);
-      expect(result.matchMethod).toBe('normalized_name');
+      expect(outcome.status).toBe('ambiguous');
+      expect(outcome.reasons).toContain(
+        'name_only_match_against_existing_artist_requires_external_id_disambiguation',
+      );
     });
 
     it('creates new canonical artist when no match exists', async () => {
@@ -410,6 +412,59 @@ describe('Entity Resolution Pipeline', () => {
       expect(outcome.evidences.some((e) => e.fieldName === 'status')).toBe(
         true,
       );
+    });
+
+    it('handles rescheduling merge from Friday 8 PM to Saturday 9 PM and emits distinct evidence', () => {
+      const current: Event = {
+        id: 'evt_reschedule_1',
+        name: 'The Smile',
+        normalizedName: 'the smile',
+        eventKind: 'concert',
+        status: 'scheduled',
+        venueId: 'ven_1',
+        timezone: 'America/Denver',
+        localStartDate: '2026-10-16', // Friday
+        startsAt: '2026-10-17T02:00:00Z', // Friday 8 PM MDT
+        startTimePrecision: 'instant',
+        isMultiDay: false,
+      };
+
+      const candidate: EventCandidate = {
+        title: 'The Smile',
+        artistNames: ['The Smile'],
+        venueName: 'Mission Ballroom',
+        timezone: 'America/Denver',
+        localStartDate: '2026-10-17', // Saturday
+        startsAt: '2026-10-18T03:00:00Z', // Saturday 9 PM MDT
+        startTimePrecision: 'instant',
+        confidence: 0.95,
+        provenance: {
+          sourceId: 'src_venue',
+          sourceType: 'venue',
+          acquisitionMethod: 'structured_json',
+          sourceUrl: 'https://venue.com/rescheduled',
+          contentHash: 'hash_reschedule',
+          fetchedAt: '2026-10-10T12:00:00Z',
+          confidence: 0.95,
+          parserVersion: '1.0.0',
+        },
+        rawPayload: {
+          isRescheduled: true,
+          status: 'rescheduled',
+        },
+      };
+
+      const outcome = evaluateFieldMerge(current, candidate);
+
+      expect(outcome.updates.localStartDate).toBe('2026-10-17');
+      expect(outcome.updates.startsAt).toBe('2026-10-18T03:00:00Z');
+      expect(outcome.updates.status).toBe('rescheduled');
+
+      const fieldNames = outcome.evidences.map((e) => e.fieldName);
+      expect(fieldNames).toContain('local_start_date');
+      expect(fieldNames).toContain('starts_at');
+      expect(fieldNames).toContain('status');
+      expect(outcome.evidences.length).toBe(3);
     });
   });
 });

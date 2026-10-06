@@ -1,7 +1,20 @@
-import type { BillingPosition, StartTimePrecision } from './catalog';
+import type { BillingPosition, EventKind, StartTimePrecision } from './catalog';
 import type { SourceProvenance } from './source';
 
-export type { BillingPosition, StartTimePrecision };
+export type { BillingPosition, EventKind, StartTimePrecision };
+
+export interface CandidateArtistExternalId {
+  provider: string;
+  externalId: string;
+  providerUrl?: string | null;
+}
+
+export interface CandidateArtist {
+  name: string;
+  billingPosition?: BillingPosition;
+  sortOrder?: number;
+  externalIds?: CandidateArtistExternalId[];
+}
 
 export interface PerformanceCandidate {
   artistName: string;
@@ -30,9 +43,11 @@ export interface EventCandidate {
   rawIngestId?: string;
   sourceId?: string;
   sourceEventId?: string;
+  sourceType?: string;
   provenance: SourceProvenance;
   title: string;
   artistNames: string[];
+  artists?: CandidateArtist[];
   venueName: string;
   city?: string;
   state?: string;
@@ -47,6 +62,7 @@ export interface EventCandidate {
   ticketUrl?: string;
   price?: CandidatePrice;
   isFestival?: boolean;
+  eventKind?: EventKind;
   performances?: PerformanceCandidate[];
   confidence: number;
   verificationStatus?: CandidateVerificationStatus;

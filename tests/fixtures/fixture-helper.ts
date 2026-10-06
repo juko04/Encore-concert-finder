@@ -31,7 +31,7 @@ export function loadFixtures(): Record<
     const val = value as EventCandidate;
     result[key] = {
       ...val,
-      rawIngestId: val.rawIngestId ?? `raw_${key}`,
+      rawIngestId: val.rawIngestId ?? 'c0000000-0000-0000-0000-000000000001',
       sourceId: val.sourceId ?? val.provenance.sourceId,
     };
   }

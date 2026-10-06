@@ -151,4 +151,57 @@ describe('EventCard Component', () => {
     expect(screen.getByText('Time TBA (Date confirmed)')).toBeInTheDocument();
     expect(screen.getByText('Price TBA')).toBeInTheDocument();
   });
+
+  it('renders prices without assuming USD when currency is unknown', async () => {
+    const { EventCard } = await import('@/components/catalog/EventCard');
+
+    render(
+      <EventCard
+        event={{
+          id: 'evt_test_unknown_currency',
+          name: 'Local Showcase',
+          normalizedName: 'local showcase',
+          eventKind: 'concert',
+          status: 'scheduled',
+          venueId: 'ven_3',
+          timezone: 'America/Denver',
+          localStartDate: '2026-10-25',
+          startsAt: '2026-10-26T01:00:00Z',
+          startTimePrecision: 'instant',
+          isMultiDay: false,
+          venue: {
+            id: 'ven_3',
+            name: 'Hi-Dive',
+            city: 'Denver',
+          },
+          artists: [
+            {
+              id: 'art_local',
+              name: 'Local Band',
+              billingPosition: 'headliner',
+            },
+          ],
+          ticketLinks: [
+            {
+              id: 'tl_unknown',
+              eventId: 'evt_test_unknown_currency',
+              url: 'https://tickets.example.com/events/local',
+              normalizedUrl: 'https://tickets.example.com/events/local',
+              minPrice: 15.0,
+              maxPrice: 20.0,
+              currency: null,
+              inventoryStatus: 'available',
+            },
+          ],
+          promoters: [],
+          sources: [],
+        }}
+      />,
+    );
+
+    // Must render numerical range without appending USD or $
+    expect(screen.getByText('15 – 20')).toBeInTheDocument();
+    expect(screen.queryByText(/USD/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/\$15/)).not.toBeInTheDocument();
+  });
 });

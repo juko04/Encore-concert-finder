@@ -37,6 +37,7 @@ interface EventCandidateRow {
   ticket_url: string | null;
   price: Record<string, unknown> | null;
   is_festival: boolean;
+  event_kind: string;
   confidence: number | string;
   verification_status: CandidateVerificationStatus;
   parser_version: string;
@@ -80,6 +81,7 @@ function mapRowToCandidate(
     ticketUrl: row.ticket_url ?? undefined,
     price: (row.price as unknown as CandidatePrice) ?? undefined,
     isFestival: row.is_festival,
+    eventKind: (row.event_kind as EventCandidate['eventKind']) ?? 'concert',
     confidence: Number(row.confidence),
     verificationStatus: row.verification_status,
     rawPayload: row.raw_payload ?? undefined,
@@ -116,6 +118,8 @@ function candidateToRow(
     ticket_url: candidate.ticketUrl ?? null,
     price: candidate.price ?? null,
     is_festival: candidate.isFestival ?? false,
+    event_kind:
+      candidate.eventKind ?? (candidate.isFestival ? 'festival' : 'concert'),
     confidence: candidate.confidence,
     verification_status: candidate.verificationStatus ?? 'unverified',
     parser_version: candidate.provenance?.parserVersion ?? '1.0.0',
@@ -135,32 +139,6 @@ export class SupabaseEventCandidateRepository implements IEventCandidateReposito
   ): Promise<
     EventCandidate & { id: string; rawIngestId: string; sourceId: string }
   > {
-    const sourceEventId =
-      candidate.sourceEventId ?? candidate.provenance?.sourceEventId;
-    if (sourceEventId) {
-      const existing = await this.getBySourceEventId(
-        candidate.sourceId,
-        sourceEventId,
-      );
-      if (existing) {
-        const row = candidateToRow({
-          ...candidate,
-          id: existing.id,
-        });
-        const { data, error } = await this.client
-          .from('event_candidates')
-          .update(row)
-          .eq('id', existing.id)
-          .select('*')
-          .single();
-
-        if (error) {
-          throw new Error(`Failed to update event candidate: ${error.message}`);
-        }
-        return mapRowToCandidate(data as EventCandidateRow);
-      }
-    }
-
     const row = candidateToRow(candidate);
     const { data, error } = await this.client
       .from('event_candidates')

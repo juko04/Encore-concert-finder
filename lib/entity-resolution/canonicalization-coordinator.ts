@@ -1,8 +1,12 @@
 import type {
+  CanonicalEventDetail,
   CanonicalizationPayload,
   EventStatus,
 } from '@/lib/domain/catalog';
-import type { EventCandidate } from '@/lib/domain/event-candidate';
+import type {
+  CandidateArtist,
+  EventCandidate,
+} from '@/lib/domain/event-candidate';
 import {
   deriveLocalDateFromInstant,
   normalizeName,
@@ -40,8 +44,7 @@ export class CanonicalizationCoordinator {
   async canonicalize(
     candidate: EventCandidate & { rawIngestId: string; sourceId: string },
   ): Promise<CanonicalizationResult> {
-    const candidateId =
-      candidate.id ?? `cand_${Math.random().toString(36).substring(2, 11)}`;
+    const candidateId = candidate.id ?? crypto.randomUUID();
 
     // 1. Resolve Venue (pure in-memory prep, zero upfront writes to DB)
     const venuePrep = await this.venueResolver.resolveOrPrepare(
@@ -119,15 +122,71 @@ export class CanonicalizationCoordinator {
       };
     }
 
+    // Contextual disambiguation: check if candidate already maps to an existing canonical event
+    let existingMatchedDetail: CanonicalEventDetail | null = null;
+    if (candidate.sourceId && candidate.sourceEventId) {
+      const matchBySource = await this.catalogRepo.findEventBySourceEventId(
+        candidate.sourceId,
+        candidate.sourceEventId,
+      );
+      if (matchBySource) {
+        existingMatchedDetail = await this.catalogRepo.getEventById(
+          matchBySource.id,
+        );
+      }
+    }
+    if (!existingMatchedDetail && candidate.ticketUrl) {
+      try {
+        const normUrl = normalizeUrl(candidate.ticketUrl);
+        const matchByTicket =
+          await this.catalogRepo.findEventByTicketUrl(normUrl);
+        if (matchByTicket) {
+          existingMatchedDetail = await this.catalogRepo.getEventById(
+            matchByTicket.id,
+          );
+        }
+      } catch {
+        // ignore
+      }
+    }
+
     // 4. Resolve Artists (Finding 5: In-memory prep with ambiguity detection)
     const artistPayloads: NonNullable<CanonicalizationPayload['artists']> = [];
     const resolvedArtistIds: string[] = [];
 
-    for (let index = 0; index < candidate.artistNames.length; index++) {
-      const artistName = candidate.artistNames[index];
+    const candidateArtists: CandidateArtist[] =
+      candidate.artists && candidate.artists.length > 0
+        ? candidate.artists
+        : candidate.artistNames.map((name, idx) => ({
+            name,
+            billingPosition: idx === 0 ? 'headliner' : 'support',
+            sortOrder: idx,
+          }));
+
+    for (let index = 0; index < candidateArtists.length; index++) {
+      const candidateArtist = candidateArtists[index];
+
+      let disambiguatedArtistId: string | undefined;
+      if (existingMatchedDetail) {
+        const matched = existingMatchedDetail.artists.find(
+          (a) => normalizeName(a.name) === normalizeName(candidateArtist.name),
+        );
+        if (matched) {
+          disambiguatedArtistId = matched.id;
+        }
+      }
+
       const resolved = await this.artistResolver.resolveOrPrepare(
         this.catalogRepo,
-        { name: artistName },
+        {
+          name: candidateArtist.name,
+          disambiguatedArtistId,
+          externalIds: candidateArtist.externalIds?.map((e) => ({
+            provider: e.provider,
+            externalId: e.externalId,
+            providerUrl: e.providerUrl,
+          })),
+        },
       );
 
       if (resolved.status === 'ambiguous') {
@@ -149,12 +208,17 @@ export class CanonicalizationCoordinator {
         };
       }
 
+      const billingPos =
+        candidateArtist.billingPosition ??
+        (index === 0 ? 'headliner' : 'support');
+      const sortOrd = candidateArtist.sortOrder ?? index;
+
       if (resolved.status === 'matched') {
         resolvedArtistIds.push(resolved.artistId!);
         artistPayloads.push({
           artist_id: resolved.artistId!,
-          billing_position: index === 0 ? 'headliner' : 'support',
-          sort_order: index,
+          billing_position: billingPos,
+          sort_order: sortOrd,
         });
       } else if (resolved.status === 'to_create') {
         const toCreate = resolved.artistToCreate!;
@@ -168,8 +232,8 @@ export class CanonicalizationCoordinator {
             external_id: e.externalId,
             provider_url: e.providerUrl,
           })),
-          billing_position: index === 0 ? 'headliner' : 'support',
-          sort_order: index,
+          billing_position: billingPos,
+          sort_order: sortOrd,
         });
       }
     }
@@ -239,7 +303,9 @@ export class CanonicalizationCoordinator {
         event: {
           name: candidate.title,
           normalized_name: normalizeName(candidate.title),
-          event_kind: candidate.isFestival ? 'festival' : 'concert',
+          event_kind:
+            candidate.eventKind ??
+            (candidate.isFestival ? 'festival' : 'concert'),
           status: (candidate.rawPayload?.status as EventStatus) ?? 'scheduled',
           venue_id: resolvedVenue.id,
           city: candidate.city ?? resolvedVenue.city ?? null,

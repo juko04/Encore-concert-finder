@@ -41,12 +41,19 @@ export function EventCard({ event }: EventCardProps) {
   const currency =
     summaryEvent?.currency ??
     detailEvent?.ticketLinks?.find((tl) => tl.currency)?.currency ??
-    'USD';
+    null;
 
   // Format price string using ISO currency code without hardcoding $
   const renderPrice = () => {
     if (minPrice === null || minPrice === undefined) {
       return 'Price TBA';
+    }
+
+    if (!currency) {
+      if (maxPrice !== null && maxPrice !== undefined && maxPrice > minPrice) {
+        return `${minPrice} – ${maxPrice}`;
+      }
+      return `${minPrice}`;
     }
 
     const formattedMin = formatCurrencyAmount(minPrice, currency);

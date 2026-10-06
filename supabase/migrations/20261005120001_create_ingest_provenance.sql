@@ -22,11 +22,12 @@ create table if not exists public.raw_ingests (
 
 create index if not exists idx_raw_ingests_content_hash on public.raw_ingests (content_hash);
 create index if not exists idx_raw_ingests_source on public.raw_ingests (source_id);
+create index if not exists idx_raw_ingests_source_fetched on public.raw_ingests (source_id, fetched_at desc);
 
 -- 2. Event Candidates (Extracted intermediate candidates awaiting resolution)
 create table if not exists public.event_candidates (
   id uuid primary key default gen_random_uuid(),
-  raw_ingest_id uuid,
+  raw_ingest_id uuid not null,
   source_id uuid not null references public.sources(id) on delete cascade,
   source_event_id text,
   source_type text not null,
@@ -50,6 +51,7 @@ create table if not exists public.event_candidates (
   ticket_url text,
   price jsonb,
   is_festival boolean not null default false,
+  event_kind text not null default 'concert' check (event_kind in ('concert', 'club_show', 'outdoor_show', 'free_event', 'music_series', 'residency', 'festival', 'multi_day_festival', 'comedy', 'sports', 'theatre', 'arts_theatre', 'family', 'other')),
   confidence numeric not null default 0.8,
   verification_status text not null default 'unverified',
   parser_version text not null default '1.0.0',
@@ -62,7 +64,8 @@ create table if not exists public.event_candidates (
 create index if not exists idx_event_candidates_raw_ingest on public.event_candidates (raw_ingest_id);
 create index if not exists idx_event_candidates_source on public.event_candidates (source_id);
 create index if not exists idx_event_candidates_source_event_id on public.event_candidates (source_id, source_event_id);
-create unique index if not exists uq_event_candidates_source_event on public.event_candidates (source_id, source_event_id) where source_event_id is not null;
+create unique index if not exists uq_event_candidates_raw_source_event on public.event_candidates (raw_ingest_id, source_event_id) where source_event_id is not null;
+create unique index if not exists uq_event_candidates_raw_content_hash on public.event_candidates (raw_ingest_id, content_hash);
 
 -- 3. Event Sources (Provenance links between canonical events and sources)
 create table if not exists public.event_sources (
@@ -83,12 +86,12 @@ create table if not exists public.event_sources (
     references public.raw_ingests(id, source_id) on delete set null
 );
 
-create unique index if not exists uq_event_sources_with_ext_id
-  on public.event_sources (event_id, source_id, source_event_id)
+create unique index if not exists uq_event_sources_source_event
+  on public.event_sources (source_id, source_event_id)
   where source_event_id is not null;
 
 create unique index if not exists uq_event_sources_without_ext_id
-  on public.event_sources (event_id, source_id)
+  on public.event_sources (event_id, source_id, source_url)
   where source_event_id is null;
 
 create index if not exists idx_event_sources_event on public.event_sources (event_id);
@@ -247,7 +250,7 @@ begin
         (v_event_data->>'local_end_date')::date,
         (v_event_data->>'starts_at')::timestamptz,
         (v_event_data->>'ends_at')::timestamptz,
-        coalesce(v_event_data->>'start_time_precision', 'instant'),
+        coalesce(v_event_data->>'start_time_precision', case when (v_event_data->>'starts_at') is not null then 'instant' else 'date_only' end),
         (v_event_data->>'doors_at')::timestamptz,
         coalesce((v_event_data->>'is_multi_day')::boolean, false),
         v_event_data->>'official_url',
@@ -376,9 +379,11 @@ begin
           now(),
           true
         )
-        on conflict (event_id, source_id, source_event_id) where source_event_id is not null do update set
+        on conflict (source_id, source_event_id) where source_event_id is not null do update set
+          event_id = excluded.event_id,
           candidate_id = excluded.candidate_id,
           raw_ingest_id = excluded.raw_ingest_id,
+          source_url = excluded.source_url,
           confidence = excluded.confidence,
           last_seen_at = now(),
           updated_at = now()
@@ -407,7 +412,7 @@ begin
           now(),
           true
         )
-        on conflict (event_id, source_id) where source_event_id is null do update set
+        on conflict (event_id, source_id, source_url) where source_event_id is null do update set
           candidate_id = excluded.candidate_id,
           raw_ingest_id = excluded.raw_ingest_id,
           confidence = excluded.confidence,

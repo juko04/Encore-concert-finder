@@ -95,7 +95,7 @@ export class MemoryRawIngestRepository implements IRawIngestRepository {
       return existing;
     }
 
-    const id = `raw_${Math.random().toString(36).substring(2, 11)}`;
+    const id = crypto.randomUUID();
     const record: RawIngest & { id: string } = {
       ...ingest,
       id,
@@ -150,31 +150,7 @@ export class MemoryEventCandidateRepository implements IEventCandidateRepository
   ): Promise<
     EventCandidate & { id: string; rawIngestId: string; sourceId: string }
   > {
-    const sourceEventId =
-      candidate.sourceEventId ?? candidate.provenance?.sourceEventId;
-    if (sourceEventId) {
-      const existing = await this.getBySourceEventId(
-        candidate.sourceId,
-        sourceEventId,
-      );
-      if (existing) {
-        const updated: EventCandidate & {
-          id: string;
-          rawIngestId: string;
-          sourceId: string;
-        } = {
-          ...existing,
-          ...candidate,
-          id: existing.id,
-        };
-        this.candidates.set(existing.id, updated);
-        return updated;
-      }
-    }
-
-    const id =
-      candidate.id ??
-      `candidate_${Math.random().toString(36).substring(2, 11)}`;
+    const id = candidate.id ?? crypto.randomUUID();
     const record: EventCandidate & {
       id: string;
       rawIngestId: string;
@@ -549,7 +525,7 @@ export class MemoryCatalogRepository implements ICatalogRepository {
     normalizedName: string;
     imageUrl?: string | null;
   }): Promise<Artist> {
-    const id = `art_${Math.random().toString(36).substring(2, 11)}`;
+    const id = crypto.randomUUID();
     const now = new Date().toISOString();
     const created: Artist = {
       id,
@@ -569,7 +545,7 @@ export class MemoryCatalogRepository implements ICatalogRepository {
     externalId: string;
     providerUrl?: string | null;
   }): Promise<ArtistExternalId> {
-    const id = `aext_${Math.random().toString(36).substring(2, 11)}`;
+    const id = crypto.randomUUID();
     const created: ArtistExternalId = {
       id,
       ...externalId,
@@ -591,7 +567,7 @@ export class MemoryCatalogRepository implements ICatalogRepository {
     website?: string | null;
     capacity?: number | null;
   }): Promise<Venue> {
-    const id = `ven_${Math.random().toString(36).substring(2, 11)}`;
+    const id = crypto.randomUUID();
     const now = new Date().toISOString();
     const created: Venue = {
       id,
@@ -610,7 +586,7 @@ export class MemoryCatalogRepository implements ICatalogRepository {
     website?: string | null;
     calendarUrl?: string | null;
   }): Promise<Promoter> {
-    const id = `pro_${Math.random().toString(36).substring(2, 11)}`;
+    const id = crypto.randomUUID();
     const now = new Date().toISOString();
     const created: Promoter = {
       id,
@@ -625,7 +601,7 @@ export class MemoryCatalogRepository implements ICatalogRepository {
   async createEvent(
     event: Omit<Event, 'id' | 'createdAt' | 'updatedAt'>,
   ): Promise<Event> {
-    const id = `evt_${Math.random().toString(36).substring(2, 11)}`;
+    const id = crypto.randomUUID();
     const now = new Date().toISOString();
     const created: Event = {
       id,
@@ -661,7 +637,7 @@ export class MemoryCatalogRepository implements ICatalogRepository {
   ): Promise<EventArtist> {
     const key = `${eventId}_${artistId}`;
     const link: EventArtist = {
-      id: `ea_${Math.random().toString(36).substring(2, 11)}`,
+      id: crypto.randomUUID(),
       eventId,
       artistId,
       billingPosition,
@@ -679,7 +655,7 @@ export class MemoryCatalogRepository implements ICatalogRepository {
   ): Promise<EventPromoter> {
     const key = `${eventId}_${promoterId}`;
     const link: EventPromoter = {
-      id: `ep_${Math.random().toString(36).substring(2, 11)}`,
+      id: crypto.randomUUID(),
       eventId,
       promoterId,
       relationshipType,
@@ -702,7 +678,7 @@ export class MemoryCatalogRepository implements ICatalogRepository {
   }): Promise<EventTicketLink> {
     const key = `${ticketLink.eventId}_${ticketLink.normalizedUrl}`;
     const link: EventTicketLink = {
-      id: `tl_${Math.random().toString(36).substring(2, 11)}`,
+      id: crypto.randomUUID(),
       ...ticketLink,
       inventoryStatus: ticketLink.inventoryStatus ?? 'available',
       createdAt: new Date().toISOString(),
@@ -721,11 +697,26 @@ export class MemoryCatalogRepository implements ICatalogRepository {
     sourceUrl: string;
     confidence: number;
   }): Promise<EventSourceRecord> {
-    const key = `${sourceRecord.eventId}_${sourceRecord.sourceId}_${sourceRecord.sourceEventId ?? ''}`;
+    if (sourceRecord.sourceEventId) {
+      for (const es of this.eventSources.values()) {
+        if (
+          es.sourceId === sourceRecord.sourceId &&
+          es.sourceEventId === sourceRecord.sourceEventId &&
+          es.eventId !== sourceRecord.eventId
+        ) {
+          throw new Error(
+            `duplicate key value violates unique constraint "uq_event_sources_source_event": source (${sourceRecord.sourceId}, ${sourceRecord.sourceEventId}) is already linked to event ${es.eventId}`,
+          );
+        }
+      }
+    }
+    const key = sourceRecord.sourceEventId
+      ? `${sourceRecord.sourceId}_${sourceRecord.sourceEventId}`
+      : `${sourceRecord.eventId}_${sourceRecord.sourceId}_${sourceRecord.sourceUrl}`;
     const existing = this.eventSources.get(key);
     const now = new Date().toISOString();
     const record: EventSourceRecord = {
-      id: existing?.id ?? `es_${Math.random().toString(36).substring(2, 11)}`,
+      id: existing?.id ?? crypto.randomUUID(),
       ...sourceRecord,
       firstSeenAt: existing?.firstSeenAt ?? now,
       lastSeenAt: now,
@@ -750,7 +741,7 @@ export class MemoryCatalogRepository implements ICatalogRepository {
     observedAt: string;
     parserVersion: string;
   }): Promise<EventFieldEvidence> {
-    const id = `fe_${Math.random().toString(36).substring(2, 11)}`;
+    const id = crypto.randomUUID();
     const record: EventFieldEvidence = {
       id,
       ...evidence,
@@ -768,7 +759,7 @@ export class MemoryCatalogRepository implements ICatalogRepository {
     confidence: number;
     reasons: Record<string, unknown> | string[];
   }): Promise<CandidateResolution> {
-    const id = `cr_${Math.random().toString(36).substring(2, 11)}`;
+    const id = crypto.randomUUID();
     const record: CandidateResolution = {
       id,
       ...resolution,
@@ -803,9 +794,7 @@ export class MemoryCatalogRepository implements ICatalogRepository {
 
       // 1. Create venue if specified in transaction payload
       if (payload.venueToCreate) {
-        createdVenueId =
-          payload.venueToCreate.id ??
-          `ven_${Math.random().toString(36).substring(2, 11)}`;
+        createdVenueId = payload.venueToCreate.id ?? crypto.randomUUID();
         const vNow = new Date().toISOString();
         this.venues.set(createdVenueId, {
           id: createdVenueId,
@@ -882,7 +871,7 @@ export class MemoryCatalogRepository implements ICatalogRepository {
             });
           }
         } else {
-          eventId = `evt_${Math.random().toString(36).substring(2, 11)}`;
+          eventId = crypto.randomUUID();
           const now = new Date().toISOString();
           const created: Event = {
             id: eventId,
@@ -901,7 +890,9 @@ export class MemoryCatalogRepository implements ICatalogRepository {
             localEndDate: payload.event.local_end_date ?? null,
             startsAt: payload.event.starts_at ?? null,
             endsAt: payload.event.ends_at ?? null,
-            startTimePrecision: payload.event.start_time_precision ?? 'instant',
+            startTimePrecision:
+              payload.event.start_time_precision ??
+              (payload.event.starts_at ? 'instant' : 'date_only'),
             doorsAt: payload.event.doors_at ?? null,
             isMultiDay: payload.event.is_multi_day ?? false,
             officialUrl: payload.event.official_url ?? null,
@@ -918,9 +909,7 @@ export class MemoryCatalogRepository implements ICatalogRepository {
           for (const a of payload.artists) {
             let artistId = a.artist_id;
             if (a.name && (!artistId || !this.artists.has(artistId))) {
-              artistId =
-                artistId ??
-                `art_${Math.random().toString(36).substring(2, 11)}`;
+              artistId = artistId ?? crypto.randomUUID();
               const artNow = new Date().toISOString();
               this.artists.set(artistId, {
                 id: artistId,
@@ -931,7 +920,7 @@ export class MemoryCatalogRepository implements ICatalogRepository {
               });
               if (a.external_ids) {
                 for (const ext of a.external_ids) {
-                  const extId = `aext_${Math.random().toString(36).substring(2, 11)}`;
+                  const extId = crypto.randomUUID();
                   this.artistExternalIds.set(extId, {
                     id: extId,
                     artistId,

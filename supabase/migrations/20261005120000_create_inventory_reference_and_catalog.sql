@@ -175,7 +175,7 @@ create table if not exists public.event_promoters (
   id uuid primary key default gen_random_uuid(),
   event_id uuid not null references public.events(id) on delete cascade,
   promoter_id uuid not null references public.promoters(id) on delete cascade,
-  relationship_type text not null default 'promoter' check (relationship_type in ('promoter', 'co_promoter', 'presenter', 'producer')),
+  relationship_type text not null default 'promoter' check (relationship_type in ('promoter', 'co_promoter', 'presenter', 'producer', 'unknown')),
   created_at timestamptz not null default now(),
   constraint uq_event_promoter unique (event_id, promoter_id)
 );
@@ -189,8 +189,8 @@ create table if not exists public.event_ticket_links (
   ticket_provider_source_id uuid references public.sources(id) on delete set null,
   url text not null,
   normalized_url text not null,
-  min_price numeric check (min_price is null or min_price >= 0),
-  max_price numeric check (max_price is null or max_price >= 0),
+  min_price numeric(12,2) check (min_price is null or min_price >= 0),
+  max_price numeric(12,2) check (max_price is null or max_price >= 0),
   currency text check (currency is null or length(currency) = 3),
   inventory_status text not null default 'available' check (inventory_status in ('available', 'low_inventory', 'sold_out', 'cancelled', 'unknown')),
   verified_at timestamptz,
