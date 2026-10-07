@@ -7,7 +7,7 @@ This repository contains the shared product and engineering context for the Conc
 1. Put the contents of this folder at the root of the new GitHub repository.
 2. Commit the documentation before any application code is generated.
 3. Open the repository locally in VS Code.
-4. Give each AI assistant the matching prompt in `AI_START_PROMPTS.md`.
+4. Give each AI assistant the matching prompt in `docs/project/ai-start-prompts.md`.
 5. Keep GitHub + the local repository as the source of truth. Do not depend on any one chat history.
 
 ## Recommended AI roles
@@ -22,11 +22,11 @@ These are defaults, not hard restrictions. The important rule is that only one a
 
 1. `AGENTS.md`
 2. `README.md`
-3. `PROJECT_CONTEXT.md`
-4. `docs/12-decisions.md`
-5. `docs/11-roadmap.md`
+3. `docs/index.md` (or `docs/product/context.md`)
+4. `docs/decisions/index.md`
+5. `docs/project/roadmap.md`
 6. Documents relevant to the current task
-7. The active `docs/PHASE_<NUMBER>_IMPLEMENTATION.md` file
+7. The active phase specification in `docs/phases/active/` (or completed records in `docs/phases/completed/`)
 8. `AI_HANDOFF.md` if work is already in progress
 
 Phase specifications are persistent implementation records. Read the active phase

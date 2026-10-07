@@ -1,155 +1,86 @@
 # AGENTS.md
 
-Shared instructions for AI coding agents (ChatGPT/Codex, Google Antigravity, Claude, or others) working in this repository.
+Shared instructions and context-routing rules for AI coding agents (ChatGPT, Antigravity, Claude, and peers) working in this repository.
 
-## Mission
+---
 
-Build a personalized live-music discovery application that ranks concerts, festivals, and local events by how worthwhile they are for an individual user.
+## 1. Mission
 
-Do not reduce the product to a generic event-search UI. Every major feature should support one of these jobs:
+Encore is a personalized live-music discovery application that ranks concerts, festivals, and local events by how worthwhile they are for an individual user based on taste, past attendance, venue affinity, price sensitivity, distance, and timing.
 
-- find something good and inexpensive soon
-- find a favorite artist worth paying more to see
-- discover nearby small/local shows
-- identify festivals/multi-day events worth traveling for
-- watch artists/events and alert on meaningful changes
+It is **not** a generic event calendar or ticketing directory. Every major feature supports one of these core user jobs:
+- Find something good and inexpensive soon
+- Find a favorite artist worth paying more to see
+- Discover nearby small/local shows and unfamiliar artists
+- Identify festivals and multi-day events worth traveling for
+- Watch artists/events and receive alerts on meaningful changes
 
-## Current stack
+---
 
-Use unless an ADR/decision document explicitly changes it:
+## 2. Context Routing (Read Minimum Necessary)
 
-- Next.js
-- TypeScript
-- Tailwind CSS
-- PostgreSQL / Supabase
-- Supabase Auth
-- Spotify Web API
-- Ticketmaster Discovery API as one baseline source
-- source adapters for venue/promoter/festival/ticketing pages
+Do not load the entire repository documentation into prompt context. Practice progressive disclosure:
 
-## Coding principles
+| If working on... | Read these authoritative files: |
+|---|---|
+| **Any task (always)** | [`AI_HANDOFF.md`](AI_HANDOFF.md) and [`docs/index.md`](docs/index.md) |
+| **Database, schema, RLS, migrations** | Active phase spec, [`docs/architecture/data-model.md`](docs/architecture/data-model.md), [`docs/architecture/security.md`](docs/architecture/security.md) |
+| **Ingestion, scrapers, crawlers** | Active phase spec, [`docs/architecture/ingestion.md`](docs/architecture/ingestion.md), [`docs/architecture/sources.md`](docs/architecture/sources.md) |
+| **Entity resolution, deduplication, matching** | Active phase spec, [`docs/architecture/entity-resolution.md`](docs/architecture/entity-resolution.md) |
+| **UI, pages, components** | Active phase spec, [`docs/product/vision.md`](docs/product/vision.md) |
+| **Architectural decisions & tradeoffs** | [`docs/decisions/index.md`](docs/decisions/index.md), [`docs/project/non-blocking-debt.md`](docs/project/non-blocking-debt.md) |
+| **Historical implementation context** | [`docs/phases/completed/`](docs/phases/completed/) *(only when strictly necessary)* |
 
-- Prefer TypeScript across frontend, backend, adapters, and workers.
-- Keep source-specific scraping code isolated behind adapters.
-- Never let page-specific DOM selectors leak into canonical event/domain logic.
-- Normalize all sources into common candidate/event types.
-- Preserve source provenance for every imported fact.
-- Do not silently delete canonical events because one crawler fails.
-- Write idempotent ingestion and worker jobs.
-- Design for reprocessing raw ingests.
-- Prefer explicit and testable recommendation logic over opaque ML.
-- Keep price, artist affinity, venue affinity, distance, and timing as independently inspectable features.
-- Treat festivals and multi-day events as first-class entities.
-- Keep user-private information separate from public event metadata.
-- Do not commit secrets, API keys, cookies, OAuth tokens, or personal user exports.
+---
 
-## Scraping rules
+## 3. Non-Negotiable Engineering Invariants
 
-Before scraping a source:
+1. **Repository as Source of Truth:** Durable architecture and product decisions must be recorded in Markdown under `docs/`. Never let decisions live only in chat history.
+2. **Phase Boundary Discipline:** Do not invent architecture, scaffold integrations, or implement features outside the current phase scope.
+3. **Immutable Source Observations:** Raw ingests (`raw_ingests`) and parsed candidate observations (`event_candidates`) are immutable audit records. Never update or mutate existing observation rows in place.
+4. **Field-Level Provenance:** Every canonical attribute must remain traceable to its source via `event_field_evidence`. Never overwrite higher-confidence data with lower-confidence data without an explicit field merge rule.
+5. **Conservative Entity Resolution:** Normalized names are not universal identity keys. Disambiguate artists and venues carefully; canonical artist IDs and external IDs take strict precedence over matching names. If ambiguous, route to `needs_review`.
+6. **No Hardcoded Geographies:** Colorado is an initial testing region, not an architectural constant. Never hardcode Denver, Colorado, or Mountain Time defaults into schemas, domain logic, or fallbacks.
+7. **Atomic Persistence:** Canonicalization mutations must execute within atomic database transactions (via the PostgreSQL stored procedure). Zero orphaned entities on partial failures.
+8. **No Test Weakening:** Never silently loosen database constraints, delete assertions, or mock out real boundaries to make CI pass.
+9. **Secrets & Security:** Never commit credentials, cookies, tokens, or `.env.local`. Secure all non-public tables with RLS and restrict sensitive stored procedures to `service_role`.
 
-1. Prefer a documented API, feed, JSON-LD, schema.org Event markup, RSS, ICS, or embedded structured JSON.
-2. If needed, use normal HTTP fetch + HTML parsing.
-3. Use Playwright/browser automation only for pages whose data is unavailable otherwise.
-4. Respect applicable terms, robots controls, authentication boundaries, and reasonable crawl rates.
-5. Do not bypass CAPTCHAs, access controls, paywalls, or anti-bot protections.
-6. Do not use fake accounts or authenticated scraping unless explicitly designed and permitted.
-7. Use social media primarily as a discovery signal unless an approved official integration exists.
-8. Record source URL, fetch time, parser version, content hash, and extraction confidence.
+---
 
-## Data integrity
+## 4. Engineering Workflow & Verification
 
-Canonical events must be traceable back to one or more source records.
+### Branch & PR Discipline
+- One task per branch. Never commit directly to `main`.
+- Only one agent owns an active implementation branch at a time; peer agents review.
+- Never merge a branch without green CI and independent code review.
 
-Do not overwrite higher-confidence data with lower-confidence data without an explicit field-level merge rule.
-
-Every source adapter should have fixture-based parser tests where feasible.
-
-## Product UX principles
-
-Event cards should answer:
-
-- Why is this recommended?
-- How much does it cost?
-- How far / how much effort is it?
-- How strong is the music match?
-- Is anything time-sensitive (presale, on-sale, price change)?
-
-Do not expose a mysterious recommendation score without a human-readable explanation.
-
-## Deferred feature reminder
-
-**Email/newsletter ingestion is intentionally deferred, not rejected.** Revisit it when implementing:
-
-- presale discovery
-- notification quality
-- promoter announcements
-- missing-source coverage
-- user integrations
-
-See `docs/14-future-email-ingestion.md`.
-
-## Collaboration workflow
-
-- GitHub is the source of truth.
-- Prefer one feature/issue per branch.
-- Before large changes, update or reference the relevant spec document.
-- Agents should read `START_HERE.md`, `AGENTS.md`, `PROJECT_CONTEXT.md`, `README.md`, and relevant files in `docs/` before implementation.
-- Check `AI_HANDOFF.md` before starting work so concurrent agents do not unknowingly overlap.
-- Only one agent should own an implementation branch/task at a time; other agents may review it.
-- If code and documentation disagree, flag the inconsistency instead of silently inventing new product behavior.
-- Major architectural changes should update `docs/12-decisions.md`.
-
-## Phase implementation documentation rule
-
-Every project phase must have a dedicated implementation specification at:
-
-```text
-docs/PHASE_<NUMBER>_IMPLEMENTATION.md
+### Standard Verification Commands
+Run before submitting code for review:
+```bash
+npm run format:check     # Verify Prettier styling
+npm run lint             # Check ESLint rules
+npm run typecheck        # Strict TypeScript typecheck (tsc --noEmit)
+npm test                 # Run fast in-memory unit tests (86+ tests)
+npm run build            # Compile Next.js production build
+npm run test:e2e         # Run Playwright browser smoke tests
+```
+When Docker / local Supabase is available:
+```bash
+npm run test:integration # Run PostgreSQL-backed integration suite
 ```
 
-For example: `docs/PHASE_0_IMPLEMENTATION.md`,
-`docs/PHASE_1_IMPLEMENTATION.md`, and `docs/PHASE_2_IMPLEMENTATION.md`.
-Each file is the persistent source of truth for its phase. It must give another
-agent enough context to implement or review that phase without prior chat history.
+---
 
-### During planning discussions
+## 5. Phase Documentation & Handoff Rules
 
-When a discussion with ChatGPT, Antigravity, or another project agent produces an
-accepted, materially relevant decision, clarification, requirement, constraint,
-implementation detail, acceptance criterion, architecture change, testing
-requirement, or scope change for the active phase, update that phase's
-`PHASE_<NUMBER>_IMPLEMENTATION.md` before ending the materially relevant work.
+### Phase Specifications
+- Every project phase has a dedicated implementation specification.
+- Active phase specifications live in [`docs/phases/active/`](docs/phases/active/).
+- When discussions yield accepted design decisions or scope changes, update the active phase specification before finishing the turn.
+- Completed phase specifications archive permanently to [`docs/phases/completed/`](docs/phases/completed/); never overwrite historical phase records.
 
-Do not update a phase specification for casual discussion, unaccepted speculation,
-or irrelevant conversation. If a decision changes the broader architecture, update
-the applicable document in `docs/` as well.
-
-### When a new phase begins
-
-Create a new `docs/PHASE_<NUMBER>_IMPLEMENTATION.md`; never overwrite or repurpose
-the prior phase file. Previous phase specifications remain in the repository as
-historical records of intended and implemented work.
-
-Every phase specification must include at least:
-
-- phase objective and relevant architectural context
-- scope and explicit exclusions
-- implementation checklist and affected modules/files
-- database or API changes, dependencies, and environment-variable changes
-- migration, testing, and CI requirements
-- completion commands and definition of done
-- known risks/open questions, decisions made during the phase, and approved deviations
-
-### Operational handoff
-
-`AI_HANDOFF.md` represents the current operational state. It must always identify:
-
-- current phase, task, branch, active implementing agent, and phase specification file
-- status, completed work, tests run, known issues, unresolved decisions, and next step
-
-Update it whenever ownership changes, implementation finishes, a major blocker is
-found, or the project moves to a new phase.
-
-Important project decisions must not live only in chat history. When working in the
-repository, update the relevant documentation before ending a materially relevant
-discussion.
+### Operational Handoff (`AI_HANDOFF.md`)
+- `AI_HANDOFF.md` represents current operational state. It must stay concise and contain only:
+  - Current phase, task, branch, and active owner
+  - Current status, test verification results, blockers, and next immediate action
+- Update `AI_HANDOFF.md` whenever ownership transitions, implementation completes, or blockers arise.

@@ -19,8 +19,7 @@ Avoid multiple agents editing the same branch at the same time.
 ## Before coding
 
 - Read `AGENTS.md`.
-- Read `PROJECT_CONTEXT.md`.
-- Read the relevant specification document(s).
+- Read `docs/index.md` and relevant specification document(s).
 - Check `AI_HANDOFF.md` for active work.
 - Confirm the task has a clear scope and acceptance criteria.
 
@@ -49,7 +48,7 @@ Update documentation when a change alters:
 - security/privacy behavior
 - project roadmap
 
-Record major approved architectural decisions in `docs/12-decisions.md`.
+Record major approved architectural decisions in `docs/decisions/index.md`.
 
 ## Secrets
 

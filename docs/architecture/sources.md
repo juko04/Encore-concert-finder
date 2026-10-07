@@ -180,4 +180,4 @@ Whenever the system sees repeated canonical events associated with a promoter or
 
 Status: **Deferred.**
 
-Do not implement now. See `14-future-email-ingestion.md`.
+Do not implement now. See [`docs/product/future-features.md`](../product/future-features.md).

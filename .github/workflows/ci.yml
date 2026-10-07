@@ -9,7 +9,8 @@ on:
 jobs:
   verify:
     name: Verification and CI
-    runs-on: ubuntu-latest
+    # Pin explicitly to ubuntu-24.04 LTS for reproducible Node 24, Docker, and Supabase container execution
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4

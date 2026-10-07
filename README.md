@@ -1,73 +1,107 @@
-# Concert Finder / Encore (working title)
+# Encore (Concert Finder)
 
-This repository is the shared product and engineering specification for a personalized concert, festival, and live-music discovery application.
+> A personalized live-music discovery platform that ranks concerts, festivals, and local events by how worthwhile they are for an individual fan.
 
-The working product goal is simple:
+Encore combines music taste, venue preferences, price sensitivity, distance, and timing into transparent, explainable recommendations. It is designed to find cheap and spontaneous local shows, identify major artist dates worth traveling for, and understand festival lineups day-by-day.
 
-> Help a user decide which live-music experiences are actually worth attending, based on taste, past attendance, venue preferences, price sensitivity, distance, timing, and lineup quality.
+---
 
-This is **not** intended to be another generic event calendar. The product should combine:
+## Quick Navigation for Beginners & Contributors
 
-- personalized concert recommendations
-- cheap/local discovery
-- larger shows worth planning for
-- festival and multi-day event intelligence
-- ticket/on-sale/watch alerts
-- resilient event ingestion from APIs plus official public web sources
+If you are new to the codebase, start here:
 
-Email/newsletter ingestion is intentionally deferred for now, but must remain on the roadmap and should be reconsidered when alerts, presales, and missing event coverage are implemented.
+- **New to the concepts?** Read the [Beginner & Conceptual Glossary](docs/learning/glossary.md) for plain-English explanations of entity resolution, canonical events, Supabase, RLS, and more.
+- **Looking for documentation?** The [Documentation Map (`docs/index.md`)](docs/index.md) routes you to every architectural and product specification.
+- **Want to know current project status?** Check the active [Operational Handoff (`AI_HANDOFF.md`)](AI_HANDOFF.md).
+- **Contributing or AI instructions?** Read [Shared Agent Guidelines (`AGENTS.md`)](AGENTS.md) and [Contributing Guide (`CONTRIBUTING.md`)](CONTRIBUTING.md).
 
-## Current technical direction
+---
 
-- Frontend / web app: Next.js + TypeScript
-- Styling: Tailwind CSS
-- Database: PostgreSQL via Supabase
-- Authentication: Supabase Auth
-- Music taste: Spotify Web API
-- Baseline event inventory: Ticketmaster Discovery API
-- Supplemental ingestion: official promoter, venue, festival, and ticketing pages
-- Scraping: fetch/HTTP + structured-data parsing + Cheerio; Playwright only when necessary
-- Background work: scheduled jobs/workers
-- Deployment: Vercel for web; Supabase for database/auth; worker deployment to be chosen during implementation
-- Initial delivery format: responsive web app / PWA before any native mobile app
+## Project Status & Completed Milestones
 
-## Start here
+| Milestone | Status | Description |
+|---|---|---|
+| **Phase 0 — Foundation** | **COMPLETE** | Next.js 15, TypeScript, Tailwind, Supabase RLS, unit/integration CI pipelines. ([Details](docs/phases/completed/PHASE_0_IMPLEMENTATION.md)) |
+| **Phase 1 — Canonical Inventory** | **COMPLETE** | Ingestion models, immutable raw observations, entity resolution (artists, venues, events), and field-level provenance in PostgreSQL. ([Details](docs/phases/completed/PHASE_1_IMPLEMENTATION.md)) |
+| **Post-Phase 1 Tooling** | **ACTIVE** | Repository organization & AI context optimization. |
+| **Encore Project Hub** | **PLANNED** | Interactive documentation, entity inspector, and pipeline visualizer (next milestone). |
+| **Phase 2 — Live Ingestion** | **PLANNED** | Live Ticketmaster API ingestion and recommendation scoring scaffolding. |
 
-New contributors and AI agents should begin with `START_HERE.md`, then read `AGENTS.md` and `PROJECT_CONTEXT.md`.
+---
 
-## Documentation map
+## Where Everything Lives
 
-- `START_HERE.md` — repository onboarding and first steps
-- `AGENTS.md` — shared instructions for AI coding agents and human contributors
-- `PROJECT_CONTEXT.md` — condensed context and decisions from the original product conversation
-- `AI_START_PROMPTS.md` — startup prompts for ChatGPT Personal, Antigravity, and Claude
-- `AI_HANDOFF.md` — current cross-agent handoff state
-- `CONTRIBUTING.md` — branch, validation, documentation, and secret-handling conventions
-- `GITHUB_SETUP.md` — beginner-friendly instructions for putting this packet into GitHub
-- `docs/01-product-vision.md` — product scope, user jobs, primary screens
-- `docs/02-system-architecture.md` — application and service architecture
-- `docs/03-data-model.md` — entities and database schema
-- `docs/04-ingestion-and-scraping.md` — APIs, crawlers, normalization, verification, deduplication
-- `docs/05-source-registry.md` — current event-source list and acquisition strategy
-- `docs/06-recommendation-engine.md` — scoring and personalization logic
-- `docs/07-festivals.md` — festival / multi-day behavior
-- `docs/08-alerts-and-watchlists.md` — watches, on-sales, price alerts
-- `docs/09-security-privacy-and-compliance.md` — privacy, secrets, scraping safety, data handling
-- `docs/10-api-and-module-plan.md` — proposed internal modules and API routes
-- `docs/11-roadmap.md` — phased implementation plan
-- `docs/12-decisions.md` — decisions already made vs. open questions
-- `docs/13-agent-collaboration.md` — recommended workflow for ChatGPT/Codex + Antigravity + GitHub
-- `docs/14-future-email-ingestion.md` — deferred email/newsletter ingestion design
+```text
+├── app/                  # Next.js App Router (pages and layouts, e.g. /discover)
+├── components/           # Reusable UI components (foundation and catalog)
+├── docs/                 # Authoritative project knowledge base (see docs/index.md)
+│   ├── product/          # Product vision, user jobs, festivals, future features
+│   ├── architecture/     # Data model, ingestion, entity resolution, security
+│   ├── phases/           # Completed historical specs and active phase slots
+│   ├── decisions/        # Settled architectural decisions and ADRs
+│   ├── project/          # Roadmap, agent collaboration, onboarding, acceptance criteria
+│   └── learning/         # Beginner glossary and educational materials
+├── lib/                  # Core application domain & business logic
+│   ├── domain/           # Pure domain types, candidate models, and value objects
+│   ├── entity-resolution/# ArtistResolver, VenueResolver, EventMatcher, FieldMerge
+│   ├── repositories/     # Catalog, candidate, and raw ingest repository implementations
+│   └── supabase/         # Browser, server, and admin Supabase client factories
+├── supabase/             # PostgreSQL database migrations and seed data
+└── tests/                # Automated test suites
+    ├── unit/             # Fast in-memory unit tests (domain, resolvers, components)
+    ├── integration/      # Real Supabase/PostgreSQL RLS and golden-path integration tests
+    ├── e2e/              # Playwright browser smoke tests
+    └── fixtures/         # Deterministic crawler and candidate test fixtures
+```
 
-## Product principles
+---
 
-1. **Explain recommendations.** A user should understand why a show was recommended.
-2. **Price is personal.** A $70 ticket can be a good value for a favorite artist and a bad value for an unknown artist.
-3. **Local discovery matters.** Small venues, bars, outdoor events, and inexpensive shows are first-class use cases.
-4. **Festivals are not just long concerts.** Lineup depth, day-by-day value, travel, and pass types must be modeled explicitly.
-5. **Use multiple data sources.** APIs provide breadth; official venue/promoter/festival sites provide depth and freshness.
-6. **Verify before trusting.** Social or weak sources may discover an event, but stronger first-party sources should verify it.
-7. **Do not overbuild ML early.** Start with transparent, tunable ranking formulas and learn from explicit feedback.
-8. **Store raw source evidence.** Preserve source snapshots so parsers can be fixed and re-run later.
-9. **Keep the architecture portable.** The recommendation engine and data model should not depend on any single ticketing provider.
-10. **Build web-first.** Prove discovery and recommendation quality before building native mobile apps.
+## Getting Started
+
+### Prerequisites
+- Node.js 24 (`nvm use` if using nvm)
+- npm 10+
+- Docker (optional, required only for running local Supabase integration tests)
+
+### Installation
+```bash
+git clone https://github.com/juko04/Encore-concert-finder.git
+cd Encore-concert-finder
+npm ci
+```
+
+### Running the App
+```bash
+npm run dev
+```
+Open [http://localhost:3000](http://localhost:3000) to view the application shell, or [http://localhost:3000/discover](http://localhost:3000/discover) to explore the concert discovery view.
+
+### Running Verification Tests
+```bash
+npm test                 # Run fast in-memory unit tests
+npm run lint             # Check ESLint rules
+npm run typecheck        # Strict TypeScript type check (tsc --noEmit)
+npm run format:check     # Check Prettier code formatting
+npm run build            # Compile production Next.js build
+npm run test:e2e         # Run browser smoke tests
+```
+
+When local Supabase / Docker is running:
+```bash
+npm run db:start         # Start local PostgreSQL / Supabase Docker container
+npm run test:integration # Run full database integration & RLS test suite
+npm run db:stop          # Stop local Supabase container
+```
+
+---
+
+## Architectural Principles
+
+1. **Explain Every Recommendation:** Transparent, human-readable reasons accompany every score.
+2. **Immutable Observations:** Sources are never edited in place; every crawl produces an immutable audit record.
+3. **Traceable Field-Level Provenance:** Every canonical attribute traces back to its source, raw ingest, and candidate observation.
+4. **Strong Identity Disambiguation:** External IDs (Spotify, MusicBrainz) take precedence over normalized names to prevent false artist merges.
+5. **Atomic Canonicalization:** All catalog mutations execute inside atomic database transactions (`apply_canonicalization`).
+6. **Web-First & Resilient:** Proven on responsive web before native mobile apps; designed to handle multiple independent source feeds without crashing.
+
+For more details, visit the [Documentation Map](docs/index.md).
