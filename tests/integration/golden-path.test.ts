@@ -7,6 +7,7 @@ import { SupabaseRawIngestRepository } from '@/lib/repositories/raw-ingest-repos
 import { SupabaseEventCandidateRepository } from '@/lib/repositories/event-candidate-repository';
 import { CanonicalizationCoordinator } from '@/lib/entity-resolution/canonicalization-coordinator';
 import type { EventCandidate } from '@/lib/domain/event-candidate';
+import { normalizeName } from '@/lib/domain/value-objects';
 
 interface LocalCredentials {
   url: string;
@@ -569,13 +570,18 @@ describe('Supabase Golden Path Integration: Full Ingestion & Canonicalization Pi
     const sourceA = adapter.id;
 
     // Create an isolated canonical event to link foreign keys against
+    const testEventName = `FK Test Event ${Date.now()}`;
     const { data: testEvent, error: testEventError } = await adminClient!
       .from('events')
       .insert({
-        name: `FK Test Event ${Date.now()}`,
+        name: testEventName,
+        normalized_name: normalizeName(testEventName),
+        event_kind: 'concert',
         status: 'scheduled',
         timezone: 'America/Denver',
         local_start_date: '2026-11-15',
+        start_time_precision: 'date_only',
+        is_multi_day: false,
       })
       .select('id')
       .single();

@@ -366,47 +366,92 @@ describe('Catalog RLS, Security & Canonicalization Atomicity', () => {
     if (!isDbAvailable || !adminClient) return;
 
     // Constraint 1: instant precision requires starts_at
-    const { error: instantError } = await adminClient.from('events').insert({
+    const { error: instantError } = await adminClient!.from('events').insert({
       name: 'Missing Instant',
       normalized_name: 'missing instant',
+      event_kind: 'concert',
+      status: 'scheduled',
+      timezone: 'America/Denver',
+      local_start_date: '2026-10-15',
       start_time_precision: 'instant',
       starts_at: null,
-      timezone: 'America/Denver',
-      local_start_date: '2026-10-15',
+      is_multi_day: false,
     });
     expect(instantError).not.toBeNull();
+    expect(instantError?.code).toBe('23514');
+    expect(instantError?.message).toContain('check_events_instant_starts_at');
 
     // Constraint 2: date_only precision forbids starts_at
-    const { error: dateOnlyError } = await adminClient.from('events').insert({
+    const { error: dateOnlyError } = await adminClient!.from('events').insert({
       name: 'Invalid Date Only',
       normalized_name: 'invalid date only',
-      start_time_precision: 'date_only',
-      starts_at: '2026-10-15T20:00:00Z',
+      event_kind: 'concert',
+      status: 'scheduled',
       timezone: 'America/Denver',
       local_start_date: '2026-10-15',
+      start_time_precision: 'date_only',
+      starts_at: '2026-10-15T20:00:00Z',
+      is_multi_day: false,
     });
     expect(dateOnlyError).not.toBeNull();
+    expect(dateOnlyError?.code).toBe('23514');
+    expect(dateOnlyError?.message).toContain(
+      'check_events_date_only_no_starts_at',
+    );
 
-    // Constraint 3: local_end_date cannot precede local_start_date
-    const { error: dateOrderError } = await adminClient.from('events').insert({
+    // Constraint 3: local_end_date cannot precede local_start_date (row otherwise completely valid)
+    const { error: dateOrderError } = await adminClient!.from('events').insert({
       name: 'Backwards Dates',
       normalized_name: 'backwards dates',
+      event_kind: 'concert',
+      status: 'scheduled',
       timezone: 'America/Denver',
       local_start_date: '2026-10-15',
       local_end_date: '2026-10-14',
+      start_time_precision: 'date_only',
+      is_multi_day: false,
     });
     expect(dateOrderError).not.toBeNull();
+    expect(dateOrderError?.code).toBe('23514');
+    expect(dateOrderError?.message).toContain('check_events_local_date_order');
 
-    // Constraint 4: multi_day consistency
-    const { error: multiDayError } = await adminClient.from('events').insert({
+    // Constraint 4: multi_day consistency (row otherwise completely valid)
+    const { error: multiDayError } = await adminClient!.from('events').insert({
       name: 'Multi Day Inconsistent',
       normalized_name: 'multi day inconsistent',
+      event_kind: 'concert',
+      status: 'scheduled',
       timezone: 'America/Denver',
       local_start_date: '2026-10-15',
       local_end_date: '2026-10-15',
+      start_time_precision: 'date_only',
       is_multi_day: true,
     });
     expect(multiDayError).not.toBeNull();
+    expect(multiDayError?.code).toBe('23514');
+    expect(multiDayError?.message).toContain(
+      'check_events_multi_day_consistency',
+    );
+
+    // Constraint 5: ends_at cannot precede starts_at (row otherwise completely valid)
+    const { error: instantOrderError } = await adminClient!
+      .from('events')
+      .insert({
+        name: 'Backwards Instant Order',
+        normalized_name: 'backwards instant order',
+        event_kind: 'concert',
+        status: 'scheduled',
+        timezone: 'America/Denver',
+        local_start_date: '2026-10-15',
+        local_end_date: '2026-10-15',
+        start_time_precision: 'instant',
+        starts_at: '2026-10-15T21:00:00Z',
+        ends_at: '2026-10-15T20:00:00Z',
+        is_multi_day: false,
+      });
+    expect(instantOrderError).not.toBeNull();
+    expect(instantOrderError?.code).toBe('23514');
+    expect(instantOrderError?.message).toContain('check_events_instant_order');
   });
 
   it('enforces compound foreign key integrity across candidate and raw ingest sources', async () => {
@@ -471,30 +516,40 @@ describe('Catalog RLS, Security & Canonicalization Atomicity', () => {
     const upstreamId = `tm_unique_test_${Date.now()}`;
 
     // Create event 1
-    const { data: event1 } = await adminClient
+    const { data: event1, error: event1Error } = await adminClient!
       .from('events')
       .insert({
         name: 'Event 1',
         normalized_name: 'event 1',
+        event_kind: 'concert',
+        status: 'scheduled',
         timezone: 'America/Denver',
         local_start_date: '2026-11-20',
         start_time_precision: 'date_only',
+        is_multi_day: false,
       })
       .select('id')
       .single();
+    expect(event1Error).toBeNull();
+    expect(event1?.id).toBeDefined();
 
     // Create event 2
-    const { data: event2 } = await adminClient
+    const { data: event2, error: event2Error } = await adminClient!
       .from('events')
       .insert({
         name: 'Event 2',
         normalized_name: 'event 2',
+        event_kind: 'concert',
+        status: 'scheduled',
         timezone: 'America/Denver',
         local_start_date: '2026-11-20',
         start_time_precision: 'date_only',
+        is_multi_day: false,
       })
       .select('id')
       .single();
+    expect(event2Error).toBeNull();
+    expect(event2?.id).toBeDefined();
 
     // Insert source link for event 1
     const { error: link1Error } = await adminClient

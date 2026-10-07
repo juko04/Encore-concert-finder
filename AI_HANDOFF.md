@@ -18,6 +18,7 @@ Phase 1 CI Closeout Pass:
 5. Enforced strong artist external IDs over contextual same-name matching in `ArtistResolver.resolveOrPrepare` (detects conflicts and routes to `ambiguous`).
 6. Made `golden-path.test.ts` independent: unified steps 1, 2, 3, 5 into single sequential test, eliminated shared mutable suite variables, gave step 8 its own isolated test event, and strictly enforced loud CI failures on missing DB via `ensureDbAvailable()`.
 7. Audited composite FK delete behavior: updated composite FKs on `event_sources` and `event_field_evidence` to `ON DELETE RESTRICT` (preventing NOT NULL 23502 error on `source_id`).
+8. Corrected Step 8 control event fixture (`normalized_name`, `start_time_precision: 'date_only'`, `event_kind`, `status`, `is_multi_day`) and audited temporal check constraints in `catalog-rls.test.ts` for false-positive prevention.
 
 ## Current phase specification
 
