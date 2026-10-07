@@ -12,7 +12,7 @@ Use whichever method is more comfortable: GitHub Desktop, VS Code's Source Contr
 6. Commit with a message such as:
    `docs: add initial product architecture and agent context`
 7. Push to `main`.
-8. Give each AI the appropriate prompt from `AI_START_PROMPTS.md`.
+8. Give each AI the appropriate prompt from `docs/project/ai-start-prompts.md`.
 
 ## Option B — Terminal
 
