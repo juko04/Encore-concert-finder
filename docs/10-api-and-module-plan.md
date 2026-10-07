@@ -22,6 +22,11 @@ components/
 
 lib/
   domain/
+  repositories/
+    catalog-repository.ts
+    source-repository.ts
+    raw-ingest-repository.ts
+    event-candidate-repository.ts
   recommendations/
   pricing/
   spotify/
@@ -96,6 +101,14 @@ GET  /api/spotify/callback
 ```
 
 Implementation may prefer server actions for some authenticated UI interactions; the domain/service layer should remain reusable.
+
+## Persistence boundary
+
+UI components must not own Supabase/database query logic. Server-rendered routes,
+route handlers, and later workers use repository abstractions for catalog reads and
+persistence. Phase 1 establishes those repositories; a broader business-service
+layer may be added above them only when later phases need reusable business
+orchestration.
 
 ## Domain services
 

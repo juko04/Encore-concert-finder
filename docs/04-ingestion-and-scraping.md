@@ -122,6 +122,14 @@ Normalize:
 
 Preserve the original source text alongside normalized fields.
 
+### URL normalization
+
+Normalize URLs conservatively for matching: normalize scheme/host casing, remove
+default ports and trailing slashes, and remove fragments plus known tracking
+parameters (`utm_*`, `gclid`, and `fbclid`). Preserve unknown provider-specific
+query parameters, which may carry signed, affiliate, or event-specific meaning.
+Retain the sanitized source URL for auditability.
+
 ## Entity resolution
 
 Artist matching signals:

@@ -4,9 +4,11 @@ import type { CrawlContext } from '@/lib/domain/source';
 
 describe('EventSourceAdapter Contract', () => {
   const fakeAdapter = new FakeVenueSourceAdapter();
+  const UUID_REGEX =
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
   const mockContext: CrawlContext = {
-    sourceId: 'venue-red-rocks',
+    sourceId: 'a0000000-0000-0000-0000-000000000001',
     sourceType: 'venue',
     acquisitionMethod: 'structured_json',
     targetUrl: 'https://example-venue.com/events',
@@ -14,22 +16,23 @@ describe('EventSourceAdapter Contract', () => {
   };
 
   it('implements required interface properties with stable adapter ID and acquisitionMethod', () => {
-    expect(fakeAdapter.id).toBe('fake-venue-adapter');
+    expect(fakeAdapter.id).toBe('a0000000-0000-0000-0000-000000000001');
+    expect(fakeAdapter.slug).toBe('fake-venue-adapter');
     expect(fakeAdapter.name).toBe('Fake Venue Source Adapter');
     expect(fakeAdapter.sourceType).toBe('venue');
     expect(fakeAdapter.acquisitionMethod).toBe('structured_json');
     expect(fakeAdapter.parserVersion).toBe('1.1.0');
   });
 
-  it('fetches multiple raw ingest records without performing live network calls', async () => {
+  it('fetches multiple raw ingest records with valid UUIDs without performing live network calls', async () => {
     const rawIngests = await fakeAdapter.fetch(mockContext);
 
     expect(Array.isArray(rawIngests)).toBe(true);
     expect(rawIngests).toHaveLength(2);
 
     const firstPage = rawIngests[0];
-    expect(firstPage.id).toBe('raw_fake-venue-adapter_page_1');
-    expect(firstPage.sourceId).toBe('venue-red-rocks');
+    expect(firstPage.id).toMatch(UUID_REGEX);
+    expect(firstPage.sourceId).toBe('a0000000-0000-0000-0000-000000000001');
     expect(firstPage.sourceUrl).toBe('https://example-venue.com/events?page=1');
     expect(firstPage.acquisitionMethod).toBe('structured_json');
     expect(firstPage.fetchedAt).toBe('2026-10-02T13:00:00Z');
@@ -40,7 +43,8 @@ describe('EventSourceAdapter Contract', () => {
     expect(typeof firstPage.rawContent).toBe('string');
 
     const secondPage = rawIngests[1];
-    expect(secondPage.id).toBe('raw_fake-venue-adapter_page_2');
+    expect(secondPage.id).toMatch(UUID_REGEX);
+    expect(secondPage.id).not.toBe(firstPage.id);
     expect(secondPage.sourceUrl).toBe(
       'https://example-venue.com/events?page=2',
     );
@@ -50,10 +54,12 @@ describe('EventSourceAdapter Contract', () => {
     const rawIngests = await fakeAdapter.fetch(mockContext);
     const candidates = await fakeAdapter.parse(rawIngests);
 
-    expect(candidates).toHaveLength(2);
+    // Page 1 contains 2 events, Page 2 contains 1 event = 3 total candidates
+    expect(candidates).toHaveLength(3);
 
-    // Single concert candidate validation (Page 1)
+    // Single concert candidate validation (Page 1, Event A)
     const concert = candidates[0];
+    expect(concert.id).toMatch(UUID_REGEX);
     expect(concert.title).toBe('The Mountain Echoes Live');
     expect(concert.artistNames).toContain('The Mountain Echoes');
     expect(concert.artistNames).toContain('River Pines');
@@ -68,29 +74,39 @@ describe('EventSourceAdapter Contract', () => {
       currency: 'USD',
     });
     expect(concert.isFestival).toBe(false);
-    expect(concert.performances).toHaveLength(2);
-    expect(concert.performances?.[0].billingPosition).toBe('headliner');
-    expect(concert.performances?.[1].billingPosition).toBe('support');
+    expect(concert.artists).toHaveLength(2);
+    expect(concert.artists?.[0].billingPosition).toBe('headliner');
+    expect(concert.artists?.[0].externalIds?.[0].externalId).toBe(
+      'spotify_artist_mountain_echoes',
+    );
+    expect(concert.artists?.[1].billingPosition).toBe('support');
 
     // Provenance validation with acquisitionMethod and rawIngestId
-    expect(concert.provenance.sourceId).toBe('venue-red-rocks');
+    expect(concert.provenance.sourceId).toBe(
+      'a0000000-0000-0000-0000-000000000001',
+    );
     expect(concert.provenance.sourceType).toBe('venue');
     expect(concert.provenance.acquisitionMethod).toBe('structured_json');
     expect(concert.provenance.sourceEventId).toBe('evt-101');
-    expect(concert.provenance.rawIngestId).toBe(
-      'raw_fake-venue-adapter_page_1',
-    );
+    expect(concert.provenance.rawIngestId).toBe(rawIngests[0].id);
     expect(concert.provenance.parserVersion).toBe('1.1.0');
     expect(concert.provenance.confidence).toBeGreaterThan(0.9);
 
-    // Multi-day residency candidate validation (Page 2)
-    const multiDay = candidates[1];
+    // Second concert candidate on same page (Page 1, Event B)
+    const secondEventPage1 = candidates[1];
+    expect(secondEventPage1.id).toMatch(UUID_REGEX);
+    expect(secondEventPage1.id).not.toBe(concert.id);
+    expect(secondEventPage1.title).toBe('Canyon Winds Live');
+    expect(secondEventPage1.provenance.rawIngestId).toBe(rawIngests[0].id);
+    expect(secondEventPage1.provenance.sourceEventId).toBe('evt-102');
+
+    // Multi-day residency candidate validation (Page 2, Event C)
+    const multiDay = candidates[2];
+    expect(multiDay.id).toMatch(UUID_REGEX);
     expect(multiDay.title).toBe('Solaris Two-Night Residency');
     expect(multiDay.startsAt).toBe('2026-10-24T19:00:00-06:00');
     expect(multiDay.endsAt).toBe('2026-10-25T23:00:00-06:00');
-    expect(multiDay.provenance.rawIngestId).toBe(
-      'raw_fake-venue-adapter_page_2',
-    );
+    expect(multiDay.provenance.rawIngestId).toBe(rawIngests[1].id);
   });
 
   it('runs complete crawl pipeline via adapter returning rawIngests and candidates', async () => {
@@ -98,6 +114,6 @@ describe('EventSourceAdapter Contract', () => {
 
     expect(result.rawIngests).toHaveLength(2);
     expect(result.rawIngests[0].httpStatus).toBe(200);
-    expect(result.candidates).toHaveLength(2);
+    expect(result.candidates).toHaveLength(3);
   });
 });

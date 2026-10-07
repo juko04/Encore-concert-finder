@@ -13,21 +13,23 @@
 - CI on pull requests
 - deterministic local fixture/dev data (not real event ingestion)
 
-## Phase 1 — Real event inventory
+## Phase 1 — Canonical inventory and ingestion foundation
 
 Goal: a usable event browser with canonical data.
 
 - source registry model
-- Ticketmaster ingestion
 - raw ingest store
 - event candidate model
 - canonical event model
 - artist/venue entities
 - baseline deduplication
-- basic Discover UI
+- deterministic fixture-only canonical inventory proof
+- optional basic Discover UI backed only by deterministic canonical data
 
-## Phase 2 — Personalized ranking
+## Phase 2 — First live source and personalized ranking
 
+- Ticketmaster Discovery API as the first real source proving the Phase 1
+  ingestion model
 - Spotify OAuth
 - Spotify artist/taste ingestion
 - user preferences

@@ -76,7 +76,10 @@ Responsibilities:
 
 Early MVP may use Next.js route handlers/server actions.
 
-As background jobs grow, keep domain logic in reusable modules so workers can call the same services.
+As background jobs grow, keep domain logic in reusable modules so workers can call
+the same services. UI components do not own database query logic: server-rendered
+routes/handlers use repository abstractions and return DTOs to the UI. A broader
+business-service layer can be added above repositories when later phases need it.
 
 ### Database
 
@@ -118,7 +121,7 @@ interface EventSourceAdapter {
   name: string;
   sourceType: 'api' | 'promoter' | 'venue' | 'festival' | 'ticketing' | 'social';
   fetch(context: CrawlContext): Promise<RawIngest[]>;
-  parse(raw: RawIngest): Promise<EventCandidate[]>;
+  parse(rawIngests: RawIngest[]): Promise<EventCandidate[]>;
 }
 ```
 

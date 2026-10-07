@@ -1,5 +1,5 @@
 {
-  "sourceId": "fake-venue-adapter",
+  "sourceId": "a0000000-0000-0000-0000-000000000001",
   "generatedAt": "2026-10-02T12:00:00Z",
   "pages": [
     {
@@ -26,11 +26,46 @@
           "billing": [
             {
               "artistName": "The Mountain Echoes",
-              "billingPosition": "headliner"
+              "billingPosition": "headliner",
+              "externalIds": [
+                {
+                  "provider": "spotify",
+                  "externalId": "spotify_artist_mountain_echoes"
+                }
+              ]
             },
             {
               "artistName": "River Pines",
               "billingPosition": "support"
+            }
+          ]
+        },
+        {
+          "id": "evt-102",
+          "name": "Canyon Winds Live",
+          "artists": ["Canyon Winds"],
+          "venue": "Red Rock Amphitheatre",
+          "city": "Morrison",
+          "state": "CO",
+          "country": "US",
+          "timezone": "America/Denver",
+          "startsAt": "2026-10-16T20:00:00-06:00",
+          "ticketUrl": "https://tickets.example.com/evt-102",
+          "price": {
+            "min": 35.0,
+            "max": 60.0,
+            "currency": "USD"
+          },
+          "billing": [
+            {
+              "artistName": "Canyon Winds",
+              "billingPosition": "headliner",
+              "externalIds": [
+                {
+                  "provider": "spotify",
+                  "externalId": "spotify_artist_canyon_winds"
+                }
+              ]
             }
           ]
         }
@@ -41,7 +76,7 @@
       "url": "https://example-venue.com/events?page=2",
       "events": [
         {
-          "id": "evt-102",
+          "id": "evt-103",
           "name": "Solaris Two-Night Residency",
           "artists": ["Solaris", "Luna Wave"],
           "venue": "Red Rock Amphitheatre",

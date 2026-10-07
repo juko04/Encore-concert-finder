@@ -52,7 +52,7 @@ jobs:
           npm run db:start
           npm run db:reset
 
-      - name: Run database integration tests (RLS)
+      - name: Run database integration tests (RLS & Golden Path)
         run: npm run test:integration
 
       - name: Stop local Supabase

@@ -133,8 +133,10 @@ created_at
 updated_at
 ```
 
-Store instants as `timestamptz`. Preserve the event's IANA time zone so date-only
-and local-time source data can be normalized without changing the intended local day.
+Store known instants as `timestamptz` and preserve the event's IANA time zone.
+Validate the identifier in application code. Persist local start/end dates and a
+time-precision value so date-only events, whose exact local time is not yet known,
+do not receive fabricated midnight timestamps.
 
 Suggested `event_type`:
 
@@ -294,12 +296,15 @@ source_url
 fetched_at
 content_hash
 content_type
-raw_content_or_storage_pointer
+raw_content nullable
+external_storage_ref nullable
 http_status
 parser_version
 ```
 
-Large raw pages may eventually live in object storage with a DB pointer.
+Store small API/HTML payloads directly in the database now. Retain the optional
+`external_storage_ref` so large payloads can later move to object storage without
+a schema redesign. Store content hashes and fetch/parser metadata in either case.
 
 ## event_candidates
 
@@ -319,8 +324,14 @@ ticket_url nullable
 price nullable
 confidence
 verification_status
+resolution_status
+resolution_confidence
+resolution_provenance jsonb
 created_at
 ```
+
+Candidate-resolution records preserve automatic match/create/reject/review
+outcomes now; manual-resolution UI is deferred to a later operational/admin phase.
 
 ## event_sources
 
