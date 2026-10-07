@@ -26,6 +26,8 @@ This document is the authoritative directory and context router for the Encore c
   *First-class multi-day modeling, lineup depth, day passes vs. weekend passes.*
 - **Alerts & Watchlists:** [`product/alerts-and-watchlists.md`](product/alerts-and-watchlists.md)  
   *Artist tracking, on-sale notifications, price drops, and lineup changes.*
+- **Attended Concerts & Reviews:** [`product/attended-concerts-and-reviews.md`](product/attended-concerts-and-reviews.md)  
+  *Long-term product direction for attendance logging and multi-dimensional experience signals.*
 - **Future Features & Email Ingestion:** [`product/future-features.md`](product/future-features.md)  
   *Deferred features, including promoter newsletter/email ingestion strategy.*
 
@@ -58,7 +60,7 @@ This document is the authoritative directory and context router for the Encore c
   - [Phase 0 — Foundation & Infrastructure](phases/completed/PHASE_0_IMPLEMENTATION.md)
   - [Phase 1 — Canonical Inventory & Ingestion Foundation](phases/completed/PHASE_1_IMPLEMENTATION.md)
 - **Active / Upcoming Phases:** [`phases/active/`](phases/active/)
-  - *Active phase slot (currently awaiting Phase 2 kickoff following Learning Hub)*
+  - [Post-Phase-1 Tooling — Encore Project Hub & Observatory](phases/active/PROJECT_HUB_IMPLEMENTATION.md) (in progress)
 
 ---
 
