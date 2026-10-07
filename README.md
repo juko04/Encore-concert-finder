@@ -23,9 +23,9 @@ If you are new to the codebase, start here:
 |---|---|---|
 | **Phase 0 — Foundation** | **COMPLETE** | Next.js 15, TypeScript, Tailwind, Supabase RLS, unit/integration CI pipelines. ([Details](docs/phases/completed/PHASE_0_IMPLEMENTATION.md)) |
 | **Phase 1 — Canonical Inventory** | **COMPLETE** | Ingestion models, immutable raw observations, entity resolution (artists, venues, events), and field-level provenance in PostgreSQL. ([Details](docs/phases/completed/PHASE_1_IMPLEMENTATION.md)) |
-| **Post-Phase 1 Tooling** | **ACTIVE** | Repository organization & AI context optimization. |
-| **Encore Project Hub** | **PLANNED** | Interactive documentation, entity inspector, and pipeline visualizer (next milestone). |
-| **Phase 2 — Live Ingestion** | **PLANNED** | Live Ticketmaster API ingestion and recommendation scoring scaffolding. |
+| **Repository & Context Cleanup** | **COMPLETE** | Modular documentation architecture, progressive disclosure for AI agents, glossary, and CI runner pinning. |
+| **Encore Project Hub** | **NEXT** | Interactive documentation, entity inspector, and pipeline visualizer (next milestone). |
+| **Phase 2 — Live Ingestion** | **NOT STARTED** | Live Ticketmaster API ingestion and recommendation scoring scaffolding. |
 
 ---
 

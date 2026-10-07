@@ -18,6 +18,9 @@ This directory contains the implementation specification for the currently activ
 - **Completed Phases:**
   - [Phase 0 — Foundation & Infrastructure](../completed/PHASE_0_IMPLEMENTATION.md)
   - [Phase 1 — Canonical Inventory & Ingestion Foundation](../completed/PHASE_1_IMPLEMENTATION.md)
-- **Current Project Milestone:** Repository Organization + AI Context Optimization (in progress).
-- **Upcoming Milestone:** Encore Project Hub / Learning Hub (interactive documentation and entity inspector).
-- **Next Phase:** Phase 2 (Live Ticketmaster Ingestion & Personalization Scaffolding) will open its active specification here once the Learning Hub is complete.
+- **Current Milestone Status:**
+  - Phase 0: **COMPLETE**
+  - Phase 1: **COMPLETE**
+  - Repository Organization + AI Context Optimization: **COMPLETE**
+  - Encore Project Hub / Learning Hub: **NEXT**
+  - Phase 2: **NOT STARTED** (will open active specification here once the Learning Hub is complete)

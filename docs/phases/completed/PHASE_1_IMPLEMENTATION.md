@@ -378,7 +378,7 @@ are manual/scheduled only.
 ## Approved deviations
 
 None. Record an approved deviation here before implementing it, including its
-rationale, affected tests, and any required update to `docs/12-decisions.md` or
+rationale, affected tests, and any required update to `docs/12-decisions.md` (now `docs/decisions/index.md`) or
 the roadmap.
 
 ---

@@ -7,32 +7,35 @@ Durable architecture records belong in [`docs/architecture/`](docs/architecture/
 
 ## Current Status & Location
 
-- **Current State:** Phase 1 successfully reviewed, verified in GitHub Actions CI, and merged into `main`.
-- **Current Milestone:** Post-Phase-1 Tooling: Repository Organization & AI Context Optimization.
+- **Current State:** Post-Phase-1 repository organization and AI-context optimization **COMPLETE**.
 - **Current Branch:** `chore/repository-context-cleanup`
-- **Active Implementing Agent:** Google Antigravity
-- **Planning / Review Agent:** ChatGPT Personal
+- **Verification:** Local test suites PASS; GitHub CI PASS.
+- **Immediate Action:** Independent review complete; merge cleanup PR into `main`.
+- **Next Milestone After Merge:** **Encore Project Hub / Learning Hub**.
+- **Phase 2 Status:** **NOT STARTED.**
 
 ---
 
-## Active Work in This Task
+## Summary of Accomplished Cleanup
 
-1. **Repository & Documentation Reorganization:**
+1. **Repository & Documentation Structure:**
    - Consolidated documentation into thematic subdirectories under `docs/` (`product/`, `architecture/`, `phases/`, `decisions/`, `project/`, `learning/`).
-   - Created central documentation router: [`docs/index.md`](docs/index.md).
-   - Created dedicated [`docs/architecture/entity-resolution.md`](docs/architecture/entity-resolution.md).
+   - Established central documentation router: [`docs/index.md`](docs/index.md).
+   - Created standalone architecture specification: [`docs/architecture/entity-resolution.md`](docs/architecture/entity-resolution.md).
    - Archived completed phase specifications to [`docs/phases/completed/`](docs/phases/completed/).
-   - Cleaned root clutter (moved project context, starter prompts, and onboarding guides to `docs/`).
-   - Removed obsolete static text dumps (`FULL_PROJECT_SPEC.txt`, `REPO_FILE_INDEX.txt`).
+   - Removed obsolete text dumps (`FULL_PROJECT_SPEC.txt`, `REPO_FILE_INDEX.txt`).
 2. **AI Context Optimization:**
-   - Streamlined [`AGENTS.md`](AGENTS.md) with context routing and progressive disclosure.
-   - Reduced [`AI_HANDOFF.md`](AI_HANDOFF.md) to current operational state only.
-3. **Beginner Onboarding:**
-   - Created beginner-friendly learning glossary: [`docs/learning/glossary.md`](docs/learning/glossary.md) with 30+ core concepts.
-   - Updated [`README.md`](README.md) to provide clean orientation.
-4. **CI & Workflow Housekeeping:**
-   - Pinned GitHub Actions runner to `ubuntu-24.04` in `.github/workflows/ci.yml`.
-   - Recorded non-blocking cleanup items in [`docs/project/non-blocking-debt.md`](docs/project/non-blocking-debt.md).
+   - Enforced progressive disclosure in [`AGENTS.md`](AGENTS.md) with context routing table.
+   - Rewrote [`docs/project/ai-start-prompts.md`](docs/project/ai-start-prompts.md) as reusable role prompts directing agents to `AGENTS.md` context routing.
+   - Streamlined [`AI_HANDOFF.md`](AI_HANDOFF.md) to active operational handoff only.
+3. **Contributor Onboarding:**
+   - Created conceptual learning glossary: [`docs/learning/glossary.md`](docs/learning/glossary.md) with 30+ core live-music and engineering concepts.
+   - Rewrote [`docs/project/onboarding.md`](docs/project/onboarding.md) for contributors arriving at the codebase today.
+   - Updated root [`README.md`](README.md) navigation and milestone tracking.
+4. **CI & Workflow Modernization:**
+   - Pinned GitHub Actions runner to `ubuntu-24.04` LTS.
+   - Upgraded `actions/checkout@v7` and `actions/setup-node@v7` with native Node 24 runtime, eliminating deprecation warnings.
+   - Recorded non-blocking debt in [`docs/project/non-blocking-debt.md`](docs/project/non-blocking-debt.md).
 
 ---
 
@@ -45,7 +48,7 @@ Durable architecture records belong in [`docs/architecture/`](docs/architecture/
 | `npm run typecheck` | **PASS** | TypeScript `tsc --noEmit` clean pre- and post-build |
 | `npm test` | **PASS** | 86/86 in-memory unit tests passing across 8 suites |
 | `npm run build` | **PASS** | Next.js 15.5 production build compiled successfully |
-| `npm run test:e2e` | **PASS** | Playwright smoke tests pass in CI |
+| `npm run test:e2e` | **PASS** | Playwright smoke tests configured for CI |
 | Database Integration Suite | **PASS in CI (21/21)** | Full RLS and golden-path integration suite verified against PostgreSQL in CI |
 
 ---
@@ -55,4 +58,4 @@ Durable architecture records belong in [`docs/architecture/`](docs/architecture/
 1. **Next Immediate Milestone:** **Encore Project Hub / Learning Hub** (interactive developer/agent/operator hub for architecture documentation, entity inspection, ingestion pipeline visualization, and system onboarding).
 2. **Phase 2 Status:** **NOT STARTED.** Do not begin live Ticketmaster ingestion, Spotify integration, or recommendation scoring until the Learning Hub is established.
 3. **Documentation Authority:** Markdown files under `docs/` remain the single source of truth. The upcoming Learning Hub will render and visualize these Markdown documents rather than duplicating them.
-4. **Accepted Deferrals & Non-Blocking Debt:** See [`docs/project/non-blocking-debt.md`](docs/project/non-blocking-debt.md).
+4. **Historical Phase Specifications:** Files under `docs/phases/completed/` are historical archives; do not load them into prompt context unless historical decision rationale is explicitly needed.

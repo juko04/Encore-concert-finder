@@ -9,10 +9,11 @@ This document tracks accepted non-blocking cleanup items and deferred architectu
 These items were identified during Phase 1 independent reviews and CI runs. They do not block current functionality but should be addressed during tooling and Phase 2 preparation:
 
 ### 1.1 CI Runner Pinning & Actions Modernization
-- **Status:** Evaluated and runner pinned in `chore/repository-context-cleanup`.
+- **Status:** Complete. Pinned to `runs-on: ubuntu-24.04` and modernized actions to `@v7` in `chore/repository-context-cleanup`.
 - **Context:** GitHub Actions displayed non-blocking warnings regarding Node 20 runtime deprecation and future changes to `ubuntu-latest`.
-- **Action Taken:** Pinned CI workflow to `runs-on: ubuntu-24.04` to ensure reproducible Docker, PostgreSQL, and Node 24 behavior.
-- **Future Action:** Monitor official GitHub Actions (`actions/checkout`, `actions/setup-node`) for major runtime bumps once GitHub finalizes runner node defaults.
+- **Action Taken:**
+  1. Pinned CI workflow to `runs-on: ubuntu-24.04` LTS for reproducible Docker, PostgreSQL, and Node 24 behavior.
+  2. Upgraded `actions/checkout@v4` → `actions/checkout@v7` and `actions/setup-node@v4` → `actions/setup-node@v7`, which run natively on Node 24 runtime, eliminating Node 20 deprecation warnings.
 
 ### 1.2 Trusted Artist External ID Enrichment on Existing Matches
 - **Status:** Deferred to Phase 2 / Ingestion expansion.
