@@ -6,19 +6,11 @@ in `docs/12-decisions.md` or the active phase specification.
 
 ## Current phase
 
-Phase 1 — Canonical Inventory and Ingestion Foundation (CI Closeout Pass Complete)
+Phase 1 — Canonical Inventory and Ingestion Foundation (COMPLETE / Ready to Merge)
 
 ## Current task
 
-Phase 1 CI Closeout Pass:
-1. Confirmed initial field-level evidence emission (>=10 canonical fields, null/unknown never fabricated, provenance IDs preserved).
-2. Implemented domain → RPC mapper `mapEventUpdatesToCanonicalizationPayload` translating camelCase `evaluateFieldMerge` updates to snake_case `CanonicalizationPayload['event']` (resolving reschedule date/starts_at updates in PostgreSQL).
-3. Consolidated and re-ran reschedule golden path in PostgreSQL: exactly 1 canonical event, 2 immutable raw observations, 2 immutable candidate observations, updated date/starts_at, and field evidence containing `local_start_date`, `starts_at`, `status`.
-4. Instant timestamp comparison: compare `local_start_date` as `'2026-10-17'`, `timezone` as `'America/Denver'`, and `starts_at` semantically as an instant (`getTime()` epoch equality).
-5. Enforced strong artist external IDs over contextual same-name matching in `ArtistResolver.resolveOrPrepare` (detects conflicts and routes to `ambiguous`).
-6. Made `golden-path.test.ts` independent: unified steps 1, 2, 3, 5 into single sequential test, eliminated shared mutable suite variables, gave step 8 its own isolated test event, and strictly enforced loud CI failures on missing DB via `ensureDbAvailable()`.
-7. Audited composite FK delete behavior: updated composite FKs on `event_sources` and `event_field_evidence` to `ON DELETE RESTRICT` (preventing NOT NULL 23502 error on `source_id`).
-8. Corrected Step 8 control event fixture (`normalized_name`, `start_time_precision: 'date_only'`, `event_kind`, `status`, `is_multi_day`) and audited temporal check constraints in `catalog-rls.test.ts` for false-positive prevention.
+Phase 1 Closeout — Handing off completed and independently reviewed Phase 1 for repository owner merge into `main`.
 
 ## Current phase specification
 
@@ -26,21 +18,23 @@ Phase 1 CI Closeout Pass:
 
 ## Status
 
-Phase 1 CI Closeout Pass complete:
+Phase 1 is **COMPLETE and ready to merge**:
+- Phase 1 pull request is **OPEN against `main`**
 - Local unit tests: PASS (86/86 unit tests passing across 8 suites)
-- Local integration tests: NOT RUN — Docker unavailable (3 suites, 21 tests gracefully skipped locally)
-- GitHub CI integration tests: PENDING (all 21 integration tests execute against live PostgreSQL / Supabase container stack in GitHub Actions)
-- TypeScript typecheck: clean (`tsc --noEmit` 0 errors pre- and post-build)
-- ESLint: clean (0 errors, 0 warnings)
-- Prettier format: clean (`format:check` passed)
-- Next.js production build: verified
+- Local integration tests: NOT RUN — Docker unavailable
+- GitHub CI integration tests: **PASS — 21/21** (database-backed RLS and golden-path integration tests verified against live PostgreSQL stack in GitHub Actions)
+- TypeScript typecheck: PASS (`tsc --noEmit` clean pre- and post-build)
+- ESLint: PASS (0 errors, 0 warnings)
+- Prettier format: PASS (`format:check` clean)
+- Next.js production build: PASS
+- Next immediate action: **Merge Phase 1 into `main`**
 
 ## Ownership / branch
 
 - Active planning/review agent: ChatGPT
 - Current branch: `feature/canonical-inventory-foundation`
 - Implementing agent: Google Antigravity
-- Issue/PR: none assigned (unmerged)
+- Issue/PR: Pull request open against `main` (unmerged)
 
 ## Completed CI closeout & convergence work
 
@@ -95,7 +89,7 @@ Phase 1 CI Closeout Pass complete:
 - `npm run test:integration` — 21 integration tests across 3 suites (`golden-path.test.ts` 5 tests, `catalog-rls.test.ts` 9 tests, `profiles-rls.test.ts` 7 tests).
   *Execution environment clarification*:
   - Local execution: `Local integration tests: NOT RUN — Docker unavailable` (tests gracefully skip when local Supabase container is not running).
-  - CI execution: `GitHub CI integration tests: PENDING` (GitHub Actions CI runs `npm run db:start && npm run db:reset && npm run test:integration` where all tests execute against the live PostgreSQL / Supabase container stack).
+  - CI execution: `GitHub CI integration tests: PASS — 21/21` (all 21 integration tests executed and passed against the live PostgreSQL / Supabase container stack in GitHub Actions).
 
 ## Accepted deferrals
 
@@ -105,20 +99,25 @@ Phase 1 CI Closeout Pass complete:
 4. Raw-ingest retention duration and deletion cron.
 5. Object-storage provider selection and external storage threshold for raw payloads.
 
-## Crucial Next Step & Project Tooling Reminder
+## Crucial Post-Phase-1 Sequence (Before Substantial Phase 2 Work)
 
 > [!IMPORTANT]
-> **NEXT IMMEDIATE TASK UPON REVIEW & MERGE (BEFORE PHASE 2 SUBSTANTIAL WORK):**
-> After Phase 1 is reviewed and merged into `main`, the very next project task is to plan and build the **Encore Project Hub / Learning Hub** (an interactive, developer/agent/operator hub for architecture documentation, entity inspection, ingestion pipeline visualization, and system onboarding).
-> Do NOT begin substantial Phase 2 crawler or ingestion implementation until this learning hub foundation is in place.
+> **EXPLICIT TASK SEQUENCE UPON MERGE:**
+> After Phase 1 is merged into `main`, execute this explicit sequence before beginning substantial Phase 2 crawler or ingestion implementation:
+>
+> 1. **Repository & folder organization cleanup**
+> 2. **AI-context & Markdown documentation optimization**
+> 3. **Encore Project Hub / Learning Hub** (an interactive, developer/agent/operator hub for architecture documentation, entity inspection, ingestion pipeline visualization, and system onboarding)
+
+### Non-blocking cleanup items to tackle in this post-Phase-1 task:
+
+- Upgrade GitHub Actions versions producing the Node 20 runtime deprecation warning.
+- Consider pinning the CI runner instead of relying indefinitely on `ubuntu-latest`.
+- Ensure newly learned trusted artist external IDs can enrich already-matched canonical artists during entity resolution.
+- Clean up Discover source attribution and unknown-venue display behavior in UI components.
 
 ## Recommended immediate steps
 
-1. Review git diff and commit history.
-2. Push changes to `feature/canonical-inventory-foundation`.
-3. Generate review bundle for ChatGPT:
-   ```bash
-   git archive --format=zip --output=../encore-review.zip HEAD
-   git diff main...HEAD > ../encore-review.diff
-   ```
-4. Perform independent re-review before merging into `main`.
+1. Repository owner merges the open Phase 1 pull request (`feature/canonical-inventory-foundation` into `main`).
+2. Pull updated `main` locally and archive/clean up feature branch.
+3. Begin the post-Phase-1 sequence starting with repository and documentation optimization.
