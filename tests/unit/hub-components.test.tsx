@@ -32,7 +32,10 @@ describe('Project Hub Components', () => {
         </HubThemeProvider>,
       );
 
-      expect(screen.getByText('Encore Observatory')).toBeInTheDocument();
+      expect(
+        screen.getByRole('heading', { name: 'Encore Project Hub' }),
+      ).toBeInTheDocument();
+      expect(screen.getByText('Observatory')).toBeInTheDocument();
       expect(screen.getByText('2D Map')).toBeInTheDocument();
       expect(
         screen.getByPlaceholderText('Search architecture...'),

@@ -3,7 +3,7 @@ import React from 'react';
 import { HubThemeProvider } from '@/components/hub/HubThemeProvider';
 
 export const metadata: Metadata = {
-  title: 'Encore Observatory — Internal Architecture Hub',
+  title: 'Encore Project Hub — Internal Architecture Observatory',
   description:
     'Interactive architectural topology and system metrics for Encore',
 };

@@ -37,7 +37,9 @@ test.describe('Application Smoke Tests', () => {
     const response = await page.goto('/hub');
 
     expect(response?.status()).toBe(200);
-    await expect(page.getByText('Encore Project Hub')).toBeVisible();
+    await expect(
+      page.getByRole('heading', { name: 'Encore Project Hub' }),
+    ).toBeVisible();
     await expect(
       page.getByText(
         'Interactive System Architecture & Operational Observatory',

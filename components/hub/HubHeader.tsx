@@ -46,14 +46,14 @@ export function HubHeader({
               <div>
                 <div className="flex items-center gap-2">
                   <h1 className="text-sm font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
-                    Encore Observatory
+                    Encore Project Hub
                   </h1>
                   <span className="rounded-full border border-indigo-500/20 bg-indigo-500/10 px-2 py-0.5 text-[10px] font-medium text-indigo-600 dark:text-indigo-400">
-                    Internal Hub
+                    Observatory
                   </span>
                 </div>
                 <p className="text-[11px] text-zinc-500 dark:text-zinc-400">
-                  Interactive Architecture Topology & Pipeline Metrics
+                  Interactive System Architecture & Operational Observatory
                 </p>
               </div>
             </div>
