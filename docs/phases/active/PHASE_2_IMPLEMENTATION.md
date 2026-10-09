@@ -127,8 +127,11 @@ An audit of the Phase 1 codebase reveals a robust architectural foundation ready
 ## 5. Workstream Breakdown
 
 ### Workstream A: Live Ticketmaster Ingestion
-1. **API Client:** Implement `TicketmasterApiClient` utilizing `fetch` with exponential backoff, status code handling (429 Too Many Requests, 5xx server errors), and authentication via `TICKETMASTER_API_KEY`.
-2. **Rate Limiting & Safety:** Enforce client-side rate limits (max 5 requests per second) and pagination guards (Ticketmaster caps total pagination at 1,000 events: `page * size < 1000`).
+1. **API Client:** Implement `TicketmasterApiClient` utilizing `fetch` with exponential backoff, status code handling (429 Too Many Requests, 5xx server errors), query string credential redaction, and authentication via `TICKETMASTER_API_KEY`.
+2. **Rate Limiting & Safety:**
+   - **Rate Limit Inconsistency & Default:** Ticketmaster Discovery API documentation states 5 requests/second, while developer FAQs state 2 requests/second. The client will default conservatively to **2 requests/second** (500ms minimum spacing between consecutive calls), with the limit remaining configurable via client options or environment variables.
+   - **Throttling & Backoff:** Explicitly respect HTTP 429 and `Retry-After` response headers using exponential backoff with jitter.
+   - **Deep Pagination Boundary:** Guard against Ticketmaster's 1,000-event ceiling (`page * size < 1000`).
 3. **Adapter Implementation:** Implement `TicketmasterDiscoveryAdapter` conforming to `EventSourceAdapter` contract.
 4. **Data Normalization:**
    - Map `dates.start.localDate` and `dates.start.localTime` respecting `dates.start.timeTBA` and `dates.start.dateTBD`.
@@ -149,11 +152,15 @@ An audit of the Phase 1 codebase reveals a robust architectural foundation ready
    - Rescheduled dates: update `local_start_date` and emit field evidence.
 
 ### Workstream C: Spotify & Music Preferences
-1. **OAuth Architecture:** Authorization Code Flow with PKCE via server-side API routes (`/api/auth/spotify/login`, `/api/auth/spotify/callback`).
-2. **Token Security:** Store refresh and access tokens in a private user table protected by Row Level Security (`auth.uid() = user_id`) and service-role-only access. Never pass access tokens to the browser.
-3. **Taste Ingestion:** Fetch user top artists across time ranges (`short_term`, `medium_term`, `long_term`) and saved library artists.
-4. **Identity Linking:** Match Spotify artist IDs (`spotify:artist:<id>`) against `artist_external_ids` in the canonical catalog.
-5. **Preference Separation:** Maintain separate signals for recorded listening affinity, explicit user favorites, venue preferences, price sensitivity, and travel willingness.
+1. **OAuth Architecture:** Authorization Code Flow with PKCE via server-side API routes (`/api/auth/spotify/login`, `/api/auth/spotify/callback`). Deferred to PR 4; do not implement now.
+2. **Spotify Development Mode Limitations & Product Risk:**
+   - Spotify developer apps in Development Mode are restricted to a maximum of 25 pre-registered user accounts requiring manual allowlisting via the Spotify Developer Dashboard.
+   - Quota limits and extended review friction for production extensions represent a significant product risk.
+   - **Mitigation:** Encore will preserve manual user artist preference selection (explicit favorite artists, genres, and manual taste profile) as a first-class, fully supported alternative that operates completely independently of Spotify OAuth.
+3. **Token Security:** Store refresh and access tokens in a private user table protected by Row Level Security (`auth.uid() = user_id`) and service-role-only access. Never pass access tokens to the browser.
+4. **Taste Ingestion:** Fetch user top artists across time ranges (`short_term`, `medium_term`, `long_term`) and saved library artists.
+5. **Identity Linking:** Match Spotify artist IDs (`spotify:artist:<id>`) against `artist_external_ids` in the canonical catalog.
+6. **Preference Separation:** Maintain separate signals for recorded listening affinity, explicit user favorites, venue preferences, price sensitivity, and travel willingness.
 
 ### Workstream D: Transparent Recommendation Scoring
 1. **Scoring Factors:** Implement independent, testable scoring functions in `lib/recommendation/`:
@@ -226,9 +233,12 @@ lib/
 - **Base URL:** `https://app.ticketmaster.com/discovery/v2/`
 - **Primary Endpoint:** `/discovery/v2/events.json`
 - **Authentication:** Query parameter `apikey={TICKETMASTER_API_KEY}`.
-- **Default Rate Limits:**
-  - Rate: 5 requests per second (enforced via token bucket / delay queue in client).
-  - Quota: 5,000 calls per day.
+- **Rate Limit Specifications & Discrepancy:**
+  - Ticketmaster Discovery API documentation states a limit of 5 requests/second, whereas developer FAQs state 2 requests/second.
+  - To prevent intermittent 429 throttling, Encore defaults conservatively to **2 requests/second** (500ms spacing between calls).
+  - Rate limit is configurable via client constructor options (`requestsPerSecond`) or environment variables.
+  - Client monitors HTTP 429 and `Retry-After` response headers, backing off with jitter.
+  - Quota: 5,000 calls per day on default developer tier.
 - **Pagination Rules:** `size` parameter (default 20, max 100), `page` parameter (0-indexed). Maximum `page * size < 1000`.
 - **Classification Filtering:** Filter by `classificationName=Music` to exclude sports, theater, and family events.
 
@@ -238,6 +248,7 @@ lib/
   - `/v1/me/top/artists` (time_range: `short_term`, `medium_term`, `long_term`, limit: 50)
   - `/v1/me/following?type=artist` (limit: 50)
 - **Scopes Required:** `user-top-read`, `user-follow-read`.
+- **Development Mode Risk:** Spotify developer apps in Development Mode are restricted to 25 pre-approved user accounts. Manual artist preference entry is preserved as an independent fallback.
 - **Token Exchange:** OAuth 2.0 Authorization Code Flow via `https://accounts.spotify.com/api/token`.
 
 ---
@@ -247,10 +258,13 @@ lib/
 1. **Secret Isolation:**
    - `TICKETMASTER_API_KEY`, `SPOTIFY_CLIENT_ID`, `SPOTIFY_CLIENT_SECRET`, and `SUPABASE_SERVICE_ROLE_KEY` reside exclusively in server environment variables validated via `getServerEnv()`.
    - Never expose API keys or credentials in client bundles or public endpoints.
-2. **Token Protection:**
+2. **Credential Redaction in Logs & Errors:**
+   - Query strings and URLs containing API keys (e.g. `apikey=...`) must be strictly sanitized and redacted prior to logging, emitting error messages, or recording audit events.
+   - Example sanitized representation: `https://app.ticketmaster.com/discovery/v2/events.json?apikey=[REDACTED]&classificationName=Music`.
+3. **Token Protection:**
    - Spotify access and refresh tokens are stored in `user_spotify_connections`.
    - Table protected with Row Level Security: users can never read raw tokens directly via Supabase client; server-only mutations execute via `service_role`.
-3. **No Unsanitized HTML/Input:**
+4. **No Unsanitized HTML/Input:**
    - External event descriptions, URLs, and artist names must be sanitized before rendering to prevent XSS.
 
 ---
@@ -323,6 +337,10 @@ When Docker/Supabase is available:
 npm run test:integration # PostgreSQL-backed integration suite
 ```
 
+### Completed Planning Verification vs. Runtime Test Verification
+- **Verified During Planning Task:** Prettier formatting (`format:check`), ESLint (`lint` — 0 errors, 0 warnings), strict TypeScript checking (`tsc --noEmit`), and in-memory unit tests (103/103 tests passing across 10 test suites).
+- **Not Re-Executed During Planning:** Next.js production build and PostgreSQL-backed integration tests (`test:integration`) were not re-executed during the pure-documentation planning pass. They must be executed on active implementation branches prior to merge.
+
 ### Test Fixture Discipline:
 - Live external API calls are strictly forbidden in unit tests or standard CI.
 - All adapter, parser, and resolver tests must execute against static, deterministic JSON fixtures (`tests/fixtures/ticketmaster-events-response.json`).
@@ -343,7 +361,8 @@ npm run test:integration # PostgreSQL-backed integration suite
 Phase 2 will be delivered in 6 focused, independently reviewable PRs:
 
 ### PR 1 — Live Ticketmaster Ingestion Foundation
-- **Goal:** Official Ticketmaster API client, response schema validation, adapter implementation, deterministic fixtures, and controlled CLI ingestion script.
+- **Goal:** Official Ticketmaster API client, response schema validation, adapter implementation, deterministic fixtures, and controlled CLI ingestion script with dry-run support.
+- **Success Definition for PR 1:** Reliable provider fetching, response parsing, Zod schema validation, credential redaction in logs/errors, and safe dry-run CLI execution. **PR 1 explicitly does NOT perform end-to-end canonical database persistence**; canonicalization integration belongs strictly to PR 2.
 - **Files:** `lib/sources/ticketmaster/`, `lib/env/server.ts`, `tests/fixtures/ticketmaster-events-response.json`, `tests/unit/ticketmaster-adapter.test.ts`, `scripts/ingest-ticketmaster.ts`.
 - **Boundary:** Produces `RawIngest` and `EventCandidate` objects without running canonicalization.
 - **Verification:** Unit tests for parsing, rate-limiting, error handling; Next.js build.
@@ -381,21 +400,22 @@ Phase 2 will be delivered in 6 focused, independently reviewable PRs:
 
 | Risk | Impact | Mitigation Strategy |
 |---|---|---|
-| **Ticketmaster API Rate Limits (429)** | Pipeline failure / blocked key | Implement token-bucket client rate limiting (max 5 req/s) with exponential backoff and jitter. |
+| **Ticketmaster API Rate Limits (429) & Doc Inconsistency** | Pipeline failure / blocked key | Discovery API states 5 req/s; FAQ states 2 req/s. Default conservatively to **2 requests/second** (500ms spacing), make limit configurable, and handle HTTP 429 / `Retry-After` with exponential backoff and jitter. |
+| **Spotify Development Mode Limitations** | 25-user cap, manual dashboard allowlist, extension review friction | Treat manual user artist preferences (favorite artists, genres) as a first-class supported alternative that functions independently of Spotify OAuth. Do not implement Spotify until PR 4. |
+| **Credential Leakage in Logs / Errors** | Exposed API keys or secrets | Query strings containing API keys (e.g. `apikey=...`) must be strictly redacted in logged URLs, errors, and traces (`apikey=[REDACTED]`). |
 | **Missing / Incomplete Venue Data** | Malformed canonical venues | Enforce locality requirement: if venue lacks `city`, route candidate to `needs_review` with `missing_venue_locality`. |
 | **Dirty External Artist Names** | False merges or duplicates | Precedence to Ticketmaster attraction IDs; normalized matching flags ambiguous names for review. |
-| **Spotify API Scope Restrictions** | OAuth failures or rejected access | Request only minimal read scopes (`user-top-read`, `user-follow-read`); do not rely on deprecated endpoints. |
 | **Missing Price Ranges** | Distorted ranking scores | Explicit missing-data rule: missing price is treated as neutral (0.5 factor) with "Price TBA" explanation, never free (\$0). |
 | **Client-Side Secret Leakage** | Compromised credentials | `getServerEnv()` strictly throws if evaluated in browser; zero API keys or service-role keys in public configs. |
 
 ---
 
-## 15. Decisions Requiring Owner Approval
+## 15. Accepted Design Decisions (Repository Owner Approved)
 
-Before merging implementation PRs:
-1. **Initial Search Geographic Scope:** Confirm whether Colorado (`stateCode=CO` / Denver market ID `27`) remains the preferred initial testing market for manual ingestion runs (without hardcoding it into architecture).
-2. **Ingestion Execution Trigger:** Confirm that manual CLI execution (`npm run ingest:ticketmaster -- --dry-run`) is approved as the operational trigger for PR 1, rather than automated background cron jobs.
-3. **Spotify Token Storage:** Confirm preference for dedicated tables (`user_spotify_connections`, `user_artist_affinities`) versus storing taste profiles inside `profiles.preferences` JSONB.
+1. **Initial Search Geographic Scope:** Colorado is approved as the initial testing region for manual CLI ingestion runs. Geographic selection remains runtime-configurable; zero Colorado-specific assumptions or fallbacks are embedded in schemas or domain logic.
+2. **Controlled Ingestion Trigger:** Manually triggered CLI execution runner (`npm run ingest:ticketmaster`) is approved for PR 1. Automated production background scheduling is deferred to future operational phases.
+3. **PR 1 Scope Boundary:** Approved: implement the Ticketmaster API client, adapter, parsing, validation, fixtures, and dry-run behavior. Canonicalization database persistence belongs in PR 2.
+4. **Planning PR Branch Precedence:** The planning specification (`docs/phase-2-specification`) must be merged into `main` before creating the first implementation branch (`feature/phase-2-ticketmaster-ingestion`), ensuring the implementation branch inherits the authoritative Phase 2 spec.
 
 ---
 
@@ -430,3 +450,4 @@ Phase 2 will be accepted when:
 2. **Large-Payload Object Storage:** Storing raw HTML/API payloads $>500$ KB in S3/R2 is deferred until payload volume warrants.
 3. **Manual Resolution Operator UI:** Human-in-the-loop admin UI for reviewing `needs_review` candidates remains deferred.
 4. **Attendance Logging & Multi-Dimensional Experience Signals:** Past concert logging deferred to Phase 4 per `docs/product/attended-concerts-and-reviews.md`.
+
