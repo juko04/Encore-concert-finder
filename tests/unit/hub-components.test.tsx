@@ -7,7 +7,13 @@ import { HubHeader } from '@/components/hub/HubHeader';
 import { SystemStatsGrid } from '@/components/hub/SystemStatsGrid';
 import { NodeInspector } from '@/components/hub/NodeInspector';
 import { ArchitectureNodeView } from '@/components/hub/ArchitectureNodeView';
-import { CATEGORIES, NODES } from '@/lib/hub/architecture-data';
+import { ArchitectureMap } from '@/components/hub/ArchitectureMap';
+import {
+  CATEGORIES,
+  CLUSTERS,
+  EDGES,
+  NODES,
+} from '@/lib/hub/architecture-data';
 import { HUB_STATS } from '@/lib/hub/hub-stats';
 
 describe('Project Hub Components', () => {
@@ -162,6 +168,21 @@ describe('Project Hub Components', () => {
       fireEvent.click(closeBtn);
       expect(onClose).toHaveBeenCalled();
     });
+
+    it('constrains desktop width to supporting contextual panel (~380px)', () => {
+      const { container } = render(
+        <NodeInspector
+          node={testNode}
+          allNodes={NODES}
+          onClose={vi.fn()}
+          onSelectNode={vi.fn()}
+        />,
+      );
+
+      const aside = container.querySelector('aside');
+      expect(aside?.className).toContain('sm:w-[380px]');
+      expect(aside?.className).toContain('sm:max-w-[400px]');
+    });
   });
 
   describe('ArchitectureNodeView', () => {
@@ -199,6 +220,78 @@ describe('Project Hub Components', () => {
       );
 
       expect(screen.getByText('PLANNED')).toBeInTheDocument();
+    });
+
+    it('uses category-specific color on selection without generic blue outline', () => {
+      const entityNode = NODES.find((n) => n.category === 'entity_resolution')!;
+      const categoryMeta = CATEGORIES[entityNode.category];
+
+      const { container } = render(
+        <svg>
+          <ArchitectureNodeView
+            node={entityNode}
+            isSelected={true}
+            isConnected={false}
+            isDimmed={false}
+            currentZoomLevel={1}
+            onSelect={vi.fn()}
+          />
+        </svg>,
+      );
+
+      // Card body rect must have stroke matching category color, and not generic stroke-indigo-500
+      const rects = container.querySelectorAll('rect');
+      const cardBody = Array.from(rects).find(
+        (r) => r.getAttribute('rx') === '8',
+      );
+      expect(cardBody).toBeDefined();
+      expect(cardBody?.getAttribute('stroke')).toBe(categoryMeta.colorDark);
+      expect(cardBody?.getAttribute('class')).not.toContain(
+        'stroke-indigo-500',
+      );
+    });
+  });
+
+  describe('ArchitectureMap', () => {
+    it('decouples detail level selection from camera zoom scale', () => {
+      render(
+        <ArchitectureMap
+          nodes={NODES}
+          edges={EDGES}
+          clusters={CLUSTERS}
+          selectedNode={null}
+          onSelectNode={vi.fn()}
+          searchQuery=""
+          selectedCategory={null}
+        />,
+      );
+
+      // Initial camera zoom percent
+      expect(screen.getByText('95%')).toBeInTheDocument();
+
+      // Click L3 Schemas detail level
+      const l3Btn = screen.getByRole('button', { name: 'L3 Schemas' });
+      fireEvent.click(l3Btn);
+
+      // Camera scale must remain 95% (unchanged by detail level selection)
+      expect(screen.getByText('95%')).toBeInTheDocument();
+
+      // Click L0 Systems detail level
+      const l0Btn = screen.getByRole('button', { name: 'L0 Systems' });
+      fireEvent.click(l0Btn);
+
+      // Camera scale must still remain 95%
+      expect(screen.getByText('95%')).toBeInTheDocument();
+
+      // Click Zoom In button
+      const zoomInBtn = screen.getByRole('button', { name: 'Zoom in' });
+      fireEvent.click(zoomInBtn);
+
+      // Camera scale must update to 120%
+      expect(screen.getByText('120%')).toBeInTheDocument();
+
+      // Active detail level button remains L0 Systems
+      expect(l0Btn.className).toContain('bg-indigo-600');
     });
   });
 });

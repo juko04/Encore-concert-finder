@@ -1,19 +1,13 @@
 'use client';
 
-import React, {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from 'react';
+import React, { useCallback, useMemo, useRef, useState } from 'react';
 import type {
   ArchitectureCluster,
   ArchitectureEdge,
   ArchitectureNode,
-  ZoomLevel,
+  DetailLevel,
 } from '@/lib/hub/architecture-model';
-import { CATEGORIES } from '@/lib/hub/architecture-data';
+import { CATEGORIES, computeClusterBounds } from '@/lib/hub/architecture-data';
 import { ArchitectureNodeView } from './ArchitectureNodeView';
 import { ArchitectureEdgeView } from './ArchitectureEdgeView';
 import { LayersIcon, ResetViewIcon, ZoomInIcon, ZoomOutIcon } from './icons';
@@ -30,7 +24,6 @@ interface ArchitectureMapProps {
 
 const ZOOM_MIN = 0.5;
 const ZOOM_MAX = 2.4;
-const HYSTERESIS = 0.04;
 
 export function ArchitectureMap({
   nodes,
@@ -43,7 +36,7 @@ export function ArchitectureMap({
 }: ArchitectureMapProps) {
   const containerRef = useRef<HTMLDivElement>(null);
 
-  // Pan & Zoom state
+  // 1. Camera Viewport State: zoom (scale) and pan (translation)
   const [zoom, setZoom] = useState<number>(0.95);
   const [pan, setPan] = useState<{ x: number; y: number }>({ x: 10, y: 10 });
   const [isDragging, setIsDragging] = useState(false);
@@ -52,29 +45,21 @@ export function ArchitectureMap({
     y: 0,
   });
 
-  // Progressive Zoom level with hysteresis to prevent edge flickering
-  const [zoomLevel, setZoomLevel] = useState<ZoomLevel>(1);
+  // 2. Information Detail Level (Completely independent from camera zoom/pan)
+  // L0 Systems -> L1 Services -> L2 Entities -> L3 Schemas
+  const [detailLevel, setDetailLevel] = useState<DetailLevel>(1);
 
-  useEffect(() => {
-    // Thresholds: L0 < 0.75, L1 in [0.75, 1.25), L2 in [1.25, 1.85), L3 >= 1.85
-    let newLevel: ZoomLevel = zoomLevel;
-
-    if (zoomLevel === 0) {
-      if (zoom >= 0.75 + HYSTERESIS) newLevel = 1;
-    } else if (zoomLevel === 1) {
-      if (zoom < 0.75 - HYSTERESIS) newLevel = 0;
-      else if (zoom >= 1.25 + HYSTERESIS) newLevel = 2;
-    } else if (zoomLevel === 2) {
-      if (zoom < 1.25 - HYSTERESIS) newLevel = 1;
-      else if (zoom >= 1.85 + HYSTERESIS) newLevel = 3;
-    } else if (zoomLevel === 3) {
-      if (zoom < 1.85 - HYSTERESIS) newLevel = 2;
-    }
-
-    if (newLevel !== zoomLevel) {
-      setZoomLevel(newLevel);
-    }
-  }, [zoom, zoomLevel]);
+  // Dynamically derive cluster bounds so headings and nodes never visually overflow
+  const resolvedClusters = useMemo(() => {
+    return clusters.map((cluster) => {
+      const clusterNodes = nodes.filter((n) => n.cluster === cluster.id);
+      const bounds = computeClusterBounds(cluster, clusterNodes);
+      return {
+        ...cluster,
+        bounds,
+      };
+    });
+  }, [clusters, nodes]);
 
   // Compute connected nodes for selection illumination
   const connectedNodeIds = useMemo(() => {
@@ -117,7 +102,7 @@ export function ArchitectureMap({
     return map;
   }, [nodes]);
 
-  // Reset to default viewport
+  // Reset viewport (preserves detail level)
   const handleResetView = useCallback(() => {
     setZoom(0.95);
     setPan({ x: 10, y: 10 });
@@ -130,17 +115,6 @@ export function ArchitectureMap({
   const handleZoomOut = useCallback(() => {
     setZoom((z) => Math.max(ZOOM_MIN, Number((z - 0.25).toFixed(2))));
   }, []);
-
-  // Set explicit preset zoom level
-  const handleSetPresetLevel = (level: ZoomLevel) => {
-    const presets: Record<ZoomLevel, number> = {
-      0: 0.65,
-      1: 0.95,
-      2: 1.45,
-      3: 1.95,
-    };
-    setZoom(presets[level]);
-  };
 
   // Pointer event handlers for panning
   const handlePointerDown = (e: React.PointerEvent) => {
@@ -186,7 +160,7 @@ export function ArchitectureMap({
         className="absolute left-3 top-3 z-10 flex flex-wrap items-center gap-2 rounded-xl border border-zinc-200/90 bg-white/95 p-1.5 shadow-sm backdrop-blur-md dark:border-zinc-800 dark:bg-zinc-900/95"
         onClick={(e) => e.stopPropagation()}
       >
-        {/* Zoom In / Out / Reset */}
+        {/* Camera Zoom In / Out / Reset */}
         <div className="flex items-center gap-1">
           <button
             type="button"
@@ -219,31 +193,31 @@ export function ArchitectureMap({
 
         <div className="h-4 w-px bg-zinc-200 dark:bg-zinc-800" />
 
-        {/* Current Zoom Percent */}
+        {/* Current Camera Zoom Percent */}
         <span className="px-1 font-mono text-xs text-zinc-500 dark:text-zinc-400">
           {Math.round(zoom * 100)}%
         </span>
 
         <div className="h-4 w-px bg-zinc-200 dark:bg-zinc-800" />
 
-        {/* Progressive Zoom Level Selector */}
+        {/* Independent Information Detail Level Selector (L0-L3) */}
         <div className="flex items-center gap-1">
           <span className="flex items-center gap-1 px-1 text-[10px] font-semibold uppercase text-zinc-400 dark:text-zinc-500">
             <LayersIcon className="h-3 w-3" />
             Detail:
           </span>
           {[
-            { level: 0 as ZoomLevel, label: 'L0 Systems' },
-            { level: 1 as ZoomLevel, label: 'L1 Services' },
-            { level: 2 as ZoomLevel, label: 'L2 Entities' },
-            { level: 3 as ZoomLevel, label: 'L3 Schemas' },
+            { level: 0 as DetailLevel, label: 'L0 Systems' },
+            { level: 1 as DetailLevel, label: 'L1 Services' },
+            { level: 2 as DetailLevel, label: 'L2 Entities' },
+            { level: 3 as DetailLevel, label: 'L3 Schemas' },
           ].map((item) => (
             <button
               key={item.level}
               type="button"
-              onClick={() => handleSetPresetLevel(item.level)}
+              onClick={() => setDetailLevel(item.level)}
               className={`rounded-md px-2 py-0.5 text-[11px] font-medium transition ${
-                zoomLevel === item.level
+                detailLevel === item.level
                   ? 'bg-indigo-600 text-white shadow-sm'
                   : 'text-zinc-600 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800'
               }`}
@@ -287,98 +261,129 @@ export function ArchitectureMap({
 
         {/* Viewport Transform Group */}
         <g transform={`translate(${pan.x}, ${pan.y}) scale(${zoom})`}>
-          {/* 1. Cluster Region Backgrounds */}
-          {clusters.map((cluster) => {
-            const cat = CATEGORIES[cluster.category];
-            return (
-              <g key={cluster.id}>
-                <rect
-                  x={cluster.bounds.x}
-                  y={cluster.bounds.y}
-                  width={cluster.bounds.width}
-                  height={cluster.bounds.height}
-                  rx={16}
-                  fill={cat.accentBgDark}
-                  stroke={cat.borderColorDark}
-                  strokeWidth={1}
-                  strokeDasharray="6 4"
-                  className="transition-colors"
-                />
-                <text
-                  x={cluster.bounds.x + 14}
-                  y={cluster.bounds.y + 24}
-                  className="select-none fill-zinc-500 text-[12px] font-bold uppercase tracking-wider dark:fill-zinc-400"
-                  style={{ fontFamily: 'system-ui, sans-serif' }}
+          {/* 1. Cluster Region Backgrounds (with dynamic sizing) */}
+          <g id="architecture-clusters">
+            {resolvedClusters.map((cluster) => {
+              const cat = CATEGORIES[cluster.category];
+              const isClusterVisible = cluster.minZoomLevel <= detailLevel;
+              return (
+                <g
+                  key={cluster.id}
+                  className={`transition-all duration-300 ease-in-out ${
+                    !isClusterVisible
+                      ? 'pointer-events-none opacity-0'
+                      : 'opacity-100'
+                  }`}
                 >
-                  {cluster.name}
-                </text>
-              </g>
-            );
-          })}
+                  <rect
+                    x={cluster.bounds.x}
+                    y={cluster.bounds.y}
+                    width={cluster.bounds.width}
+                    height={cluster.bounds.height}
+                    rx={16}
+                    fill={cat.accentBgDark}
+                    stroke={cat.borderColorDark}
+                    strokeWidth={1}
+                    strokeDasharray="6 4"
+                    className="transition-colors"
+                  />
+                  <text
+                    x={cluster.bounds.x + 14}
+                    y={cluster.bounds.y + 24}
+                    className="select-none fill-zinc-500 text-[12px] font-bold uppercase tracking-wider dark:fill-zinc-400"
+                    style={{ fontFamily: 'system-ui, sans-serif' }}
+                  >
+                    {cluster.name}
+                  </text>
+                </g>
+              );
+            })}
+          </g>
 
-          {/* 2. Edges / Relationship Paths */}
-          {edges.map((edge) => {
-            const sNode = nodeMap.get(edge.sourceId);
-            const tNode = nodeMap.get(edge.targetId);
-            if (!sNode || !tNode) return null;
+          {/* 2. Edge Connection Paths & Arrows */}
+          <g id="architecture-edge-paths">
+            {edges.map((edge) => {
+              const sNode = nodeMap.get(edge.sourceId);
+              const tNode = nodeMap.get(edge.targetId);
+              if (!sNode || !tNode) return null;
 
-            // Only show edge if both nodes are visible at current zoom level
-            if (
-              sNode.minZoomLevel > zoomLevel ||
-              tNode.minZoomLevel > zoomLevel
-            ) {
-              return null;
-            }
+              const isHighlighted =
+                selectedNode !== null &&
+                (edge.sourceId === selectedNode.id ||
+                  edge.targetId === selectedNode.id);
 
-            const isHighlighted =
-              selectedNode !== null &&
-              (edge.sourceId === selectedNode.id ||
-                edge.targetId === selectedNode.id);
+              const isDimmed = selectedNode !== null && !isHighlighted;
 
-            const isDimmed = selectedNode !== null && !isHighlighted;
+              return (
+                <ArchitectureEdgeView
+                  key={`path-${edge.id}`}
+                  edge={edge}
+                  sourceNode={sNode}
+                  targetNode={tNode}
+                  isHighlighted={isHighlighted}
+                  isDimmed={isDimmed}
+                  currentZoomLevel={detailLevel}
+                  renderMode="path"
+                />
+              );
+            })}
+          </g>
 
-            return (
-              <ArchitectureEdgeView
-                key={edge.id}
-                edge={edge}
-                sourceNode={sNode}
-                targetNode={tNode}
-                isHighlighted={isHighlighted}
-                isDimmed={isDimmed}
-                currentZoomLevel={zoomLevel}
-              />
-            );
-          })}
+          {/* 3. Architecture Nodes */}
+          <g id="architecture-nodes">
+            {nodes.map((node) => {
+              const isSelected = selectedNode?.id === node.id;
+              const isConnected = connectedNodeIds.has(node.id);
+              const isMatchesFilter = filteredNodeIds
+                ? filteredNodeIds.has(node.id)
+                : true;
 
-          {/* 3. Nodes */}
-          {nodes.map((node) => {
-            // Progressive disclosure check: hide node if its minZoomLevel exceeds current level
-            if (node.minZoomLevel > zoomLevel) {
-              return null;
-            }
+              const isDimmed =
+                (selectedNode !== null && !isSelected && !isConnected) ||
+                !isMatchesFilter;
 
-            const isSelected = selectedNode?.id === node.id;
-            const isConnected = connectedNodeIds.has(node.id);
-            const isMatchesFilter = filteredNodeIds
-              ? filteredNodeIds.has(node.id)
-              : true;
+              return (
+                <ArchitectureNodeView
+                  key={node.id}
+                  node={node}
+                  isSelected={isSelected}
+                  isConnected={isConnected}
+                  isDimmed={isDimmed}
+                  currentZoomLevel={detailLevel}
+                  onSelect={(clicked) => onSelectNode(clicked)}
+                />
+              );
+            })}
+          </g>
 
-            const isDimmed =
-              (selectedNode !== null && !isSelected && !isConnected) ||
-              !isMatchesFilter;
+          {/* 4. Edge Labels Layer (Rendered ABOVE paths and nodes for 100% legibility) */}
+          <g id="architecture-edge-labels">
+            {edges.map((edge) => {
+              const sNode = nodeMap.get(edge.sourceId);
+              const tNode = nodeMap.get(edge.targetId);
+              if (!sNode || !tNode) return null;
 
-            return (
-              <ArchitectureNodeView
-                key={node.id}
-                node={node}
-                isSelected={isSelected}
-                isConnected={isConnected}
-                isDimmed={isDimmed}
-                currentZoomLevel={zoomLevel}
-                onSelect={(clicked) => onSelectNode(clicked)}
-              />
-            );
-          })}
+              const isHighlighted =
+                selectedNode !== null &&
+                (edge.sourceId === selectedNode.id ||
+                  edge.targetId === selectedNode.id);
+
+              const isDimmed = selectedNode !== null && !isHighlighted;
+
+              return (
+                <ArchitectureEdgeView
+                  key={`label-${edge.id}`}
+                  edge={edge}
+                  sourceNode={sNode}
+                  targetNode={tNode}
+                  isHighlighted={isHighlighted}
+                  isDimmed={isDimmed}
+                  currentZoomLevel={detailLevel}
+                  renderMode="label"
+                />
+              );
+            })}
+          </g>
         </g>
       </svg>
     </div>

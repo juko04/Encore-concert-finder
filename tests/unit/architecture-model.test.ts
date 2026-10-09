@@ -84,4 +84,34 @@ describe('Architecture Model & Graph Integrity', () => {
     expect(HUB_STATS.runtimeInfo.unitTestsCount).toBe(86);
     expect(HUB_STATS.runtimeInfo.integrationTestsCount).toBe(21);
   });
+
+  it('dynamically computes cluster bounds that contain headings and all nodes without overflow', async () => {
+    const { computeClusterBounds } =
+      await import('@/lib/hub/architecture-data');
+
+    for (const cluster of CLUSTERS) {
+      const clusterNodes = NODES.filter((n) => n.cluster === cluster.id);
+      const bounds = computeClusterBounds(cluster, clusterNodes);
+
+      // Width must accommodate heading text plus horizontal padding
+      const minHeadingWidth = Math.ceil(cluster.name.length * 9.2) + 36;
+      expect(bounds.width).toBeGreaterThanOrEqual(minHeadingWidth);
+
+      // Every node in the cluster must fit horizontally inside the cluster bounds
+      for (const node of clusterNodes) {
+        expect(node.position.x).toBeGreaterThanOrEqual(bounds.x);
+        expect(node.position.x + 210).toBeLessThanOrEqual(
+          bounds.x + bounds.width,
+        );
+      }
+
+      // Bounds height must cover all contained nodes
+      for (const node of clusterNodes) {
+        expect(node.position.y).toBeGreaterThanOrEqual(bounds.y);
+        expect(node.position.y + 64).toBeLessThanOrEqual(
+          bounds.y + bounds.height,
+        );
+      }
+    }
+  });
 });

@@ -100,12 +100,65 @@ export const CATEGORIES: Record<ArchitectureCategory, CategoryMetadata> = {
   },
 };
 
+/**
+ * Computes dynamic cluster bounds ensuring that:
+ * 1. The region heading text fits with full horizontal padding and never overflows the bounding box.
+ * 2. All contained nodes fit within the bounding box with comfortable padding.
+ * 3. Base dimensions are respected as minimums.
+ */
+export function computeClusterBounds(
+  cluster: ArchitectureCluster,
+  clusterNodes: ArchitectureNode[],
+): { x: number; y: number; width: number; height: number } {
+  // Approximate uppercase character width with tracking-wider at 12px font size (~9.2px)
+  const charWidth = 9.2;
+  const headingHorizontalPadding = 36; // 14px left margin + 22px right padding
+  const headingMinWidth =
+    Math.ceil(cluster.name.length * charWidth) + headingHorizontalPadding;
+
+  const nodeWidth = 210;
+  const nodeHorizontalPadding = 28;
+
+  const maxNodeRight = clusterNodes.reduce((max, node) => {
+    return Math.max(max, node.position.x + nodeWidth);
+  }, cluster.bounds.x);
+
+  const minWidthForNodes =
+    maxNodeRight > cluster.bounds.x
+      ? maxNodeRight - cluster.bounds.x + nodeHorizontalPadding
+      : 0;
+
+  const maxNodeBottom = clusterNodes.reduce((max, node) => {
+    const nodeHeight = node.minZoomLevel >= 2 ? 80 : 64;
+    return Math.max(max, node.position.y + nodeHeight);
+  }, cluster.bounds.y);
+
+  const minHeightForNodes =
+    maxNodeBottom > cluster.bounds.y
+      ? maxNodeBottom - cluster.bounds.y + 24
+      : 0;
+
+  const width = Math.max(
+    cluster.bounds.width,
+    headingMinWidth,
+    minWidthForNodes,
+  );
+  const height = Math.max(cluster.bounds.height, minHeightForNodes);
+
+  return {
+    x: cluster.bounds.x,
+    y: cluster.bounds.y,
+    width,
+    height,
+  };
+}
+
 export const CLUSTERS: ArchitectureCluster[] = [
   {
     id: 'sources_cluster',
     name: 'External Source Ingest',
     category: 'sources',
-    bounds: { x: 40, y: 40, width: 260, height: 520 },
+    bounds: { x: 40, y: 40, width: 280, height: 530 },
     minZoomLevel: 0,
     description:
       'Ticketing APIs and direct venue website crawlers that produce raw data payloads.',
@@ -114,7 +167,7 @@ export const CLUSTERS: ArchitectureCluster[] = [
     id: 'ingestion_cluster',
     name: 'Observation Pipeline',
     category: 'ingestion',
-    bounds: { x: 340, y: 40, width: 280, height: 520 },
+    bounds: { x: 395, y: 40, width: 280, height: 530 },
     minZoomLevel: 0,
     description:
       'Immutable raw ingest audit log and parsed event candidate observations.',
@@ -123,7 +176,7 @@ export const CLUSTERS: ArchitectureCluster[] = [
     id: 'resolution_cluster',
     name: 'Entity Resolution Engine',
     category: 'entity_resolution',
-    bounds: { x: 660, y: 40, width: 300, height: 520 },
+    bounds: { x: 745, y: 40, width: 280, height: 580 },
     minZoomLevel: 0,
     description:
       'Deterministic artist and venue disambiguation, event matching, and atomic canonicalization.',
@@ -132,7 +185,7 @@ export const CLUSTERS: ArchitectureCluster[] = [
     id: 'catalog_cluster',
     name: 'Canonical Inventory (PostgreSQL)',
     category: 'canonical_catalog',
-    bounds: { x: 1000, y: 40, width: 300, height: 520 },
+    bounds: { x: 1095, y: 40, width: 340, height: 580 },
     minZoomLevel: 0,
     description:
       'Deduplicated master events, artists, venues, ticket links, and field-level evidence.',
@@ -141,7 +194,7 @@ export const CLUSTERS: ArchitectureCluster[] = [
     id: 'personalization_cluster',
     name: 'Taste & Personalization (Planned)',
     category: 'personalization',
-    bounds: { x: 1340, y: 40, width: 270, height: 250 },
+    bounds: { x: 1445, y: 40, width: 350, height: 260 },
     minZoomLevel: 1,
     description:
       'Spotify listening profile ingestion and transparent recommendation scoring (Phase 2+).',
@@ -150,7 +203,7 @@ export const CLUSTERS: ArchitectureCluster[] = [
     id: 'ui_cluster',
     name: 'Encore UI Surface',
     category: 'client_ui',
-    bounds: { x: 1340, y: 310, width: 270, height: 250 },
+    bounds: { x: 1445, y: 310, width: 350, height: 270 },
     minZoomLevel: 0,
     description:
       'Consumer Discover feed, event cards, and internal Project Hub observatory.',
@@ -166,7 +219,7 @@ export const NODES: ArchitectureNode[] = [
     status: 'implemented', // Scaffolding & fixtures implemented in Phase 1, live crawler Phase 2
     minZoomLevel: 1,
     cluster: 'sources_cluster',
-    position: { x: 80, y: 100 },
+    position: { x: 75, y: 100 },
     shortDescription:
       'Baseline event inventory API providing initial tour dates, venues, and ticket links.',
     overview: {
@@ -214,7 +267,7 @@ export const NODES: ArchitectureNode[] = [
     status: 'implemented', // Scaffolding & adapter interface established
     minZoomLevel: 1,
     cluster: 'sources_cluster',
-    position: { x: 80, y: 240 },
+    position: { x: 75, y: 240 },
     shortDescription:
       'Cheerio / HTTP web scrapers targeting independent clubs, bars, and community spaces.',
     overview: {
@@ -245,7 +298,7 @@ export const NODES: ArchitectureNode[] = [
     status: 'planned',
     minZoomLevel: 2,
     cluster: 'sources_cluster',
-    position: { x: 80, y: 390 },
+    position: { x: 75, y: 380 },
     shortDescription:
       'OAuth taste profile extraction: top artists, saved tracks, and listening frequency.',
     overview: {
@@ -283,7 +336,7 @@ export const NODES: ArchitectureNode[] = [
     status: 'implemented',
     minZoomLevel: 0,
     cluster: 'ingestion_cluster',
-    position: { x: 380, y: 150 },
+    position: { x: 430, y: 130 },
     shortDescription:
       'Immutable PostgreSQL audit table (raw_ingests) storing untouched payloads with SHA-256 hashes.',
     overview: {
@@ -333,7 +386,7 @@ export const NODES: ArchitectureNode[] = [
     status: 'implemented',
     minZoomLevel: 0,
     cluster: 'ingestion_cluster',
-    position: { x: 380, y: 340 },
+    position: { x: 430, y: 340 },
     shortDescription:
       'Standardized source observations (event_candidates) linked to parent raw_ingests via composite FK.',
     overview: {
@@ -379,7 +432,7 @@ export const NODES: ArchitectureNode[] = [
     status: 'implemented',
     minZoomLevel: 1,
     cluster: 'resolution_cluster',
-    position: { x: 700, y: 90 },
+    position: { x: 780, y: 90 },
     shortDescription:
       'Disambiguates artist identities; prioritizes external IDs over normalized names.',
     overview: {
@@ -411,7 +464,7 @@ export const NODES: ArchitectureNode[] = [
     status: 'implemented',
     minZoomLevel: 1,
     cluster: 'resolution_cluster',
-    position: { x: 700, y: 220 },
+    position: { x: 780, y: 220 },
     shortDescription:
       'Resolves physical venues using external IDs, coordinate proximity, and suffix stripping.',
     overview: {
@@ -443,7 +496,7 @@ export const NODES: ArchitectureNode[] = [
     status: 'implemented',
     minZoomLevel: 1,
     cluster: 'resolution_cluster',
-    position: { x: 700, y: 350 },
+    position: { x: 780, y: 350 },
     shortDescription:
       'Matches candidate observations to canonical events using date intervals and primary headliners.',
     overview: {
@@ -475,7 +528,7 @@ export const NODES: ArchitectureNode[] = [
     status: 'implemented',
     minZoomLevel: 0,
     cluster: 'resolution_cluster',
-    position: { x: 700, y: 470 },
+    position: { x: 780, y: 480 },
     shortDescription:
       'Executes atomic PostgreSQL stored procedure (apply_canonicalization) with field-level evidence.',
     overview: {
@@ -513,7 +566,7 @@ export const NODES: ArchitectureNode[] = [
     status: 'implemented',
     minZoomLevel: 0,
     cluster: 'catalog_cluster',
-    position: { x: 1040, y: 120 },
+    position: { x: 1130, y: 120 },
     shortDescription:
       'The central canonical events table displaying verified titles, dates, timezones, and venue links.',
     overview: {
@@ -548,7 +601,7 @@ export const NODES: ArchitectureNode[] = [
     status: 'implemented',
     minZoomLevel: 3,
     cluster: 'catalog_cluster',
-    position: { x: 1040, y: 300 },
+    position: { x: 1130, y: 280 },
     shortDescription:
       'Granular audit trail recording the exact source, candidate, and confidence behind every field.',
     overview: {
@@ -581,7 +634,7 @@ export const NODES: ArchitectureNode[] = [
     status: 'implemented',
     minZoomLevel: 2,
     cluster: 'catalog_cluster',
-    position: { x: 1040, y: 440 },
+    position: { x: 1130, y: 440 },
     shortDescription:
       'Master artist and venue reference entities with external ID registries and aliases.',
     overview: {
@@ -614,7 +667,7 @@ export const NODES: ArchitectureNode[] = [
     status: 'planned',
     minZoomLevel: 1,
     cluster: 'personalization_cluster',
-    position: { x: 1370, y: 130 },
+    position: { x: 1480, y: 110 },
     shortDescription:
       'Transparent ranking algorithm combining listening affinity, venue affinity, and willingness-to-pay.',
     overview: {
@@ -651,7 +704,7 @@ export const NODES: ArchitectureNode[] = [
     status: 'implemented',
     minZoomLevel: 0,
     cluster: 'ui_cluster',
-    position: { x: 1370, y: 350 },
+    position: { x: 1480, y: 350 },
     shortDescription:
       'The user-facing live concert feed displaying verified canonical events, dates, and ticket links.',
     overview: {
@@ -685,7 +738,7 @@ export const NODES: ArchitectureNode[] = [
     status: 'implemented',
     minZoomLevel: 0,
     cluster: 'ui_cluster',
-    position: { x: 1370, y: 460 },
+    position: { x: 1480, y: 470 },
     shortDescription:
       'Internal engineering observatory providing spatial architecture visualization and health stats.',
     overview: {

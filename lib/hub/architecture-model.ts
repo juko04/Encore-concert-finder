@@ -16,7 +16,8 @@ export type ArchitectureCategory =
 
 export type ImplementationStatus = 'implemented' | 'planned';
 
-export type ZoomLevel = 0 | 1 | 2 | 3;
+export type DetailLevel = 0 | 1 | 2 | 3;
+export type ZoomLevel = DetailLevel;
 
 export interface CategoryMetadata {
   id: ArchitectureCategory;

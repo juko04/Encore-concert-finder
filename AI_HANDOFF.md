@@ -11,9 +11,9 @@ Durable architecture records belong in [`docs/architecture/`](docs/architecture/
 - **Active Specification:** [`docs/phases/active/PROJECT_HUB_IMPLEMENTATION.md`](docs/phases/active/PROJECT_HUB_IMPLEMENTATION.md).
 - **Current Branch:** `feature/project-hub-foundation`
 - **Active Implementing Agent:** Google Antigravity
-- **Current Task:** Project Hub Foundation Slice (Route `/hub`, 2D interactive architecture map, progressive zoom disclosure, 5-tab inspector, theme toggle, and system health metrics) — COMPLETE.
-- **Verification State:** ALL CHECKS GREEN (`format:check`, `lint` with 0 warnings, `typecheck`, 99/99 unit tests across 10 suites, Next.js production build).
-- **Immediate Next Action:** Await user review and feedback on the Project Hub foundation slice on branch `feature/project-hub-foundation`.
+- **Current Task:** Project Hub Foundation UX Polish (multi-pass edge label layering, decoupled detail levels L0-L3 from camera zoom, ~380px inspector panel, dynamic cluster bounding boxes, category-colored node selection) — COMPLETE.
+- **Verification State:** ALL CHECKS GREEN (`format:check`, `lint` with 0 warnings, `typecheck`, 103/103 unit tests across 10 suites, 3/3 Playwright smoke tests, Next.js production build).
+- **Immediate Next Action:** Await user / peer agent review on branch `feature/project-hub-foundation`.
 - **Phase 2 Status:** **NOT STARTED.** Live Ticketmaster/Spotify ingestion and recommendation algorithms remain strictly out of scope.
 
 ---

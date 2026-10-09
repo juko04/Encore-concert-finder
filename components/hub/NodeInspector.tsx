@@ -52,11 +52,11 @@ export function NodeInspector({
 
   return (
     <aside
-      className="fixed inset-y-0 right-0 z-50 flex w-full max-w-md flex-col border-l border-zinc-200/90 bg-white/95 shadow-2xl backdrop-blur-xl transition-all duration-300 dark:border-zinc-800 dark:bg-zinc-950/95 sm:max-w-lg"
+      className="fixed inset-y-0 right-0 z-50 flex w-full flex-col border-l border-zinc-200/90 bg-white/95 shadow-2xl backdrop-blur-xl transition-all duration-300 dark:border-zinc-800 dark:bg-zinc-950/95 sm:w-[380px] sm:max-w-[400px]"
       aria-label="Node Inspector"
     >
       {/* Top Header */}
-      <div className="flex items-start justify-between border-b border-zinc-200/80 px-6 py-4 dark:border-zinc-800/80">
+      <div className="flex items-start justify-between border-b border-zinc-200/80 px-5 py-3.5 dark:border-zinc-800/80">
         <div>
           <div className="flex items-center gap-2">
             <span
@@ -97,7 +97,7 @@ export function NodeInspector({
       </div>
 
       {/* Tab Navigation */}
-      <div className="flex border-b border-zinc-200/80 px-6 dark:border-zinc-800/80">
+      <div className="scrollbar-none flex overflow-x-auto border-b border-zinc-200/80 px-5 dark:border-zinc-800/80">
         {[
           { id: 'overview' as InspectorTab, label: 'Overview' },
           {
@@ -112,7 +112,7 @@ export function NodeInspector({
             key={tab.id}
             type="button"
             onClick={() => setActiveTab(tab.id)}
-            className={`-mb-px mr-4 border-b-2 py-2.5 text-xs font-medium transition ${
+            className={`-mb-px mr-4 whitespace-nowrap border-b-2 py-2.5 text-xs font-medium transition ${
               activeTab === tab.id
                 ? 'border-indigo-600 font-semibold text-indigo-600 dark:border-indigo-400 dark:text-indigo-400'
                 : 'border-transparent text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-200'
@@ -124,7 +124,7 @@ export function NodeInspector({
       </div>
 
       {/* Tab Content Body */}
-      <div className="flex-1 space-y-5 overflow-y-auto p-6 text-sm">
+      <div className="flex-1 space-y-5 overflow-y-auto p-5 text-sm">
         {/* TAB 1: OVERVIEW */}
         {activeTab === 'overview' && (
           <div className="space-y-4">

@@ -1,7 +1,11 @@
 'use client';
 
 import React from 'react';
-import type { ArchitectureNode, ZoomLevel } from '@/lib/hub/architecture-model';
+import type {
+  ArchitectureNode,
+  DetailLevel,
+  ZoomLevel,
+} from '@/lib/hub/architecture-model';
 import { CATEGORIES } from '@/lib/hub/architecture-data';
 
 interface ArchitectureNodeViewProps {
@@ -9,7 +13,7 @@ interface ArchitectureNodeViewProps {
   isSelected: boolean;
   isConnected: boolean;
   isDimmed: boolean;
-  currentZoomLevel: ZoomLevel;
+  currentZoomLevel: ZoomLevel | DetailLevel;
   onSelect: (node: ArchitectureNode) => void;
 }
 
@@ -24,11 +28,12 @@ export function ArchitectureNodeView({
   const categoryMeta = CATEGORIES[node.category];
   const isPlanned = node.status === 'planned';
 
-  // Node dimensions based on zoom level and content
+  // Node dimensions based on detail level
   const width = 210;
   const height = currentZoomLevel >= 2 ? 80 : 64;
 
   const nodeColor = categoryMeta.colorDark;
+  const isLevelVisible = node.minZoomLevel <= currentZoomLevel;
 
   return (
     <g
@@ -37,8 +42,12 @@ export function ArchitectureNodeView({
         e.stopPropagation();
         onSelect(node);
       }}
-      className={`cursor-pointer select-none transition-all duration-200 ${
-        isDimmed ? 'opacity-30 hover:opacity-80' : 'opacity-100'
+      className={`group cursor-pointer select-none outline-none transition-all duration-300 ease-in-out focus:outline-none ${
+        !isLevelVisible
+          ? 'pointer-events-none opacity-0'
+          : isDimmed
+            ? 'opacity-30 hover:opacity-80'
+            : 'opacity-100'
       }`}
       role="button"
       tabIndex={0}
@@ -50,22 +59,36 @@ export function ArchitectureNodeView({
         }
       }}
     >
-      {/* Outer Glow on Selection or Connection */}
+      {/* Keyboard Focus-Visible Ring (Visible ONLY for keyboard Tab users, never mouse clicks) */}
+      <rect
+        x={-5}
+        y={-5}
+        width={width + 10}
+        height={height + 10}
+        rx={13}
+        fill="none"
+        stroke="#6366f1"
+        strokeWidth={2}
+        strokeDasharray="4 3"
+        className="pointer-events-none opacity-0 transition-opacity group-focus-visible:opacity-100"
+      />
+
+      {/* Category-Specific Selection Outer Glow */}
       {isSelected && (
         <rect
-          x={-4}
-          y={-4}
-          width={width + 8}
-          height={height + 8}
-          rx={12}
+          x={-3}
+          y={-3}
+          width={width + 6}
+          height={height + 6}
+          rx={11}
           fill="none"
           stroke={nodeColor}
-          strokeWidth={3}
-          strokeOpacity={0.8}
-          className="animate-pulse"
+          strokeWidth={2}
+          strokeOpacity={0.6}
         />
       )}
 
+      {/* Connected Node Subtle Indicator */}
       {isConnected && !isSelected && (
         <rect
           x={-2}
@@ -77,11 +100,11 @@ export function ArchitectureNodeView({
           stroke={nodeColor}
           strokeWidth={1.5}
           strokeDasharray="4 2"
-          strokeOpacity={0.9}
+          strokeOpacity={0.8}
         />
       )}
 
-      {/* Main Node Card Body */}
+      {/* Main Node Card Body - Strictly uses nodeColor on selection (NO generic blue outline) */}
       <rect
         x={0}
         y={0}
@@ -89,14 +112,19 @@ export function ArchitectureNodeView({
         height={height}
         rx={8}
         className={`fill-white transition-colors dark:fill-zinc-900 ${
-          isSelected
-            ? 'stroke-indigo-500 shadow-md'
-            : isPlanned
-              ? 'stroke-amber-500/60 dark:stroke-amber-400/50'
-              : 'stroke-zinc-300 hover:stroke-zinc-400 dark:stroke-zinc-700/80 dark:hover:stroke-zinc-500'
+          !isSelected && !isPlanned
+            ? 'stroke-zinc-300 hover:stroke-zinc-400 dark:stroke-zinc-700/80 dark:hover:stroke-zinc-500'
+            : ''
         }`}
-        strokeWidth={isPlanned ? 1.5 : 1}
-        strokeDasharray={isPlanned ? '4 3' : 'none'}
+        stroke={
+          isSelected
+            ? nodeColor
+            : isPlanned
+              ? 'rgba(245, 158, 11, 0.6)'
+              : undefined
+        }
+        strokeWidth={isSelected ? 2 : isPlanned ? 1.5 : 1}
+        strokeDasharray={isPlanned && !isSelected ? '4 3' : 'none'}
       />
 
       {/* Left Semantic Category Color Bar */}
@@ -150,22 +178,27 @@ export function ArchitectureNodeView({
         {node.name.length > 24 ? `${node.name.slice(0, 22)}…` : node.name}
       </text>
 
-      {/* Progressive Detail: Short Description (Visible at Zoom >= 1) */}
-      {currentZoomLevel >= 1 && (
-        <text
-          x={14}
-          y={53}
-          className="fill-zinc-500 text-[10px] dark:fill-zinc-400"
-        >
-          {node.shortDescription.length > 30
-            ? `${node.shortDescription.slice(0, 28)}…`
-            : node.shortDescription}
-        </text>
-      )}
+      {/* Progressive Detail: Short Description (Visible at Detail Level >= 1) */}
+      <text
+        x={14}
+        y={53}
+        className={`fill-zinc-500 text-[10px] transition-opacity duration-300 dark:fill-zinc-400 ${
+          currentZoomLevel >= 1 ? 'opacity-100' : 'opacity-0'
+        }`}
+      >
+        {node.shortDescription.length > 30
+          ? `${node.shortDescription.slice(0, 28)}…`
+          : node.shortDescription}
+      </text>
 
-      {/* Progressive Detail: Table / Function Indicator (Visible at Zoom >= 2) */}
-      {currentZoomLevel >= 2 && node.technical.tableNames && (
-        <g transform="translate(14, 62)">
+      {/* Progressive Detail: Table / Function Indicator (Visible at Detail Level >= 2) */}
+      {node.technical.tableNames && (
+        <g
+          transform="translate(14, 62)"
+          className={`transition-opacity duration-300 ${
+            currentZoomLevel >= 2 ? 'opacity-100' : 'opacity-0'
+          }`}
+        >
           <text
             x={0}
             y={10}
