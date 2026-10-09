@@ -59,8 +59,9 @@ This document is the authoritative directory and context router for the Encore c
 - **Completed Historical Phases:** [`phases/completed/`](phases/completed/)
   - [Phase 0 — Foundation & Infrastructure](phases/completed/PHASE_0_IMPLEMENTATION.md)
   - [Phase 1 — Canonical Inventory & Ingestion Foundation](phases/completed/PHASE_1_IMPLEMENTATION.md)
+  - [Post-Phase-1 Tooling — Encore Project Hub & Observatory](phases/completed/PROJECT_HUB_IMPLEMENTATION.md)
 - **Active / Upcoming Phases:** [`phases/active/`](phases/active/)
-  - [Post-Phase-1 Tooling — Encore Project Hub & Observatory](phases/active/PROJECT_HUB_IMPLEMENTATION.md) (in progress)
+  - [Phase 2 — Live Ingestion & Personalization](phases/active/PHASE_2_IMPLEMENTATION.md) (in progress)
 
 ---
 

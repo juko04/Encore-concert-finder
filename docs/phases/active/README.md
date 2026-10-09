@@ -14,13 +14,14 @@ This directory contains the implementation specification for the currently activ
 
 ## Current Status
 
-- **Active Specification:** [`PROJECT_HUB_IMPLEMENTATION.md`](PROJECT_HUB_IMPLEMENTATION.md) (Encore Project Hub & Internal Architecture Observatory)
+- **Active Specification:** [`PHASE_2_IMPLEMENTATION.md`](PHASE_2_IMPLEMENTATION.md) (Phase 2 — Live Ingestion & Personalization)
 - **Completed Phases:**
   - [Phase 0 — Foundation & Infrastructure](../completed/PHASE_0_IMPLEMENTATION.md)
   - [Phase 1 — Canonical Inventory & Ingestion Foundation](../completed/PHASE_1_IMPLEMENTATION.md)
+  - [Post-Phase-1 Tooling — Encore Project Hub & Observatory](../completed/PROJECT_HUB_IMPLEMENTATION.md)
 - **Current Milestone Status:**
   - Phase 0: **COMPLETE**
   - Phase 1: **COMPLETE**
   - Repository Organization + AI Context Optimization: **COMPLETE**
-  - Encore Project Hub / Learning Hub: **IN PROGRESS** (`feature/project-hub-foundation`)
-  - Phase 2: **NOT STARTED** (will open active specification here once the Learning Hub is complete)
+  - Encore Project Hub / Learning Hub: **COMPLETE**
+  - Phase 2: **ACTIVE** (Live Ingestion & Personalization)
