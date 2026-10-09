@@ -32,4 +32,18 @@ test.describe('Application Smoke Tests', () => {
       page.getByText('Explore upcoming concerts and events'),
     ).toBeVisible();
   });
+
+  test('successfully loads the project hub page', async ({ page }) => {
+    const response = await page.goto('/hub');
+
+    expect(response?.status()).toBe(200);
+    await expect(
+      page.getByRole('heading', { name: 'Encore Project Hub' }),
+    ).toBeVisible();
+    await expect(
+      page.getByText(
+        'Interactive System Architecture & Operational Observatory',
+      ),
+    ).toBeVisible();
+  });
 });
