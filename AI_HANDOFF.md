@@ -7,21 +7,21 @@ Durable architecture records belong in [`docs/architecture/`](docs/architecture/
 
 ## Current Status & Location
 
-- **Current Milestone:** **Encore Project Hub / Learning Hub** (Internal Architecture Observatory).
-- **Active Specification:** [`docs/phases/active/PROJECT_HUB_IMPLEMENTATION.md`](docs/phases/active/PROJECT_HUB_IMPLEMENTATION.md).
-- **Current Branch:** `feature/project-hub-foundation`
+- **Current Milestone:** **Phase 2 — Live Ingestion & Personalization**.
+- **Active Specification:** [`docs/phases/active/PHASE_2_IMPLEMENTATION.md`](docs/phases/active/PHASE_2_IMPLEMENTATION.md).
+- **Current Branch:** `docs/phase-2-specification`
 - **Active Implementing Agent:** Google Antigravity
-- **Current Task:** Project Hub Foundation UX Polish (multi-pass edge label layering, decoupled detail levels L0-L3 from camera zoom, ~380px inspector panel, dynamic cluster bounding boxes, category-colored node selection) — COMPLETE.
-- **Verification State:** ALL CHECKS GREEN (`format:check`, `lint` with 0 warnings, `typecheck`, 103/103 unit tests across 10 suites, 3/3 Playwright smoke tests, Next.js production build).
-- **Immediate Next Action:** Await user / peer agent review on branch `feature/project-hub-foundation`.
-- **Phase 2 Status:** **NOT STARTED.** Live Ticketmaster/Spotify ingestion and recommendation algorithms remain strictly out of scope.
+- **Current Task:** Phase 2 Kickoff, Codebase Audit & Implementation Specification — COMPLETE.
+- **Verification State:** Planning verification verified (`format:check`, `lint` with 0 warnings, `typecheck`, 103/103 unit tests across 10 suites passing). Next.js production build and PostgreSQL integration tests verified on prior PRs, to be re-run on PR 1.
+- **Immediate Next Action:** Merge `docs/phase-2-specification` into `main` via PR, pull updated `main`, and create `feature/phase-2-ticketmaster-ingestion` for PR 1.
+- **Phase 2 Status:** **ACTIVE — PLANNING COMPLETE.** Ready for planning PR merge and PR 1 kickoff.
 
 ---
 
 ## What the Next Agent Must Know
 
-1. **Internal Observatory Mission:** The Project Hub at `/hub` is an internal tool for the repository owner to visually explore, understand, and inspect Encore's architecture, data pipeline, and system health.
-2. **2D Map Primacy:** The primary visualization is a responsive, declarative SVG + React 2D map with progressive disclosure across zoom levels (L0 Macro $\to$ L1 Subsystems $\to$ L2 Entities $\to$ L3 Tables/Schemas). 3D constellation mode is designed into the data model but deferred.
-3. **Implemented vs. Planned Clarity:** Implemented architecture nodes are visually distinct from planned nodes (dashed/outline treatment with explicit `PLANNED — NOT IMPLEMENTED` badges).
-4. **No Write Capabilities:** The Hub is strictly read-only and must never introduce `service_role` keys into the browser.
-5. **Durable Records:** Product direction for future attended concerts and non-collapsing feedback signals is recorded in [`docs/product/attended-concerts-and-reviews.md`](docs/product/attended-concerts-and-reviews.md).
+1. **Phase 1 Pipeline Is Proven:** Ingestion abstractions, raw ingests, candidate extraction, entity resolution, and the atomic `apply_canonicalization` PostgreSQL stored procedure are fully proven with 21/21 integration tests. Extend this pipeline; do not replace it.
+2. **Phase 2 Boundary Discipline:** Phase 2 is broken into 6 focused PRs (PR 1: Ticketmaster Ingestion Foundation, PR 2: Canonicalization Integration & Verification, PR 3: Operational Safeguards & UI Polish, PR 4: Spotify OAuth & Taste Ingestion, PR 5: Recommendation Feature Foundation, PR 6: Ranked Discovery Views). Do not combine workstreams.
+3. **Deterministic Fixtures Only in CI:** Unit tests and CI must NEVER make live external API calls to Ticketmaster or Spotify. All tests must execute against sanitized static fixtures.
+4. **Security & Secrets:** All API keys (`TICKETMASTER_API_KEY`, Spotify credentials, `SUPABASE_SERVICE_ROLE_KEY`) are server-only via `getServerEnv()`. Never expose secrets in client bundles or public configs.
+5. **Read-Only Project Hub:** The Project Hub at `/hub` is strictly read-only and must remain unaffected by ingestion routines except for optional read-only stats/telemetry.
