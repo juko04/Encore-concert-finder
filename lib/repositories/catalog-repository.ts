@@ -1107,6 +1107,47 @@ export class SupabaseCatalogRepository implements ICatalogRepository {
     return mapResolutionRow(data as CandidateResolutionRow);
   }
 
+  async findResolutionByCandidateId(
+    candidateId: string,
+  ): Promise<CandidateResolution | null> {
+    const { data, error } = await this.client
+      .from('candidate_resolutions')
+      .select('*')
+      .eq('event_candidate_id', candidateId)
+      .order('resolved_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (error) {
+      throw new Error(`Failed to find candidate resolution: ${error.message}`);
+    }
+    return data ? mapResolutionRow(data as CandidateResolutionRow) : null;
+  }
+
+  async countResolutions(): Promise<number> {
+    const { count, error } = await this.client
+      .from('candidate_resolutions')
+      .select('*', { count: 'exact', head: true });
+
+    if (error) {
+      throw new Error(
+        `Failed to count candidate resolutions: ${error.message}`,
+      );
+    }
+    return count ?? 0;
+  }
+
+  async countFieldEvidence(): Promise<number> {
+    const { count, error } = await this.client
+      .from('event_field_evidence')
+      .select('*', { count: 'exact', head: true });
+
+    if (error) {
+      throw new Error(`Failed to count field evidence: ${error.message}`);
+    }
+    return count ?? 0;
+  }
+
   /**
    * Atomic canonicalization transaction execution (Finding 2).
    * Executes inside PostgreSQL stored procedure with automatic rollback on error.

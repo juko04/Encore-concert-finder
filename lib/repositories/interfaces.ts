@@ -21,6 +21,7 @@ import type {
   PromoterRelationshipType,
   Venue,
 } from '@/lib/domain/catalog';
+export type { CanonicalizationPayload };
 import type { EventCandidate } from '@/lib/domain/event-candidate';
 import type { RawIngest, Source } from '@/lib/domain/source';
 
@@ -155,6 +156,11 @@ export interface ICatalogRepository {
     confidence: number;
     reasons: Record<string, unknown> | string[];
   }): Promise<CandidateResolution>;
+  findResolutionByCandidateId(
+    candidateId: string,
+  ): Promise<CandidateResolution | null>;
+  countResolutions(): Promise<number>;
+  countFieldEvidence(): Promise<number>;
 
   // Atomic transaction execution for canonicalization (Finding 2)
   applyCanonicalization(

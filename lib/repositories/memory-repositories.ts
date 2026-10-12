@@ -814,6 +814,25 @@ export class MemoryCatalogRepository implements ICatalogRepository {
     return record;
   }
 
+  async findResolutionByCandidateId(
+    candidateId: string,
+  ): Promise<CandidateResolution | null> {
+    for (const res of this.candidateResolutions.values()) {
+      if (res.eventCandidateId === candidateId) {
+        return res;
+      }
+    }
+    return null;
+  }
+
+  async countResolutions(): Promise<number> {
+    return this.candidateResolutions.size;
+  }
+
+  async countFieldEvidence(): Promise<number> {
+    return this.eventFieldEvidence.size;
+  }
+
   /**
    * Atomic canonicalization transaction execution.
    * If any step fails, entire batch is rolled back cleanly.
@@ -961,8 +980,45 @@ export class MemoryCatalogRepository implements ICatalogRepository {
                 createdAt: artNow,
                 updatedAt: artNow,
               });
-              if (a.external_ids) {
-                for (const ext of a.external_ids) {
+            }
+
+            // Enrich or attach external IDs if provided (for both new and matched artists)
+            if (artistId && a.external_ids) {
+              const artNow = new Date().toISOString();
+              for (const ext of a.external_ids) {
+                // Check constraint: uq_artist_provider_external_id (no other artist can have this external ID)
+                for (const existingExt of this.artistExternalIds.values()) {
+                  if (
+                    existingExt.provider === ext.provider &&
+                    existingExt.externalId === ext.external_id &&
+                    existingExt.artistId !== artistId
+                  ) {
+                    throw new Error(
+                      `duplicate key value violates unique constraint "uq_artist_provider_external_id": (${ext.provider}, ${ext.external_id}) already belongs to artist ${existingExt.artistId}`,
+                    );
+                  }
+                  if (
+                    existingExt.artistId === artistId &&
+                    existingExt.provider === ext.provider &&
+                    existingExt.externalId !== ext.external_id
+                  ) {
+                    throw new Error(
+                      `duplicate key value violates unique constraint "uq_artist_provider": artist ${artistId} already has ${ext.provider} id ${existingExt.externalId}`,
+                    );
+                  }
+                }
+
+                // Check idempotent presence
+                const alreadyPresent = Array.from(
+                  this.artistExternalIds.values(),
+                ).some(
+                  (e) =>
+                    e.artistId === artistId &&
+                    e.provider === ext.provider &&
+                    e.externalId === ext.external_id,
+                );
+
+                if (!alreadyPresent) {
                   const extId = crypto.randomUUID();
                   this.artistExternalIds.set(extId, {
                     id: extId,
@@ -975,6 +1031,7 @@ export class MemoryCatalogRepository implements ICatalogRepository {
                 }
               }
             }
+
             if (artistId) {
               await this.linkEventArtist(
                 eventId,

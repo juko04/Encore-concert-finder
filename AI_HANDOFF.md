@@ -9,20 +9,39 @@ Durable architecture records belong in [`docs/architecture/`](docs/architecture/
 
 - **Current Milestone:** **Phase 2 — Live Ingestion & Personalization**.
 - **Active Specification:** [`docs/phases/active/PHASE_2_IMPLEMENTATION.md`](docs/phases/active/PHASE_2_IMPLEMENTATION.md).
-- **Current Branch:** `feature/phase-2-ticketmaster-ingestion` (PR #6)
+- **Current Branch:** `feature/phase-2-ticketmaster-canonicalization`
 - **Active Implementing Agent:** Google Antigravity
-- **Current Task:** Phase 2 PR 1: Ticketmaster Ingestion Foundation — Review Remediation Pass 2 COMPLETE.
-- **Verification State:** ALL GREEN (`npm run format:check`, `npm run lint` 0 warnings/errors, `npm run typecheck`, `npm test` 135/135 unit tests across 11 suites, `npm run build` Next.js production compile, Playwright e2e 3/3 smoke tests passing, `npm run ingest:ticketmaster -- --fixture` dry-run verified).
-- **Immediate Next Action:** Push remediation commits to PR #6, monitor GitHub CI, and await final approval. Do not merge automatically.
-- **Phase 2 Status:** **ACTIVE — PR 1 READY FOR FINAL APPROVAL.** Canonical persistence and coordinator identity safeguards strictly deferred to PR 2.
+- **Current Task:** Phase 2 PR 2: Ticketmaster Canonicalization Integration — FINAL REMEDIATION COMPLETE.
+- **Remediation Delivered:**
+  1. **Atomic External-ID Conflict Rejection:** Stored procedure `apply_canonicalization` and repository layers reject conflicting external-ID assignments with PostgreSQL error 23505, rollback atomically, and allow idempotent identical associations.
+  2. **Idempotent Replay Evidence Stability:** `runTicketmasterIngestion` checks existing candidate resolutions on replay, preventing duplicate `candidate_resolutions` and inflated `event_field_evidence` rows. Added `--reprocess` override.
+  3. **Hardened Destination Guards:** Implemented strict URL parsing (`isVerifiedLocalOrDevDatabase`, `assertSafeDatabaseTarget`) rejecting spoofed/misleading hostnames (`evil-local.com`, `attacker.dev`) and requiring `--allow-production-write` for remote targets. Applied to CLI and integration tests.
+  4. **PostgreSQL Integration Tests:** Real database-backed tests for enrichment, identical replay, cross-artist conflict rejection with transaction rollback, and count stability. CI strictly fails if database is offline.
+  5. **Neutral Price Formatting:** CLI preview formats missing currency neutrally without fabricating `$`/`USD`.
+  6. **Test Isolation Across Repeat Runs:** `buildIsolatedTicketmasterFixture` generates uniquely namespaced fixture observations and date offsets per test suite execution, enabling consecutive test runs against the same persistent local Supabase database without collision, deletion of unrelated records, or database resets.
+- **Verification State:** ALL GREEN:
+  - `npm run format:check`: 100% compliant with Prettier.
+  - `npm run lint`: 0 warnings, 0 errors.
+  - `npm run typecheck`: Strict TypeScript compile passed with 0 errors.
+  - `npm test`: 164/164 unit tests passing across 13 test suites (including 24/24 in `ticketmaster-canonicalization.test.ts`).
+  - `npm run build`: Next.js production compile successful.
+  - `npm run test:e2e`: 3/3 Playwright browser smoke tests passing.
+  - `npm run test:integration`: 28/28 integration tests passing consecutively across repeated runs.
+- **Immediate Next Action:** Push test isolation fix to `origin/feature/phase-2-ticketmaster-canonicalization`, monitor PR #7 CI until green, and await independent code review. Do not merge automatically.
+- **Phase 2 Status:** **ACTIVE — PR #7 FINAL REMEDIATION COMPLETE, AWAITING REVIEW.**
 
 ---
 
 ## What the Next Agent Must Know
 
-1. **Phase 1 Pipeline Is Proven:** Ingestion abstractions, raw ingests, candidate extraction, entity resolution, and the atomic `apply_canonicalization` PostgreSQL stored procedure are fully proven with 21/21 integration tests. Extend this pipeline; do not replace it.
-2. **Phase 2 Boundary Discipline:** Phase 2 is broken into 6 focused PRs (PR 1: Ticketmaster Ingestion Foundation, PR 2: Canonicalization Integration & Verification, PR 3: Operational Safeguards & UI Polish, PR 4: Spotify OAuth & Taste Ingestion, PR 5: Recommendation Feature Foundation, PR 6: Ranked Discovery Views). Do not combine workstreams.
-3. **PR 2 Implementation Note:** When implementing PR 2, integrate the coordinator safeguards for `missing_venue_identity` (when `candidate.venueName` is empty) and `missing_artist_identity` (when `candidateArtists` is empty) into `CanonicalizationCoordinator` alongside full canonical persistence and PostgreSQL verification tests.
-4. **Deterministic Fixtures Only in CI:** Unit tests and CI must NEVER make live external API calls to Ticketmaster or Spotify. All tests must execute against sanitized static fixtures.
-5. **Security & Secrets:** All API keys (`TICKETMASTER_API_KEY`, Spotify credentials, `SUPABASE_SERVICE_ROLE_KEY`) are server-only via `getServerEnv()`. Never expose secrets in client bundles or public configs.
-6. **Read-Only Project Hub:** The Project Hub at `/hub` is strictly read-only and must remain unaffected by ingestion routines except for optional read-only stats/telemetry.
+1. **Phase 2 PR 2 Architecture & Delivery:**
+   - **Source Registration:** Deterministic lookup or registration of `ticketmaster-discovery` (UUID `b0000000-0000-0000-0000-000000000003`) in `lib/sources/ticketmaster/source-registry.ts`.
+   - **Pipeline Execution:** Reusable `runTicketmasterIngestion` pipeline in `lib/sources/ticketmaster/ingestion-pipeline.ts` with dry-run vs persist modes, audit immutability, foreign key consistency, and telemetry.
+   - **CLI Runner:** Safe dry-run default with `--persist` and `--allow-production-write` guards in `scripts/ingest-ticketmaster.ts`.
+   - **Tech Debt 1.2 Closed:** Atomic external ID enrichment on matched artists in `ArtistResolver`, `CanonicalizationCoordinator`, `MemoryCatalogRepository`, and PostgreSQL migration `20261012120000_enrich_matched_artist_external_ids.sql`.
+   - **Entity Resolution Safeguards:** `missing_venue_identity`, `missing_venue_locality`, and `missing_artist_identity` route cleanly to `needs_review`.
+2. **Upcoming PR 3 Scope:**
+   - PR 3 covers Ingestion Reliability, Operational Safeguards & UI Polish (Tech Debt 1.3: source attribution badges on `/discover`, Tech Debt 1.4: unknown-venue display behavior). Do not implement Spotify integration or recommendation scoring in PR 3.
+3. **Deterministic Fixtures Only in CI:** Unit tests and CI must NEVER make live external API calls to Ticketmaster or Spotify.
+4. **Security & Secrets:** All API keys (`TICKETMASTER_API_KEY`, `SUPABASE_SERVICE_ROLE_KEY`) are server-only. Never expose secrets in client bundles.
+5. **Read-Only Project Hub:** The Project Hub at `/hub` remains strictly read-only and unaffected by ingestion routines.

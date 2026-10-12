@@ -369,9 +369,10 @@ Phase 2 will be delivered in 6 focused, independently reviewable PRs:
 
 ### PR 2 — Canonicalization Integration & Real-Data Verification
 - **Goal:** Feed real Ticketmaster candidates through `CanonicalizationCoordinator` and the atomic PostgreSQL procedure.
-- **Files:** `lib/entity-resolution/`, `tests/integration/ticketmaster-canonicalization.test.ts`.
-- **Debt Resolution:** Close Tech Debt 1.2 (enriching existing canonical artists with newly discovered external IDs atomically).
-- **Verification:** Integration tests verifying candidate $\to$ canonical event persistence, evidence emission, and idempotent replay.
+- **Status:** Complete (Implemented on `feature/phase-2-ticketmaster-canonicalization`).
+- **Files:** `lib/sources/ticketmaster/ingestion-pipeline.ts`, `lib/sources/ticketmaster/source-registry.ts`, `lib/entity-resolution/artist-resolver.ts`, `lib/entity-resolution/canonicalization-coordinator.ts`, `lib/repositories/memory-repositories.ts`, `supabase/migrations/20261012120000_enrich_matched_artist_external_ids.sql`, `scripts/ingest-ticketmaster.ts`, `tests/unit/ticketmaster-canonicalization.test.ts`, `tests/integration/ticketmaster-canonicalization.test.ts`.
+- **Debt Resolution:** Closed Tech Debt 1.2 (enriching existing canonical artists with newly discovered external IDs atomically without collisions).
+- **Verification:** 20/20 unit tests, 23/23 integration tests (skipping gracefully when local DB is offline), full repo verification suite passed.
 
 ### PR 3 — Ingestion Reliability, Operational Safeguards & UI Polish
 - **Goal:** Content-hash duplicate skipping, source health tracking, and Discover page visual provenance.
