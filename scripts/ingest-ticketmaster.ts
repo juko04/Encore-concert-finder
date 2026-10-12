@@ -30,11 +30,13 @@ import { SupabaseSourceRepository } from '@/lib/repositories/source-repository';
 import { SupabaseRawIngestRepository } from '@/lib/repositories/raw-ingest-repository';
 import { SupabaseEventCandidateRepository } from '@/lib/repositories/event-candidate-repository';
 import { SupabaseCatalogRepository } from '@/lib/repositories/catalog-repository';
+import { assertSafeDatabaseTarget } from '@/lib/supabase/destination-guard';
 
 interface ParsedArgs {
   useFixture: boolean;
   persist: boolean;
   allowProductionWrite: boolean;
+  reprocess: boolean;
   stateCode: string;
   size: number;
   page: number;
@@ -72,6 +74,7 @@ function parseArgs(args: string[]): ParsedArgs {
     useFixture: false,
     persist: false,
     allowProductionWrite: false,
+    reprocess: false,
     stateCode: 'CO',
     size: 20,
     page: 0,
@@ -84,6 +87,8 @@ function parseArgs(args: string[]): ParsedArgs {
       result.persist = true;
     } else if (arg === '--allow-production-write') {
       result.allowProductionWrite = true;
+    } else if (arg === '--reprocess') {
+      result.reprocess = true;
     } else if (arg.startsWith('--state=')) {
       result.stateCode = arg.split('=')[1].toUpperCase();
     } else if (arg.startsWith('--size=')) {
@@ -98,6 +103,40 @@ function parseArgs(args: string[]): ParsedArgs {
   }
 
   return result;
+}
+
+export function formatPricePreview(
+  price:
+    | {
+        min?: number | null;
+        max?: number | null;
+        currency?: string | null;
+      }
+    | null
+    | undefined,
+): string {
+  if (
+    !price ||
+    ((price.min === undefined || price.min === null) &&
+      (price.max === undefined || price.max === null))
+  ) {
+    return 'Price TBA';
+  }
+
+  const minStr = price.min !== undefined && price.min !== null ? price.min : '';
+  const maxStr = price.max !== undefined && price.max !== null ? price.max : '';
+  const rangeStr =
+    minStr !== '' && maxStr !== '' && minStr !== maxStr
+      ? `${minStr} – ${maxStr}`
+      : `${minStr || maxStr}`;
+
+  if (price.currency === 'USD') {
+    return `$${rangeStr} USD`;
+  }
+  if (price.currency) {
+    return `${rangeStr} ${price.currency}`;
+  }
+  return `${rangeStr} (Currency Unknown)`;
 }
 
 async function run(): Promise<void> {
@@ -117,6 +156,10 @@ async function run(): Promise<void> {
   console.log(`Page Size:       ${options.size}`);
   console.log(`Page Number:     ${options.page}`);
   if (options.keyword) console.log(`Keyword:         ${options.keyword}`);
+  if (options.reprocess)
+    console.log(
+      'Reprocess Mode:  ENABLED (Re-evaluating previously resolved candidates)',
+    );
   console.log('------------------------------------------------------------\n');
 
   const apiKey = process.env.TICKETMASTER_API_KEY;
@@ -145,19 +188,14 @@ async function run(): Promise<void> {
       process.exit(1);
     }
 
-    const isLocalOrDev =
-      supabaseUrl.includes('127.0.0.1') ||
-      supabaseUrl.includes('localhost') ||
-      supabaseUrl.includes('.dev') ||
-      supabaseUrl.includes('local');
-
-    if (!isLocalOrDev && !options.allowProductionWrite) {
-      console.error(
-        'ERROR: Production Persistence Guard Active.\n' +
-          `Target database (${supabaseUrl}) is not a recognized local or development instance.\n` +
-          'Writing to production requires the explicit safety flag: --allow-production-write.\n' +
-          'Aborting execution to prevent unauthorized modifications.\n',
+    try {
+      assertSafeDatabaseTarget(
+        supabaseUrl,
+        options.allowProductionWrite,
+        'Ticketmaster CLI Ingestion',
       );
+    } catch (err: unknown) {
+      console.error(`\nERROR: ${(err as Error).message}\n`);
       process.exit(1);
     }
   }
@@ -195,6 +233,7 @@ async function run(): Promise<void> {
         queryParams,
         useFixture: options.useFixture,
         persist: true,
+        reprocess: options.reprocess,
       });
     } else {
       console.log('Executing safe dry-run preview with in-memory pipeline...');
@@ -212,6 +251,7 @@ async function run(): Promise<void> {
         queryParams,
         useFixture: options.useFixture,
         persist: false,
+        reprocess: options.reprocess,
       });
     }
 
@@ -245,9 +285,7 @@ async function run(): Promise<void> {
         cand.startTimePrecision === 'instant'
           ? cand.startsAt
           : 'Date confirmed (Time TBA)';
-      const priceStr = cand.price
-        ? `$${cand.price.min} – $${cand.price.max} ${cand.price.currency ?? 'USD'}`
-        : 'Price TBA';
+      const priceStr = formatPricePreview(cand.price);
 
       console.log(
         `[${idx + 1}] ${cand.title}\n` +
@@ -273,6 +311,7 @@ async function run(): Promise<void> {
     console.log(`  Raw Ingests Reused:         ${result.rawIngestsReused}`);
     console.log(`  Candidates Parsed:          ${result.candidatesParsed}`);
     console.log(`  Candidates Persisted:       ${result.candidatesPersisted}`);
+    console.log(`  Candidates Reused:          ${result.candidatesReused}`);
     console.log(
       `  Canonical Events Created:   ${result.canonicalEventsCreated}`,
     );
@@ -321,4 +360,10 @@ async function run(): Promise<void> {
   }
 }
 
-run();
+if (
+  process.argv[1] &&
+  process.argv[1].includes('ingest-ticketmaster') &&
+  !process.env.VITEST
+) {
+  run();
+}

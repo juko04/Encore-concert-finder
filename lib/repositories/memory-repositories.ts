@@ -814,6 +814,25 @@ export class MemoryCatalogRepository implements ICatalogRepository {
     return record;
   }
 
+  async findResolutionByCandidateId(
+    candidateId: string,
+  ): Promise<CandidateResolution | null> {
+    for (const res of this.candidateResolutions.values()) {
+      if (res.eventCandidateId === candidateId) {
+        return res;
+      }
+    }
+    return null;
+  }
+
+  async countResolutions(): Promise<number> {
+    return this.candidateResolutions.size;
+  }
+
+  async countFieldEvidence(): Promise<number> {
+    return this.eventFieldEvidence.size;
+  }
+
   /**
    * Atomic canonicalization transaction execution.
    * If any step fails, entire batch is rolled back cleanly.

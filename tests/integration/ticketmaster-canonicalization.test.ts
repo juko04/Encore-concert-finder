@@ -7,6 +7,8 @@ import { SupabaseEventCandidateRepository } from '@/lib/repositories/event-candi
 import { SupabaseCatalogRepository } from '@/lib/repositories/catalog-repository';
 import { ensureTicketmasterSource } from '@/lib/sources/ticketmaster/source-registry';
 import { runTicketmasterIngestion } from '@/lib/sources/ticketmaster/ingestion-pipeline';
+import { assertSafeDatabaseTarget } from '@/lib/supabase/destination-guard';
+import type { CanonicalizationPayload } from '@/lib/repositories/interfaces';
 
 interface LocalCredentials {
   url: string;
@@ -89,6 +91,13 @@ describe('Supabase Integration: Ticketmaster Ingestion & Canonicalization', () =
       return;
     }
 
+    // Verify database target passes strict destination safety guard
+    assertSafeDatabaseTarget(
+      credentials.url,
+      false,
+      'Ticketmaster integration test suite',
+    );
+
     try {
       const response = await fetch(`${credentials.url}/auth/v1/health`, {
         headers: { apikey: credentials.anonKey },
@@ -122,6 +131,36 @@ describe('Supabase Integration: Ticketmaster Ingestion & Canonicalization', () =
     catalogRepo = new SupabaseCatalogRepository(adminClient);
   });
 
+  it('enforces destination guard safety against non-local and spoofed database hosts', () => {
+    expect(() =>
+      assertSafeDatabaseTarget(
+        'https://evil-local.com',
+        false,
+        'Integration destination test',
+      ),
+    ).toThrow(
+      /Target database .* is not a verified local or development instance/,
+    );
+    expect(() =>
+      assertSafeDatabaseTarget(
+        'https://attacker.dev',
+        false,
+        'Integration destination test',
+      ),
+    ).toThrow(
+      /Target database .* is not a verified local or development instance/,
+    );
+    expect(() =>
+      assertSafeDatabaseTarget(
+        'https://project-ref.supabase.co',
+        false,
+        'Integration destination test',
+      ),
+    ).toThrow(
+      /Target database .* is not a verified local or development instance/,
+    );
+  });
+
   it('runs deterministic fixture ingestion through PostgreSQL stored procedure and verifies canonical events', async () => {
     if (!ensureDbAvailable()) return;
 
@@ -146,10 +185,12 @@ describe('Supabase Integration: Ticketmaster Ingestion & Canonicalization', () =
     expect(events.length).toBeGreaterThan(0);
   });
 
-  it('verifies idempotent replay through PostgreSQL stored procedure produces zero duplicate events', async () => {
+  it('verifies idempotent replay through PostgreSQL stored procedure produces zero duplicate events and stable evidence/resolution counts', async () => {
     if (!ensureDbAvailable()) return;
 
     const eventsBefore = await catalogRepo.listEvents({ limit: 50 });
+    const resolutionsBefore = await catalogRepo.countResolutions();
+    const evidenceBefore = await catalogRepo.countFieldEvidence();
 
     const replayRun = await runTicketmasterIngestion({
       useFixture: true,
@@ -161,10 +202,259 @@ describe('Supabase Integration: Ticketmaster Ingestion & Canonicalization', () =
     });
 
     // Replay must match existing canonical events rather than creating duplicates
+    expect(replayRun.rawIngestsPersisted).toBe(0);
+    expect(replayRun.rawIngestsReused).toBeGreaterThan(0);
+    expect(replayRun.candidatesReused).toBeGreaterThan(0);
     expect(replayRun.canonicalEventsCreated).toBe(0);
     expect(replayRun.canonicalEventsMatched).toBeGreaterThan(0);
 
     const eventsAfter = await catalogRepo.listEvents({ limit: 50 });
     expect(eventsAfter.length).toBe(eventsBefore.length);
+
+    // Verify candidate resolutions and field evidence row counts did NOT inflate on replay
+    const resolutionsAfter = await catalogRepo.countResolutions();
+    const evidenceAfter = await catalogRepo.countFieldEvidence();
+    expect(resolutionsAfter).toBe(resolutionsBefore);
+    expect(evidenceAfter).toBe(evidenceBefore);
+  });
+
+  it('reprocess mode deliberately re-evaluates candidates through PostgreSQL stored procedure', async () => {
+    if (!ensureDbAvailable()) return;
+
+    const reprocessRun = await runTicketmasterIngestion({
+      useFixture: true,
+      persist: true,
+      sourceRepo,
+      rawIngestRepo,
+      candidateRepo,
+      catalogRepo,
+      reprocess: true,
+    });
+
+    expect(reprocessRun.candidatesReused).toBe(0);
+    expect(reprocessRun.canonicalEventsCreated).toBe(0);
+    expect(reprocessRun.canonicalEventsMatched).toBeGreaterThan(0);
+  });
+
+  it('successfully enriches external IDs for matched artist in PostgreSQL stored procedure', async () => {
+    if (!ensureDbAvailable()) return;
+
+    const testNonce = Date.now().toString();
+    const artistName = `Test Match Artist ${testNonce}`;
+
+    // 1. Create artist in PostgreSQL
+    const { data: artist, error: artistError } = await adminClient!
+      .from('artists')
+      .insert({
+        name: artistName,
+        normalized_name: artistName.toLowerCase().trim(),
+      })
+      .select('id')
+      .single();
+
+    expect(artistError).toBeNull();
+    expect(artist?.id).toBeDefined();
+
+    // 2. Execute canonicalization transaction enriching the artist with a Ticketmaster external ID
+    const externalId = `TM-ENRICH-${testNonce}`;
+    const payload: CanonicalizationPayload = {
+      event: {
+        name: `Enrichment Concert ${testNonce}`,
+        normalized_name: `enrichment concert ${testNonce}`,
+        local_start_date: '2026-11-20',
+        timezone: 'America/Denver',
+      },
+      artists: [
+        {
+          artist_id: artist!.id,
+          name: artistName,
+          external_ids: [
+            {
+              provider: 'ticketmaster',
+              external_id: externalId,
+              provider_url: `https://ticketmaster.com/artist/${externalId}`,
+            },
+          ],
+        },
+      ],
+    };
+
+    const res = await catalogRepo.applyCanonicalization(payload);
+    expect(res.eventId).toBeDefined();
+
+    // 3. Verify external ID record was committed to artist_external_ids
+    const { data: extRecords, error: extError } = await adminClient!
+      .from('artist_external_ids')
+      .select('*')
+      .eq('artist_id', artist!.id)
+      .eq('provider', 'ticketmaster');
+
+    expect(extError).toBeNull();
+    expect(extRecords?.length).toBe(1);
+    expect(extRecords![0].external_id).toBe(externalId);
+  });
+
+  it('idempotent identical external ID replay succeeds in PostgreSQL without error', async () => {
+    if (!ensureDbAvailable()) return;
+
+    const testNonce = Date.now().toString();
+    const artistName = `Test Idempotent Artist ${testNonce}`;
+
+    const { data: artist, error: artistError } = await adminClient!
+      .from('artists')
+      .insert({
+        name: artistName,
+        normalized_name: artistName.toLowerCase().trim(),
+      })
+      .select('id')
+      .single();
+
+    expect(artistError).toBeNull();
+    expect(artist?.id).toBeDefined();
+
+    const externalId = `TM-IDEM-${testNonce}`;
+    const payload: CanonicalizationPayload = {
+      event: {
+        name: `Idempotent Concert ${testNonce}`,
+        normalized_name: `idempotent concert ${testNonce}`,
+        local_start_date: '2026-11-21',
+        timezone: 'America/Denver',
+      },
+      artists: [
+        {
+          artist_id: artist!.id,
+          name: artistName,
+          external_ids: [
+            {
+              provider: 'ticketmaster',
+              external_id: externalId,
+            },
+          ],
+        },
+      ],
+    };
+
+    // First application
+    const res1 = await catalogRepo.applyCanonicalization(payload);
+    expect(res1.eventId).toBeDefined();
+
+    // Replay with identical (artist_id, provider, external_id)
+    const res2 = await catalogRepo.applyCanonicalization(payload);
+    expect(res2.eventId).toBeDefined();
+
+    // Verify row count in artist_external_ids remains exactly 1
+    const { data: extRecords } = await adminClient!
+      .from('artist_external_ids')
+      .select('*')
+      .eq('artist_id', artist!.id)
+      .eq('provider', 'ticketmaster');
+
+    expect(extRecords?.length).toBe(1);
+  });
+
+  it('cross-artist external ID conflict rejects with 23505 and rolls back entire transaction atomically in PostgreSQL', async () => {
+    if (!ensureDbAvailable()) return;
+
+    const testNonce = Date.now().toString();
+    const artist1Name = `Test Alpha Artist ${testNonce}`;
+    const artist2Name = `Test Beta Artist ${testNonce}`;
+
+    // 1. Create artist 1 and assign external ID
+    const { data: artist1, error: a1Error } = await adminClient!
+      .from('artists')
+      .insert({
+        name: artist1Name,
+        normalized_name: artist1Name.toLowerCase().trim(),
+      })
+      .select('id')
+      .single();
+    expect(a1Error).toBeNull();
+
+    const sharedExternalId = `TM-SHARED-${testNonce}`;
+    const { error: ext1Error } = await adminClient!
+      .from('artist_external_ids')
+      .insert({
+        artist_id: artist1!.id,
+        provider: 'ticketmaster',
+        external_id: sharedExternalId,
+      });
+    expect(ext1Error).toBeNull();
+
+    // 2. Create artist 2
+    const { data: artist2, error: a2Error } = await adminClient!
+      .from('artists')
+      .insert({
+        name: artist2Name,
+        normalized_name: artist2Name.toLowerCase().trim(),
+      })
+      .select('id')
+      .single();
+    expect(a2Error).toBeNull();
+
+    // 3. Attempt canonicalization transaction with a new event and venue, attempting to assign artist 1's external ID to artist 2
+    const conflictingEventName = `Conflicting Concert ${testNonce}`;
+    const conflictingVenueName = `Conflicting Venue ${testNonce}`;
+    const conflictPayload: CanonicalizationPayload = {
+      event: {
+        name: conflictingEventName,
+        normalized_name: conflictingEventName.toLowerCase().trim(),
+        local_start_date: '2026-11-22',
+        timezone: 'America/Denver',
+      },
+      venueToCreate: {
+        name: conflictingVenueName,
+        normalized_name: conflictingVenueName.toLowerCase().trim(),
+        city: 'Denver',
+      },
+      artists: [
+        {
+          artist_id: artist2!.id,
+          name: artist2Name,
+          external_ids: [
+            {
+              provider: 'ticketmaster',
+              external_id: sharedExternalId, // Belongs to Artist 1!
+            },
+          ],
+        },
+      ],
+    };
+
+    // Stored procedure must raise exception 23505 and fail the transaction
+    await expect(
+      catalogRepo.applyCanonicalization(conflictPayload),
+    ).rejects.toThrow(
+      /Cannot assign external_id .* already assigned to artist|23505|unique constraint/i,
+    );
+
+    // 4. Verify complete PostgreSQL transaction rollback:
+    // Event was NOT inserted
+    const { data: rolledBackEvents } = await adminClient!
+      .from('events')
+      .select('id')
+      .eq('name', conflictingEventName);
+    expect(rolledBackEvents?.length).toBe(0);
+
+    // Venue was NOT inserted
+    const { data: rolledBackVenues } = await adminClient!
+      .from('venues')
+      .select('id')
+      .eq('name', conflictingVenueName);
+    expect(rolledBackVenues?.length).toBe(0);
+
+    // Artist 2 was NOT given the external ID
+    const { data: artist2Ext } = await adminClient!
+      .from('artist_external_ids')
+      .select('*')
+      .eq('artist_id', artist2!.id);
+    expect(artist2Ext?.length).toBe(0);
+
+    // Artist 1 still exclusively owns the external ID
+    const { data: artist1Ext } = await adminClient!
+      .from('artist_external_ids')
+      .select('*')
+      .eq('external_id', sharedExternalId);
+    expect(artist1Ext?.length).toBe(1);
+    expect(artist1Ext![0].artist_id).toBe(artist1!.id);
   });
 });

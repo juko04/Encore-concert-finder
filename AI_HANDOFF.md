@@ -11,18 +11,23 @@ Durable architecture records belong in [`docs/architecture/`](docs/architecture/
 - **Active Specification:** [`docs/phases/active/PHASE_2_IMPLEMENTATION.md`](docs/phases/active/PHASE_2_IMPLEMENTATION.md).
 - **Current Branch:** `feature/phase-2-ticketmaster-canonicalization`
 - **Active Implementing Agent:** Google Antigravity
-- **Current Task:** Phase 2 PR 2: Ticketmaster Canonicalization Integration — IMPLEMENTATION & VERIFICATION COMPLETE.
+- **Current Task:** Phase 2 PR 2: Ticketmaster Canonicalization Integration — REMEDIATION COMPLETE.
+- **Remediation Delivered:**
+  1. **Atomic External-ID Conflict Rejection:** Stored procedure `apply_canonicalization` and repository layers reject conflicting external-ID assignments with PostgreSQL error 23505, rollback atomically, and allow idempotent identical associations.
+  2. **Idempotent Replay Evidence Stability:** `runTicketmasterIngestion` checks existing candidate resolutions on replay, preventing duplicate `candidate_resolutions` and inflated `event_field_evidence` rows. Added `--reprocess` override.
+  3. **Hardened Destination Guards:** Implemented strict URL parsing (`isVerifiedLocalOrDevDatabase`, `assertSafeDatabaseTarget`) rejecting spoofed/misleading hostnames (`evil-local.com`, `attacker.dev`) and requiring `--allow-production-write` for remote targets. Applied to CLI and integration tests.
+  4. **PostgreSQL Integration Tests:** Real database-backed tests for enrichment, identical replay, cross-artist conflict rejection with transaction rollback, and count stability. CI strictly fails if database is offline.
+  5. **Neutral Price Formatting:** CLI preview formats missing currency neutrally without fabricating `$`/`USD`.
 - **Verification State:** ALL GREEN:
   - `npm run format:check`: 100% compliant with Prettier.
   - `npm run lint`: 0 warnings, 0 errors.
   - `npm run typecheck`: Strict TypeScript compile passed with 0 errors.
-  - `npm test`: 155/155 unit tests passing across 12 test suites (including 20/20 in `ticketmaster-canonicalization.test.ts`).
+  - `npm test`: 163/163 unit tests passing across 13 test suites (including 23/23 in `ticketmaster-canonicalization.test.ts` and 5/5 in `destination-guard.test.ts`).
   - `npm run build`: Next.js production compile successful.
   - `npm run test:e2e`: 3/3 Playwright browser smoke tests passing.
-  - `npm run test:integration`: 23/23 integration tests passing / gracefully skipping when local Supabase is offline.
-  - `npm run ingest:ticketmaster -- --fixture`: Safe dry-run preview verified with full telemetry.
-- **Immediate Next Action:** Create commit, push branch, open Pull Request for PR 2, monitor CI, and await independent code review. Do not merge automatically.
-- **Phase 2 Status:** **ACTIVE — PR 2 READY FOR REVIEW.**
+  - `npm run test:integration`: 28/28 integration tests passing / gracefully skipping when local Supabase is offline.
+- **Immediate Next Action:** Push remediation commit to `origin/feature/phase-2-ticketmaster-canonicalization`, monitor PR #7 CI until green, and await independent code review. Do not merge automatically.
+- **Phase 2 Status:** **ACTIVE — PR #7 REMEDIATION COMPLETE, AWAITING REVIEW.**
 
 ---
 

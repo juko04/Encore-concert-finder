@@ -22,6 +22,8 @@ declare
   v_existing_event boolean := false;
   v_existing_event_id uuid;
   v_ext_id_item jsonb;
+  v_existing_owner_id uuid;
+  v_existing_ext_for_artist text;
 begin
   -- 1. Create Venue if specified in transaction payload
   v_venue_to_create := payload->'venueToCreate';
@@ -146,18 +148,50 @@ begin
         -- Attach or enrich external IDs if provided (executes for both new and matched artists)
         if v_artist_id is not null and v_artist_item->'external_ids' is not null and jsonb_array_length(v_artist_item->'external_ids') > 0 then
           for v_ext_id_item in select * from jsonb_array_elements(v_artist_item->'external_ids') loop
-            insert into public.artist_external_ids (
-              artist_id,
-              provider,
-              external_id,
-              provider_url
-            ) values (
-              v_artist_id,
-              v_ext_id_item->>'provider',
-              v_ext_id_item->>'external_id',
-              v_ext_id_item->>'provider_url'
-            )
-            on conflict (provider, external_id) do nothing;
+            -- Check if this provider + external_id is already assigned to ANY artist
+            select artist_id into v_existing_owner_id
+            from public.artist_external_ids
+            where provider = v_ext_id_item->>'provider'
+              and external_id = v_ext_id_item->>'external_id';
+
+            if v_existing_owner_id is not null then
+              if v_existing_owner_id <> v_artist_id then
+                raise exception 'Cannot assign external_id % for provider % to artist %: already assigned to artist %',
+                  v_ext_id_item->>'external_id',
+                  v_ext_id_item->>'provider',
+                  v_artist_id,
+                  v_existing_owner_id
+                  using errcode = '23505';
+              end if;
+              -- Idempotent: identical (artist_id, provider, external_id) already attached -> no-op
+            else
+              -- Check if this artist already has a DIFFERENT external ID for this provider (violates uq_artist_provider)
+              select external_id into v_existing_ext_for_artist
+              from public.artist_external_ids
+              where artist_id = v_artist_id
+                and provider = v_ext_id_item->>'provider';
+
+              if v_existing_ext_for_artist is not null and v_existing_ext_for_artist <> (v_ext_id_item->>'external_id') then
+                raise exception 'Cannot assign external_id % for provider % to artist %: artist already has external_id %',
+                  v_ext_id_item->>'external_id',
+                  v_ext_id_item->>'provider',
+                  v_artist_id,
+                  v_existing_ext_for_artist
+                  using errcode = '23505';
+              end if;
+
+              insert into public.artist_external_ids (
+                artist_id,
+                provider,
+                external_id,
+                provider_url
+              ) values (
+                v_artist_id,
+                v_ext_id_item->>'provider',
+                v_ext_id_item->>'external_id',
+                v_ext_id_item->>'provider_url'
+              );
+            end if;
           end loop;
         end if;
 

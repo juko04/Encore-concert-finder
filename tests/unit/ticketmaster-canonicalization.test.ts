@@ -16,6 +16,8 @@ import {
   TICKETMASTER_DEFAULT_SOURCE_ID,
   TICKETMASTER_SOURCE_SLUG,
 } from '@/lib/sources/ticketmaster';
+import { formatPricePreview } from '../../scripts/ingest-ticketmaster';
+import type { CanonicalizationPayload } from '@/lib/repositories/interfaces';
 
 describe('Phase 2 PR 2: Ticketmaster Canonicalization Integration', () => {
   function setupTestRepositories() {
@@ -154,8 +156,12 @@ describe('Phase 2 PR 2: Ticketmaster Canonicalization Integration', () => {
       persist: true,
     });
     expect(run1.canonicalEventsCreated).toBe(5);
+    const resolutionsRun1 = await catalogRepo.countResolutions();
+    const evidenceRun1 = await catalogRepo.countFieldEvidence();
+    expect(resolutionsRun1).toBe(6); // 5 created + 1 needs_review
+    expect(evidenceRun1).toBeGreaterThan(0);
 
-    // Second ingestion run with identical data
+    // Second ingestion run with identical data (ordinary replay)
     const run2 = await runTicketmasterIngestion({
       sourceRepo,
       rawIngestRepo,
@@ -168,10 +174,55 @@ describe('Phase 2 PR 2: Ticketmaster Canonicalization Integration', () => {
 
     expect(run2.rawIngestsPersisted).toBe(0);
     expect(run2.rawIngestsReused).toBe(1);
+    expect(run2.candidatesReused).toBe(6);
     expect(run2.canonicalEventsCreated).toBe(0);
     expect(run2.canonicalEventsMatched).toBe(5);
 
+    // Verify candidate resolutions and field evidence counts did NOT inflate on replay
+    const resolutionsRun2 = await catalogRepo.countResolutions();
+    const evidenceRun2 = await catalogRepo.countFieldEvidence();
+    expect(resolutionsRun2).toBe(resolutionsRun1);
+    expect(evidenceRun2).toBe(evidenceRun1);
+
     // Catalog count must remain exactly 5
+    const events = await catalogRepo.listEvents();
+    expect(events.length).toBe(5);
+  });
+
+  // Requirement 5b: Replay with explicit --reprocess override deliberately re-evaluates candidates
+  it('5b. replay with explicit --reprocess override deliberately re-evaluates candidates through canonicalization coordinator', async () => {
+    const { sourceRepo, rawIngestRepo, candidateRepo, catalogRepo, adapter } =
+      setupTestRepositories();
+
+    // Initial run
+    await runTicketmasterIngestion({
+      sourceRepo,
+      rawIngestRepo,
+      candidateRepo,
+      catalogRepo,
+      adapter,
+      useFixture: true,
+      persist: true,
+    });
+
+    // Run with reprocess: true
+    const reprocessRun = await runTicketmasterIngestion({
+      sourceRepo,
+      rawIngestRepo,
+      candidateRepo,
+      catalogRepo,
+      adapter,
+      useFixture: true,
+      persist: true,
+      reprocess: true,
+    });
+
+    expect(reprocessRun.rawIngestsPersisted).toBe(0);
+    expect(reprocessRun.rawIngestsReused).toBe(1);
+    expect(reprocessRun.candidatesReused).toBe(0); // Deliberately did not skip candidates
+    expect(reprocessRun.canonicalEventsCreated).toBe(0);
+    expect(reprocessRun.canonicalEventsMatched).toBe(5);
+
     const events = await catalogRepo.listEvents();
     expect(events.length).toBe(5);
   });
@@ -1239,5 +1290,105 @@ describe('Phase 2 PR 2: Ticketmaster Canonicalization Integration', () => {
       expect(evt.localStartDate).toMatch(/^\d{4}-\d{2}-\d{2}$/);
       expect(evt.artists.length).toBeGreaterThanOrEqual(1);
     }
+  });
+
+  // Requirement 21: applyCanonicalization cross-artist external ID conflict rejection & rollback
+  it('21. applyCanonicalization rejects cross-artist external ID conflict with unique constraint and performs atomic rollback', async () => {
+    const { catalogRepo } = setupTestRepositories();
+
+    // 1. Create artist A and attach Ticketmaster external ID
+    const artistA = await catalogRepo.createArtist({
+      name: 'Artist Alpha',
+      normalizedName: 'artist alpha',
+    });
+    await catalogRepo.addArtistExternalId({
+      artistId: artistA.id,
+      provider: 'ticketmaster',
+      externalId: 'TM-EXTERNAL-ALPHA',
+    });
+
+    // 2. Create artist B
+    const artistB = await catalogRepo.createArtist({
+      name: 'Artist Beta',
+      normalizedName: 'artist beta',
+    });
+
+    // 3. Attempt canonicalization transaction that tries to assign Artist Alpha's external ID to Artist Beta
+    const conflictPayload: CanonicalizationPayload = {
+      event: {
+        name: 'Conflicting Beta Concert',
+        normalized_name: 'conflicting beta concert',
+        local_start_date: '2026-12-25',
+        timezone: 'America/Denver',
+      },
+      venueToCreate: {
+        name: 'Conflict Venue',
+        normalized_name: 'conflict venue',
+        city: 'Denver',
+      },
+      artists: [
+        {
+          artist_id: artistB.id,
+          name: 'Artist Beta',
+          external_ids: [
+            {
+              provider: 'ticketmaster',
+              external_id: 'TM-EXTERNAL-ALPHA', // Belongs to Artist Alpha!
+            },
+          ],
+        },
+      ],
+    };
+
+    await expect(
+      catalogRepo.applyCanonicalization(conflictPayload),
+    ).rejects.toThrow(
+      /duplicate key value violates unique constraint "uq_artist_provider_external_id"/,
+    );
+
+    // 4. Verify atomic rollback: no new event or venue was created
+    const events = await catalogRepo.listEvents();
+    expect(events.length).toBe(0);
+
+    const venue = await catalogRepo.findVenue('conflict venue', 'Denver');
+    expect(venue).toBeNull();
+
+    // Artist Beta did not receive the conflicting external ID
+    const betaExt = Array.from(catalogRepo.artistExternalIds.values()).filter(
+      (e) => e.artistId === artistB.id,
+    );
+    expect(betaExt.length).toBe(0);
+  });
+
+  // Requirement 22: formatPricePreview neutral currency formatting
+  it('22. formatPricePreview formats prices neutrally without fabricating currencies or symbols', () => {
+    // Missing or undefined price
+    expect(formatPricePreview(null)).toBe('Price TBA');
+    expect(formatPricePreview(undefined)).toBe('Price TBA');
+    expect(formatPricePreview({ min: null, max: null })).toBe('Price TBA');
+
+    // USD currency
+    expect(formatPricePreview({ min: 25, max: 75, currency: 'USD' })).toBe(
+      '$25 – 75 USD',
+    );
+    expect(formatPricePreview({ min: 50, max: 50, currency: 'USD' })).toBe(
+      '$50 USD',
+    );
+
+    // Non-USD currency (must not prepend $)
+    expect(formatPricePreview({ min: 30, max: 80, currency: 'EUR' })).toBe(
+      '30 – 80 EUR',
+    );
+    expect(formatPricePreview({ min: 40, max: 40, currency: 'GBP' })).toBe(
+      '40 GBP',
+    );
+
+    // Missing currency (must not assume $ or USD)
+    expect(formatPricePreview({ min: 20, max: 60, currency: null })).toBe(
+      '20 – 60 (Currency Unknown)',
+    );
+    expect(formatPricePreview({ min: 35, max: 35, currency: undefined })).toBe(
+      '35 (Currency Unknown)',
+    );
   });
 });

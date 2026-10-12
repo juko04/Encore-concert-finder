@@ -24,6 +24,7 @@ export interface TicketmasterIngestionOptions {
   useFixture?: boolean;
   fixtureJson?: string;
   persist?: boolean;
+  reprocess?: boolean;
 }
 
 export interface TicketmasterIngestionResult {
@@ -33,6 +34,7 @@ export interface TicketmasterIngestionResult {
   rawIngestsReused: number;
   candidatesParsed: number;
   candidatesPersisted: number;
+  candidatesReused: number;
   canonicalEventsCreated: number;
   canonicalEventsMatched: number;
   candidatesNeedsReview: number;
@@ -126,6 +128,7 @@ export async function runTicketmasterIngestion(
       rawIngestsReused: 0,
       candidatesParsed: parsedCandidates.length,
       candidatesPersisted: 0,
+      candidatesReused: 0,
       canonicalEventsCreated: 0,
       canonicalEventsMatched: 0,
       candidatesNeedsReview: Object.values(reviewReasons).reduce(
@@ -192,10 +195,39 @@ export async function runTicketmasterIngestion(
   let canonicalEventsMatched = 0;
   let candidatesNeedsReview = 0;
   let candidatesRejected = 0;
+  let candidatesReused = 0;
   const reviewReasons: Record<string, number> = {};
   const persistedEventIds: string[] = [];
 
   for (const cand of persistedCandidates) {
+    // Check if candidate observation was already resolved in a prior run
+    if (!options.reprocess) {
+      const existingRes = await options.catalogRepo.findResolutionByCandidateId(
+        cand.id,
+      );
+      if (existingRes) {
+        candidatesReused++;
+        if (
+          existingRes.status === 'created' ||
+          existingRes.status === 'matched'
+        ) {
+          canonicalEventsMatched++;
+          if (existingRes.eventId) persistedEventIds.push(existingRes.eventId);
+        } else if (existingRes.status === 'needs_review') {
+          candidatesNeedsReview++;
+          const reasonsList = Array.isArray(existingRes.reasons)
+            ? (existingRes.reasons as string[])
+            : Object.keys(existingRes.reasons);
+          for (const r of reasonsList) {
+            reviewReasons[r] = (reviewReasons[r] || 0) + 1;
+          }
+        } else if (existingRes.status === 'rejected') {
+          candidatesRejected++;
+        }
+        continue;
+      }
+    }
+
     const outcome = await coordinator.canonicalize(cand);
 
     if (outcome.status === 'created') {
@@ -226,6 +258,7 @@ export async function runTicketmasterIngestion(
     rawIngestsReused,
     candidatesParsed: candidates.length,
     candidatesPersisted: persistedCandidates.length,
+    candidatesReused,
     canonicalEventsCreated,
     canonicalEventsMatched,
     candidatesNeedsReview,
