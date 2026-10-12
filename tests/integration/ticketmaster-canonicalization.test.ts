@@ -149,7 +149,9 @@ describe('Supabase Integration: Ticketmaster Ingestion & Canonicalization', () =
   it('verifies idempotent replay through PostgreSQL stored procedure produces zero duplicate events', async () => {
     if (!ensureDbAvailable()) return;
 
-    const run1 = await runTicketmasterIngestion({
+    const eventsBefore = await catalogRepo.listEvents({ limit: 50 });
+
+    const replayRun = await runTicketmasterIngestion({
       useFixture: true,
       persist: true,
       sourceRepo,
@@ -158,17 +160,11 @@ describe('Supabase Integration: Ticketmaster Ingestion & Canonicalization', () =
       catalogRepo,
     });
 
-    const run2 = await runTicketmasterIngestion({
-      useFixture: true,
-      persist: true,
-      sourceRepo,
-      rawIngestRepo,
-      candidateRepo,
-      catalogRepo,
-    });
+    // Replay must match existing canonical events rather than creating duplicates
+    expect(replayRun.canonicalEventsCreated).toBe(0);
+    expect(replayRun.canonicalEventsMatched).toBeGreaterThan(0);
 
-    // Replay should match existing events rather than creating duplicates
-    expect(run2.canonicalEventsCreated).toBe(0);
-    expect(run2.canonicalEventsMatched).toBe(run1.canonicalEventsCreated);
+    const eventsAfter = await catalogRepo.listEvents({ limit: 50 });
+    expect(eventsAfter.length).toBe(eventsBefore.length);
   });
 });

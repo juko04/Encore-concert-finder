@@ -363,3 +363,4 @@ $$;
 revoke all on function public.apply_canonicalization(jsonb) from public;
 revoke all on function public.apply_canonicalization(jsonb) from anon, authenticated;
 grant execute on function public.apply_canonicalization(jsonb) to service_role;
+
