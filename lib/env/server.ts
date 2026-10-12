@@ -4,6 +4,7 @@ export const serverEnvSchema = z.object({
   SUPABASE_SERVICE_ROLE_KEY: z
     .string({ required_error: 'SUPABASE_SERVICE_ROLE_KEY is required' })
     .min(1, 'SUPABASE_SERVICE_ROLE_KEY is required'),
+  TICKETMASTER_API_KEY: z.string().optional(),
 });
 
 export type ServerEnv = z.infer<typeof serverEnvSchema>;
@@ -23,6 +24,7 @@ export function getServerEnv(): ServerEnv {
 
   const rawEnv = {
     SUPABASE_SERVICE_ROLE_KEY: process.env.SUPABASE_SERVICE_ROLE_KEY,
+    TICKETMASTER_API_KEY: process.env.TICKETMASTER_API_KEY,
   };
 
   const parsed = serverEnvSchema.safeParse(rawEnv);
