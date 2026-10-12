@@ -15,12 +15,23 @@ export interface TicketmasterClientOptions {
   timeoutMs?: number;
 }
 
-export class NonRetryableError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = 'NonRetryableError';
-  }
-}
+import {
+  NonRetryableError,
+  TicketmasterAuthError,
+  TicketmasterError,
+  TicketmasterNetworkError,
+  TicketmasterRateLimitError,
+  TicketmasterValidationError,
+} from './errors';
+
+export {
+  NonRetryableError,
+  TicketmasterAuthError,
+  TicketmasterError,
+  TicketmasterNetworkError,
+  TicketmasterRateLimitError,
+  TicketmasterValidationError,
+};
 
 export class TicketmasterApiClient {
   private readonly apiKey: string;
@@ -134,15 +145,16 @@ export class TicketmasterApiClient {
     url: string;
   }> {
     if (!this.apiKey) {
-      throw new NonRetryableError(
+      throw new TicketmasterAuthError(
         'Ticketmaster API key is required. Provide it in constructor options or set TICKETMASTER_API_KEY environment variable.',
       );
     }
 
     if (params.page !== undefined) {
       if (!Number.isInteger(params.page) || params.page < 0) {
-        throw new NonRetryableError(
+        throw new TicketmasterValidationError(
           `Invalid page parameter: ${params.page}. Page must be a non-negative integer.`,
+          { statusCode: 400 },
         );
       }
     }
@@ -152,8 +164,9 @@ export class TicketmasterApiClient {
         params.size < 1 ||
         params.size > 200
       ) {
-        throw new NonRetryableError(
+        throw new TicketmasterValidationError(
           `Invalid size parameter: ${params.size}. Size must be an integer between 1 and 200.`,
+          { statusCode: 400 },
         );
       }
     }
@@ -163,10 +176,11 @@ export class TicketmasterApiClient {
 
     // Enforce Ticketmaster Discovery API deep pagination boundary
     if (page * size >= 1000) {
-      throw new NonRetryableError(
+      throw new TicketmasterValidationError(
         `Ticketmaster API deep pagination limit exceeded: page (${page}) * size (${size}) = ${
           page * size
         } >= 1000. Use narrower date or geographic filters.`,
+        { statusCode: 400 },
       );
     }
 
@@ -197,10 +211,11 @@ export class TicketmasterApiClient {
           try {
             json = JSON.parse(rawText);
           } catch (parseErr) {
-            throw new NonRetryableError(
+            throw new TicketmasterValidationError(
               `Malformed JSON response from Ticketmaster API at ${sanitizedUrl}: ${
                 parseErr instanceof Error ? parseErr.message : String(parseErr)
               }`,
+              { statusCode: 200, sanitizedUrl, cause: parseErr },
             );
           }
 
@@ -209,8 +224,9 @@ export class TicketmasterApiClient {
             const errorDetails = parsed.error.issues
               .map((i) => `${i.path.join('.')}: ${i.message}`)
               .join('; ');
-            throw new NonRetryableError(
+            throw new TicketmasterValidationError(
               `Ticketmaster API response schema validation failed at ${sanitizedUrl}: ${errorDetails}`,
+              { statusCode: 200, sanitizedUrl, cause: parsed.error },
             );
           }
 
@@ -225,8 +241,9 @@ export class TicketmasterApiClient {
         if (res.status === 429) {
           attempt++;
           if (attempt > this.maxRetries) {
-            throw new Error(
+            throw new TicketmasterRateLimitError(
               `Ticketmaster API rate limit exceeded (HTTP 429) at ${sanitizedUrl}. Max retries (${this.maxRetries}) reached.`,
+              { statusCode: 429, sanitizedUrl },
             );
           }
 
@@ -257,8 +274,9 @@ export class TicketmasterApiClient {
         if (res.status >= 500) {
           attempt++;
           if (attempt > this.maxRetries) {
-            throw new Error(
+            throw new TicketmasterNetworkError(
               `Ticketmaster API server error (HTTP ${res.status}) at ${sanitizedUrl}. Max retries reached.`,
+              { statusCode: res.status, sanitizedUrl },
             );
           }
 
@@ -270,18 +288,33 @@ export class TicketmasterApiClient {
         // Client errors (400, 401, 403, 404, etc.) - non-retryable, fail immediately!
         const errBody = await res.text().catch(() => '');
         const sanitizedBody = redactSensitiveString(errBody, this.apiKey);
+        if (res.status === 401 || res.status === 403) {
+          throw new TicketmasterAuthError(
+            `Ticketmaster API request failed with HTTP ${res.status} at ${sanitizedUrl}: ${sanitizedBody}`,
+            { statusCode: res.status, sanitizedUrl },
+          );
+        }
         throw new NonRetryableError(
           `Ticketmaster API request failed with HTTP ${res.status} at ${sanitizedUrl}: ${sanitizedBody}`,
+          { statusCode: res.status, sanitizedUrl },
         );
       } catch (err) {
         if (err instanceof NonRetryableError) {
           // Non-retryable error: fail immediately without executing retry loop
-          throw new Error(redactSensitiveString(err.message, this.apiKey));
+          err.message = redactSensitiveString(err.message, this.apiKey);
+          throw err;
         }
 
         if (attempt >= this.maxRetries) {
+          if (err instanceof TicketmasterError) {
+            err.message = redactSensitiveString(err.message, this.apiKey);
+            throw err;
+          }
           const rawMessage = err instanceof Error ? err.message : String(err);
-          throw new Error(redactSensitiveString(rawMessage, this.apiKey));
+          throw new TicketmasterNetworkError(
+            redactSensitiveString(rawMessage, this.apiKey),
+            { sanitizedUrl, cause: err },
+          );
         }
 
         // Network / Abort timeout error: retry with backoff
@@ -291,8 +324,9 @@ export class TicketmasterApiClient {
       }
     }
 
-    throw new Error(
+    throw new TicketmasterNetworkError(
       `Failed to fetch from Ticketmaster API after ${this.maxRetries} attempts at ${sanitizedUrl}`,
+      { sanitizedUrl },
     );
   }
 }

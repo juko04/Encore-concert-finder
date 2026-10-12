@@ -7,6 +7,7 @@ import type {
   BillingPosition,
   CandidateResolution,
   CanonicalEventDetail,
+  CanonicalEventSourceSummary,
   CanonicalEventSummary,
   CanonicalizationPayload,
   Event,
@@ -471,36 +472,103 @@ export class SupabaseCatalogRepository implements ICatalogRepository {
       throw new Error(`Failed to list events: ${error.message}`);
     }
 
+    const rows = eventsData || [];
+    if (rows.length === 0) {
+      return [];
+    }
+
+    const eventIds = rows.map((r) => (r as EventRow).id);
+
+    // Batch-fetch artists for all returned events (1 query, ordered by sort_order)
+    const { data: allArtistLinks, error: artistError } = await this.client
+      .from('event_artists')
+      .select('*, artists(*)')
+      .in('event_id', eventIds)
+      .order('sort_order', { ascending: true });
+
+    if (artistError) {
+      throw new Error(
+        `Failed to batch-fetch event artists: ${artistError.message}`,
+      );
+    }
+
+    // Batch-fetch ticket links for all returned events (1 query)
+    const { data: allTicketLinks, error: ticketError } = await this.client
+      .from('event_ticket_links')
+      .select('*')
+      .in('event_id', eventIds);
+
+    if (ticketError) {
+      throw new Error(
+        `Failed to batch-fetch event ticket links: ${ticketError.message}`,
+      );
+    }
+
+    // Batch-fetch event sources with joined source registry relation for all returned events (1 query)
+    const { data: allSourceLinks, error: sourceError } = await this.client
+      .from('event_sources')
+      .select('event_id, source_id, source_url, is_current, sources(*)')
+      .in('event_id', eventIds)
+      .eq('is_current', true);
+
+    if (sourceError) {
+      throw new Error(
+        `Failed to batch-fetch event sources: ${sourceError.message}`,
+      );
+    }
+
+    // Group relations in-memory by event_id
+    const artistsByEventId = new Map<
+      string,
+      Array<{ name: string; billingPosition: BillingPosition }>
+    >();
+    for (const aRow of (allArtistLinks as unknown as EventArtistRow[]) || []) {
+      const list = artistsByEventId.get(aRow.event_id) || [];
+      list.push({
+        name: aRow.artists?.name ?? 'Unknown Artist',
+        billingPosition: aRow.billing_position,
+      });
+      artistsByEventId.set(aRow.event_id, list);
+    }
+
+    const ticketLinksByEventId = new Map<string, EventTicketLink[]>();
+    for (const tRow of (allTicketLinks as EventTicketLinkRow[]) || []) {
+      const list = ticketLinksByEventId.get(tRow.event_id) || [];
+      list.push(mapTicketLinkRow(tRow));
+      ticketLinksByEventId.set(tRow.event_id, list);
+    }
+
+    interface EventSourceJoinRow extends EventSourceRow {
+      sources?: {
+        id: string;
+        name: string;
+        slug: string;
+      } | null;
+    }
+
+    const sourcesByEventId = new Map<string, CanonicalEventSourceSummary[]>();
+    for (const sRow of (allSourceLinks as unknown as EventSourceJoinRow[]) ||
+      []) {
+      const list = sourcesByEventId.get(sRow.event_id) || [];
+      list.push({
+        id: sRow.source_id,
+        name: sRow.sources?.name ?? 'Unknown Source',
+        slug: sRow.sources?.slug ?? 'unknown-source',
+        sourceUrl: sRow.source_url,
+      });
+      sourcesByEventId.set(sRow.event_id, list);
+    }
+
     const summaries: CanonicalEventSummary[] = [];
 
-    for (const row of eventsData || []) {
+    for (const row of rows) {
       const event = mapEventRow(row as EventRow);
       const venueRow = (row as { venues?: VenueRow | null }).venues;
       const venue = venueRow ? mapVenueRow(venueRow) : null;
 
-      // Fetch artists
-      const { data: artistLinks } = await this.client
-        .from('event_artists')
-        .select('*, artists(*)')
-        .eq('event_id', event.id)
-        .order('sort_order', { ascending: true });
-
-      const artists = ((artistLinks as unknown as EventArtistRow[]) || []).map(
-        (aRow) => ({
-          name: aRow.artists?.name ?? 'Unknown Artist',
-          billingPosition: aRow.billing_position,
-        }),
-      );
-
-      // Fetch ticket links for pricing
-      const { data: ticketLinksData } = await this.client
-        .from('event_ticket_links')
-        .select('*')
-        .eq('event_id', event.id);
-
-      const ticketLinks = ((ticketLinksData as EventTicketLinkRow[]) || []).map(
-        mapTicketLinkRow,
-      );
+      const artists = artistsByEventId.get(event.id) || [];
+      const ticketLinks = ticketLinksByEventId.get(event.id) || [];
+      const sources = sourcesByEventId.get(event.id) || [];
 
       const minPrice = ticketLinks.reduce<number | null>((min, tl) => {
         if (tl.minPrice === null || tl.minPrice === undefined) return min;
@@ -517,7 +585,7 @@ export class SupabaseCatalogRepository implements ICatalogRepository {
       summaries.push({
         id: event.id,
         title: event.name,
-        venueName: venue?.name ?? event.name,
+        venueName: venue?.name ?? 'Venue TBA',
         city: venue?.city ?? event.city ?? undefined,
         region: venue?.region ?? event.region ?? undefined,
         localStartDate: event.localStartDate,
@@ -530,6 +598,8 @@ export class SupabaseCatalogRepository implements ICatalogRepository {
         minPrice,
         maxPrice,
         currency,
+        sourceName: sources.length > 0 ? sources[0].name : undefined,
+        sources,
       });
     }
 
@@ -1016,6 +1086,8 @@ export class SupabaseCatalogRepository implements ICatalogRepository {
     sourceEventId?: string | null;
     sourceUrl: string;
     confidence: number;
+    sourceName?: string;
+    sourceSlug?: string;
   }): Promise<EventSourceRecord> {
     const { data, error } = await this.client
       .from('event_sources')

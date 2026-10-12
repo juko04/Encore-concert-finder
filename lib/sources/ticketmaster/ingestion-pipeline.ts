@@ -12,6 +12,7 @@ import type {
 } from '@/lib/repositories/interfaces';
 import { TicketmasterDiscoveryAdapter } from './adapter';
 import { ensureTicketmasterSource } from './source-registry';
+import { PipelineDatabaseError, TicketmasterError } from './errors';
 import type { TicketmasterEventQueryParams } from './types';
 
 export interface TicketmasterIngestionOptions {
@@ -42,6 +43,9 @@ export interface TicketmasterIngestionResult {
   reviewReasons: Record<string, number>;
   persistedEventIds: string[];
   candidates: EventCandidate[];
+  durationMs: number;
+  startedAt: string;
+  completedAt: string;
 }
 
 /**
@@ -51,8 +55,20 @@ export interface TicketmasterIngestionResult {
 export async function runTicketmasterIngestion(
   options: TicketmasterIngestionOptions,
 ): Promise<TicketmasterIngestionResult> {
+  const startedAt = new Date().toISOString();
+  const startMs = Date.now();
+
   const adapter = options.adapter ?? new TicketmasterDiscoveryAdapter();
   const source = await ensureTicketmasterSource(options.sourceRepo);
+
+  // Link in-memory catalog repo with sourceRepo if supported
+  if (
+    'sourceRepo' in options.catalogRepo &&
+    !(options.catalogRepo as { sourceRepo?: unknown }).sourceRepo
+  ) {
+    (options.catalogRepo as { sourceRepo?: ISourceRepository }).sourceRepo =
+      options.sourceRepo;
+  }
 
   const persist = Boolean(options.persist);
   const useFixture = Boolean(options.useFixture);
@@ -121,6 +137,7 @@ export async function runTicketmasterIngestion(
       }
     }
 
+    const completedAt = new Date().toISOString();
     return {
       source,
       rawIngestsFetched: rawIngests.length,
@@ -139,132 +156,153 @@ export async function runTicketmasterIngestion(
       reviewReasons,
       persistedEventIds: [],
       candidates: parsedCandidates,
+      startedAt,
+      completedAt,
+      durationMs: Math.max(1, Date.now() - startMs),
     };
   }
 
   // 2. Database persistence mode
-  let rawIngestsPersisted = 0;
-  let rawIngestsReused = 0;
-  const persistedRawIngests: Array<RawIngest & { id: string }> = [];
+  try {
+    let rawIngestsPersisted = 0;
+    let rawIngestsReused = 0;
+    const persistedRawIngests: Array<RawIngest & { id: string }> = [];
 
-  for (const raw of rawIngests) {
-    const existing = await options.rawIngestRepo.getBySourceUrlAndContentHash(
-      source.id,
-      raw.sourceUrl,
-      raw.contentHash,
-    );
-
-    if (existing) {
-      rawIngestsReused++;
-      persistedRawIngests.push(existing);
-    } else {
-      const saved = await options.rawIngestRepo.create({
-        sourceId: source.id,
-        sourceUrl: raw.sourceUrl,
-        acquisitionMethod: raw.acquisitionMethod,
-        fetchedAt: raw.fetchedAt,
-        contentHash: raw.contentHash,
-        contentType: raw.contentType,
-        rawContent: raw.rawContent,
-        externalStorageRef: raw.externalStorageRef,
-        httpStatus: raw.httpStatus,
-        parserVersion: raw.parserVersion,
-      });
-      rawIngestsPersisted++;
-      persistedRawIngests.push(saved);
-    }
-  }
-
-  // Parse candidates using the actually persisted raw ingest rows so IDs match
-  const candidates = await adapter.parse(persistedRawIngests);
-
-  const persistedCandidates: Array<
-    EventCandidate & { id: string; rawIngestId: string; sourceId: string }
-  > = [];
-
-  for (const candidate of candidates) {
-    const savedCand = await options.candidateRepo.create(
-      candidate as EventCandidate & { rawIngestId: string; sourceId: string },
-    );
-    persistedCandidates.push(savedCand);
-  }
-
-  // Canonicalize candidates
-  const coordinator = new CanonicalizationCoordinator(options.catalogRepo);
-  let canonicalEventsCreated = 0;
-  let canonicalEventsMatched = 0;
-  let candidatesNeedsReview = 0;
-  let candidatesRejected = 0;
-  let candidatesReused = 0;
-  const reviewReasons: Record<string, number> = {};
-  const persistedEventIds: string[] = [];
-
-  for (const cand of persistedCandidates) {
-    // Check if candidate observation was already resolved in a prior run
-    if (!options.reprocess) {
-      const existingRes = await options.catalogRepo.findResolutionByCandidateId(
-        cand.id,
+    for (const raw of rawIngests) {
+      const existing = await options.rawIngestRepo.getBySourceUrlAndContentHash(
+        source.id,
+        raw.sourceUrl,
+        raw.contentHash,
       );
-      if (existingRes) {
-        candidatesReused++;
-        if (
-          existingRes.status === 'created' ||
-          existingRes.status === 'matched'
-        ) {
-          canonicalEventsMatched++;
-          if (existingRes.eventId) persistedEventIds.push(existingRes.eventId);
-        } else if (existingRes.status === 'needs_review') {
-          candidatesNeedsReview++;
-          const reasonsList = Array.isArray(existingRes.reasons)
-            ? (existingRes.reasons as string[])
-            : Object.keys(existingRes.reasons);
-          for (const r of reasonsList) {
-            reviewReasons[r] = (reviewReasons[r] || 0) + 1;
+
+      if (existing) {
+        rawIngestsReused++;
+        persistedRawIngests.push(existing);
+      } else {
+        const saved = await options.rawIngestRepo.create({
+          sourceId: source.id,
+          sourceUrl: raw.sourceUrl,
+          acquisitionMethod: raw.acquisitionMethod,
+          fetchedAt: raw.fetchedAt,
+          contentHash: raw.contentHash,
+          contentType: raw.contentType,
+          rawContent: raw.rawContent,
+          externalStorageRef: raw.externalStorageRef,
+          httpStatus: raw.httpStatus,
+          parserVersion: raw.parserVersion,
+        });
+        rawIngestsPersisted++;
+        persistedRawIngests.push(saved);
+      }
+    }
+
+    // Parse candidates using the actually persisted raw ingest rows so IDs match
+    const candidates = await adapter.parse(persistedRawIngests);
+
+    const persistedCandidates: Array<
+      EventCandidate & { id: string; rawIngestId: string; sourceId: string }
+    > = [];
+
+    for (const candidate of candidates) {
+      const savedCand = await options.candidateRepo.create(
+        candidate as EventCandidate & { rawIngestId: string; sourceId: string },
+      );
+      persistedCandidates.push(savedCand);
+    }
+
+    // Canonicalize candidates
+    const coordinator = new CanonicalizationCoordinator(options.catalogRepo);
+    let canonicalEventsCreated = 0;
+    let canonicalEventsMatched = 0;
+    let candidatesNeedsReview = 0;
+    let candidatesRejected = 0;
+    let candidatesReused = 0;
+    const reviewReasons: Record<string, number> = {};
+    const persistedEventIds: string[] = [];
+
+    for (const cand of persistedCandidates) {
+      // Check if candidate observation was already resolved in a prior run
+      if (!options.reprocess) {
+        const existingRes =
+          await options.catalogRepo.findResolutionByCandidateId(cand.id);
+        if (existingRes) {
+          candidatesReused++;
+          if (
+            existingRes.status === 'created' ||
+            existingRes.status === 'matched'
+          ) {
+            canonicalEventsMatched++;
+            if (existingRes.eventId)
+              persistedEventIds.push(existingRes.eventId);
+          } else if (existingRes.status === 'needs_review') {
+            candidatesNeedsReview++;
+            const reasonsList = Array.isArray(existingRes.reasons)
+              ? (existingRes.reasons as string[])
+              : Object.keys(existingRes.reasons);
+            for (const r of reasonsList) {
+              reviewReasons[r] = (reviewReasons[r] || 0) + 1;
+            }
+          } else if (existingRes.status === 'rejected') {
+            candidatesRejected++;
           }
-        } else if (existingRes.status === 'rejected') {
-          candidatesRejected++;
+          continue;
         }
-        continue;
+      }
+
+      const outcome = await coordinator.canonicalize(cand);
+
+      if (outcome.status === 'created') {
+        canonicalEventsCreated++;
+        if (outcome.eventId) persistedEventIds.push(outcome.eventId);
+      } else if (outcome.status === 'matched') {
+        canonicalEventsMatched++;
+        if (outcome.eventId) persistedEventIds.push(outcome.eventId);
+      } else if (outcome.status === 'needs_review') {
+        candidatesNeedsReview++;
+        const reasonsList = Array.isArray(outcome.reasons)
+          ? (outcome.reasons as string[])
+          : Object.keys(outcome.reasons);
+        for (const r of reasonsList) {
+          reviewReasons[r] = (reviewReasons[r] || 0) + 1;
+        }
+      } else if (outcome.status === 'rejected') {
+        candidatesRejected++;
       }
     }
 
-    const outcome = await coordinator.canonicalize(cand);
+    await options.sourceRepo.recordSuccess(source.id);
 
-    if (outcome.status === 'created') {
-      canonicalEventsCreated++;
-      if (outcome.eventId) persistedEventIds.push(outcome.eventId);
-    } else if (outcome.status === 'matched') {
-      canonicalEventsMatched++;
-      if (outcome.eventId) persistedEventIds.push(outcome.eventId);
-    } else if (outcome.status === 'needs_review') {
-      candidatesNeedsReview++;
-      const reasonsList = Array.isArray(outcome.reasons)
-        ? (outcome.reasons as string[])
-        : Object.keys(outcome.reasons);
-      for (const r of reasonsList) {
-        reviewReasons[r] = (reviewReasons[r] || 0) + 1;
-      }
-    } else if (outcome.status === 'rejected') {
-      candidatesRejected++;
+    const completedAt = new Date().toISOString();
+    return {
+      source,
+      rawIngestsFetched: rawIngests.length,
+      rawIngestsPersisted,
+      rawIngestsReused,
+      candidatesParsed: candidates.length,
+      candidatesPersisted: persistedCandidates.length,
+      candidatesReused,
+      canonicalEventsCreated,
+      canonicalEventsMatched,
+      candidatesNeedsReview,
+      candidatesRejected,
+      reviewReasons,
+      persistedEventIds,
+      candidates,
+      startedAt,
+      completedAt,
+      durationMs: Math.max(1, Date.now() - startMs),
+    };
+  } catch (err) {
+    if (
+      err instanceof TicketmasterError ||
+      err instanceof PipelineDatabaseError
+    ) {
+      throw err;
     }
+    const msg = err instanceof Error ? err.message : String(err);
+    throw new PipelineDatabaseError(
+      `Database error during ingestion persistence: ${msg}`,
+      err,
+    );
   }
-
-  await options.sourceRepo.recordSuccess(source.id);
-
-  return {
-    source,
-    rawIngestsFetched: rawIngests.length,
-    rawIngestsPersisted,
-    rawIngestsReused,
-    candidatesParsed: candidates.length,
-    candidatesPersisted: persistedCandidates.length,
-    candidatesReused,
-    canonicalEventsCreated,
-    canonicalEventsMatched,
-    candidatesNeedsReview,
-    candidatesRejected,
-    reviewReasons,
-    persistedEventIds,
-    candidates,
-  };
 }

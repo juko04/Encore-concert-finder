@@ -9,14 +9,37 @@ export interface EventCardProps {
   event: CanonicalEventSummary | CanonicalEventDetail;
 }
 
+/**
+ * Normalizes raw source provider names into clean, compact badge text.
+ */
+export function formatSourceBadgeName(rawName: string): string {
+  const trimmed = rawName.trim();
+  if (
+    trimmed.toLowerCase().includes('ticketmaster') ||
+    trimmed.toLowerCase() === 'ticketmaster discovery api'
+  ) {
+    return 'Ticketmaster';
+  }
+  return trimmed;
+}
+
 export function EventCard({ event }: EventCardProps) {
   const isDetail = 'ticketLinks' in event;
   const detailEvent = isDetail ? (event as CanonicalEventDetail) : null;
   const summaryEvent = !isDetail ? (event as CanonicalEventSummary) : null;
 
   const title = summaryEvent?.title ?? detailEvent?.name ?? 'Untitled Event';
-  const venueName =
-    summaryEvent?.venueName ?? detailEvent?.venue?.name ?? 'Unknown Venue';
+
+  // Venue extraction and unknown venue handling (Tech Debt 1.4)
+  const rawVenueName = summaryEvent?.venueName ?? detailEvent?.venue?.name;
+  const isUnknownVenue =
+    !rawVenueName ||
+    rawVenueName.trim().length === 0 ||
+    rawVenueName.trim().toLowerCase() === 'unknown venue' ||
+    rawVenueName.trim().toLowerCase() === 'venue tba' ||
+    rawVenueName.trim().toLowerCase() === 'venue tba / unknown';
+  const displayVenueName = isUnknownVenue ? null : rawVenueName.trim();
+
   const city =
     summaryEvent?.city ?? detailEvent?.venue?.city ?? detailEvent?.city;
   const region =
@@ -87,8 +110,44 @@ export function EventCard({ event }: EventCardProps) {
   const isCancelled = event.status === 'cancelled';
   const isPostponed = event.status === 'postponed';
   const ticketUrl = summaryEvent?.ticketUrl ?? detailEvent?.primaryTicketUrl;
+
+  // Source attribution badges (Tech Debt 1.3)
+  const sourceBadges = React.useMemo(() => {
+    if (summaryEvent?.sources && summaryEvent.sources.length > 0) {
+      return summaryEvent.sources.map((s) => ({
+        id: s.id,
+        name: formatSourceBadgeName(s.name),
+        slug: s.slug,
+      }));
+    }
+    if (summaryEvent?.sourceName) {
+      return [
+        {
+          id: 'summary-source',
+          name: formatSourceBadgeName(summaryEvent.sourceName),
+          slug: 'source',
+        },
+      ];
+    }
+    if (detailEvent?.sources && detailEvent.sources.length > 0) {
+      return detailEvent.sources
+        .filter((s) => Boolean(s.sourceId))
+        .map((s, idx) => ({
+          id: s.sourceId || String(idx),
+          name: formatSourceBadgeName(
+            (s as { sourceName?: string }).sourceName || '',
+          ),
+          slug: 'source',
+        }))
+        .filter((b) => b.name.length > 0);
+    }
+    return [];
+  }, [summaryEvent, detailEvent]);
+
   const sourceCount =
-    detailEvent?.sources?.length ?? (summaryEvent?.sourceName ? 1 : 0);
+    detailEvent?.sources?.length ??
+    summaryEvent?.sources?.length ??
+    (summaryEvent?.sourceName ? 1 : 0);
 
   return (
     <article
@@ -127,9 +186,24 @@ export function EventCard({ event }: EventCardProps) {
 
         {/* Venue & Location */}
         <div className="mt-3 text-sm text-zinc-400">
-          <p className="font-medium text-zinc-300">{venueName}</p>
+          {isUnknownVenue ? (
+            <span
+              data-testid="venue-tba-badge"
+              className="inline-flex items-center rounded-md border border-amber-800/40 bg-zinc-800/80 px-2 py-0.5 text-xs font-medium text-amber-300/90"
+            >
+              Venue TBA / Unknown
+            </span>
+          ) : (
+            <p className="font-medium text-zinc-300">{displayVenueName}</p>
+          )}
           {(city || region) && (
-            <p className="text-xs text-zinc-500">
+            <p
+              className={
+                isUnknownVenue
+                  ? 'mt-1 text-xs text-zinc-500'
+                  : 'text-xs text-zinc-500'
+              }
+            >
               {[city, region].filter(Boolean).join(', ')}
             </p>
           )}
@@ -157,9 +231,30 @@ export function EventCard({ event }: EventCardProps) {
 
       {/* Attribution */}
       {sourceCount > 0 && (
-        <div className="mt-2 text-right text-[10px] text-zinc-500">
-          Source attribution: {sourceCount}{' '}
-          {sourceCount === 1 ? 'source' : 'sources'}
+        <div className="mt-3 flex items-center justify-between gap-2 border-t border-zinc-800/60 pt-2 text-[10px] text-zinc-500">
+          <div
+            className="flex flex-wrap items-center gap-1.5"
+            data-testid="event-sources"
+          >
+            <span className="text-[10px] text-zinc-500">Source:</span>
+            {sourceBadges.length > 0 ? (
+              sourceBadges.map((badge) => (
+                <span
+                  key={badge.id}
+                  data-testid="source-badge"
+                  className="shadow-xs inline-flex items-center rounded border border-zinc-700/60 bg-zinc-800/90 px-1.5 py-0.5 text-[10px] font-medium text-zinc-300"
+                >
+                  {badge.name}
+                </span>
+              ))
+            ) : (
+              <span className="text-zinc-400">Verified</span>
+            )}
+          </div>
+          <span className="text-[10px] text-zinc-500">
+            Source attribution: {sourceCount}{' '}
+            {sourceCount === 1 ? 'source' : 'sources'}
+          </span>
         </div>
       )}
     </article>

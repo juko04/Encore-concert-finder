@@ -134,6 +134,8 @@ export interface ICatalogRepository {
     sourceEventId?: string | null;
     sourceUrl: string;
     confidence: number;
+    sourceName?: string;
+    sourceSlug?: string;
   }): Promise<EventSourceRecord>;
   recordFieldEvidence(evidence: {
     eventId: string;

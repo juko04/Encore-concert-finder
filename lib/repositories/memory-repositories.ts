@@ -8,6 +8,7 @@ import type {
   BillingPosition,
   CandidateResolution,
   CanonicalEventDetail,
+  CanonicalEventSourceSummary,
   CanonicalEventSummary,
   CanonicalizationPayload,
   Event,
@@ -274,6 +275,12 @@ export class MemoryCatalogRepository implements ICatalogRepository {
   public eventSources: Map<string, EventSourceRecord> = new Map();
   public eventFieldEvidence: Map<string, EventFieldEvidence> = new Map();
   public candidateResolutions: Map<string, CandidateResolution> = new Map();
+  public sources: Map<string, Source> = new Map();
+  public sourceRepo?: ISourceRepository;
+
+  constructor(sourceRepo?: ISourceRepository) {
+    this.sourceRepo = sourceRepo;
+  }
 
   async getEventById(id: string): Promise<CanonicalEventDetail | null> {
     const event = this.events.get(id);
@@ -428,10 +435,53 @@ export class MemoryCatalogRepository implements ICatalogRepository {
         }
       }
 
+      const eventSources: CanonicalEventSourceSummary[] = [];
+      for (const es of this.eventSources.values()) {
+        if (es.eventId === event.id && es.isCurrent !== false) {
+          let sName = es.sourceName;
+          let sSlug = es.sourceSlug;
+          if (!sName && this.sourceRepo) {
+            const memSourceRepo = this.sourceRepo as {
+              sources?: Map<string, Source>;
+            };
+            const found = memSourceRepo.sources?.get(es.sourceId);
+            if (found) {
+              sName = found.name;
+              sSlug = found.slug;
+            }
+          }
+          if (!sName && this.sources.has(es.sourceId)) {
+            const found = this.sources.get(es.sourceId);
+            if (found) {
+              sName = found.name;
+              sSlug = found.slug;
+            }
+          }
+          if (!sName) {
+            if (
+              es.sourceUrl.includes('ticketmaster') ||
+              es.sourceId.includes('000000000003')
+            ) {
+              sName = 'Ticketmaster Discovery API';
+              sSlug = 'ticketmaster-discovery';
+            } else {
+              sName = 'Verified Source';
+              sSlug = 'verified-source';
+            }
+          }
+          eventSources.push({
+            id: es.sourceId,
+            name: sName,
+            slug: sSlug ?? 'source',
+            sourceUrl: es.sourceUrl,
+          });
+        }
+      }
+
       return {
         id: event.id,
         title: event.name,
-        venueName: venue?.name ?? event.name,
+        venueName: venue?.name ?? 'Venue TBA',
         city: venue?.city ?? event.city ?? undefined,
         region: venue?.region ?? event.region ?? undefined,
         localStartDate: event.localStartDate,
@@ -444,6 +494,8 @@ export class MemoryCatalogRepository implements ICatalogRepository {
         minPrice,
         maxPrice,
         currency,
+        sourceName: eventSources.length > 0 ? eventSources[0].name : undefined,
+        sources: eventSources,
       };
     });
   }
@@ -740,6 +792,8 @@ export class MemoryCatalogRepository implements ICatalogRepository {
     sourceEventId?: string | null;
     sourceUrl: string;
     confidence: number;
+    sourceName?: string;
+    sourceSlug?: string;
   }): Promise<EventSourceRecord> {
     if (sourceRecord.sourceEventId) {
       for (const es of this.eventSources.values()) {
@@ -1070,6 +1124,8 @@ export class MemoryCatalogRepository implements ICatalogRepository {
             sourceEventId: payload.source.source_event_id,
             sourceUrl: payload.source.source_url,
             confidence: payload.source.confidence ?? 0.8,
+            sourceName: payload.source.source_name,
+            sourceSlug: payload.source.source_slug,
           });
         }
 

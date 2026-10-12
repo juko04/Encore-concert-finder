@@ -21,13 +21,14 @@ These items were identified during Phase 1 independent reviews and CI runs. They
 - **Resolution:** Implemented atomic external ID enrichment in `ArtistResolver`, `CanonicalizationCoordinator`, `MemoryCatalogRepository`, and PostgreSQL stored procedure migration `20261012120000_enrich_matched_artist_external_ids.sql`. Collisions and cross-artist conflicting associations are detected and rejected.
 
 ### 1.3 Discover Catalog Source Attribution
-- **Status:** Deferred to UI refinement.
-- **Context:** The `/discover` catalog page displays canonical event cards, but source provenance attribution (e.g. "Sourced from Ticketmaster" or "Direct Venue Calendar") is not yet rendered on individual cards.
-- **Future Action:** Display source badges on event cards to provide human-readable provenance and transparency.
+- **Status:** Complete (Phase 2, PR 3).
+- **Context:** The `/discover` catalog page displays canonical event cards, but source provenance attribution (e.g. "Sourced from Ticketmaster" or "Direct Venue Calendar") was not rendered on individual cards.
+- **Resolution:** Batch-fetched `event_sources` joined with `sources` in `SupabaseCatalogRepository.listEvents` and `MemoryCatalogRepository.listEvents`, rendered subtle source provenance badges with `data-testid="source-badge"` on `EventCard.tsx`.
 
 ### 1.4 Unknown Venue Display Behavior
-- **Status:** Deferred to UI refinement.
+- **Status:** Complete (Phase 2, PR 3).
 - **Context:** In fallback display cases where venue information is missing or pending resolution, UI components should display a clear "Venue TBA / Unknown" badge rather than substituting the event title in the venue slot.
+- **Resolution:** Rendered `<span data-testid="venue-tba-badge">Venue TBA / Unknown</span>` in `EventCard.tsx` when venue name is missing or placeholder without fabricating event title or artist name; preserved locality display, neutral price formatting, and status badges.
 
 ---
 
@@ -36,7 +37,8 @@ These items were identified during Phase 1 independent reviews and CI runs. They
 The following items were explicitly reviewed during Phase 1 and deferred:
 
 1. **N+1 Catalog Query Optimization:**  
-   `listEvents` queries artists and ticket links for returned events. Safe to defer until catalog query volume warrants a consolidated SQL join, materialized view, or GraphQL query.
+   - **Status:** Complete (Phase 2, PR 3).
+   - **Resolution:** Refactored `SupabaseCatalogRepository.listEvents` to batch-fetch `event_artists`, `event_ticket_links`, and `event_sources` + `sources` in single `.in('event_id', eventIds)` queries, reducing catalog page rendering from 1 + 3N queries to exactly 4 queries.
 2. **Advanced Venue Aliasing Infrastructure:**  
    Bidirectional suffix and alias normalization is implemented in application code; a dedicated alias registry table and alias maintenance pipeline is deferred to future operator tooling.
 3. **Manual Resolution Operator UI:**  

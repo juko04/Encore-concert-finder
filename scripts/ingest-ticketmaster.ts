@@ -16,6 +16,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {
   TicketmasterDiscoveryAdapter,
+  classifyIngestionError,
   redactSensitiveString,
   runTicketmasterIngestion,
   type TicketmasterEventQueryParams,
@@ -306,6 +307,15 @@ async function run(): Promise<void> {
     console.log(
       '================================================================================',
     );
+    console.log(
+      `  Execution Mode:             ${options.persist ? 'DATABASE PERSISTENCE' : 'DRY-RUN'}`,
+    );
+    console.log(`  Execution Started:          ${result.startedAt}`);
+    console.log(`  Execution Completed:        ${result.completedAt}`);
+    console.log(`  Pipeline Duration:          ${result.durationMs}ms`);
+    console.log(
+      `  Query Scope:                state=${options.stateCode}, size=${options.size}, page=${options.page}${options.keyword ? `, keyword=${options.keyword}` : ''}`,
+    );
     console.log(`  Raw Ingests Fetched:        ${result.rawIngestsFetched}`);
     console.log(`  Raw Ingests Persisted:      ${result.rawIngestsPersisted}`);
     console.log(`  Raw Ingests Reused:         ${result.rawIngestsReused}`);
@@ -354,16 +364,50 @@ async function run(): Promise<void> {
       );
     }
   } catch (error) {
-    const rawMsg = error instanceof Error ? error.message : String(error);
-    console.error(`\nIngestion failed: ${redactSensitiveString(rawMsg)}\n`);
+    const report = classifyIngestionError(error, apiKey);
+
+    let remediation =
+      'Inspect error details and retry after addressing underlying condition.';
+    if (report.category === 'auth_failure') {
+      remediation =
+        'Verify that TICKETMASTER_API_KEY is correctly set in environment or .env.local and has active Discovery API v2 entitlements.';
+    } else if (report.category === 'rate_limit_exceeded') {
+      remediation =
+        'Provider rate limit quota reached or 429 backoff exhausted. Try narrowing geographic scope or decreasing query frequency.';
+    } else if (report.category === 'network_error') {
+      remediation =
+        'Network connectivity issue or timeout reaching Ticketmaster endpoint. Check internet access or retry with narrower query filters.';
+    } else if (report.category === 'validation_error') {
+      remediation =
+        'Ticketmaster response payload or query parameters failed schema validation. Check query params or fixture format.';
+    } else if (report.category === 'database_error') {
+      remediation =
+        'Database transaction failure or schema constraint violation during canonicalization. Check Supabase connection and database logs.';
+    }
+
+    console.error(
+      '\n================================================================================',
+    );
+    console.error('INGESTION FAILURE REPORT:');
+    console.error(
+      '================================================================================',
+    );
+    console.error(`  Category:     ${report.category.toUpperCase()}`);
+    console.error(`  Status Code:  ${report.statusCode ?? 'N/A'}`);
+    console.error(`  Message:      ${report.message}`);
+    console.error(`  Remediation:  ${remediation}`);
+    console.error(
+      '================================================================================\n',
+    );
     process.exit(1);
   }
 }
 
-if (
-  process.argv[1] &&
-  process.argv[1].includes('ingest-ticketmaster') &&
-  !process.env.VITEST
-) {
+const isCliEntry =
+  !process.env.VITEST &&
+  (import.meta.url.includes('ingest-ticketmaster') ||
+    process.argv.some((arg) => arg.includes('ingest-ticketmaster')));
+
+if (isCliEntry) {
   run();
 }
