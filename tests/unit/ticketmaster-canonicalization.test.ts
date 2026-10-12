@@ -18,6 +18,7 @@ import {
 } from '@/lib/sources/ticketmaster';
 import { formatPricePreview } from '../../scripts/ingest-ticketmaster';
 import type { CanonicalizationPayload } from '@/lib/repositories/interfaces';
+import { buildIsolatedTicketmasterFixture } from '../fixtures/fixture-helper';
 
 describe('Phase 2 PR 2: Ticketmaster Canonicalization Integration', () => {
   function setupTestRepositories() {
@@ -1390,5 +1391,71 @@ describe('Phase 2 PR 2: Ticketmaster Canonicalization Integration', () => {
     expect(formatPricePreview({ min: 35, max: 35, currency: undefined })).toBe(
       '35 (Currency Unknown)',
     );
+  });
+
+  // Requirement 23: Consecutive ingestion runs with isolated namespaced fixtures
+  it('23. consecutive ingestion runs with isolated fixtures succeed without colliding or duplicating across runs', async () => {
+    const { sourceRepo, rawIngestRepo, candidateRepo, catalogRepo } =
+      setupTestRepositories();
+
+    const fixtureA = buildIsolatedTicketmasterFixture('runA', 10);
+    const fixtureB = buildIsolatedTicketmasterFixture('runB', 20);
+
+    // Run 1: First ingestion with fixture A
+    const runA = await runTicketmasterIngestion({
+      sourceRepo,
+      rawIngestRepo,
+      candidateRepo,
+      catalogRepo,
+      useFixture: true,
+      fixtureJson: fixtureA,
+      persist: true,
+    });
+
+    expect(runA.rawIngestsPersisted).toBe(1);
+    expect(runA.candidatesPersisted).toBe(6);
+    expect(runA.canonicalEventsCreated).toBe(5);
+    expect(runA.candidatesNeedsReview).toBe(1);
+
+    // Run 2: Consecutive ingestion with fixture B against the exact same storage state
+    const runB = await runTicketmasterIngestion({
+      sourceRepo,
+      rawIngestRepo,
+      candidateRepo,
+      catalogRepo,
+      useFixture: true,
+      fixtureJson: fixtureB,
+      persist: true,
+    });
+
+    expect(runB.rawIngestsPersisted).toBe(1);
+    expect(runB.candidatesPersisted).toBe(6);
+    expect(runB.canonicalEventsCreated).toBe(5);
+    expect(runB.candidatesNeedsReview).toBe(1);
+
+    // Total events in catalog is now 10 (5 from Run A + 5 from Run B)
+    const allEvents = await catalogRepo.listEvents({ limit: 50 });
+    expect(allEvents.length).toBe(10);
+
+    // Replay of Run B against the same storage state remains 100% idempotent
+    const replayB = await runTicketmasterIngestion({
+      sourceRepo,
+      rawIngestRepo,
+      candidateRepo,
+      catalogRepo,
+      useFixture: true,
+      fixtureJson: fixtureB,
+      persist: true,
+    });
+
+    expect(replayB.rawIngestsPersisted).toBe(0);
+    expect(replayB.rawIngestsReused).toBe(1);
+    expect(replayB.candidatesReused).toBe(6);
+    expect(replayB.canonicalEventsCreated).toBe(0);
+    expect(replayB.canonicalEventsMatched).toBe(5);
+
+    // Catalog count remains exactly 10
+    const allEventsAfterReplay = await catalogRepo.listEvents({ limit: 50 });
+    expect(allEventsAfterReplay.length).toBe(10);
   });
 });

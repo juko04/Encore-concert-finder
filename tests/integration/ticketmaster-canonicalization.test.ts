@@ -9,6 +9,7 @@ import { ensureTicketmasterSource } from '@/lib/sources/ticketmaster/source-regi
 import { runTicketmasterIngestion } from '@/lib/sources/ticketmaster/ingestion-pipeline';
 import { assertSafeDatabaseTarget } from '@/lib/supabase/destination-guard';
 import type { CanonicalizationPayload } from '@/lib/repositories/interfaces';
+import { buildIsolatedTicketmasterFixture } from '../fixtures/fixture-helper';
 
 interface LocalCredentials {
   url: string;
@@ -62,6 +63,16 @@ function resolveSupabaseCredentials(): LocalCredentials | null {
 
 describe('Supabase Integration: Ticketmaster Ingestion & Canonicalization', () => {
   const credentials = resolveSupabaseCredentials();
+
+  // Generate an isolated fixture uniquely namespaced to this test suite execution.
+  // Guarantees repeat runs against the same persistent local development database
+  // pass cleanly without requiring a database reset.
+  const suiteNonce = `${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
+  const dayOffset = (Date.now() % 50000) + Math.floor(Math.random() * 500) + 1;
+  const isolatedFixtureJson = buildIsolatedTicketmasterFixture(
+    suiteNonce,
+    dayOffset,
+  );
 
   let adminClient: SupabaseClient | null = null;
   let isDbAvailable = false;
@@ -169,6 +180,7 @@ describe('Supabase Integration: Ticketmaster Ingestion & Canonicalization', () =
 
     const result = await runTicketmasterIngestion({
       useFixture: true,
+      fixtureJson: isolatedFixtureJson,
       persist: true,
       sourceRepo,
       rawIngestRepo,
@@ -194,6 +206,7 @@ describe('Supabase Integration: Ticketmaster Ingestion & Canonicalization', () =
 
     const replayRun = await runTicketmasterIngestion({
       useFixture: true,
+      fixtureJson: isolatedFixtureJson,
       persist: true,
       sourceRepo,
       rawIngestRepo,
@@ -223,6 +236,7 @@ describe('Supabase Integration: Ticketmaster Ingestion & Canonicalization', () =
 
     const reprocessRun = await runTicketmasterIngestion({
       useFixture: true,
+      fixtureJson: isolatedFixtureJson,
       persist: true,
       sourceRepo,
       rawIngestRepo,
@@ -239,7 +253,7 @@ describe('Supabase Integration: Ticketmaster Ingestion & Canonicalization', () =
   it('successfully enriches external IDs for matched artist in PostgreSQL stored procedure', async () => {
     if (!ensureDbAvailable()) return;
 
-    const testNonce = Date.now().toString();
+    const testNonce = `${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
     const artistName = `Test Match Artist ${testNonce}`;
 
     // 1. Create artist in PostgreSQL
@@ -297,7 +311,7 @@ describe('Supabase Integration: Ticketmaster Ingestion & Canonicalization', () =
   it('idempotent identical external ID replay succeeds in PostgreSQL without error', async () => {
     if (!ensureDbAvailable()) return;
 
-    const testNonce = Date.now().toString();
+    const testNonce = `${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
     const artistName = `Test Idempotent Artist ${testNonce}`;
 
     const { data: artist, error: artistError } = await adminClient!
@@ -355,7 +369,7 @@ describe('Supabase Integration: Ticketmaster Ingestion & Canonicalization', () =
   it('cross-artist external ID conflict rejects with 23505 and rolls back entire transaction atomically in PostgreSQL', async () => {
     if (!ensureDbAvailable()) return;
 
-    const testNonce = Date.now().toString();
+    const testNonce = `${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
     const artist1Name = `Test Alpha Artist ${testNonce}`;
     const artist2Name = `Test Beta Artist ${testNonce}`;
 
