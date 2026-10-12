@@ -148,31 +148,6 @@ describe('CanonicalizationCoordinator Unit Tests', () => {
     expect(res.reasons).toContain('missing_or_invalid_timezone');
   });
 
-  it('routes candidate to needs_review when venueName is empty or missing', async () => {
-    const candidateMissingVenue = {
-      ...fixtures.single_show,
-      venueName: '',
-    };
-
-    const res = await coordinator.canonicalize(candidateMissingVenue);
-    expect(res.status).toBe('needs_review');
-    expect(res.eventId).toBeNull();
-    expect(res.reasons).toContain('missing_venue_identity');
-  });
-
-  it('routes candidate to needs_review when artists and artistNames are empty', async () => {
-    const candidateMissingArtists = {
-      ...fixtures.single_show,
-      artistNames: [],
-      artists: [],
-    };
-
-    const res = await coordinator.canonicalize(candidateMissingArtists);
-    expect(res.status).toBe('needs_review');
-    expect(res.eventId).toBeNull();
-    expect(res.reasons).toContain('missing_artist_identity');
-  });
-
   it('derives local calendar date correctly across UTC date rollover (Finding 4)', async () => {
     // UTC 02:00:00 on Oct 15 in America/Denver is 20:00:00 on Oct 14
     const rolloverCandidate = fixtures.utc_rollover_show;

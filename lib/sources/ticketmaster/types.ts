@@ -78,7 +78,7 @@ export type TicketmasterAttraction = z.infer<
  */
 export const TicketmasterVenueSchema = z.object({
   id: z.string().optional(),
-  name: z.string().default('Unknown Venue'),
+  name: z.string().optional(),
   url: z.string().optional(),
   postalCode: z.string().optional(),
   timezone: z.string().optional(),
@@ -119,7 +119,7 @@ export type TicketmasterVenue = z.infer<typeof TicketmasterVenueSchema>;
  */
 export const TicketmasterPriceRangeSchema = z.object({
   type: z.string().optional(),
-  currency: z.string().default('USD'),
+  currency: z.string().optional(),
   min: z.number().optional(),
   max: z.number().optional(),
 });

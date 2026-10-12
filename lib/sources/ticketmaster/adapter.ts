@@ -76,9 +76,17 @@ export class TicketmasterDiscoveryAdapter implements EventSourceAdapter {
    */
   async parse(rawIngests: RawIngest[]): Promise<EventCandidate[]> {
     const candidates: EventCandidate[] = [];
-
     for (const raw of rawIngests) {
-      if (!raw.rawContent) continue;
+      if (!raw.rawContent || raw.rawContent.trim().length === 0) {
+        if (raw.externalStorageRef) {
+          throw new Error(
+            `Ticketmaster raw ingest content is stored in external storage (${raw.externalStorageRef}), which requires asynchronous retrieval not supported in PR 1.`,
+          );
+        }
+        throw new Error(
+          `Ticketmaster raw ingest content is missing or unavailable for source ${raw.sourceId} (rawIngestId: ${raw.id || 'unpersisted'}).`,
+        );
+      }
 
       let json: unknown;
       try {

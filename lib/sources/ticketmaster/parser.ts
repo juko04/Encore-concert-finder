@@ -142,7 +142,7 @@ export function parseTicketmasterEvent(
     ? {
         min: priceRange.min,
         max: priceRange.max,
-        currency: priceRange.currency || 'USD',
+        currency: priceRange.currency || undefined,
       }
     : undefined;
 

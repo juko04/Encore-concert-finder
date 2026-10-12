@@ -7,6 +7,7 @@ import {
   redactSensitiveString,
   redactSensitiveUrl,
   TicketmasterEvent,
+  TicketmasterEventsResponseSchema,
 } from '@/lib/sources/ticketmaster';
 import type { RawIngest } from '@/lib/domain/source';
 
@@ -252,6 +253,86 @@ describe('Ticketmaster Ingestion Foundation', () => {
         'missing_artist_identity',
       );
     });
+
+    it('does not fabricate venue name or currency when passed through Zod schema first', () => {
+      // Incomplete raw provider payload: venue has no name, price has no currency
+      const rawIncompletePayload = {
+        _embedded: {
+          events: [
+            {
+              id: 'tm-evt-schema-test',
+              name: 'Mystery Acoustics Night',
+              type: 'event',
+              url: 'https://www.ticketmaster.com/mystery-acoustics-night/event/123',
+              dates: {
+                start: {
+                  localDate: '2026-11-25',
+                  localTime: '19:00:00',
+                  dateTime: '2026-11-26T02:00:00Z',
+                },
+                timezone: 'America/Denver',
+                status: { code: 'onsale' },
+              },
+              priceRanges: [
+                {
+                  type: 'standard',
+                  min: 30.0,
+                  max: 75.0,
+                  // intentionally omitting currency
+                },
+              ],
+              _embedded: {
+                venues: [
+                  {
+                    id: 'ven-no-name-id',
+                    // intentionally omitting name
+                    city: { name: 'Denver' },
+                    state: { stateCode: 'CO' },
+                  },
+                ],
+                // intentionally omitting attractions
+              },
+            },
+          ],
+        },
+        page: {
+          size: 1,
+          totalElements: 1,
+          totalPages: 1,
+          number: 0,
+        },
+      };
+
+      // 1. Pass through Zod schema first
+      const validated =
+        TicketmasterEventsResponseSchema.parse(rawIncompletePayload);
+      const rawParsedEvent = validated._embedded!.events![0];
+
+      // Verify Zod schema did not inject 'Unknown Venue' or 'USD'
+      expect(rawParsedEvent._embedded?.venues?.[0].name).toBeUndefined();
+      expect(rawParsedEvent.priceRanges?.[0].currency).toBeUndefined();
+
+      // 2. Pass into parseTicketmasterEvent
+      const candidate = parseTicketmasterEvent(rawParsedEvent, dummyContext);
+
+      // Verify parser behavior
+      expect(candidate.venueName).toBe('');
+      expect(candidate.venueName).not.toBe('Unknown Venue');
+      expect(candidate.price?.min).toBe(30.0);
+      expect(candidate.price?.max).toBe(75.0);
+      expect(candidate.price?.currency).toBeUndefined();
+      expect(candidate.price?.currency).not.toBe('USD');
+
+      // Verify accurate needs_review classification
+      expect(candidate.resolutionStatus).toBe('needs_review');
+      expect(candidate.resolutionProvenance?.reasons).toContain(
+        'missing_venue_identity',
+      );
+      expect(candidate.resolutionProvenance?.reasons).toContain(
+        'missing_artist_identity',
+      );
+      expect(candidate.confidence).toBe(0.5);
+    });
   });
 
   describe('TicketmasterDiscoveryAdapter', () => {
@@ -351,6 +432,54 @@ describe('Ticketmaster Ingestion Foundation', () => {
 
       const candidates = await adapter.parse([emptyIngest]);
       expect(candidates).toEqual([]);
+    });
+
+    it('throws descriptive error when rawContent is missing or empty rather than treating as empty response', async () => {
+      const nullContentIngest: RawIngest = {
+        id: 'raw-ingest-null',
+        sourceId: adapter.id,
+        sourceUrl: 'https://app.ticketmaster.com/discovery/v2/events.json',
+        acquisitionMethod: 'api',
+        fetchedAt: '2026-10-10T12:00:00Z',
+        contentHash: 'hash',
+        contentType: 'application/json',
+        rawContent: null,
+        httpStatus: 200,
+        parserVersion: adapter.parserVersion,
+      };
+
+      await expect(adapter.parse([nullContentIngest])).rejects.toThrow(
+        /Ticketmaster raw ingest content is missing or unavailable/,
+      );
+
+      const emptyStringIngest: RawIngest = {
+        ...nullContentIngest,
+        rawContent: '   ',
+      };
+
+      await expect(adapter.parse([emptyStringIngest])).rejects.toThrow(
+        /Ticketmaster raw ingest content is missing or unavailable/,
+      );
+    });
+
+    it('throws descriptive error when rawContent is stored in external storage', async () => {
+      const externalIngest: RawIngest = {
+        id: 'raw-ingest-ext',
+        sourceId: adapter.id,
+        sourceUrl: 'https://app.ticketmaster.com/discovery/v2/events.json',
+        acquisitionMethod: 'api',
+        fetchedAt: '2026-10-10T12:00:00Z',
+        contentHash: 'hash',
+        contentType: 'application/json',
+        rawContent: null,
+        externalStorageRef: 's3://encore-raw-ingests/tm/2026-10-10/page-1.json',
+        httpStatus: 200,
+        parserVersion: adapter.parserVersion,
+      };
+
+      await expect(adapter.parse([externalIngest])).rejects.toThrow(
+        /Ticketmaster raw ingest content is stored in external storage/,
+      );
     });
   });
 

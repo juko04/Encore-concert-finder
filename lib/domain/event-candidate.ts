@@ -19,7 +19,7 @@ export interface CandidateArtist {
 export interface CandidatePrice {
   min?: number;
   max?: number;
-  currency: string;
+  currency?: string;
   isFree?: boolean;
   estimatedFees?: number;
 }
