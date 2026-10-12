@@ -32,6 +32,11 @@ export interface ArtistPreparationResult {
       providerUrl?: string | null;
     }>;
   };
+  externalIdsToEnrich?: Array<{
+    provider: string;
+    externalId: string;
+    providerUrl?: string | null;
+  }>;
   reasons: string[];
 }
 
@@ -74,10 +79,24 @@ export class ArtistResolver {
             };
           }
 
+          const enrichment = await this.evaluateExternalIdEnrichment(
+            catalogRepo,
+            matched.id,
+            options.externalIds,
+          );
+
+          if (enrichment.conflictReason) {
+            return {
+              status: 'ambiguous',
+              reasons: [enrichment.conflictReason],
+            };
+          }
+
           return {
             status: 'matched',
             artistId: matched.id,
             artist: matched,
+            externalIdsToEnrich: enrichment.externalIdsToEnrich,
             reasons: ['exact_external_id_match'],
           };
         }
@@ -113,10 +132,24 @@ export class ArtistResolver {
           }
         }
 
+        const enrichment = await this.evaluateExternalIdEnrichment(
+          catalogRepo,
+          matched.id,
+          options.externalIds,
+        );
+
+        if (enrichment.conflictReason) {
+          return {
+            status: 'ambiguous',
+            reasons: [enrichment.conflictReason],
+          };
+        }
+
         return {
           status: 'matched',
           artistId: matched.id,
           artist: matched,
+          externalIdsToEnrich: enrichment.externalIdsToEnrich,
           reasons: ['existing_canonical_event_artist_match'],
         };
       }
@@ -260,6 +293,73 @@ export class ArtistResolver {
       artist: created,
       isNew: true,
       matchMethod: 'created',
+    };
+  }
+
+  /**
+   * Evaluates incoming external IDs against an already matched canonical artist.
+   * Ensures non-conflicting IDs can be enriched, while detecting collisions or contradictory identities.
+   */
+  private async evaluateExternalIdEnrichment(
+    catalogRepo: ICatalogRepository,
+    matchedArtistId: string,
+    incomingExternalIds?: Array<{
+      provider: string;
+      externalId: string;
+      providerUrl?: string | null;
+    }>,
+  ): Promise<{
+    externalIdsToEnrich?: Array<{
+      provider: string;
+      externalId: string;
+      providerUrl?: string | null;
+    }>;
+    conflictReason?: string;
+  }> {
+    if (!incomingExternalIds || incomingExternalIds.length === 0) {
+      return {};
+    }
+
+    const matchedExtIds =
+      await catalogRepo.findArtistExternalIds(matchedArtistId);
+    const toEnrich: Array<{
+      provider: string;
+      externalId: string;
+      providerUrl?: string | null;
+    }> = [];
+
+    for (const incoming of incomingExternalIds) {
+      const existingForProvider = matchedExtIds.find(
+        (e) => e.provider === incoming.provider,
+      );
+
+      if (existingForProvider) {
+        if (existingForProvider.externalId !== incoming.externalId) {
+          return {
+            conflictReason: 'conflicting_external_id_for_matched_artist',
+          };
+        }
+        // Identical external ID already attached -> idempotent skip
+        continue;
+      }
+
+      // Verify that no OTHER canonical artist already owns this incoming external ID
+      const otherArtist = await catalogRepo.findArtistByExternalId(
+        incoming.provider,
+        incoming.externalId,
+      );
+      if (otherArtist && otherArtist.id !== matchedArtistId) {
+        return {
+          conflictReason:
+            'external_id_already_associated_with_different_artist',
+        };
+      }
+
+      toEnrich.push(incoming);
+    }
+
+    return {
+      externalIdsToEnrich: toEnrich.length > 0 ? toEnrich : undefined,
     };
   }
 }

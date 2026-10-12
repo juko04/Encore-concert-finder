@@ -132,6 +132,30 @@ export class CanonicalizationCoordinator {
     }
     const candidateId = candidate.id;
 
+    // Validate venue identity before resolving (avoid creating canonical "Unknown Venue")
+    const trimmedVenueName = candidate.venueName?.trim();
+    if (
+      !trimmedVenueName ||
+      trimmedVenueName.length === 0 ||
+      trimmedVenueName.toLowerCase() === 'unknown venue'
+    ) {
+      const payload: CanonicalizationPayload = {
+        resolution: {
+          event_candidate_id: candidateId,
+          status: 'needs_review',
+          matcher_version: '1.0.0',
+          confidence: 0.4,
+          reasons: ['missing_venue_identity'],
+        },
+      };
+      await this.catalogRepo.applyCanonicalization(payload);
+      return {
+        eventId: null,
+        status: 'needs_review',
+        reasons: ['missing_venue_identity'],
+      };
+    }
+
     // Validate locality before resolving venue (Point 9: Empty city is not valid unknown geography)
     const trimmedCity = candidate.city?.trim();
     if (!trimmedCity) {
@@ -156,7 +180,7 @@ export class CanonicalizationCoordinator {
     const venuePrep = await this.venueResolver.resolveOrPrepare(
       this.catalogRepo,
       {
-        name: candidate.venueName,
+        name: trimmedVenueName,
         city: trimmedCity,
         region: candidate.state,
         countryCode: candidate.country ?? null,
@@ -269,8 +293,33 @@ export class CanonicalizationCoordinator {
             sortOrder: idx,
           }));
 
-    for (let index = 0; index < candidateArtists.length; index++) {
-      const candidateArtist = candidateArtists[index];
+    const validCandidateArtists = candidateArtists.filter(
+      (a) =>
+        a.name &&
+        a.name.trim().length > 0 &&
+        a.name.trim().toLowerCase() !== 'unknown artist',
+    );
+
+    if (validCandidateArtists.length === 0) {
+      const payload: CanonicalizationPayload = {
+        resolution: {
+          event_candidate_id: candidateId,
+          status: 'needs_review',
+          matcher_version: '1.0.0',
+          confidence: 0.4,
+          reasons: ['missing_artist_identity'],
+        },
+      };
+      await this.catalogRepo.applyCanonicalization(payload);
+      return {
+        eventId: null,
+        status: 'needs_review',
+        reasons: ['missing_artist_identity'],
+      };
+    }
+
+    for (let index = 0; index < validCandidateArtists.length; index++) {
+      const candidateArtist = validCandidateArtists[index];
 
       let disambiguatedArtistId: string | undefined;
       if (existingMatchedDetail) {
@@ -325,6 +374,11 @@ export class CanonicalizationCoordinator {
           artist_id: resolved.artistId!,
           billing_position: billingPos,
           sort_order: sortOrd,
+          external_ids: resolved.externalIdsToEnrich?.map((e) => ({
+            provider: e.provider,
+            external_id: e.externalId,
+            provider_url: e.providerUrl,
+          })),
         });
       } else if (resolved.status === 'to_create') {
         const toCreate = resolved.artistToCreate!;
@@ -521,8 +575,8 @@ export class CanonicalizationCoordinator {
       const existingEvent = matchResult.matchedEvent!;
       const mergeOutcome = evaluateFieldMerge(
         existingEvent,
-        candidate,
-        candidate.provenance?.parserVersion,
+        preparedCandidate,
+        preparedCandidate.provenance?.parserVersion,
       );
 
       payload = {

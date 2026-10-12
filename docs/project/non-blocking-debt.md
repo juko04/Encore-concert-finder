@@ -16,9 +16,9 @@ These items were identified during Phase 1 independent reviews and CI runs. They
   2. Upgraded `actions/checkout@v4` → `actions/checkout@v7` and `actions/setup-node@v4` → `actions/setup-node@v7`, which run natively on Node 24 runtime, eliminating Node 20 deprecation warnings.
 
 ### 1.2 Trusted Artist External ID Enrichment on Existing Matches
-- **Status:** Deferred to Phase 2 / Ingestion expansion.
-- **Context:** When a candidate matches an existing canonical artist, `ArtistResolver` currently returns the resolved `artistId`. If the incoming candidate carries *additional* trusted external IDs (e.g. MusicBrainz or Ticketmaster IDs) not yet registered on that artist, they are not yet merged into `artist_external_ids`.
-- **Future Action:** Implement an atomic enrichment path in `apply_canonicalization` to insert newly learned external IDs for already-matched artists when no conflict exists.
+- **Status:** Complete (Phase 2, PR 2).
+- **Context:** When a candidate matches an existing canonical artist, `ArtistResolver` previously returned the resolved `artistId` without persisting new external IDs on that artist.
+- **Resolution:** Implemented atomic external ID enrichment in `ArtistResolver`, `CanonicalizationCoordinator`, `MemoryCatalogRepository`, and PostgreSQL stored procedure migration `20261012120000_enrich_matched_artist_external_ids.sql`. Collisions and cross-artist conflicting associations are detected and rejected.
 
 ### 1.3 Discover Catalog Source Attribution
 - **Status:** Deferred to UI refinement.

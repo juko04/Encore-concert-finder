@@ -1,14 +1,15 @@
 #!/usr/bin/env node
 
 /**
- * Controlled CLI Ingestion Runner for Ticketmaster Discovery API (PR 1 Dry-Run Foundation).
+ * Controlled CLI Ingestion Runner for Ticketmaster Discovery API (Phase 2, PR 2).
  * Usage:
- *   npm run ingest:ticketmaster -- [--fixture] [--state=CO] [--size=20] [--keyword=rock]
+ *   # Safe dry-run preview (default, zero database writes):
+ *   npm run ingest:ticketmaster -- --fixture
+ *   npm run ingest:ticketmaster -- [--state=CO] [--size=20] [--keyword=rock]
  *
- * Notes:
- *   Safe dry-run inspection only (zero database modifications).
- *   --state: CO (configurable initial test region)
- *   --size: 20
+ *   # Explicit database persistence mode:
+ *   npm run ingest:ticketmaster -- --fixture --persist
+ *   npm run ingest:ticketmaster -- --persist --size=5
  */
 
 import fs from 'node:fs';
@@ -16,12 +17,24 @@ import path from 'node:path';
 import {
   TicketmasterDiscoveryAdapter,
   redactSensitiveString,
+  runTicketmasterIngestion,
   type TicketmasterEventQueryParams,
 } from '@/lib/sources/ticketmaster';
-import type { RawIngest } from '@/lib/domain/source';
+import {
+  MemoryCatalogRepository,
+  MemoryEventCandidateRepository,
+  MemoryRawIngestRepository,
+  MemorySourceRepository,
+} from '@/lib/repositories/memory-repositories';
+import { SupabaseSourceRepository } from '@/lib/repositories/source-repository';
+import { SupabaseRawIngestRepository } from '@/lib/repositories/raw-ingest-repository';
+import { SupabaseEventCandidateRepository } from '@/lib/repositories/event-candidate-repository';
+import { SupabaseCatalogRepository } from '@/lib/repositories/catalog-repository';
 
 interface ParsedArgs {
   useFixture: boolean;
+  persist: boolean;
+  allowProductionWrite: boolean;
   stateCode: string;
   size: number;
   page: number;
@@ -29,9 +42,36 @@ interface ParsedArgs {
   marketId?: string;
 }
 
+function loadEnvLocal(): void {
+  const envPath = path.resolve(process.cwd(), '.env.local');
+  if (fs.existsSync(envPath)) {
+    const lines = fs.readFileSync(envPath, 'utf-8').split('\n');
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith('#')) continue;
+      const eqIdx = trimmed.indexOf('=');
+      if (eqIdx > 0) {
+        const key = trimmed.slice(0, eqIdx).trim();
+        let val = trimmed.slice(eqIdx + 1).trim();
+        if (
+          (val.startsWith('"') && val.endsWith('"')) ||
+          (val.startsWith("'") && val.endsWith("'"))
+        ) {
+          val = val.slice(1, -1);
+        }
+        if (!process.env[key]) {
+          process.env[key] = val;
+        }
+      }
+    }
+  }
+}
+
 function parseArgs(args: string[]): ParsedArgs {
   const result: ParsedArgs = {
     useFixture: false,
+    persist: false,
+    allowProductionWrite: false,
     stateCode: 'CO',
     size: 20,
     page: 0,
@@ -40,6 +80,10 @@ function parseArgs(args: string[]): ParsedArgs {
   for (const arg of args) {
     if (arg === '--fixture') {
       result.useFixture = true;
+    } else if (arg === '--persist') {
+      result.persist = true;
+    } else if (arg === '--allow-production-write') {
+      result.allowProductionWrite = true;
     } else if (arg.startsWith('--state=')) {
       result.stateCode = arg.split('=')[1].toUpperCase();
     } else if (arg.startsWith('--size=')) {
@@ -57,12 +101,15 @@ function parseArgs(args: string[]): ParsedArgs {
 }
 
 async function run(): Promise<void> {
+  loadEnvLocal();
   const options = parseArgs(process.argv.slice(2));
 
   console.log('\n============================================================');
-  console.log('       ENCORE — TICKETMASTER INGESTION RUNNER (PR 1)');
+  console.log('       ENCORE — TICKETMASTER INGESTION RUNNER (PR 2)');
   console.log('============================================================');
-  console.log('Mode:            DRY-RUN (Safe Read-Only In-Memory Preview)');
+  console.log(
+    `Mode:            ${options.persist ? 'DATABASE PERSISTENCE (Atomic Write)' : 'DRY-RUN (Safe Read-Only In-Memory Preview)'}`,
+  );
   console.log(
     `Source:          ${options.useFixture ? 'Local Fixture (Deterministic)' : 'Live Ticketmaster Discovery API'}`,
   );
@@ -84,6 +131,37 @@ async function run(): Promise<void> {
     process.exit(1);
   }
 
+  // Safety checks for database persistence mode
+  if (options.persist) {
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+    const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
+
+    if (!supabaseUrl || !serviceRoleKey) {
+      console.error(
+        'ERROR: Database Persistence Requested (--persist) but Supabase credentials are missing.\n' +
+          'NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY must be configured in environment or .env.local.\n' +
+          'To test without database writes, omit --persist for dry-run preview.\n',
+      );
+      process.exit(1);
+    }
+
+    const isLocalOrDev =
+      supabaseUrl.includes('127.0.0.1') ||
+      supabaseUrl.includes('localhost') ||
+      supabaseUrl.includes('.dev') ||
+      supabaseUrl.includes('local');
+
+    if (!isLocalOrDev && !options.allowProductionWrite) {
+      console.error(
+        'ERROR: Production Persistence Guard Active.\n' +
+          `Target database (${supabaseUrl}) is not a recognized local or development instance.\n` +
+          'Writing to production requires the explicit safety flag: --allow-production-write.\n' +
+          'Aborting execution to prevent unauthorized modifications.\n',
+      );
+      process.exit(1);
+    }
+  }
+
   const adapter = new TicketmasterDiscoveryAdapter({
     apiKey: apiKey || 'fixture-test-key',
   });
@@ -99,52 +177,49 @@ async function run(): Promise<void> {
   };
 
   try {
-    let rawIngests: RawIngest[] = [];
+    let result;
 
-    if (options.useFixture) {
-      console.log('Loading deterministic Ticketmaster fixture...');
-      const fixturePath = path.resolve(
-        process.cwd(),
-        'tests/fixtures/ticketmaster-events-response.json',
-      );
-      const rawJson = fs.readFileSync(fixturePath, 'utf-8');
+    if (options.persist) {
+      console.log('Initializing PostgreSQL database repositories...');
+      const sourceRepo = new SupabaseSourceRepository();
+      const rawIngestRepo = new SupabaseRawIngestRepository();
+      const candidateRepo = new SupabaseEventCandidateRepository();
+      const catalogRepo = new SupabaseCatalogRepository();
 
-      rawIngests = [
-        {
-          id: crypto.randomUUID(),
-          sourceId: adapter.id,
-          sourceUrl:
-            'https://app.ticketmaster.com/discovery/v2/events.json?classificationName=Music&stateCode=' +
-            options.stateCode,
-          acquisitionMethod: 'api',
-          fetchedAt: new Date().toISOString(),
-          contentHash: 'fixture_deterministic_hash',
-          contentType: 'application/json',
-          rawContent: rawJson,
-          httpStatus: 200,
-          parserVersion: adapter.parserVersion,
-        },
-      ];
+      result = await runTicketmasterIngestion({
+        sourceRepo,
+        rawIngestRepo,
+        candidateRepo,
+        catalogRepo,
+        adapter,
+        queryParams,
+        useFixture: options.useFixture,
+        persist: true,
+      });
     } else {
-      console.log(
-        'Fetching live event pages from Ticketmaster Discovery API...',
-      );
-      rawIngests = await adapter.fetch({
-        sourceId: adapter.id,
-        sourceType: adapter.sourceType,
-        acquisitionMethod: adapter.acquisitionMethod,
-        targetUrl: 'https://app.ticketmaster.com/discovery/v2/events.json',
-        crawlStartedAt: new Date().toISOString(),
-        metadata: queryParams as Record<string, unknown>,
+      console.log('Executing safe dry-run preview with in-memory pipeline...');
+      const sourceRepo = new MemorySourceRepository();
+      const rawIngestRepo = new MemoryRawIngestRepository();
+      const candidateRepo = new MemoryEventCandidateRepository();
+      const catalogRepo = new MemoryCatalogRepository();
+
+      result = await runTicketmasterIngestion({
+        sourceRepo,
+        rawIngestRepo,
+        candidateRepo,
+        catalogRepo,
+        adapter,
+        queryParams,
+        useFixture: options.useFixture,
+        persist: false,
       });
     }
 
-    const candidates = await adapter.parse(rawIngests);
+    console.log(`✓ Source: ${result.source.name} (id: ${result.source.id})`);
+    console.log(`✓ Fetched ${result.rawIngestsFetched} raw page snapshot(s).`);
+    console.log(`✓ Parsed ${result.candidatesParsed} event candidate(s).\n`);
 
-    console.log(`✓ Loaded ${rawIngests.length} raw ingest page(s).`);
-    console.log(`✓ Parsed ${candidates.length} candidate observation(s).\n`);
-
-    if (candidates.length === 0) {
+    if (result.candidates.length === 0) {
       console.log('No music events found matching the specified criteria.');
       return;
     }
@@ -154,10 +229,11 @@ async function run(): Promise<void> {
       '--------------------------------------------------------------------------------',
     );
 
-    candidates.forEach((cand, idx) => {
+    result.candidates.forEach((cand, idx) => {
       const headliner =
         cand.artists?.find((a) => a.billingPosition === 'headliner')?.name ||
-        cand.artistNames[0];
+        cand.artistNames[0] ||
+        'N/A';
       const support = cand.artists
         ?.filter((a) => a.billingPosition === 'support')
         .map((a) => a.name)
@@ -170,7 +246,7 @@ async function run(): Promise<void> {
           ? cand.startsAt
           : 'Date confirmed (Time TBA)';
       const priceStr = cand.price
-        ? `$${cand.price.min} – $${cand.price.max} ${cand.price.currency}`
+        ? `$${cand.price.min} – $${cand.price.max} ${cand.price.currency ?? 'USD'}`
         : 'Price TBA';
 
       console.log(
@@ -185,41 +261,59 @@ async function run(): Promise<void> {
       );
     });
 
-    // Summary Telemetry
-    const instantCount = candidates.filter(
-      (c) => c.startTimePrecision === 'instant',
-    ).length;
-    const dateOnlyCount = candidates.filter(
-      (c) => c.startTimePrecision === 'date_only',
-    ).length;
-    const multiActCount = candidates.filter(
-      (c) => (c.artists?.length || 0) > 1,
-    ).length;
-    const festivalCount = candidates.filter((c) => c.isFestival).length;
-    const missingCityCount = candidates.filter((c) => !c.city).length;
-
     console.log(
-      '--------------------------------------------------------------------------------',
+      '================================================================================',
     );
-    console.log('Ingestion Summary:');
-    console.log(`  Total Candidates:      ${candidates.length}`);
-    console.log(`  Instant Precision:     ${instantCount}`);
-    console.log(`  Date-Only Precision:   ${dateOnlyCount}`);
-    console.log(`  Multi-Act Bills:       ${multiActCount}`);
-    console.log(`  Festivals / Multi-day: ${festivalCount}`);
+    console.log('INGESTION TELEMETRY REPORT:');
     console.log(
-      `  Missing Venue City:    ${missingCityCount} (will route to needs_review in PR 2)`,
+      '================================================================================',
+    );
+    console.log(`  Raw Ingests Fetched:        ${result.rawIngestsFetched}`);
+    console.log(`  Raw Ingests Persisted:      ${result.rawIngestsPersisted}`);
+    console.log(`  Raw Ingests Reused:         ${result.rawIngestsReused}`);
+    console.log(`  Candidates Parsed:          ${result.candidatesParsed}`);
+    console.log(`  Candidates Persisted:       ${result.candidatesPersisted}`);
+    console.log(
+      `  Canonical Events Created:   ${result.canonicalEventsCreated}`,
     );
     console.log(
-      '--------------------------------------------------------------------------------\n',
+      `  Canonical Events Matched:   ${result.canonicalEventsMatched}`,
+    );
+    console.log(
+      `  Candidates Needs Review:    ${result.candidatesNeedsReview}`,
     );
 
+    if (Object.keys(result.reviewReasons).length > 0) {
+      console.log('    Review Reasons Breakdown:');
+      for (const [reason, count] of Object.entries(result.reviewReasons)) {
+        console.log(`      - ${reason}: ${count}`);
+      }
+    }
+
+    console.log(`  Candidates Rejected:        ${result.candidatesRejected}`);
+    console.log(`  Database Errors:            0`);
     console.log(
-      '✓ DRY-RUN COMPLETE: Zero database rows were modified (Safe Read-Only Mode).',
+      '================================================================================\n',
     );
-    console.log(
-      'Notice: Atomic persistence into raw_ingests and event_candidates is scheduled for PR 2.\n',
-    );
+
+    if (options.persist) {
+      console.log(
+        '✓ PERSISTENCE COMPLETE: Events and provenance atomically committed to database.',
+      );
+      console.log(
+        `Persisted canonical event IDs (${result.persistedEventIds.length}):\n` +
+          result.persistedEventIds.map((id) => `  - ${id}`).join('\n') +
+          '\n',
+      );
+    } else {
+      console.log(
+        '✓ DRY-RUN COMPLETE: Zero database rows were modified (Safe Read-Only Preview).',
+      );
+      console.log(
+        'To persist these records into local database, re-run with --persist:\n' +
+          '  npm run ingest:ticketmaster -- --fixture --persist\n',
+      );
+    }
   } catch (error) {
     const rawMsg = error instanceof Error ? error.message : String(error);
     console.error(`\nIngestion failed: ${redactSensitiveString(rawMsg)}\n`);
