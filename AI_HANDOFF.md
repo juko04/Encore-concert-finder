@@ -9,12 +9,12 @@ Durable architecture records belong in [`docs/architecture/`](docs/architecture/
 
 - **Current Milestone:** **Phase 2 — Live Ingestion & Personalization**.
 - **Active Specification:** [`docs/phases/active/PHASE_2_IMPLEMENTATION.md`](docs/phases/active/PHASE_2_IMPLEMENTATION.md).
-- **Current Branch:** `docs/phase-2-specification`
+- **Current Branch:** `feature/phase-2-ticketmaster-ingestion`
 - **Active Implementing Agent:** Google Antigravity
-- **Current Task:** Phase 2 Kickoff, Codebase Audit & Implementation Specification — COMPLETE.
-- **Verification State:** Planning verification verified (`format:check`, `lint` with 0 warnings, `typecheck`, 103/103 unit tests across 10 suites passing). Next.js production build and PostgreSQL integration tests verified on prior PRs, to be re-run on PR 1.
-- **Immediate Next Action:** Merge `docs/phase-2-specification` into `main` via PR, pull updated `main`, and create `feature/phase-2-ticketmaster-ingestion` for PR 1.
-- **Phase 2 Status:** **ACTIVE — PLANNING COMPLETE.** Ready for planning PR merge and PR 1 kickoff.
+- **Current Task:** Phase 2 PR 1: Ticketmaster Ingestion Foundation & Safe Dry-Run Runner — COMPLETE.
+- **Verification State:** ALL GREEN (`npm run format:check`, `npm run lint` 0 warnings/errors, `npm run typecheck`, `npm test` 119/119 unit tests across 11 suites, `npm run build` Next.js production compile, Playwright e2e 3/3 smoke tests passing, `npm run ingest:ticketmaster -- --dry-run --fixture` verified).
+- **Immediate Next Action:** Open PR targeting `main`, monitor GitHub CI, and await independent code review. Do not merge automatically.
+- **Phase 2 Status:** **ACTIVE — PR 1 READY FOR REVIEW.** Canonical persistence deferred to PR 2.
 
 ---
 

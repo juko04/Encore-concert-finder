@@ -1,0 +1,340 @@
+{
+  "_embedded": {
+    "events": [
+      {
+        "id": "tm-evt-001",
+        "name": "The Black Keys - Dropout Boogie Tour",
+        "type": "event",
+        "url": "https://www.ticketmaster.com/the-black-keys-morrison-colorado-10-15-2026/event/1E005D01?utm_source=test&gclid=123",
+        "locale": "en-us",
+        "dates": {
+          "start": {
+            "localDate": "2026-10-15",
+            "localTime": "19:30:00",
+            "dateTime": "2026-10-16T01:30:00Z",
+            "dateTBD": false,
+            "dateTBA": false,
+            "timeTBA": false,
+            "noSpecificTime": false
+          },
+          "timezone": "America/Denver",
+          "status": {
+            "code": "onsale"
+          }
+        },
+        "priceRanges": [
+          {
+            "type": "standard",
+            "currency": "USD",
+            "min": 49.5,
+            "max": 129.5
+          }
+        ],
+        "classifications": [
+          {
+            "primary": true,
+            "segment": { "id": "KZFzniwnSyZrrSv7nJ", "name": "Music" },
+            "genre": { "id": "KnvZfZ7vAeA", "name": "Rock" },
+            "subGenre": { "id": "KZazBEonSMnZfZ7v6F1", "name": "Blues Rock" }
+          }
+        ],
+        "_embedded": {
+          "venues": [
+            {
+              "id": "KovZpZAEk7IA",
+              "name": "Red Rocks Amphitheatre",
+              "postalCode": "80465",
+              "timezone": "America/Denver",
+              "city": { "name": "Morrison" },
+              "state": { "name": "Colorado", "stateCode": "CO" },
+              "country": {
+                "name": "United States Of America",
+                "countryCode": "US"
+              },
+              "address": { "line1": "18300 W Alameda Pkwy" },
+              "location": { "longitude": "-105.2058", "latitude": "39.6653" }
+            }
+          ],
+          "attractions": [
+            {
+              "id": "K8vZ9171Cff",
+              "name": "The Black Keys",
+              "type": "attraction",
+              "url": "https://www.ticketmaster.com/the-black-keys-tickets/artist/821044",
+              "externalLinks": {
+                "spotify": [
+                  {
+                    "url": "https://open.spotify.com/artist/7mnBLXK823vNxN3UWB7Gfz"
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      },
+      {
+        "id": "tm-evt-002",
+        "name": "Khruangbin with Men I Trust",
+        "type": "event",
+        "url": "https://www.ticketmaster.com/khruangbin-denver-colorado-10-18-2026/event/1E005D02",
+        "locale": "en-us",
+        "dates": {
+          "start": {
+            "localDate": "2026-10-18",
+            "localTime": "20:00:00",
+            "dateTime": "2026-10-19T02:00:00Z",
+            "dateTBD": false,
+            "dateTBA": false,
+            "timeTBA": false,
+            "noSpecificTime": false
+          },
+          "timezone": "America/Denver",
+          "status": {
+            "code": "onsale"
+          }
+        },
+        "priceRanges": [
+          {
+            "type": "standard",
+            "currency": "USD",
+            "min": 55.0,
+            "max": 85.0
+          }
+        ],
+        "classifications": [
+          {
+            "primary": true,
+            "segment": { "id": "KZFzniwnSyZrrSv7nJ", "name": "Music" },
+            "genre": { "id": "KnvZfZ7vAeA", "name": "Alternative" }
+          }
+        ],
+        "_embedded": {
+          "venues": [
+            {
+              "id": "KovZpZAEdE1A",
+              "name": "Mission Ballroom",
+              "postalCode": "80216",
+              "timezone": "America/Denver",
+              "city": { "name": "Denver" },
+              "state": { "name": "Colorado", "stateCode": "CO" },
+              "country": {
+                "name": "United States Of America",
+                "countryCode": "US"
+              },
+              "address": { "line1": "4242 Wynkoop St" },
+              "location": { "longitude": "-104.9785", "latitude": "39.7736" }
+            }
+          ],
+          "attractions": [
+            {
+              "id": "K8vZ9171oFf",
+              "name": "Khruangbin",
+              "type": "attraction",
+              "url": "https://www.ticketmaster.com/khruangbin-tickets/artist/2034085",
+              "externalLinks": {
+                "spotify": [
+                  {
+                    "url": "https://open.spotify.com/artist/2mVuvv5iLLPt4P9R4Jk36S"
+                  }
+                ]
+              }
+            },
+            {
+              "id": "K8vZ917_0Lf",
+              "name": "Men I Trust",
+              "type": "attraction",
+              "url": "https://www.ticketmaster.com/men-i-trust-tickets/artist/2418512",
+              "externalLinks": {
+                "spotify": [
+                  {
+                    "url": "https://open.spotify.com/artist/3usUxw5a5OOuAWt7H329iW"
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      },
+      {
+        "id": "tm-evt-003",
+        "name": "Telluride Bluegrass Festival 2027",
+        "type": "event",
+        "url": "https://www.ticketmaster.com/telluride-bluegrass-festival-telluride-colorado/event/1E005D03",
+        "locale": "en-us",
+        "dates": {
+          "start": {
+            "localDate": "2027-06-17",
+            "dateTBD": false,
+            "dateTBA": false,
+            "timeTBA": true,
+            "noSpecificTime": true
+          },
+          "end": {
+            "localDate": "2027-06-20"
+          },
+          "timezone": "America/Denver",
+          "status": {
+            "code": "onsale"
+          }
+        },
+        "priceRanges": [
+          {
+            "type": "standard",
+            "currency": "USD",
+            "min": 250.0,
+            "max": 450.0
+          }
+        ],
+        "classifications": [
+          {
+            "primary": true,
+            "segment": { "id": "KZFzniwnSyZrrSv7nJ", "name": "Music" },
+            "genre": { "name": "Festival" },
+            "subGenre": { "name": "Bluegrass" }
+          }
+        ],
+        "_embedded": {
+          "venues": [
+            {
+              "id": "KovZpZAE1111",
+              "name": "Telluride Town Park",
+              "postalCode": "81435",
+              "timezone": "America/Denver",
+              "city": { "name": "Telluride" },
+              "state": { "name": "Colorado", "stateCode": "CO" },
+              "country": {
+                "name": "United States Of America",
+                "countryCode": "US"
+              }
+            }
+          ],
+          "attractions": [
+            {
+              "id": "K8vZ9171111",
+              "name": "Sam Bush Band"
+            },
+            {
+              "id": "K8vZ9172222",
+              "name": "Béla Fleck"
+            }
+          ]
+        }
+      },
+      {
+        "id": "tm-evt-004",
+        "name": "Underground Spring Jam",
+        "type": "event",
+        "url": "https://www.ticketmaster.com/underground-spring-jam-denver-colorado/event/1E005D04",
+        "locale": "en-us",
+        "dates": {
+          "start": {
+            "localDate": "2026-11-05",
+            "timeTBA": true,
+            "dateTBD": false,
+            "dateTBA": false
+          },
+          "timezone": "America/Denver",
+          "status": {
+            "code": "onsale"
+          }
+        },
+        "priceRanges": [
+          {
+            "type": "standard",
+            "currency": "USD",
+            "min": 20.0,
+            "max": 25.0
+          }
+        ],
+        "_embedded": {
+          "venues": [
+            {
+              "id": "KovZpZAE2222",
+              "name": "Bluebird Theater",
+              "city": { "name": "Denver" },
+              "state": { "stateCode": "CO" }
+            }
+          ],
+          "attractions": [
+            {
+              "id": "K8vZ9173333",
+              "name": "Local H"
+            }
+          ]
+        }
+      },
+      {
+        "id": "tm-evt-005",
+        "name": "Canceled Showcase Tour",
+        "type": "event",
+        "url": "https://www.ticketmaster.com/canceled-showcase-tour-denver-colorado/event/1E005D05",
+        "locale": "en-us",
+        "dates": {
+          "start": {
+            "localDate": "2026-11-12",
+            "localTime": "20:00:00",
+            "dateTime": "2026-11-13T03:00:00Z"
+          },
+          "timezone": "America/Denver",
+          "status": {
+            "code": "canceled"
+          }
+        },
+        "_embedded": {
+          "venues": [
+            {
+              "id": "KovZpZAE3333",
+              "name": "Ogden Theatre",
+              "city": { "name": "Denver" },
+              "state": { "stateCode": "CO" }
+            }
+          ],
+          "attractions": [
+            {
+              "id": "K8vZ9174444",
+              "name": "Ghost Light"
+            }
+          ]
+        }
+      },
+      {
+        "id": "tm-evt-006",
+        "name": "Secret Mountain Pop-up",
+        "type": "event",
+        "url": "https://www.ticketmaster.com/secret-mountain-popup/event/1E005D06",
+        "locale": "en-us",
+        "dates": {
+          "start": {
+            "localDate": "2026-11-20",
+            "localTime": "21:00:00",
+            "dateTime": "2026-11-21T04:00:00Z"
+          },
+          "timezone": "America/Denver",
+          "status": {
+            "code": "onsale"
+          }
+        },
+        "_embedded": {
+          "venues": [
+            {
+              "id": "KovZpZAE4444",
+              "name": "Mystery Ranch Venue"
+            }
+          ],
+          "attractions": [
+            {
+              "id": "K8vZ9175555",
+              "name": "Tycho"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "page": {
+    "size": 6,
+    "totalElements": 6,
+    "totalPages": 1,
+    "number": 0
+  }
+}
