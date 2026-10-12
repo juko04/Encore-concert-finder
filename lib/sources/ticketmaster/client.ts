@@ -15,6 +15,13 @@ export interface TicketmasterClientOptions {
   timeoutMs?: number;
 }
 
+export class NonRetryableError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'NonRetryableError';
+  }
+}
+
 export class TicketmasterApiClient {
   private readonly apiKey: string;
   private readonly baseUrl: string;
@@ -22,6 +29,7 @@ export class TicketmasterApiClient {
   private readonly maxRetries: number;
   private readonly timeoutMs: number;
   private lastRequestTime = 0;
+  private rateLimitQueue: Promise<void> = Promise.resolve();
 
   constructor(options?: TicketmasterClientOptions) {
     let resolvedKey = options?.apiKey || process.env.TICKETMASTER_API_KEY;
@@ -48,16 +56,21 @@ export class TicketmasterApiClient {
   }
 
   /**
-   * Enforces inter-request rate limiting delay.
+   * Enforces inter-request rate limiting delay in a concurrency-safe manner.
    */
   private async enforceRateLimit(): Promise<void> {
-    const now = Date.now();
-    const elapsed = now - this.lastRequestTime;
-    if (elapsed < this.minIntervalMs) {
-      const waitTime = this.minIntervalMs - elapsed;
-      await new Promise((resolve) => setTimeout(resolve, waitTime));
-    }
-    this.lastRequestTime = Date.now();
+    const queueItem = this.rateLimitQueue.then(async () => {
+      const now = Date.now();
+      const elapsed = now - this.lastRequestTime;
+      if (elapsed < this.minIntervalMs) {
+        const waitTime = this.minIntervalMs - elapsed;
+        await new Promise((resolve) => setTimeout(resolve, waitTime));
+      }
+      this.lastRequestTime = Date.now();
+    });
+
+    this.rateLimitQueue = queueItem.catch(() => {});
+    await queueItem;
   }
 
   /**
@@ -121,9 +134,28 @@ export class TicketmasterApiClient {
     url: string;
   }> {
     if (!this.apiKey) {
-      throw new Error(
+      throw new NonRetryableError(
         'Ticketmaster API key is required. Provide it in constructor options or set TICKETMASTER_API_KEY environment variable.',
       );
+    }
+
+    if (params.page !== undefined) {
+      if (!Number.isInteger(params.page) || params.page < 0) {
+        throw new NonRetryableError(
+          `Invalid page parameter: ${params.page}. Page must be a non-negative integer.`,
+        );
+      }
+    }
+    if (params.size !== undefined) {
+      if (
+        !Number.isInteger(params.size) ||
+        params.size < 1 ||
+        params.size > 200
+      ) {
+        throw new NonRetryableError(
+          `Invalid size parameter: ${params.size}. Size must be an integer between 1 and 200.`,
+        );
+      }
     }
 
     const size = params.size ?? 20;
@@ -131,7 +163,7 @@ export class TicketmasterApiClient {
 
     // Enforce Ticketmaster Discovery API deep pagination boundary
     if (page * size >= 1000) {
-      throw new Error(
+      throw new NonRetryableError(
         `Ticketmaster API deep pagination limit exceeded: page (${page}) * size (${size}) = ${
           page * size
         } >= 1000. Use narrower date or geographic filters.`,
@@ -165,7 +197,7 @@ export class TicketmasterApiClient {
           try {
             json = JSON.parse(rawText);
           } catch (parseErr) {
-            throw new Error(
+            throw new NonRetryableError(
               `Malformed JSON response from Ticketmaster API at ${sanitizedUrl}: ${
                 parseErr instanceof Error ? parseErr.message : String(parseErr)
               }`,
@@ -177,7 +209,7 @@ export class TicketmasterApiClient {
             const errorDetails = parsed.error.issues
               .map((i) => `${i.path.join('.')}: ${i.message}`)
               .join('; ');
-            throw new Error(
+            throw new NonRetryableError(
               `Ticketmaster API response schema validation failed at ${sanitizedUrl}: ${errorDetails}`,
             );
           }
@@ -189,7 +221,7 @@ export class TicketmasterApiClient {
           };
         }
 
-        // Handle 429 Too Many Requests
+        // Handle 429 Too Many Requests (retryable with Retry-After)
         if (res.status === 429) {
           attempt++;
           if (attempt > this.maxRetries) {
@@ -205,6 +237,15 @@ export class TicketmasterApiClient {
             const parsedSeconds = parseInt(retryAfterHeader, 10);
             if (!isNaN(parsedSeconds) && parsedSeconds > 0) {
               delayMs = parsedSeconds * 1000;
+            } else {
+              // Support HTTP-date in Retry-After (e.g. "Wed, 21 Oct 2026 07:28:00 GMT")
+              const parsedDate = Date.parse(retryAfterHeader);
+              if (!isNaN(parsedDate)) {
+                const diffMs = parsedDate - Date.now();
+                if (diffMs > 0) {
+                  delayMs = diffMs;
+                }
+              }
             }
           }
 
@@ -212,7 +253,7 @@ export class TicketmasterApiClient {
           continue;
         }
 
-        // Handle 5xx Server Errors with exponential backoff
+        // Handle 5xx Server Errors (retryable with exponential backoff)
         if (res.status >= 500) {
           attempt++;
           if (attempt > this.maxRetries) {
@@ -226,13 +267,18 @@ export class TicketmasterApiClient {
           continue;
         }
 
-        // Client errors (400, 401, 403, 404, etc.) - do not retry
+        // Client errors (400, 401, 403, 404, etc.) - non-retryable, fail immediately!
         const errBody = await res.text().catch(() => '');
         const sanitizedBody = redactSensitiveString(errBody, this.apiKey);
-        throw new Error(
+        throw new NonRetryableError(
           `Ticketmaster API request failed with HTTP ${res.status} at ${sanitizedUrl}: ${sanitizedBody}`,
         );
       } catch (err) {
+        if (err instanceof NonRetryableError) {
+          // Non-retryable error: fail immediately without executing retry loop
+          throw new Error(redactSensitiveString(err.message, this.apiKey));
+        }
+
         if (attempt >= this.maxRetries) {
           const rawMessage = err instanceof Error ? err.message : String(err);
           throw new Error(redactSensitiveString(rawMessage, this.apiKey));

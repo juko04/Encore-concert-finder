@@ -83,13 +83,22 @@ export class TicketmasterDiscoveryAdapter implements EventSourceAdapter {
       let json: unknown;
       try {
         json = JSON.parse(raw.rawContent);
-      } catch {
-        continue;
+      } catch (err) {
+        throw new Error(
+          `Failed to parse Ticketmaster raw ingest JSON for source ${raw.sourceId}: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
       }
 
       const parseResult = TicketmasterEventsResponseSchema.safeParse(json);
       if (!parseResult.success) {
-        continue;
+        const errorDetails = parseResult.error.issues
+          .map((i) => `${i.path.join('.')}: ${i.message}`)
+          .join('; ');
+        throw new Error(
+          `Ticketmaster raw ingest schema validation failed for source ${raw.sourceId}: ${errorDetails}`,
+        );
       }
 
       const events = parseResult.data._embedded?.events || [];

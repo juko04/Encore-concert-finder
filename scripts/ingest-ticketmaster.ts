@@ -1,12 +1,12 @@
 #!/usr/bin/env node
 
 /**
- * Controlled CLI Ingestion Runner for Ticketmaster Discovery API.
+ * Controlled CLI Ingestion Runner for Ticketmaster Discovery API (PR 1 Dry-Run Foundation).
  * Usage:
- *   npm run ingest:ticketmaster -- [--dry-run] [--fixture] [--state=CO] [--size=20] [--keyword=rock]
+ *   npm run ingest:ticketmaster -- [--fixture] [--state=CO] [--size=20] [--keyword=rock]
  *
- * Defaults:
- *   --dry-run: true (does not write to database unless --persist is explicitly passed)
+ * Notes:
+ *   Safe dry-run inspection only (zero database modifications).
  *   --state: CO (configurable initial test region)
  *   --size: 20
  */
@@ -21,7 +21,6 @@ import {
 import type { RawIngest } from '@/lib/domain/source';
 
 interface ParsedArgs {
-  dryRun: boolean;
   useFixture: boolean;
   stateCode: string;
   size: number;
@@ -32,7 +31,6 @@ interface ParsedArgs {
 
 function parseArgs(args: string[]): ParsedArgs {
   const result: ParsedArgs = {
-    dryRun: true,
     useFixture: false,
     stateCode: 'CO',
     size: 20,
@@ -40,11 +38,7 @@ function parseArgs(args: string[]): ParsedArgs {
   };
 
   for (const arg of args) {
-    if (arg === '--dry-run') {
-      result.dryRun = true;
-    } else if (arg === '--persist' || arg === '--no-dry-run') {
-      result.dryRun = false;
-    } else if (arg === '--fixture') {
+    if (arg === '--fixture') {
       result.useFixture = true;
     } else if (arg.startsWith('--state=')) {
       result.stateCode = arg.split('=')[1].toUpperCase();
@@ -68,9 +62,7 @@ async function run(): Promise<void> {
   console.log('\n============================================================');
   console.log('       ENCORE — TICKETMASTER INGESTION RUNNER (PR 1)');
   console.log('============================================================');
-  console.log(
-    `Mode:            ${options.dryRun ? 'DRY-RUN (Safe Read-Only)' : 'PERSIST (Write to DB)'}`,
-  );
+  console.log('Mode:            DRY-RUN (Safe Read-Only In-Memory Preview)');
   console.log(
     `Source:          ${options.useFixture ? 'Local Fixture (Deterministic)' : 'Live Ticketmaster Discovery API'}`,
   );
@@ -86,7 +78,7 @@ async function run(): Promise<void> {
     console.error(
       'Notice: TICKETMASTER_API_KEY environment variable is not set.\n' +
         'To test the ingestion runner without live credentials, run with --fixture:\n\n' +
-        '  npm run ingest:ticketmaster -- --dry-run --fixture\n\n' +
+        '  npm run ingest:ticketmaster -- --fixture\n\n' +
         'Or export TICKETMASTER_API_KEY to fetch live events from Ticketmaster.\n',
     );
     process.exit(1);
@@ -222,58 +214,12 @@ async function run(): Promise<void> {
       '--------------------------------------------------------------------------------\n',
     );
 
-    if (options.dryRun) {
-      console.log('✓ DRY-RUN COMPLETE: Zero database rows were modified.');
-      console.log(
-        'To persist raw ingests and candidates, pass --persist with Supabase credentials.',
-      );
-    } else {
-      console.log('Persisting to database...');
-      const { createClient } = await import('@supabase/supabase-js');
-      const { SupabaseRawIngestRepository } =
-        await import('@/lib/repositories/raw-ingest-repository');
-      const { SupabaseEventCandidateRepository } =
-        await import('@/lib/repositories/event-candidate-repository');
-      const { getServerEnv } = await import('@/lib/env/server');
-
-      const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-      const { SUPABASE_SERVICE_ROLE_KEY } = getServerEnv();
-
-      if (!supabaseUrl || !SUPABASE_SERVICE_ROLE_KEY) {
-        throw new Error(
-          'Supabase URL or service role key missing in environment. Cannot persist.',
-        );
-      }
-
-      const client = createClient(supabaseUrl, SUPABASE_SERVICE_ROLE_KEY);
-      const rawRepo = new SupabaseRawIngestRepository(client);
-      const candRepo = new SupabaseEventCandidateRepository(client);
-
-      for (const raw of rawIngests) {
-        const persistedRaw = await rawRepo.create(raw);
-        console.log(`✓ Persisted raw_ingests row: ${persistedRaw.id}`);
-
-        const pageCandidates = candidates.filter(
-          (c) => c.rawIngestId === raw.id,
-        );
-        const candidatesWithRawId = pageCandidates.map((c) => ({
-          ...c,
-          rawIngestId: persistedRaw.id,
-          sourceId: raw.sourceId,
-        }));
-
-        const persistedCandidates =
-          await candRepo.createMany(candidatesWithRawId);
-        console.log(
-          `✓ Persisted ${persistedCandidates.length} candidate rows.`,
-        );
-      }
-
-      console.log(
-        '\n✓ PERSISTENCE COMPLETE: Candidates saved to event_candidates table.',
-      );
-      console.log('Note: Canonicalization integration will execute in PR 2.\n');
-    }
+    console.log(
+      '✓ DRY-RUN COMPLETE: Zero database rows were modified (Safe Read-Only Mode).',
+    );
+    console.log(
+      'Notice: Atomic persistence into raw_ingests and event_candidates is scheduled for PR 2.\n',
+    );
   } catch (error) {
     const rawMsg = error instanceof Error ? error.message : String(error);
     console.error(`\nIngestion failed: ${redactSensitiveString(rawMsg)}\n`);

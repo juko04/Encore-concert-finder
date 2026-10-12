@@ -86,35 +86,27 @@ export function parseTicketmasterEvent(
         externalIds,
       });
     });
-  } else {
-    // If no attractions are embedded, use the event title as headliner
-    artistNames.push(event.name);
-    artists.push({
-      name: event.name,
-      billingPosition: 'headliner',
-      sortOrder: 0,
-      externalIds: [],
-    });
   }
+  // If no attractions are embedded, do not substitute event title as a fake artist.
+  // artistNames and artists remain empty arrays.
 
   // 3. Venue Extraction
   const primaryVenue = event._embedded?.venues?.[0];
-  const venueName = primaryVenue?.name || 'Unknown Venue';
+  const venueName = primaryVenue?.name?.trim() || '';
   const city = primaryVenue?.city?.name?.trim() || undefined;
   const state =
-    primaryVenue?.state?.stateCode ||
+    primaryVenue?.state?.stateCode?.trim() ||
     primaryVenue?.state?.name?.trim() ||
     undefined;
   const country =
-    primaryVenue?.country?.countryCode ||
+    primaryVenue?.country?.countryCode?.trim() ||
     primaryVenue?.country?.name?.trim() ||
     undefined;
 
   // 4. Temporal & Timezone Handling
   const localStartDate = event.dates.start.localDate;
   const localEndDate = event.dates.end?.localDate || localStartDate;
-  const timezone =
-    event.dates.timezone || primaryVenue?.timezone || 'America/Denver';
+  const timezone = event.dates.timezone || primaryVenue?.timezone || undefined;
 
   const isTimeUncertain =
     event.dates.start.timeTBA ||
@@ -186,6 +178,23 @@ export function parseTicketmasterEvent(
     }
   }
 
+  // 9. Incomplete Observation Evaluation
+  const reviewReasons: string[] = [];
+  if (!venueName) {
+    reviewReasons.push('missing_venue_identity');
+  }
+  if (!city) {
+    reviewReasons.push('missing_venue_locality');
+  }
+  if (artists.length === 0) {
+    reviewReasons.push('missing_artist_identity');
+  }
+  if (!timezone) {
+    reviewReasons.push('missing_or_invalid_timezone');
+  }
+
+  const isComplete = reviewReasons.length === 0;
+
   return {
     id: crypto.randomUUID(),
     rawIngestId: context.rawIngestId,
@@ -210,8 +219,11 @@ export function parseTicketmasterEvent(
     price,
     isFestival,
     eventKind,
-    confidence: 0.95,
+    confidence: isComplete ? 0.95 : 0.5,
     verificationStatus: 'unverified',
+    resolutionStatus: isComplete ? undefined : 'needs_review',
+    resolutionProvenance:
+      reviewReasons.length > 0 ? { reasons: reviewReasons } : undefined,
     rawPayload: {
       id: event.id,
       name: event.name,
@@ -219,6 +231,7 @@ export function parseTicketmasterEvent(
       dates: event.dates,
       status,
       providerStatus: event.dates.status?.code,
+      reviewReasons: reviewReasons.length > 0 ? reviewReasons : undefined,
     },
   };
 }

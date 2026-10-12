@@ -132,7 +132,26 @@ export class CanonicalizationCoordinator {
     }
     const candidateId = candidate.id;
 
-    // Validate locality before resolving venue (Point 9: Empty city is not valid unknown geography)
+    // Validate venue identity and locality before resolving venue
+    const trimmedVenueName = candidate.venueName?.trim();
+    if (!trimmedVenueName) {
+      const payload: CanonicalizationPayload = {
+        resolution: {
+          event_candidate_id: candidateId,
+          status: 'needs_review',
+          matcher_version: '1.0.0',
+          confidence: 0.4,
+          reasons: ['missing_venue_identity'],
+        },
+      };
+      await this.catalogRepo.applyCanonicalization(payload);
+      return {
+        eventId: null,
+        status: 'needs_review',
+        reasons: ['missing_venue_identity'],
+      };
+    }
+
     const trimmedCity = candidate.city?.trim();
     if (!trimmedCity) {
       const payload: CanonicalizationPayload = {
@@ -268,6 +287,24 @@ export class CanonicalizationCoordinator {
             billingPosition: idx === 0 ? 'headliner' : 'support',
             sortOrder: idx,
           }));
+
+    if (candidateArtists.length === 0) {
+      const payload: CanonicalizationPayload = {
+        resolution: {
+          event_candidate_id: candidateId,
+          status: 'needs_review',
+          matcher_version: '1.0.0',
+          confidence: 0.4,
+          reasons: ['missing_artist_identity'],
+        },
+      };
+      await this.catalogRepo.applyCanonicalization(payload);
+      return {
+        eventId: null,
+        status: 'needs_review',
+        reasons: ['missing_artist_identity'],
+      };
+    }
 
     for (let index = 0; index < candidateArtists.length; index++) {
       const candidateArtist = candidateArtists[index];

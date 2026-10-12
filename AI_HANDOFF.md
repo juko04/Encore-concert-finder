@@ -9,12 +9,12 @@ Durable architecture records belong in [`docs/architecture/`](docs/architecture/
 
 - **Current Milestone:** **Phase 2 — Live Ingestion & Personalization**.
 - **Active Specification:** [`docs/phases/active/PHASE_2_IMPLEMENTATION.md`](docs/phases/active/PHASE_2_IMPLEMENTATION.md).
-- **Current Branch:** `feature/phase-2-ticketmaster-ingestion`
+- **Current Branch:** `feature/phase-2-ticketmaster-ingestion` (PR #6)
 - **Active Implementing Agent:** Google Antigravity
-- **Current Task:** Phase 2 PR 1: Ticketmaster Ingestion Foundation & Safe Dry-Run Runner — COMPLETE.
-- **Verification State:** ALL GREEN (`npm run format:check`, `npm run lint` 0 warnings/errors, `npm run typecheck`, `npm test` 119/119 unit tests across 11 suites, `npm run build` Next.js production compile, Playwright e2e 3/3 smoke tests passing, `npm run ingest:ticketmaster -- --dry-run --fixture` verified).
-- **Immediate Next Action:** Open PR targeting `main`, monitor GitHub CI, and await independent code review. Do not merge automatically.
-- **Phase 2 Status:** **ACTIVE — PR 1 READY FOR REVIEW.** Canonical persistence deferred to PR 2.
+- **Current Task:** Phase 2 PR 1: Ticketmaster Ingestion Foundation — Code Review Remediation COMPLETE.
+- **Verification State:** ALL GREEN (`npm run format:check`, `npm run lint` 0 warnings/errors, `npm run typecheck`, `npm test` 134/134 unit tests across 11 suites [+15 new regression tests], `npm run build` Next.js production compile, Playwright e2e 3/3 smoke tests passing, `npm run ingest:ticketmaster -- --fixture` dry-run verified).
+- **Immediate Next Action:** Push remediation commits to PR #6, monitor GitHub CI, and await final independent code review. Do not merge automatically.
+- **Phase 2 Status:** **ACTIVE — PR 1 REMEDIATION READY FOR FINAL REVIEW.** Canonical persistence strictly deferred to PR 2.
 
 ---
 

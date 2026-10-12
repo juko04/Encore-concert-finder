@@ -162,6 +162,95 @@ describe('Ticketmaster Ingestion Foundation', () => {
 
       expect(candidate.venueName).toBe('Mystery Ranch Venue');
       expect(candidate.city).toBeUndefined();
+      expect(candidate.resolutionStatus).toBe('needs_review');
+      expect(candidate.resolutionProvenance).toEqual({
+        reasons: ['missing_venue_locality'],
+      });
+      expect(candidate.confidence).toBe(0.5);
+    });
+
+    it('handles missing timezone without fabricating America/Denver fallback', () => {
+      const baseEvt = events[0];
+      const evtMissingTz: TicketmasterEvent = {
+        ...baseEvt,
+        id: 'tm-evt-no-tz',
+        dates: {
+          ...baseEvt.dates,
+          timezone: undefined,
+        },
+        _embedded: {
+          ...baseEvt._embedded,
+          venues: [
+            {
+              id: 'ven-1',
+              name: 'Venue With No Timezone',
+              city: { name: 'Denver' },
+              state: { stateCode: 'CO' },
+            },
+          ],
+        },
+      };
+
+      const candidate = parseTicketmasterEvent(evtMissingTz, dummyContext);
+      expect(candidate.timezone).toBeUndefined();
+      expect(candidate.resolutionStatus).toBe('needs_review');
+      expect(candidate.resolutionProvenance?.reasons).toContain(
+        'missing_or_invalid_timezone',
+      );
+      expect(candidate.confidence).toBe(0.5);
+    });
+
+    it('handles missing venue without fabricating Unknown Venue', () => {
+      const baseEvt = events[0];
+      const evtMissingVenue: TicketmasterEvent = {
+        ...baseEvt,
+        id: 'tm-evt-no-venue',
+        _embedded: {
+          ...baseEvt._embedded,
+          venues: undefined,
+        },
+      };
+
+      const candidate = parseTicketmasterEvent(evtMissingVenue, dummyContext);
+      expect(candidate.venueName).toBe('');
+      expect(candidate.venueName).not.toBe('Unknown Venue');
+      expect(candidate.city).toBeUndefined();
+      expect(candidate.resolutionStatus).toBe('needs_review');
+      expect(candidate.resolutionProvenance?.reasons).toContain(
+        'missing_venue_identity',
+      );
+      expect(candidate.resolutionProvenance?.reasons).toContain(
+        'missing_venue_locality',
+      );
+    });
+
+    it('handles missing attractions without substituting event name as artist', () => {
+      const baseEvt = events[0];
+      const evtMissingAttractions: TicketmasterEvent = {
+        ...baseEvt,
+        id: 'tm-evt-no-artists',
+        name: 'Underground Electronic Showcase',
+        _embedded: {
+          ...baseEvt._embedded,
+          attractions: undefined,
+        },
+      };
+
+      const candidate = parseTicketmasterEvent(
+        evtMissingAttractions,
+        dummyContext,
+      );
+      expect(candidate.artistNames).toEqual([]);
+      expect(candidate.artists).toEqual([]);
+      expect(
+        candidate.artists?.some(
+          (a) => a.name === 'Underground Electronic Showcase',
+        ),
+      ).toBe(false);
+      expect(candidate.resolutionStatus).toBe('needs_review');
+      expect(candidate.resolutionProvenance?.reasons).toContain(
+        'missing_artist_identity',
+      );
     });
   });
 
@@ -199,6 +288,69 @@ describe('Ticketmaster Ingestion Foundation', () => {
         expect(cand.sourceId).toBe(adapter.id);
         expect(cand.provenance.rawIngestId).toBe('raw-ingest-456');
       }
+    });
+
+    it('throws descriptive error on malformed JSON rawContent', async () => {
+      const malformedIngest: RawIngest = {
+        id: 'raw-ingest-bad-json',
+        sourceId: adapter.id,
+        sourceUrl: 'https://app.ticketmaster.com/discovery/v2/events.json',
+        acquisitionMethod: 'api',
+        fetchedAt: '2026-10-10T12:00:00Z',
+        contentHash: 'bad-hash',
+        contentType: 'application/json',
+        rawContent: '{"invalid": json syntax oops}',
+        httpStatus: 200,
+        parserVersion: adapter.parserVersion,
+      };
+
+      await expect(adapter.parse([malformedIngest])).rejects.toThrow(
+        /Failed to parse Ticketmaster raw ingest JSON/,
+      );
+    });
+
+    it('throws descriptive error on invalid response schema rawContent', async () => {
+      const invalidSchemaIngest: RawIngest = {
+        id: 'raw-ingest-bad-schema',
+        sourceId: adapter.id,
+        sourceUrl: 'https://app.ticketmaster.com/discovery/v2/events.json',
+        acquisitionMethod: 'api',
+        fetchedAt: '2026-10-10T12:00:00Z',
+        contentHash: 'bad-hash',
+        contentType: 'application/json',
+        rawContent: JSON.stringify({ invalid: 'schema-missing-page' }),
+        httpStatus: 200,
+        parserVersion: adapter.parserVersion,
+      };
+
+      await expect(adapter.parse([invalidSchemaIngest])).rejects.toThrow(
+        /schema validation failed/,
+      );
+    });
+
+    it('returns empty candidate list on valid empty response with 0 events', async () => {
+      const emptyIngest: RawIngest = {
+        id: 'raw-ingest-empty',
+        sourceId: adapter.id,
+        sourceUrl: 'https://app.ticketmaster.com/discovery/v2/events.json',
+        acquisitionMethod: 'api',
+        fetchedAt: '2026-10-10T12:00:00Z',
+        contentHash: 'empty-hash',
+        contentType: 'application/json',
+        rawContent: JSON.stringify({
+          page: {
+            size: 20,
+            totalElements: 0,
+            totalPages: 0,
+            number: 0,
+          },
+        }),
+        httpStatus: 200,
+        parserVersion: adapter.parserVersion,
+      };
+
+      const candidates = await adapter.parse([emptyIngest]);
+      expect(candidates).toEqual([]);
     });
   });
 
@@ -297,21 +449,153 @@ describe('Ticketmaster Ingestion Foundation', () => {
       }
     });
 
-    it('throws validation error when provider returns malformed schema', async () => {
+    it.each([
+      { status: 400, name: 'Bad Request' },
+      { status: 401, name: 'Unauthorized' },
+      { status: 403, name: 'Forbidden' },
+    ])(
+      'fails immediately on HTTP $status without retrying regardless of maxRetries',
+      async ({ status, name }) => {
+        const client = new TicketmasterApiClient({
+          apiKey: 'SECRET_API_KEY_123',
+          requestsPerSecond: 100,
+          maxRetries: 3,
+        });
+
+        let fetchCalls = 0;
+        global.fetch = vi.fn().mockImplementation(async () => {
+          fetchCalls++;
+          return {
+            ok: false,
+            status,
+            text: async () => `${name} error with key SECRET_API_KEY_123`,
+          };
+        });
+
+        try {
+          await client.fetchEvents();
+          expect.unreachable();
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          // Exactly 1 fetch call: no retries!
+          expect(fetchCalls).toBe(1);
+          expect(msg).toContain(`HTTP ${status}`);
+          // Credentials redacted
+          expect(msg).not.toContain('SECRET_API_KEY_123');
+          expect(msg).toContain('apikey=[REDACTED]');
+        }
+      },
+    );
+
+    it('fails immediately on HTTP 200 with malformed JSON without retrying', async () => {
       const client = new TicketmasterApiClient({
         apiKey: 'test-key',
         requestsPerSecond: 100,
-        maxRetries: 0,
+        maxRetries: 3,
+      });
+
+      let fetchCalls = 0;
+      global.fetch = vi.fn().mockImplementation(async () => {
+        fetchCalls++;
+        return {
+          ok: true,
+          text: async () => '{"broken": json',
+        };
+      });
+
+      await expect(client.fetchEvents()).rejects.toThrow(/Malformed JSON/);
+      expect(fetchCalls).toBe(1);
+    });
+
+    it('fails immediately on HTTP 200 with invalid schema without retrying', async () => {
+      const client = new TicketmasterApiClient({
+        apiKey: 'test-key',
+        requestsPerSecond: 100,
+        maxRetries: 3,
+      });
+
+      let fetchCalls = 0;
+      global.fetch = vi.fn().mockImplementation(async () => {
+        fetchCalls++;
+        return {
+          ok: true,
+          text: async () => JSON.stringify({ notAValidResponse: true }),
+        };
+      });
+
+      await expect(client.fetchEvents()).rejects.toThrow(
+        /schema validation failed/,
+      );
+      expect(fetchCalls).toBe(1);
+    });
+
+    it('handles HTTP-date formatted Retry-After header on HTTP 429', async () => {
+      const client = new TicketmasterApiClient({
+        apiKey: 'test-key',
+        requestsPerSecond: 100,
+        maxRetries: 2,
+      });
+
+      let attempts = 0;
+      const futureDate = new Date(Date.now() + 50).toUTCString();
+
+      global.fetch = vi.fn().mockImplementation(async () => {
+        attempts++;
+        if (attempts === 1) {
+          return {
+            ok: false,
+            status: 429,
+            headers: new Headers({ 'Retry-After': futureDate }),
+            text: async () => 'Rate limit exceeded',
+          };
+        }
+        return {
+          ok: true,
+          text: async () => JSON.stringify(fixtureData),
+        };
+      });
+
+      const res = await client.fetchEvents({ size: 1 });
+      expect(attempts).toBe(2);
+      expect(res.response._embedded?.events?.length).toBe(6);
+    });
+
+    it('rejects invalid pagination parameters immediately', async () => {
+      const client = new TicketmasterApiClient({ apiKey: 'test-key' });
+
+      await expect(client.fetchEvents({ page: -1 })).rejects.toThrow(
+        /Invalid page parameter/,
+      );
+      await expect(client.fetchEvents({ size: 0 })).rejects.toThrow(
+        /Invalid size parameter/,
+      );
+      await expect(client.fetchEvents({ size: 201 })).rejects.toThrow(
+        /Invalid size parameter/,
+      );
+    });
+
+    it('maintains concurrency-safe rate limit spacing under parallel requests', async () => {
+      const client = new TicketmasterApiClient({
+        apiKey: 'test-key',
+        requestsPerSecond: 5, // 200ms spacing
       });
 
       global.fetch = vi.fn().mockResolvedValue({
         ok: true,
-        text: async () => JSON.stringify({ unexpected: 'payload' }), // missing 'page'
+        text: async () => JSON.stringify(fixtureData),
       });
 
-      await expect(client.fetchEvents()).rejects.toThrowError(
-        /schema validation failed/,
-      );
+      const start = Date.now();
+      // Launch 3 requests in parallel
+      await Promise.all([
+        client.fetchEvents({ size: 1 }),
+        client.fetchEvents({ size: 1 }),
+        client.fetchEvents({ size: 1 }),
+      ]);
+      const elapsed = Date.now() - start;
+
+      // 3 serial requests with 200ms spacing should take at least ~350ms
+      expect(elapsed).toBeGreaterThanOrEqual(350);
     });
   });
 });
