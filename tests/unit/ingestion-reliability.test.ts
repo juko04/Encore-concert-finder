@@ -141,9 +141,43 @@ describe('Phase 2 PR 3: Ingestion Reliability & Discover Improvements', () => {
       expect(report.message).not.toContain(secret);
       expect(report.message).toContain('[REDACTED]');
     });
+    it('safely serializes error reports containing nested Error objects, credentials, and circular references', () => {
+      const secret = 'tm_super_secret_key_888';
+      const nestedError = new Error(`Connection timeout for key=${secret}`);
+      (nestedError as unknown as { code: string }).code = 'ECONNRESET';
+
+      const circularObj: Record<string, unknown> = {
+        apiKey: secret,
+        url: `https://app.ticketmaster.com/v2/events.json?apikey=${secret}`,
+        nested: nestedError,
+      };
+      circularObj.self = circularObj;
+
+      const dbErr = new PipelineDatabaseError(
+        `Failed to commit batch transaction with key=${secret}`,
+        circularObj,
+      );
+
+      const report = classifyIngestionError(dbErr, secret);
+      expect(report.category).toBe('database_error');
+      expect(report.message).not.toContain(secret);
+      expect(report.message).toContain('[REDACTED]');
+
+      // Must be safely serializable with JSON.stringify without throwing circular error
+      const serialized = JSON.stringify(report);
+      expect(serialized).toBeDefined();
+      expect(serialized).not.toContain(secret);
+      expect(serialized).toContain('[REDACTED]');
+      expect(serialized).toContain('[Circular Reference]');
+
+      const parsed = JSON.parse(serialized);
+      expect(parsed.details.apiKey).toBe('[REDACTED]');
+      expect(parsed.details.url).toContain('apikey=[REDACTED]');
+      expect(parsed.details.nested.message).toContain('[REDACTED]');
+    });
   });
 
-  describe('Ingestion Telemetry & Candidate Isolation', () => {
+  describe('Ingestion Telemetry & Replay Invariants', () => {
     function setupTestPipeline() {
       const sourceRepo = new MemorySourceRepository();
       const rawIngestRepo = new MemoryRawIngestRepository();
@@ -186,6 +220,161 @@ describe('Phase 2 PR 3: Ingestion Reliability & Discover Improvements', () => {
       expect(result.candidatesPersisted).toBe(0);
       expect(result.canonicalEventsCreated).toBe(0);
       expect(catalogRepo.events.size).toBe(0);
+    });
+
+    it('accurately distinguishes telemetry counters for First Ingestion and Identical Replay', async () => {
+      const { sourceRepo, rawIngestRepo, candidateRepo, catalogRepo, adapter } =
+        setupTestPipeline();
+
+      // 1. FIRST INGESTION
+      const run1 = await runTicketmasterIngestion({
+        sourceRepo,
+        rawIngestRepo,
+        candidateRepo,
+        catalogRepo,
+        adapter,
+        useFixture: true,
+        persist: true,
+      });
+
+      expect(run1.rawIngestsPersisted).toBe(1);
+      expect(run1.rawIngestsReused).toBe(0);
+      expect(run1.candidatesParsed).toBe(6);
+      expect(run1.candidatesPersisted).toBe(6);
+      expect(run1.candidatesReused).toBe(0);
+      expect(run1.canonicalEventsCreated).toBe(5);
+      expect(run1.canonicalEventsMatched).toBe(0);
+      expect(run1.candidatesNeedsReview).toBe(1);
+      expect(run1.reviewReasons['missing_venue_locality']).toBe(1);
+
+      // Verify source health success recorded
+      const sourceRecord = await sourceRepo.getById(run1.source.id);
+      expect(sourceRecord?.consecutiveFailures).toBe(0);
+      expect(sourceRecord?.lastFetchedAt).toBeDefined();
+
+      // 2. IDENTICAL REPLAY (same fixture without reprocess)
+      const run2 = await runTicketmasterIngestion({
+        sourceRepo,
+        rawIngestRepo,
+        candidateRepo,
+        catalogRepo,
+        adapter,
+        useFixture: true,
+        persist: true,
+      });
+
+      // Raw ingest was reused by contentHash
+      expect(run2.rawIngestsPersisted).toBe(0);
+      expect(run2.rawIngestsReused).toBe(1);
+
+      // Candidates are reused; 0 newly persisted candidate rows
+      expect(run2.candidatesPersisted).toBe(0);
+      expect(run2.candidatesReused).toBe(6);
+
+      // CRITICAL REPLAY INVARIANT: zero new events created, and previously created events are NOT reported as matched!
+      expect(run2.canonicalEventsCreated).toBe(0);
+      expect(run2.canonicalEventsMatched).toBe(0);
+
+      // Review candidates are preserved in reporting
+      expect(run2.candidatesNeedsReview).toBe(1);
+      expect(run2.reviewReasons['missing_venue_locality']).toBe(1);
+
+      // Total canonical events in catalog remain exactly 5
+      expect(catalogRepo.events.size).toBe(5);
+    });
+
+    it('correctly increments canonicalEventsMatched on Updated Provider Observation', async () => {
+      const { sourceRepo, rawIngestRepo, candidateRepo, catalogRepo, adapter } =
+        setupTestPipeline();
+
+      // Run 1: First ingestion of initial fixture
+      await runTicketmasterIngestion({
+        sourceRepo,
+        rawIngestRepo,
+        candidateRepo,
+        catalogRepo,
+        adapter,
+        useFixture: true,
+        persist: true,
+      });
+
+      expect(catalogRepo.events.size).toBe(5);
+
+      // Run 2: Ingest an updated observation for an existing event (e.g. Khruangbin with new ticket price or updated timestamp)
+      const initialJson = JSON.parse(
+        await import('fs').then((fs) =>
+          fs.readFileSync(
+            'tests/fixtures/ticketmaster-events-response.json',
+            'utf-8',
+          ),
+        ),
+      );
+
+      // Keep only event 0 (Khruangbin) with an updated price and slightly modified title note
+      const updatedEvent = {
+        ...initialJson._embedded.events[0],
+        priceRanges: [{ min: 45.0, max: 95.0, currency: 'USD' }],
+      };
+      const updatedPayload = JSON.stringify({
+        ...initialJson,
+        _embedded: {
+          events: [updatedEvent],
+        },
+      });
+
+      const updateRun = await runTicketmasterIngestion({
+        sourceRepo,
+        rawIngestRepo,
+        candidateRepo,
+        catalogRepo,
+        adapter,
+        useFixture: true,
+        fixtureJson: updatedPayload,
+        persist: true,
+      });
+
+      // New raw ingest row and new candidate row persisted because payload is distinct
+      expect(updateRun.rawIngestsPersisted).toBe(1);
+      expect(updateRun.rawIngestsReused).toBe(0);
+      expect(updateRun.candidatesPersisted).toBe(1);
+      expect(updateRun.candidatesReused).toBe(0);
+
+      // It matched against the existing canonical event, updating it instead of creating a duplicate
+      expect(updateRun.canonicalEventsCreated).toBe(0);
+      expect(updateRun.canonicalEventsMatched).toBe(1);
+      expect(updateRun.candidatesNeedsReview).toBe(0);
+
+      // Total canonical events remains 5 (no duplicates created!)
+      expect(catalogRepo.events.size).toBe(5);
+    });
+
+    it('does not label parsing or validation failures as database errors, and invokes recordFailure', async () => {
+      const { sourceRepo, rawIngestRepo, candidateRepo, catalogRepo } =
+        setupTestPipeline();
+
+      // Custom adapter that fails during parsing
+      const brokenAdapter = new TicketmasterDiscoveryAdapter();
+      brokenAdapter.parse = async () => {
+        throw new TicketmasterValidationError(
+          'Schema validation failed: Missing required field dates.start.localDate',
+        );
+      };
+
+      await expect(
+        runTicketmasterIngestion({
+          sourceRepo,
+          rawIngestRepo,
+          candidateRepo,
+          catalogRepo,
+          adapter: brokenAdapter,
+          useFixture: true,
+          persist: true,
+        }),
+      ).rejects.toThrow(TicketmasterValidationError);
+
+      // Source health consecutiveFailures must increment
+      const source = await sourceRepo.getBySlug('ticketmaster-discovery');
+      expect(source?.consecutiveFailures).toBe(1);
     });
 
     it('populates source attribution badges on canonical events in listEvents (Tech Debt 1.3)', async () => {
@@ -287,7 +476,7 @@ describe('Phase 2 PR 3: Ingestion Reliability & Discover Improvements', () => {
       expect(found?.venueName).not.toBe('The National — Special Showcase');
     });
 
-    it('wraps and classifies unexpected database persistence failures into PipelineDatabaseError', async () => {
+    it('wraps and classifies unexpected database persistence failures into PipelineDatabaseError and increments source failures', async () => {
       const { sourceRepo, rawIngestRepo, candidateRepo, catalogRepo, adapter } =
         setupTestPipeline();
 
@@ -308,23 +497,8 @@ describe('Phase 2 PR 3: Ingestion Reliability & Discover Improvements', () => {
         }),
       ).rejects.toThrow(PipelineDatabaseError);
 
-      try {
-        await runTicketmasterIngestion({
-          sourceRepo,
-          rawIngestRepo,
-          candidateRepo,
-          catalogRepo,
-          adapter,
-          useFixture: true,
-          persist: true,
-        });
-        expect.unreachable();
-      } catch (err) {
-        expect(err).toBeInstanceOf(PipelineDatabaseError);
-        const report = classifyIngestionError(err);
-        expect(report.category).toBe('database_error');
-        expect(report.message).toContain('connection lost to postgres pool');
-      }
+      const source = await sourceRepo.getBySlug('ticketmaster-discovery');
+      expect(source?.consecutiveFailures).toBe(1);
     });
   });
 });

@@ -292,6 +292,87 @@ describe('EventCard Component', () => {
     ).toBeInTheDocument();
   });
 
+  it('renders neutral Unknown Source badge when source relation exists but name is unresolvable (never fabricates Verified)', async () => {
+    const { EventCard } = await import('@/components/catalog/EventCard');
+
+    render(
+      <EventCard
+        event={{
+          id: '10000000-0000-0000-0000-000000000099',
+          title: 'Mystery Event',
+          venueName: 'Bluebird Theater',
+          city: 'Denver',
+          region: 'CO',
+          localStartDate: '2026-10-30',
+          startsAt: '2026-10-31T02:00:00Z',
+          timezone: 'America/Denver',
+          startTimePrecision: 'instant',
+          status: 'scheduled',
+          artists: [{ name: 'Mystery Band', billingPosition: 'headliner' }],
+          sources: [
+            {
+              id: 'unknown-id-1',
+              name: '',
+              slug: 'unknown-source',
+            },
+          ],
+        }}
+      />,
+    );
+
+    const sourceBadge = screen.getByTestId('source-badge');
+    expect(sourceBadge).toBeInTheDocument();
+    expect(sourceBadge).toHaveTextContent('Unknown Source');
+    // Ensure "Verified" is NEVER present
+    expect(screen.queryByText('Verified')).not.toBeInTheDocument();
+    expect(
+      screen.getByText('Source attribution: 1 source'),
+    ).toBeInTheDocument();
+  });
+
+  it('renders mixed known and unknown source badges accurately', async () => {
+    const { EventCard } = await import('@/components/catalog/EventCard');
+
+    render(
+      <EventCard
+        event={{
+          id: '10000000-0000-0000-0000-000000000098',
+          title: 'Mixed Sources Show',
+          venueName: 'Gothic Theatre',
+          city: 'Englewood',
+          region: 'CO',
+          localStartDate: '2026-11-05',
+          startsAt: '2026-11-06T02:00:00Z',
+          timezone: 'America/Denver',
+          startTimePrecision: 'instant',
+          status: 'scheduled',
+          artists: [{ name: 'Band A', billingPosition: 'headliner' }],
+          sources: [
+            {
+              id: 'source-1',
+              name: 'Ticketmaster Discovery API',
+              slug: 'ticketmaster-discovery',
+            },
+            {
+              id: 'source-2',
+              name: '',
+              slug: 'unknown-source',
+            },
+          ],
+        }}
+      />,
+    );
+
+    const badges = screen.getAllByTestId('source-badge');
+    expect(badges).toHaveLength(2);
+    expect(badges[0]).toHaveTextContent('Ticketmaster');
+    expect(badges[1]).toHaveTextContent('Unknown Source');
+    expect(screen.queryByText('Verified')).not.toBeInTheDocument();
+    expect(
+      screen.getByText('Source attribution: 2 sources'),
+    ).toBeInTheDocument();
+  });
+
   it('renders Venue TBA / Unknown badge when venue is missing or unknown without fabricating event title (Tech Debt 1.4)', async () => {
     const { EventCard } = await import('@/components/catalog/EventCard');
 

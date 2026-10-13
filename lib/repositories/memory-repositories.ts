@@ -35,6 +35,10 @@ import type {
   IRawIngestRepository,
   ISourceRepository,
 } from './interfaces';
+import {
+  TICKETMASTER_DEFAULT_SOURCE_ID,
+  TICKETMASTER_SOURCE_SLUG,
+} from '@/lib/sources/ticketmaster/source-registry';
 
 export class MemorySourceRepository implements ISourceRepository {
   private sources: Map<string, Source> = new Map();
@@ -403,7 +407,9 @@ export class MemoryCatalogRepository implements ICatalogRepository {
     const limit = filters?.limit ?? 50;
     const paged = result.slice(offset, offset + limit);
 
-    return paged.map((event) => {
+    const summaries: CanonicalEventSummary[] = [];
+
+    for (const event of paged) {
       const venue = event.venueId ? this.venues.get(event.venueId) : null;
       const artists: Array<{ name: string; billingPosition: BillingPosition }> =
         [];
@@ -441,10 +447,7 @@ export class MemoryCatalogRepository implements ICatalogRepository {
           let sName = es.sourceName;
           let sSlug = es.sourceSlug;
           if (!sName && this.sourceRepo) {
-            const memSourceRepo = this.sourceRepo as {
-              sources?: Map<string, Source>;
-            };
-            const found = memSourceRepo.sources?.get(es.sourceId);
+            const found = await this.sourceRepo.getById(es.sourceId);
             if (found) {
               sName = found.name;
               sSlug = found.slug;
@@ -457,28 +460,26 @@ export class MemoryCatalogRepository implements ICatalogRepository {
               sSlug = found.slug;
             }
           }
+          // Exact authoritative registry match
+          if (!sName && es.sourceId === TICKETMASTER_DEFAULT_SOURCE_ID) {
+            sName = 'Ticketmaster Discovery API';
+            sSlug = TICKETMASTER_SOURCE_SLUG;
+          }
+          // Neutral unknown-source state without implying verification
           if (!sName) {
-            if (
-              es.sourceUrl.includes('ticketmaster') ||
-              es.sourceId.includes('000000000003')
-            ) {
-              sName = 'Ticketmaster Discovery API';
-              sSlug = 'ticketmaster-discovery';
-            } else {
-              sName = 'Verified Source';
-              sSlug = 'verified-source';
-            }
+            sName = 'Unknown Source';
+            sSlug = 'unknown-source';
           }
           eventSources.push({
             id: es.sourceId,
             name: sName,
-            slug: sSlug ?? 'source',
+            slug: sSlug ?? 'unknown-source',
             sourceUrl: es.sourceUrl,
           });
         }
       }
 
-      return {
+      summaries.push({
         id: event.id,
         title: event.name,
         venueName: venue?.name ?? 'Venue TBA',
@@ -496,8 +497,10 @@ export class MemoryCatalogRepository implements ICatalogRepository {
         currency,
         sourceName: eventSources.length > 0 ? eventSources[0].name : undefined,
         sources: eventSources,
-      };
-    });
+      });
+    }
+
+    return summaries;
   }
 
   async findArtistByName(normalizedName: string): Promise<Artist | null> {

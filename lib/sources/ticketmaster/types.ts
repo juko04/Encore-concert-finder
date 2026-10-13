@@ -33,6 +33,14 @@ export function redactSensitiveString(
     /([?&](?:apikey|api_key|token|secret)=)[^&\s"']+/gi,
     '$1[REDACTED]',
   );
+  sanitized = sanitized.replace(
+    /Bearer\s+[A-Za-z0-9._~+/-]+=*/gi,
+    'Bearer [REDACTED]',
+  );
+  sanitized = sanitized.replace(
+    /((?:apiKey|api_key|token|secret|password)\s*[:=]\s*["']?)[^"'\s,]+/gi,
+    '$1[REDACTED]',
+  );
   if (secretToRedact && secretToRedact.trim().length > 0) {
     sanitized = sanitized.replaceAll(secretToRedact, '[REDACTED]');
   }

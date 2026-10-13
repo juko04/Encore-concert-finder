@@ -167,6 +167,89 @@ export class PipelineDatabaseError extends Error {
 }
 
 /**
+ * Recursively sanitizes any detail object or Error instance to ensure:
+ * 1. It is safe to serialize with JSON.stringify() (no circular references, non-enumerable Error fields converted).
+ * 2. Sensitive credentials (API keys, tokens, passwords, secrets) are redacted across strings, URLs, and object properties.
+ */
+export function sanitizeErrorDetails(
+  details: unknown,
+  secretToRedact?: string,
+  seen = new WeakSet<object>(),
+): unknown {
+  if (details === null || details === undefined) {
+    return undefined;
+  }
+
+  if (typeof details === 'string') {
+    return redactSensitiveString(details, secretToRedact);
+  }
+
+  if (typeof details === 'number' || typeof details === 'boolean') {
+    return details;
+  }
+
+  if (typeof details === 'bigint') {
+    return details.toString();
+  }
+
+  if (typeof details === 'symbol' || typeof details === 'function') {
+    return undefined;
+  }
+
+  if (typeof details === 'object') {
+    if (seen.has(details)) {
+      return '[Circular Reference]';
+    }
+    seen.add(details);
+
+    if (details instanceof Error) {
+      const errObj: Record<string, unknown> = {
+        name: details.name,
+        message: redactSensitiveString(details.message, secretToRedact),
+      };
+      if (
+        'code' in details &&
+        (details as { code?: unknown }).code !== undefined
+      ) {
+        errObj.code = (details as { code?: unknown }).code;
+      }
+      if (
+        'statusCode' in details &&
+        (details as { statusCode?: unknown }).statusCode !== undefined
+      ) {
+        errObj.statusCode = (details as { statusCode?: unknown }).statusCode;
+      }
+      if (details.cause !== undefined) {
+        errObj.cause = sanitizeErrorDetails(
+          details.cause,
+          secretToRedact,
+          seen,
+        );
+      }
+      return errObj;
+    }
+
+    if (Array.isArray(details)) {
+      return details.map((item) =>
+        sanitizeErrorDetails(item, secretToRedact, seen),
+      );
+    }
+
+    const sanitizedObj: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(details)) {
+      if (/key|token|secret|password|auth|cookie|credential/i.test(key)) {
+        sanitizedObj[key] = '[REDACTED]';
+      } else {
+        sanitizedObj[key] = sanitizeErrorDetails(value, secretToRedact, seen);
+      }
+    }
+    return sanitizedObj;
+  }
+
+  return redactSensitiveString(String(details), secretToRedact);
+}
+
+/**
  * Classifies an unknown ingestion failure into a structured report with credentials redacted.
  */
 export function classifyIngestionError(
@@ -174,24 +257,35 @@ export function classifyIngestionError(
   apiKeyToRedact?: string,
 ): IngestionErrorReport {
   if (err instanceof TicketmasterError) {
+    const details = err.cause
+      ? sanitizeErrorDetails(err.cause, apiKeyToRedact)
+      : undefined;
     return {
       category: err.category,
       message: redactSensitiveString(err.message, apiKeyToRedact),
       statusCode: err.statusCode,
-      sanitizedUrl: err.sanitizedUrl,
+      sanitizedUrl: err.sanitizedUrl
+        ? redactSensitiveString(err.sanitizedUrl, apiKeyToRedact)
+        : undefined,
+      ...(details !== undefined ? { details } : {}),
     };
   }
 
   if (err instanceof PipelineDatabaseError) {
+    const details = sanitizeErrorDetails(err.originalError, apiKeyToRedact);
     return {
       category: 'database_error',
       message: redactSensitiveString(err.message, apiKeyToRedact),
-      details: err.originalError,
+      ...(details !== undefined ? { details } : {}),
     };
   }
 
   const rawMsg = err instanceof Error ? err.message : String(err);
   const msg = redactSensitiveString(rawMsg, apiKeyToRedact);
+  const details =
+    err instanceof Error && err.cause
+      ? sanitizeErrorDetails(err.cause, apiKeyToRedact)
+      : undefined;
 
   if (
     /HTTP\s*(?:401|403)|unauthorized|forbidden|api key.*(?:invalid|required|missing)/i.test(
@@ -202,6 +296,7 @@ export function classifyIngestionError(
       category: 'auth_failure',
       message: msg,
       statusCode: /403/.test(msg) ? 403 : 401,
+      ...(details !== undefined ? { details } : {}),
     };
   }
 
@@ -210,6 +305,7 @@ export function classifyIngestionError(
       category: 'rate_limit_exceeded',
       message: msg,
       statusCode: 429,
+      ...(details !== undefined ? { details } : {}),
     };
   }
 
@@ -221,6 +317,7 @@ export function classifyIngestionError(
     return {
       category: 'validation_error',
       message: msg,
+      ...(details !== undefined ? { details } : {}),
     };
   }
 
@@ -232,6 +329,7 @@ export function classifyIngestionError(
     return {
       category: 'network_error',
       message: msg,
+      ...(details !== undefined ? { details } : {}),
     };
   }
 
@@ -243,11 +341,13 @@ export function classifyIngestionError(
     return {
       category: 'database_error',
       message: msg,
+      ...(details !== undefined ? { details } : {}),
     };
   }
 
   return {
     category: 'network_error',
     message: msg,
+    ...(details !== undefined ? { details } : {}),
   };
 }

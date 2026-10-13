@@ -12,7 +12,11 @@ import type {
 } from '@/lib/repositories/interfaces';
 import { TicketmasterDiscoveryAdapter } from './adapter';
 import { ensureTicketmasterSource } from './source-registry';
-import { PipelineDatabaseError, TicketmasterError } from './errors';
+import {
+  PipelineDatabaseError,
+  TicketmasterError,
+  TicketmasterValidationError,
+} from './errors';
 import type { TicketmasterEventQueryParams } from './types';
 
 export interface TicketmasterIngestionOptions {
@@ -197,17 +201,62 @@ export async function runTicketmasterIngestion(
     }
 
     // Parse candidates using the actually persisted raw ingest rows so IDs match
-    const candidates = await adapter.parse(persistedRawIngests);
+    let candidates: EventCandidate[];
+    try {
+      candidates = await adapter.parse(persistedRawIngests);
+    } catch (parseErr) {
+      if (parseErr instanceof TicketmasterError) {
+        throw parseErr;
+      }
+      const msg =
+        parseErr instanceof Error ? parseErr.message : String(parseErr);
+      throw new TicketmasterValidationError(
+        `Validation error during ingestion parsing: ${msg}`,
+        { cause: parseErr },
+      );
+    }
+
+    // Pre-fetch existing candidates by raw ingest to differentiate newly inserted from reused
+    const existingCandidatesByRaw = new Map<
+      string,
+      Array<
+        EventCandidate & { id: string; rawIngestId: string; sourceId: string }
+      >
+    >();
+    for (const raw of persistedRawIngests) {
+      const existingList = await options.candidateRepo.getByRawIngestId(raw.id);
+      existingCandidatesByRaw.set(raw.id, existingList);
+    }
 
     const persistedCandidates: Array<
       EventCandidate & { id: string; rawIngestId: string; sourceId: string }
     > = [];
+    let candidatesPersisted = 0;
 
     for (const candidate of candidates) {
-      const savedCand = await options.candidateRepo.create(
-        candidate as EventCandidate & { rawIngestId: string; sourceId: string },
+      const existingForRaw = candidate.rawIngestId
+        ? (existingCandidatesByRaw.get(candidate.rawIngestId) ?? [])
+        : [];
+      const existingCand = existingForRaw.find(
+        (c) =>
+          (candidate.sourceEventId &&
+            c.sourceEventId === candidate.sourceEventId) ||
+          (candidate.candidateFingerprint &&
+            c.candidateFingerprint === candidate.candidateFingerprint),
       );
-      persistedCandidates.push(savedCand);
+
+      if (existingCand) {
+        persistedCandidates.push(existingCand);
+      } else {
+        const savedCand = await options.candidateRepo.create(
+          candidate as EventCandidate & {
+            rawIngestId: string;
+            sourceId: string;
+          },
+        );
+        candidatesPersisted++;
+        persistedCandidates.push(savedCand);
+      }
     }
 
     // Canonicalize candidates
@@ -227,14 +276,10 @@ export async function runTicketmasterIngestion(
           await options.catalogRepo.findResolutionByCandidateId(cand.id);
         if (existingRes) {
           candidatesReused++;
-          if (
-            existingRes.status === 'created' ||
-            existingRes.status === 'matched'
-          ) {
-            canonicalEventsMatched++;
-            if (existingRes.eventId)
-              persistedEventIds.push(existingRes.eventId);
-          } else if (existingRes.status === 'needs_review') {
+          if (existingRes.eventId) {
+            persistedEventIds.push(existingRes.eventId);
+          }
+          if (existingRes.status === 'needs_review') {
             candidatesNeedsReview++;
             const reasonsList = Array.isArray(existingRes.reasons)
               ? (existingRes.reasons as string[])
@@ -245,6 +290,7 @@ export async function runTicketmasterIngestion(
           } else if (existingRes.status === 'rejected') {
             candidatesRejected++;
           }
+          // Note: Unchanged existing resolutions do NOT increment canonicalEventsMatched.
           continue;
         }
       }
@@ -279,7 +325,7 @@ export async function runTicketmasterIngestion(
       rawIngestsPersisted,
       rawIngestsReused,
       candidatesParsed: candidates.length,
-      candidatesPersisted: persistedCandidates.length,
+      candidatesPersisted,
       candidatesReused,
       canonicalEventsCreated,
       canonicalEventsMatched,
@@ -293,6 +339,7 @@ export async function runTicketmasterIngestion(
       durationMs: Math.max(1, Date.now() - startMs),
     };
   } catch (err) {
+    await options.sourceRepo.recordFailure(source.id).catch(() => {});
     if (
       err instanceof TicketmasterError ||
       err instanceof PipelineDatabaseError

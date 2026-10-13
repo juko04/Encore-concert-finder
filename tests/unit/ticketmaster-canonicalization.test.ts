@@ -177,7 +177,7 @@ describe('Phase 2 PR 2: Ticketmaster Canonicalization Integration', () => {
     expect(run2.rawIngestsReused).toBe(1);
     expect(run2.candidatesReused).toBe(6);
     expect(run2.canonicalEventsCreated).toBe(0);
-    expect(run2.canonicalEventsMatched).toBe(5);
+    expect(run2.canonicalEventsMatched).toBe(0); // Truthful telemetry: unchanged events are not newly matched on replay
 
     // Verify candidate resolutions and field evidence counts did NOT inflate on replay
     const resolutionsRun2 = await catalogRepo.countResolutions();
@@ -1452,7 +1452,7 @@ describe('Phase 2 PR 2: Ticketmaster Canonicalization Integration', () => {
     expect(replayB.rawIngestsReused).toBe(1);
     expect(replayB.candidatesReused).toBe(6);
     expect(replayB.canonicalEventsCreated).toBe(0);
-    expect(replayB.canonicalEventsMatched).toBe(5);
+    expect(replayB.canonicalEventsMatched).toBe(0); // Truthful telemetry: unchanged events are not newly matched on replay
 
     // Catalog count remains exactly 10
     const allEventsAfterReplay = await catalogRepo.listEvents({ limit: 50 });

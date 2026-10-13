@@ -11,24 +11,23 @@ Durable architecture records belong in [`docs/architecture/`](docs/architecture/
 - **Active Specification:** [`docs/phases/active/PHASE_2_IMPLEMENTATION.md`](docs/phases/active/PHASE_2_IMPLEMENTATION.md).
 - **Current Branch:** `feature/phase-2-ingestion-reliability`
 - **Active Implementing Agent:** Google Antigravity
-- **Current Task:** Phase 2, PR 3: Ingestion Reliability & Discover Improvements — IMPLEMENTATION COMPLETE, READY FOR PR.
+- **Current Task:** Phase 2, PR 3: Ingestion Reliability & Discover Improvements — INDEPENDENT REVIEW REMEDIATIONS COMPLETE.
 - **Deliverables & Remediation:**
-  1. **Error Taxonomy & Redaction:** Implemented classified ingestion error classes (`TicketmasterAuthError`, `TicketmasterRateLimitError`, `TicketmasterNetworkError`, `TicketmasterValidationError`, `PipelineDatabaseError`) and robust error classifier `classifyIngestionError()` with automatic API key and credential redaction across URLs, messages, and traces.
-  2. **Truthful Ingestion Telemetry:** Enhanced pipeline and CLI runner with execution timing (`startedAt`, `completedAt`, `durationMs`), query scope logging, candidate review breakdown (`missing_venue_identity`, `missing_venue_locality`, etc.), and structured remediation guidance on failure.
-  3. **Discover Source Attribution (Tech Debt 1.3):** Added `sources` to `CanonicalEventSummary`, batched source joins in catalog repositories, and rendered subtle provenance badges with `data-testid="source-badge"` on `EventCard.tsx`.
-  4. **Incomplete Event & Venue Handling (Tech Debt 1.4):** Rendered `<span data-testid="venue-tba-badge">Venue TBA / Unknown</span>` when venue name is missing or placeholder without fabricating event title or artist name; preserved locality display, neutral price formatting, and status badges.
-  5. **N+1 Catalog Query Optimization (Phase 1 Deferral 2.1):** Batch-fetched artists, ticket links, and sources using `.in('event_id', eventIds)` in `SupabaseCatalogRepository.listEvents`, reducing catalog queries from 1 + 3N to 4.
-  6. **Candidate Isolation Invariant:** Verified that unresolved and `needs_review` candidates exist strictly in `event_candidates` and are never exposed on `/discover`.
+  1. **Removed Fabricated Source Attribution:** Eliminated URL substring and partial UUID matching in `MemoryCatalogRepository.listEvents()`; removed `"Verified"` fallback in `EventCard.tsx` in favor of a neutral `Unknown Source` state without implying verification. Added unit tests for known, unknown, and multiple sources.
+  2. **Safe Error Report Serialization:** Implemented recursive `sanitizeErrorDetails()` ensuring nested Error objects, credentials (`apikey`, `Bearer`, etc.), and circular references are sanitized safely for `JSON.stringify()`.
+  3. **Truthful Telemetry Under Replay:** Differentiated newly inserted candidate rows from existing candidates returned by idempotent repository operations. Unchanged previously created events are no longer reported as newly matched during replay. Defined and tested counters for first ingestion, identical replay, updated provider observations, and review candidates.
+  4. **Database-Backed Catalog Regression Coverage:** Added targeted PostgreSQL integration tests in `tests/integration/catalog-rls.test.ts` verifying source joins, multiple current sources, exclusion of inactive/historical relationships, missing data handling, and anon RLS read support after the N+1 query refactor.
+  5. **Failure Classification & Source-Health Tracking:** Prevented parsing/validation errors from being labeled database errors; invoked `sourceRepo.recordFailure()` on all failure modes, ensuring failed runs cannot report success.
 - **Verification State:** ALL GREEN:
   - `npm run format:check`: 100% compliant with Prettier.
   - `npm run lint`: 0 warnings, 0 errors.
   - `npm run typecheck`: Strict TypeScript compile passed with 0 errors.
-  - `npm test`: 181/181 unit tests passing across 14 test suites (100% pass rate).
+  - `npm test`: 187/187 unit tests passing across 14 test suites (100% pass rate).
   - `npm run build`: Next.js production compile successful.
   - `npm run test:e2e`: 3/3 Playwright browser smoke tests passing.
-  - `npm run test:integration`: 28/28 integration tests passing (or skipping gracefully when local DB is offline).
-- **Immediate Next Action:** Open PR #8 against `main`, monitor CI until green, and await independent code review. Do not merge automatically.
-- **Phase 2 Status:** **ACTIVE — PR 3 IMPLEMENTATION COMPLETE, OPENING PR.**
+  - `npm run test:integration`: 29/29 integration tests passing (or skipping gracefully when local DB is offline).
+- **Immediate Next Action:** Push remediation commits to `origin/feature/phase-2-ingestion-reliability`, monitor PR #8 CI until green, and await final independent code review. Do not merge automatically.
+- **Phase 2 Status:** **ACTIVE — PR 3 REMEDIATIONS APPLIED, AWAITING FINAL REVIEW.**
 
 ---
 

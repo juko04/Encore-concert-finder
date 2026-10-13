@@ -11,14 +11,24 @@ export interface EventCardProps {
 
 /**
  * Normalizes raw source provider names into clean, compact badge text.
+ * Never fabricates verification claims.
  */
-export function formatSourceBadgeName(rawName: string): string {
+export function formatSourceBadgeName(rawName?: string | null): string {
+  if (!rawName || rawName.trim().length === 0) {
+    return 'Unknown Source';
+  }
   const trimmed = rawName.trim();
   if (
     trimmed.toLowerCase().includes('ticketmaster') ||
     trimmed.toLowerCase() === 'ticketmaster discovery api'
   ) {
     return 'Ticketmaster';
+  }
+  if (
+    trimmed.toLowerCase() === 'verified source' ||
+    trimmed.toLowerCase() === 'verified'
+  ) {
+    return 'Unknown Source';
   }
   return trimmed;
 }
@@ -135,11 +145,10 @@ export function EventCard({ event }: EventCardProps) {
         .map((s, idx) => ({
           id: s.sourceId || String(idx),
           name: formatSourceBadgeName(
-            (s as { sourceName?: string }).sourceName || '',
+            (s as { sourceName?: string }).sourceName,
           ),
           slug: 'source',
-        }))
-        .filter((b) => b.name.length > 0);
+        }));
     }
     return [];
   }, [summaryEvent, detailEvent]);
@@ -248,7 +257,12 @@ export function EventCard({ event }: EventCardProps) {
                 </span>
               ))
             ) : (
-              <span className="text-zinc-400">Verified</span>
+              <span
+                data-testid="source-badge"
+                className="shadow-xs inline-flex items-center rounded border border-zinc-700/60 bg-zinc-800/90 px-1.5 py-0.5 text-[10px] font-medium text-zinc-300"
+              >
+                Unknown Source
+              </span>
             )}
           </div>
           <span className="text-[10px] text-zinc-500">
