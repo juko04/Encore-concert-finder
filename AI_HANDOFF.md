@@ -26,8 +26,8 @@ Durable architecture records belong in [`docs/architecture/`](docs/architecture/
   - `npm run build`: Next.js production compile successful.
   - `npm run test:e2e`: 3/3 Playwright browser smoke tests passing.
   - `npm run test:integration`: 29/29 integration tests passing (or skipping gracefully when local DB is offline).
-- **Immediate Next Action:** Push second-review remediation commits to `origin/feature/phase-2-ingestion-reliability`, monitor PR #8 CI until green, and await final independent code review approval before merge. Do not merge automatically.
-- **Phase 2 Status:** **ACTIVE — PR 3 SECOND-REVIEW REMEDIATIONS COMPLETE, AWAITING FINAL REVIEW.**
+- **Immediate Next Action:** PR #8 CI is 100% green on commit `7b6deaf`. Await final independent code review approval before merge. Do not merge automatically.
+- **Phase 2 Status:** **ACTIVE — PR 3 SECOND-REVIEW REMEDIATIONS COMPLETE, CI 100% GREEN, AWAITING FINAL REVIEW.**
 
 ---
 
