@@ -376,9 +376,10 @@ Phase 2 will be delivered in 6 focused, independently reviewable PRs:
 
 ### PR 3 — Ingestion Reliability, Operational Safeguards & UI Polish
 - **Goal:** Content-hash duplicate skipping, source health tracking, and Discover page visual provenance.
-- **Files:** `lib/sources/ticketmaster/`, `components/catalog/EventCard.tsx`, `app/discover/page.tsx`.
-- **Debt Resolution:** Close Tech Debt 1.3 (source attribution badges) and Tech Debt 1.4 (unknown-venue display behavior).
-- **Verification:** Unit tests and Playwright smoke tests for Discover UI.
+- **Status:** Complete (Implemented on `feature/phase-2-ingestion-reliability`).
+- **Files:** `lib/sources/ticketmaster/errors.ts`, `lib/sources/ticketmaster/client.ts`, `lib/sources/ticketmaster/ingestion-pipeline.ts`, `components/catalog/EventCard.tsx`, `lib/domain/catalog.ts`, `lib/repositories/catalog-repository.ts`, `lib/repositories/memory-repositories.ts`, `scripts/ingest-ticketmaster.ts`, `tests/unit/ingestion-reliability.test.ts`, `tests/unit/components.test.tsx`.
+- **Debt Resolution:** Closed Tech Debt 1.3 (source attribution badges), Tech Debt 1.4 (unknown-venue display behavior), and Phase 1 Deferral 2.1 (N+1 catalog query batching).
+- **Verification:** 181/181 unit tests passing, Next.js build clean, 3/3 Playwright smoke tests, full repository test suite verified.
 
 ### PR 4 — Spotify Authentication & Taste Ingestion
 - **Goal:** Secure Spotify OAuth flow, encrypted token storage with RLS, and extraction of top artists into `user_artist_affinities`.

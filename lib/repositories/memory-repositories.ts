@@ -8,6 +8,7 @@ import type {
   BillingPosition,
   CandidateResolution,
   CanonicalEventDetail,
+  CanonicalEventSourceSummary,
   CanonicalEventSummary,
   CanonicalizationPayload,
   Event,
@@ -34,6 +35,10 @@ import type {
   IRawIngestRepository,
   ISourceRepository,
 } from './interfaces';
+import {
+  TICKETMASTER_DEFAULT_SOURCE_ID,
+  TICKETMASTER_SOURCE_SLUG,
+} from '@/lib/sources/ticketmaster/source-registry';
 
 export class MemorySourceRepository implements ISourceRepository {
   private sources: Map<string, Source> = new Map();
@@ -274,6 +279,12 @@ export class MemoryCatalogRepository implements ICatalogRepository {
   public eventSources: Map<string, EventSourceRecord> = new Map();
   public eventFieldEvidence: Map<string, EventFieldEvidence> = new Map();
   public candidateResolutions: Map<string, CandidateResolution> = new Map();
+  public sources: Map<string, Source> = new Map();
+  public sourceRepo?: ISourceRepository;
+
+  constructor(sourceRepo?: ISourceRepository) {
+    this.sourceRepo = sourceRepo;
+  }
 
   async getEventById(id: string): Promise<CanonicalEventDetail | null> {
     const event = this.events.get(id);
@@ -396,7 +407,9 @@ export class MemoryCatalogRepository implements ICatalogRepository {
     const limit = filters?.limit ?? 50;
     const paged = result.slice(offset, offset + limit);
 
-    return paged.map((event) => {
+    const summaries: CanonicalEventSummary[] = [];
+
+    for (const event of paged) {
       const venue = event.venueId ? this.venues.get(event.venueId) : null;
       const artists: Array<{ name: string; billingPosition: BillingPosition }> =
         [];
@@ -428,10 +441,48 @@ export class MemoryCatalogRepository implements ICatalogRepository {
         }
       }
 
-      return {
+      const eventSources: CanonicalEventSourceSummary[] = [];
+      for (const es of this.eventSources.values()) {
+        if (es.eventId === event.id && es.isCurrent !== false) {
+          let sName = es.sourceName;
+          let sSlug = es.sourceSlug;
+          if (!sName && this.sourceRepo) {
+            const found = await this.sourceRepo.getById(es.sourceId);
+            if (found) {
+              sName = found.name;
+              sSlug = found.slug;
+            }
+          }
+          if (!sName && this.sources.has(es.sourceId)) {
+            const found = this.sources.get(es.sourceId);
+            if (found) {
+              sName = found.name;
+              sSlug = found.slug;
+            }
+          }
+          // Exact authoritative registry match
+          if (!sName && es.sourceId === TICKETMASTER_DEFAULT_SOURCE_ID) {
+            sName = 'Ticketmaster Discovery API';
+            sSlug = TICKETMASTER_SOURCE_SLUG;
+          }
+          // Neutral unknown-source state without implying verification
+          if (!sName) {
+            sName = 'Unknown Source';
+            sSlug = 'unknown-source';
+          }
+          eventSources.push({
+            id: es.sourceId,
+            name: sName,
+            slug: sSlug ?? 'unknown-source',
+            sourceUrl: es.sourceUrl,
+          });
+        }
+      }
+
+      summaries.push({
         id: event.id,
         title: event.name,
-        venueName: venue?.name ?? event.name,
+        venueName: venue?.name ?? 'Venue TBA',
         city: venue?.city ?? event.city ?? undefined,
         region: venue?.region ?? event.region ?? undefined,
         localStartDate: event.localStartDate,
@@ -444,8 +495,12 @@ export class MemoryCatalogRepository implements ICatalogRepository {
         minPrice,
         maxPrice,
         currency,
-      };
-    });
+        sourceName: eventSources.length > 0 ? eventSources[0].name : undefined,
+        sources: eventSources,
+      });
+    }
+
+    return summaries;
   }
 
   async findArtistByName(normalizedName: string): Promise<Artist | null> {
@@ -740,6 +795,8 @@ export class MemoryCatalogRepository implements ICatalogRepository {
     sourceEventId?: string | null;
     sourceUrl: string;
     confidence: number;
+    sourceName?: string;
+    sourceSlug?: string;
   }): Promise<EventSourceRecord> {
     if (sourceRecord.sourceEventId) {
       for (const es of this.eventSources.values()) {
@@ -1070,6 +1127,8 @@ export class MemoryCatalogRepository implements ICatalogRepository {
             sourceEventId: payload.source.source_event_id,
             sourceUrl: payload.source.source_url,
             confidence: payload.source.confidence ?? 0.8,
+            sourceName: payload.source.source_name,
+            sourceSlug: payload.source.source_slug,
           });
         }
 

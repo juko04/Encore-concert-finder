@@ -1,6 +1,8 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { execSync } from 'child_process';
+import crypto from 'node:crypto';
+import { SupabaseCatalogRepository } from '@/lib/repositories/catalog-repository';
 
 interface LocalCredentials {
   url: string;
@@ -575,5 +577,262 @@ describe('Catalog RLS, Security & Canonicalization Atomicity', () => {
     expect(duplicateLinkError).not.toBeNull();
     // 23505 is unique_violation in PostgreSQL
     expect(duplicateLinkError?.code).toBe('23505');
+  });
+
+  it('verifies batched listEvents correctly joins source names, handles multiple/inactive sources, preserves artist/ticket ordering, and supports anon RLS reads', async () => {
+    if (!isDbAvailable || !adminClient || !anonClient) return;
+
+    const runSuffix = crypto.randomUUID().slice(0, 8);
+
+    // 1. Create venue
+    const { data: venue, error: venueError } = await adminClient
+      .from('venues')
+      .insert({
+        name: `Red Rocks Amphitheatre ${runSuffix}`,
+        normalized_name: `red rocks amphitheatre ${runSuffix}`,
+        city: 'Morrison',
+        region: 'CO',
+        timezone: 'America/Denver',
+      })
+      .select('id')
+      .single();
+    expect(venueError).toBeNull();
+    expect(venue?.id).toBeDefined();
+
+    // 2. Create artists
+    const { data: artist1, error: a1Error } = await adminClient
+      .from('artists')
+      .insert({
+        name: `Headliner Band ${runSuffix}`,
+        normalized_name: `headliner band ${runSuffix}`,
+      })
+      .select('id')
+      .single();
+    expect(a1Error).toBeNull();
+
+    const { data: artist2, error: a2Error } = await adminClient
+      .from('artists')
+      .insert({
+        name: `Support Act ${runSuffix}`,
+        normalized_name: `support act ${runSuffix}`,
+      })
+      .select('id')
+      .single();
+    expect(a2Error).toBeNull();
+
+    // 3. Create sources
+    const { data: sourceA, error: sAError } = await adminClient
+      .from('sources')
+      .insert({
+        slug: `source-alpha-${runSuffix}`,
+        name: `Source Alpha ${runSuffix}`,
+        source_type: 'ticketing',
+        acquisition_method: 'api',
+        base_url: 'https://alpha.example.com',
+        reliability_score: 0.95,
+        active: true,
+        parser_version: '1.0.0',
+      })
+      .select('id')
+      .single();
+    expect(sAError).toBeNull();
+
+    const { data: sourceB, error: sBError } = await adminClient
+      .from('sources')
+      .insert({
+        slug: `source-beta-${runSuffix}`,
+        name: `Source Beta ${runSuffix}`,
+        source_type: 'venue',
+        acquisition_method: 'api',
+        base_url: 'https://beta.example.com',
+        reliability_score: 0.9,
+        active: true,
+        parser_version: '1.0.0',
+      })
+      .select('id')
+      .single();
+    expect(sBError).toBeNull();
+
+    // 4. Create Event 1 (complete data)
+    const testDate = '2026-11-28';
+    const { data: event1, error: ev1Error } = await adminClient
+      .from('events')
+      .insert({
+        name: `Festival Showcase ${runSuffix}`,
+        normalized_name: `festival showcase ${runSuffix}`,
+        event_kind: 'concert',
+        status: 'scheduled',
+        venue_id: venue?.id,
+        city: 'Morrison',
+        region: 'CO',
+        timezone: 'America/Denver',
+        local_start_date: testDate,
+        starts_at: `${testDate}T01:00:00Z`,
+        start_time_precision: 'instant',
+        is_multi_day: false,
+      })
+      .select('id')
+      .single();
+    expect(ev1Error).toBeNull();
+
+    // Link artists in specific sort_order
+    await adminClient.from('event_artists').insert([
+      {
+        event_id: event1?.id,
+        artist_id: artist1?.id,
+        billing_position: 'headliner',
+        sort_order: 1,
+      },
+      {
+        event_id: event1?.id,
+        artist_id: artist2?.id,
+        billing_position: 'support',
+        sort_order: 2,
+      },
+    ]);
+
+    // Link ticket prices
+    await adminClient.from('event_ticket_links').insert({
+      event_id: event1?.id,
+      url: 'https://tickets.example.com/show',
+      normalized_url: 'https://tickets.example.com/show',
+      min_price: 35.0,
+      max_price: 85.0,
+      currency: 'USD',
+      inventory_status: 'available',
+    });
+
+    // Link sources: multiple current sources + one inactive source
+    await adminClient.from('event_sources').insert([
+      {
+        event_id: event1?.id,
+        source_id: sourceA?.id,
+        source_url: 'https://alpha.example.com/events/1',
+        confidence: 0.95,
+        is_current: true,
+      },
+      {
+        event_id: event1?.id,
+        source_id: sourceB?.id,
+        source_url: 'https://beta.example.com/events/1',
+        confidence: 0.9,
+        is_current: true,
+      },
+      {
+        event_id: event1?.id,
+        source_id: sourceA?.id,
+        source_url: 'https://alpha.example.com/events/historical-1',
+        confidence: 0.5,
+        is_current: false, // Inactive / historical relationship
+      },
+    ]);
+
+    // 5. Create Event 2 (missing venue, ticket links, sources)
+    const { data: event2, error: ev2Error } = await adminClient
+      .from('events')
+      .insert({
+        name: `Orphaned Show ${runSuffix}`,
+        normalized_name: `orphaned show ${runSuffix}`,
+        event_kind: 'concert',
+        status: 'scheduled',
+        venue_id: null, // Missing venue
+        city: null,
+        region: null,
+        timezone: 'America/Denver',
+        local_start_date: testDate,
+        start_time_precision: 'date_only',
+        is_multi_day: false,
+      })
+      .select('id')
+      .single();
+    expect(ev2Error).toBeNull();
+
+    // 6. Test batched listEvents via adminClient (server-side catalog repository queries with source joins)
+    const catalogRepo = new SupabaseCatalogRepository(adminClient);
+    const results = await catalogRepo.listEvents({
+      fromDate: testDate,
+      toDate: testDate,
+    });
+
+    // Verify Event 1 associations
+    const ev1Summary = results.find((e) => e.id === event1?.id);
+    expect(ev1Summary).toBeDefined();
+    expect(ev1Summary?.venueName).toBe(`Red Rocks Amphitheatre ${runSuffix}`);
+    expect(ev1Summary?.city).toBe('Morrison');
+    expect(ev1Summary?.region).toBe('CO');
+
+    // Artists: verify ordered sequence and billing positions
+    expect(ev1Summary?.artists).toHaveLength(2);
+    expect(ev1Summary?.artists?.[0].name).toBe(`Headliner Band ${runSuffix}`);
+    expect(ev1Summary?.artists?.[0].billingPosition).toBe('headliner');
+    expect(ev1Summary?.artists?.[1].name).toBe(`Support Act ${runSuffix}`);
+    expect(ev1Summary?.artists?.[1].billingPosition).toBe('support');
+
+    // Ticket links: pricing aggregation
+    expect(ev1Summary?.minPrice).toBe(35.0);
+    expect(ev1Summary?.maxPrice).toBe(85.0);
+    expect(ev1Summary?.currency).toBe('USD');
+
+    // Sources: verify correct joins, multiple current sources, and exclusion of inactive
+    expect(ev1Summary?.sources).toBeDefined();
+    expect(ev1Summary?.sources).toHaveLength(2);
+    const sourceNames = ev1Summary?.sources?.map((s) => s.name) ?? [];
+    expect(sourceNames).toContain(`Source Alpha ${runSuffix}`);
+    expect(sourceNames).toContain(`Source Beta ${runSuffix}`);
+    expect(
+      ev1Summary?.sources?.some(
+        (s) => s.sourceUrl === 'https://alpha.example.com/events/historical-1',
+      ),
+    ).toBe(false);
+
+    // Verify Event 2 fallback handling
+    const ev2Summary = results.find((e) => e.id === event2?.id);
+    expect(ev2Summary).toBeDefined();
+    expect(ev2Summary?.venueName).toBe('Venue TBA');
+    expect(ev2Summary?.artists).toEqual([]);
+    expect(ev2Summary?.minPrice).toBeNull();
+    expect(ev2Summary?.maxPrice).toBeNull();
+    expect(ev2Summary?.sources).toEqual([]);
+
+    // 7. Verify public anon RLS read permissions on catalog tables and views
+    const { data: anonEventData, error: anonEventError } = await anonClient
+      .from('events')
+      .select('id, name')
+      .eq('id', event1?.id)
+      .single();
+    expect(anonEventError).toBeNull();
+    expect(anonEventData?.name).toBe(`Festival Showcase ${runSuffix}`);
+
+    const { data: anonArtistData, error: anonArtistError } = await anonClient
+      .from('event_artists')
+      .select('event_id, artist_id, billing_position')
+      .eq('event_id', event1?.id);
+    expect(anonArtistError).toBeNull();
+    expect(anonArtistData).toHaveLength(2);
+
+    const { data: anonTicketData, error: anonTicketError } = await anonClient
+      .from('event_ticket_links')
+      .select('event_id, min_price, max_price')
+      .eq('event_id', event1?.id);
+    expect(anonTicketError).toBeNull();
+    expect(anonTicketData).toHaveLength(1);
+
+    const { data: anonSourceData, error: anonSourceError } = await anonClient
+      .from('public_sources')
+      .select('id, name, slug')
+      .eq('id', sourceA?.id)
+      .single();
+    expect(anonSourceError).toBeNull();
+    expect(anonSourceData?.name).toBe(`Source Alpha ${runSuffix}`);
+
+    // Direct access to event_sources is denied to anonClient under RLS
+    const { data: anonEventSources, error: anonEventSourcesError } =
+      await anonClient
+        .from('event_sources')
+        .select('id')
+        .eq('event_id', event1?.id);
+    expect(
+      anonEventSourcesError || anonEventSources?.length === 0,
+    ).toBeTruthy();
   });
 });

@@ -208,4 +208,276 @@ describe('EventCard Component', () => {
     expect(screen.queryByText(/USD/)).not.toBeInTheDocument();
     expect(screen.queryByText(/\$15/)).not.toBeInTheDocument();
   });
+
+  it('renders subtle source badge from summary sources (Tech Debt 1.3)', async () => {
+    const { EventCard } = await import('@/components/catalog/EventCard');
+
+    render(
+      <EventCard
+        event={{
+          id: '10000000-0000-0000-0000-000000000010',
+          title: 'The Black Keys',
+          venueName: 'Red Rocks Amphitheatre',
+          city: 'Morrison',
+          region: 'CO',
+          localStartDate: '2026-10-15',
+          startsAt: '2026-10-16T01:30:00Z',
+          timezone: 'America/Denver',
+          startTimePrecision: 'instant',
+          status: 'scheduled',
+          artists: [{ name: 'The Black Keys', billingPosition: 'headliner' }],
+          ticketUrl: 'https://www.ticketmaster.com/event/1',
+          minPrice: 49.5,
+          maxPrice: 129.5,
+          currency: 'USD',
+          sourceName: 'Ticketmaster Discovery API',
+          sources: [
+            {
+              id: 'b0000000-0000-0000-0000-000000000003',
+              name: 'Ticketmaster Discovery API',
+              slug: 'ticketmaster-discovery',
+            },
+          ],
+        }}
+      />,
+    );
+
+    const sourceBadge = screen.getByTestId('source-badge');
+    expect(sourceBadge).toBeInTheDocument();
+    expect(sourceBadge).toHaveTextContent('Ticketmaster');
+    expect(
+      screen.getByText('Source attribution: 1 source'),
+    ).toBeInTheDocument();
+  });
+
+  it('renders multiple source badges when multiple sources contributed', async () => {
+    const { EventCard } = await import('@/components/catalog/EventCard');
+
+    render(
+      <EventCard
+        event={{
+          id: '10000000-0000-0000-0000-000000000011',
+          title: 'Khruangbin with Men I Trust',
+          venueName: 'Mission Ballroom',
+          city: 'Denver',
+          region: 'CO',
+          localStartDate: '2026-10-18',
+          startsAt: '2026-10-19T02:00:00Z',
+          timezone: 'America/Denver',
+          startTimePrecision: 'instant',
+          status: 'scheduled',
+          artists: [{ name: 'Khruangbin', billingPosition: 'headliner' }],
+          sources: [
+            {
+              id: 'source-1',
+              name: 'Ticketmaster Discovery API',
+              slug: 'ticketmaster-discovery',
+            },
+            {
+              id: 'source-2',
+              name: 'Direct Venue Calendar',
+              slug: 'direct-venue-calendar',
+            },
+          ],
+        }}
+      />,
+    );
+
+    const badges = screen.getAllByTestId('source-badge');
+    expect(badges).toHaveLength(2);
+    expect(badges[0]).toHaveTextContent('Ticketmaster');
+    expect(badges[1]).toHaveTextContent('Direct Venue Calendar');
+    expect(
+      screen.getByText('Source attribution: 2 sources'),
+    ).toBeInTheDocument();
+  });
+
+  it('renders neutral Unknown Source badge when source relation exists but name is unresolvable (never fabricates Verified)', async () => {
+    const { EventCard } = await import('@/components/catalog/EventCard');
+
+    render(
+      <EventCard
+        event={{
+          id: '10000000-0000-0000-0000-000000000099',
+          title: 'Mystery Event',
+          venueName: 'Bluebird Theater',
+          city: 'Denver',
+          region: 'CO',
+          localStartDate: '2026-10-30',
+          startsAt: '2026-10-31T02:00:00Z',
+          timezone: 'America/Denver',
+          startTimePrecision: 'instant',
+          status: 'scheduled',
+          artists: [{ name: 'Mystery Band', billingPosition: 'headliner' }],
+          sources: [
+            {
+              id: 'unknown-id-1',
+              name: '',
+              slug: 'unknown-source',
+            },
+          ],
+        }}
+      />,
+    );
+
+    const sourceBadge = screen.getByTestId('source-badge');
+    expect(sourceBadge).toBeInTheDocument();
+    expect(sourceBadge).toHaveTextContent('Unknown Source');
+    // Ensure "Verified" is NEVER present
+    expect(screen.queryByText('Verified')).not.toBeInTheDocument();
+    expect(
+      screen.getByText('Source attribution: 1 source'),
+    ).toBeInTheDocument();
+  });
+
+  it('renders mixed known and unknown source badges accurately', async () => {
+    const { EventCard } = await import('@/components/catalog/EventCard');
+
+    render(
+      <EventCard
+        event={{
+          id: '10000000-0000-0000-0000-000000000098',
+          title: 'Mixed Sources Show',
+          venueName: 'Gothic Theatre',
+          city: 'Englewood',
+          region: 'CO',
+          localStartDate: '2026-11-05',
+          startsAt: '2026-11-06T02:00:00Z',
+          timezone: 'America/Denver',
+          startTimePrecision: 'instant',
+          status: 'scheduled',
+          artists: [{ name: 'Band A', billingPosition: 'headliner' }],
+          sources: [
+            {
+              id: 'source-1',
+              name: 'Ticketmaster Discovery API',
+              slug: 'ticketmaster-discovery',
+            },
+            {
+              id: 'source-2',
+              name: '',
+              slug: 'unknown-source',
+            },
+          ],
+        }}
+      />,
+    );
+
+    const badges = screen.getAllByTestId('source-badge');
+    expect(badges).toHaveLength(2);
+    expect(badges[0]).toHaveTextContent('Ticketmaster');
+    expect(badges[1]).toHaveTextContent('Unknown Source');
+    expect(screen.queryByText('Verified')).not.toBeInTheDocument();
+    expect(
+      screen.getByText('Source attribution: 2 sources'),
+    ).toBeInTheDocument();
+  });
+
+  it('renders Venue TBA / Unknown badge when venue is missing or unknown without fabricating event title (Tech Debt 1.4)', async () => {
+    const { EventCard } = await import('@/components/catalog/EventCard');
+
+    render(
+      <EventCard
+        event={{
+          id: '10000000-0000-0000-0000-000000000012',
+          title: 'Radiohead Secret Show',
+          venueName: 'Venue TBA',
+          localStartDate: '2026-11-20',
+          startsAt: null,
+          timezone: 'America/Denver',
+          startTimePrecision: 'date_only',
+          status: 'scheduled',
+          artists: [{ name: 'Radiohead', billingPosition: 'headliner' }],
+        }}
+      />,
+    );
+
+    // Must render the explicit badge
+    const venueBadge = screen.getByTestId('venue-tba-badge');
+    expect(venueBadge).toBeInTheDocument();
+    expect(venueBadge).toHaveTextContent('Venue TBA / Unknown');
+
+    // Must NEVER display the event title in the venue position
+    const title = screen.getByRole('heading', { level: 3 });
+    expect(title).toHaveTextContent('Radiohead Secret Show');
+    // Ensure "Radiohead Secret Show" only appears once in the document (as title, not venue)
+    expect(screen.getAllByText('Radiohead Secret Show')).toHaveLength(1);
+  });
+
+  it('renders Venue TBA / Unknown badge with preserved locality when city/region are known', async () => {
+    const { EventCard } = await import('@/components/catalog/EventCard');
+
+    render(
+      <EventCard
+        event={{
+          id: '10000000-0000-0000-0000-000000000013',
+          title: 'Mountain Pop-up',
+          venueName: 'Unknown Venue',
+          city: 'Telluride',
+          region: 'CO',
+          localStartDate: '2026-11-25',
+          startsAt: null,
+          timezone: 'America/Denver',
+          startTimePrecision: 'date_only',
+          status: 'scheduled',
+          artists: [{ name: 'Tycho', billingPosition: 'headliner' }],
+        }}
+      />,
+    );
+
+    expect(screen.getByTestId('venue-tba-badge')).toHaveTextContent(
+      'Venue TBA / Unknown',
+    );
+    expect(screen.getByText('Telluride, CO')).toBeInTheDocument();
+  });
+
+  it('renders cancelled indicator and suppresses Get Tickets button for cancelled shows', async () => {
+    const { EventCard } = await import('@/components/catalog/EventCard');
+
+    render(
+      <EventCard
+        event={{
+          id: '10000000-0000-0000-0000-000000000014',
+          title: 'Cancelled Tour',
+          venueName: 'Ogden Theatre',
+          city: 'Denver',
+          region: 'CO',
+          localStartDate: '2026-11-12',
+          startsAt: '2026-11-13T03:00:00Z',
+          timezone: 'America/Denver',
+          startTimePrecision: 'instant',
+          status: 'cancelled',
+          artists: [{ name: 'Ghost Light', billingPosition: 'headliner' }],
+          ticketUrl: 'https://tickets.example.com/cancelled',
+        }}
+      />,
+    );
+
+    expect(screen.getByText('Cancelled')).toBeInTheDocument();
+    expect(screen.queryByText('Get Tickets')).not.toBeInTheDocument();
+  });
+
+  it('renders postponed indicator for postponed shows', async () => {
+    const { EventCard } = await import('@/components/catalog/EventCard');
+
+    render(
+      <EventCard
+        event={{
+          id: '10000000-0000-0000-0000-000000000015',
+          title: 'Postponed Show',
+          venueName: 'Bluebird Theater',
+          city: 'Denver',
+          region: 'CO',
+          localStartDate: '2026-12-01',
+          startsAt: '2026-12-02T02:00:00Z',
+          timezone: 'America/Denver',
+          startTimePrecision: 'instant',
+          status: 'postponed',
+          artists: [{ name: 'Some Artist', billingPosition: 'headliner' }],
+        }}
+      />,
+    );
+
+    expect(screen.getByText('Postponed')).toBeInTheDocument();
+  });
 });

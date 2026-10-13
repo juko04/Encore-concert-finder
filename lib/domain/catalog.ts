@@ -194,6 +194,13 @@ export interface CandidateResolution {
   createdAt?: string;
 }
 
+export interface CanonicalEventSourceSummary {
+  id: string;
+  name: string;
+  slug: string;
+  sourceUrl?: string;
+}
+
 export interface CanonicalEventSummary {
   id: string;
   title: string;
@@ -211,6 +218,7 @@ export interface CanonicalEventSummary {
   maxPrice?: number | null;
   currency?: string | null;
   sourceName?: string;
+  sources?: CanonicalEventSourceSummary[];
 }
 
 export interface CanonicalEventDetail extends Event {
@@ -300,6 +308,8 @@ export interface CanonicalizationPayload {
     source_event_id?: string | null;
     source_url: string;
     confidence?: number;
+    source_name?: string;
+    source_slug?: string;
   } | null;
   evidence?: Array<{
     field_name: string;

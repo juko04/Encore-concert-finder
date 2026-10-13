@@ -9,39 +9,42 @@ Durable architecture records belong in [`docs/architecture/`](docs/architecture/
 
 - **Current Milestone:** **Phase 2 — Live Ingestion & Personalization**.
 - **Active Specification:** [`docs/phases/active/PHASE_2_IMPLEMENTATION.md`](docs/phases/active/PHASE_2_IMPLEMENTATION.md).
-- **Current Branch:** `feature/phase-2-ticketmaster-canonicalization`
+- **Current Branch:** `feature/phase-2-ingestion-reliability`
 - **Active Implementing Agent:** Google Antigravity
-- **Current Task:** Phase 2 PR 2: Ticketmaster Canonicalization Integration — FINAL REMEDIATION COMPLETE.
-- **Remediation Delivered:**
-  1. **Atomic External-ID Conflict Rejection:** Stored procedure `apply_canonicalization` and repository layers reject conflicting external-ID assignments with PostgreSQL error 23505, rollback atomically, and allow idempotent identical associations.
-  2. **Idempotent Replay Evidence Stability:** `runTicketmasterIngestion` checks existing candidate resolutions on replay, preventing duplicate `candidate_resolutions` and inflated `event_field_evidence` rows. Added `--reprocess` override.
-  3. **Hardened Destination Guards:** Implemented strict URL parsing (`isVerifiedLocalOrDevDatabase`, `assertSafeDatabaseTarget`) rejecting spoofed/misleading hostnames (`evil-local.com`, `attacker.dev`) and requiring `--allow-production-write` for remote targets. Applied to CLI and integration tests.
-  4. **PostgreSQL Integration Tests:** Real database-backed tests for enrichment, identical replay, cross-artist conflict rejection with transaction rollback, and count stability. CI strictly fails if database is offline.
-  5. **Neutral Price Formatting:** CLI preview formats missing currency neutrally without fabricating `$`/`USD`.
-  6. **Test Isolation Across Repeat Runs:** `buildIsolatedTicketmasterFixture` generates uniquely namespaced fixture observations and date offsets per test suite execution, enabling consecutive test runs against the same persistent local Supabase database without collision, deletion of unrelated records, or database resets.
+- **Current Task:** Phase 2, PR 3: Ingestion Reliability & Discover Improvements — INDEPENDENT REVIEW REMEDIATIONS COMPLETE.
+- **Deliverables & Remediation:**
+  1. **Removed Fabricated Source Attribution:** Eliminated URL substring and partial UUID matching in `MemoryCatalogRepository.listEvents()`; removed `"Verified"` fallback in `EventCard.tsx` in favor of a neutral `Unknown Source` state without implying verification. Added unit tests for known, unknown, and multiple sources.
+  2. **Safe Error Report Serialization & Nested Metadata:** Implemented recursive `sanitizeErrorDetails()` with strict validation for `statusCode` and `code`, recursive sanitization of custom Error metadata and properties, redaction of untrusted Error names and object keys, circular reference protection, and credential stripping. Added regression test asserting zero secrets in serialized report.
+  3. **Truthful Telemetry Under Replay & Interrupted Recovery:** Decoupled `candidatesReused` (existing candidate records reused from database) from `candidatesSkipped` (candidates whose canonicalization is skipped due to existing resolutions). Verified telemetry counters across First Ingestion, Interrupted Recovery, Identical Replay, Reprocess, and Updated Observations.
+  4. **Database-Backed Catalog Regression Coverage:** Added targeted PostgreSQL integration tests in `tests/integration/catalog-rls.test.ts` verifying source joins, multiple current sources, exclusion of inactive/historical relationships, missing data handling, and anon RLS read support after the N+1 query refactor.
+  5. **Failure Classification & Source-Health Tracking Across Fetch & Persistence:** Wrapped `adapter.fetch()` in persistence mode to invoke `sourceRepo.recordFailure()` on network/rate-limit/auth/validation failures while preserving strict zero-write read-only dry-run isolation.
 - **Verification State:** ALL GREEN:
   - `npm run format:check`: 100% compliant with Prettier.
   - `npm run lint`: 0 warnings, 0 errors.
   - `npm run typecheck`: Strict TypeScript compile passed with 0 errors.
-  - `npm test`: 164/164 unit tests passing across 13 test suites (including 24/24 in `ticketmaster-canonicalization.test.ts`).
+  - `npm test`: 191/191 unit tests passing across 14 test suites (100% pass rate).
   - `npm run build`: Next.js production compile successful.
   - `npm run test:e2e`: 3/3 Playwright browser smoke tests passing.
-  - `npm run test:integration`: 28/28 integration tests passing consecutively across repeated runs.
-- **Immediate Next Action:** Push test isolation fix to `origin/feature/phase-2-ticketmaster-canonicalization`, monitor PR #7 CI until green, and await independent code review. Do not merge automatically.
-- **Phase 2 Status:** **ACTIVE — PR #7 FINAL REMEDIATION COMPLETE, AWAITING REVIEW.**
+  - `npm run test:integration`: 29/29 integration tests passing (or skipping gracefully when local DB is offline).
+- **Immediate Next Action:** PR #8 CI is 100% green on commit `7b6deaf`. Await final independent code review approval before merge. Do not merge automatically.
+- **Phase 2 Status:** **ACTIVE — PR 3 SECOND-REVIEW REMEDIATIONS COMPLETE, CI 100% GREEN, AWAITING FINAL REVIEW.**
 
 ---
 
 ## What the Next Agent Must Know
 
-1. **Phase 2 PR 2 Architecture & Delivery:**
-   - **Source Registration:** Deterministic lookup or registration of `ticketmaster-discovery` (UUID `b0000000-0000-0000-0000-000000000003`) in `lib/sources/ticketmaster/source-registry.ts`.
-   - **Pipeline Execution:** Reusable `runTicketmasterIngestion` pipeline in `lib/sources/ticketmaster/ingestion-pipeline.ts` with dry-run vs persist modes, audit immutability, foreign key consistency, and telemetry.
-   - **CLI Runner:** Safe dry-run default with `--persist` and `--allow-production-write` guards in `scripts/ingest-ticketmaster.ts`.
-   - **Tech Debt 1.2 Closed:** Atomic external ID enrichment on matched artists in `ArtistResolver`, `CanonicalizationCoordinator`, `MemoryCatalogRepository`, and PostgreSQL migration `20261012120000_enrich_matched_artist_external_ids.sql`.
-   - **Entity Resolution Safeguards:** `missing_venue_identity`, `missing_venue_locality`, and `missing_artist_identity` route cleanly to `needs_review`.
-2. **Upcoming PR 3 Scope:**
-   - PR 3 covers Ingestion Reliability, Operational Safeguards & UI Polish (Tech Debt 1.3: source attribution badges on `/discover`, Tech Debt 1.4: unknown-venue display behavior). Do not implement Spotify integration or recommendation scoring in PR 3.
+1. **Phase 2 PR 3 Architecture & Delivery:**
+   - **Error Taxonomy:** Located in `lib/sources/ticketmaster/errors.ts`. All client and pipeline errors classify cleanly with credential redaction.
+   - **Telemetry:** Pipeline returns `durationMs`, `startedAt`, `completedAt`. CLI runner formats human-readable run summaries and structured failure reports.
+   - **Source Attribution:** `event_sources` joined with `sources` batch-loaded without N+1 queries. Displayed via `data-testid="source-badge"` in `components/catalog/EventCard.tsx`.
+   - **Venue TBA Badge:** Missing venue names display `Venue TBA / Unknown` via `data-testid="venue-tba-badge"`.
+   - **N+1 Query Elimination:** `SupabaseCatalogRepository.listEvents` queries in 4 batch requests.
+2. **Upcoming PR 4 Scope (Spotify Authentication & Taste Ingestion):**
+   - OAuth Authorization Code Flow with PKCE via server-side API routes (`/api/auth/spotify/login`, `/api/auth/spotify/callback`).
+   - Secure token persistence in `user_spotify_connections` with strict RLS (`auth.uid() = user_id`) and service-role write.
+   - Ingestion of user top artists into `user_artist_affinities`.
+   - Preserve manual user artist preference selection as a first-class alternative (mitigates Spotify Development Mode 25-user limit).
+   - Do NOT implement recommendation scoring in PR 4 (deferred to PR 5 & 6).
 3. **Deterministic Fixtures Only in CI:** Unit tests and CI must NEVER make live external API calls to Ticketmaster or Spotify.
-4. **Security & Secrets:** All API keys (`TICKETMASTER_API_KEY`, `SUPABASE_SERVICE_ROLE_KEY`) are server-only. Never expose secrets in client bundles.
+4. **Security & Secrets:** All API keys (`TICKETMASTER_API_KEY`, `SPOTIFY_CLIENT_ID`, `SPOTIFY_CLIENT_SECRET`, `SUPABASE_SERVICE_ROLE_KEY`) are server-only. Never expose secrets in client bundles.
 5. **Read-Only Project Hub:** The Project Hub at `/hub` remains strictly read-only and unaffected by ingestion routines.

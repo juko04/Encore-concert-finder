@@ -31,6 +31,13 @@ test.describe('Application Smoke Tests', () => {
     await expect(
       page.getByText('Explore upcoming concerts and events'),
     ).toBeVisible();
+
+    // Verify presence of either event cards or clean empty state
+    const emptyState = page.getByText('No upcoming events found');
+    const eventCards = page.getByTestId('event-card');
+    const hasEmptyState = await emptyState.isVisible();
+    const cardCount = await eventCards.count();
+    expect(hasEmptyState || cardCount > 0).toBe(true);
   });
 
   test('successfully loads the project hub page', async ({ page }) => {
