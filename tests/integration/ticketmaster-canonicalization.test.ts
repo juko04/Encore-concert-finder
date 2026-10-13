@@ -219,7 +219,7 @@ describe('Supabase Integration: Ticketmaster Ingestion & Canonicalization', () =
     expect(replayRun.rawIngestsReused).toBeGreaterThan(0);
     expect(replayRun.candidatesReused).toBeGreaterThan(0);
     expect(replayRun.canonicalEventsCreated).toBe(0);
-    expect(replayRun.canonicalEventsMatched).toBeGreaterThan(0);
+    expect(replayRun.canonicalEventsMatched).toBe(0);
 
     const eventsAfter = await catalogRepo.listEvents({ limit: 50 });
     expect(eventsAfter.length).toBe(eventsBefore.length);

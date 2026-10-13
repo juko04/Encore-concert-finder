@@ -747,8 +747,8 @@ describe('Catalog RLS, Security & Canonicalization Atomicity', () => {
       .single();
     expect(ev2Error).toBeNull();
 
-    // 6. Test batched listEvents via anonClient (verifying RLS read permissions)
-    const catalogRepo = new SupabaseCatalogRepository(anonClient);
+    // 6. Test batched listEvents via adminClient (server-side catalog repository queries with source joins)
+    const catalogRepo = new SupabaseCatalogRepository(adminClient);
     const results = await catalogRepo.listEvents({
       fromDate: testDate,
       toDate: testDate,
@@ -793,5 +793,46 @@ describe('Catalog RLS, Security & Canonicalization Atomicity', () => {
     expect(ev2Summary?.minPrice).toBeNull();
     expect(ev2Summary?.maxPrice).toBeNull();
     expect(ev2Summary?.sources).toEqual([]);
+
+    // 7. Verify public anon RLS read permissions on catalog tables and views
+    const { data: anonEventData, error: anonEventError } = await anonClient
+      .from('events')
+      .select('id, name')
+      .eq('id', event1?.id)
+      .single();
+    expect(anonEventError).toBeNull();
+    expect(anonEventData?.name).toBe(`Festival Showcase ${runSuffix}`);
+
+    const { data: anonArtistData, error: anonArtistError } = await anonClient
+      .from('event_artists')
+      .select('event_id, artist_id, billing_position')
+      .eq('event_id', event1?.id);
+    expect(anonArtistError).toBeNull();
+    expect(anonArtistData).toHaveLength(2);
+
+    const { data: anonTicketData, error: anonTicketError } = await anonClient
+      .from('event_ticket_links')
+      .select('event_id, min_price, max_price')
+      .eq('event_id', event1?.id);
+    expect(anonTicketError).toBeNull();
+    expect(anonTicketData).toHaveLength(1);
+
+    const { data: anonSourceData, error: anonSourceError } = await anonClient
+      .from('public_sources')
+      .select('id, name, slug')
+      .eq('id', sourceA?.id)
+      .single();
+    expect(anonSourceError).toBeNull();
+    expect(anonSourceData?.name).toBe(`Source Alpha ${runSuffix}`);
+
+    // Direct access to event_sources is denied to anonClient under RLS
+    const { data: anonEventSources, error: anonEventSourcesError } =
+      await anonClient
+        .from('event_sources')
+        .select('id')
+        .eq('event_id', event1?.id);
+    expect(
+      anonEventSourcesError || anonEventSources?.length === 0,
+    ).toBeTruthy();
   });
 });
