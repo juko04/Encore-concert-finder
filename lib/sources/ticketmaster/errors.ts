@@ -204,21 +204,64 @@ export function sanitizeErrorDetails(
 
     if (details instanceof Error) {
       const errObj: Record<string, unknown> = {
-        name: details.name,
+        name: redactSensitiveString(details.name || 'Error', secretToRedact),
         message: redactSensitiveString(details.message, secretToRedact),
       };
+
+      const errRecord = details as unknown as Record<string, unknown>;
+
+      // Strict validation for statusCode: must be an integer HTTP status code
       if (
-        'code' in details &&
-        (details as { code?: unknown }).code !== undefined
+        typeof errRecord.statusCode === 'number' &&
+        Number.isInteger(errRecord.statusCode) &&
+        errRecord.statusCode >= 100 &&
+        errRecord.statusCode <= 599
       ) {
-        errObj.code = (details as { code?: unknown }).code;
+        errObj.statusCode = errRecord.statusCode;
+      } else if (errRecord.statusCode !== undefined) {
+        errObj.statusCode = sanitizeErrorDetails(
+          errRecord.statusCode,
+          secretToRedact,
+          seen,
+        );
       }
-      if (
-        'statusCode' in details &&
-        (details as { statusCode?: unknown }).statusCode !== undefined
-      ) {
-        errObj.statusCode = (details as { statusCode?: unknown }).statusCode;
+
+      // Safe validation and recursive sanitization for code
+      if (typeof errRecord.code === 'string') {
+        errObj.code = redactSensitiveString(errRecord.code, secretToRedact);
+      } else if (typeof errRecord.code === 'number') {
+        errObj.code = errRecord.code;
+      } else if (errRecord.code !== undefined) {
+        errObj.code = sanitizeErrorDetails(
+          errRecord.code,
+          secretToRedact,
+          seen,
+        );
       }
+
+      // Recursively sanitize all custom properties / metadata on Error
+      for (const [rawKey, val] of Object.entries(details)) {
+        if (
+          rawKey === 'name' ||
+          rawKey === 'message' ||
+          rawKey === 'code' ||
+          rawKey === 'statusCode' ||
+          rawKey === 'cause' ||
+          rawKey === 'stack'
+        ) {
+          continue;
+        }
+        const safeKey = redactSensitiveString(rawKey, secretToRedact);
+        if (
+          /key|token|secret|password|auth|cookie|credential/i.test(rawKey) ||
+          /key|token|secret|password|auth|cookie|credential/i.test(safeKey)
+        ) {
+          errObj[safeKey] = '[REDACTED]';
+        } else {
+          errObj[safeKey] = sanitizeErrorDetails(val, secretToRedact, seen);
+        }
+      }
+
       if (details.cause !== undefined) {
         errObj.cause = sanitizeErrorDetails(
           details.cause,
@@ -237,10 +280,18 @@ export function sanitizeErrorDetails(
 
     const sanitizedObj: Record<string, unknown> = {};
     for (const [key, value] of Object.entries(details)) {
-      if (/key|token|secret|password|auth|cookie|credential/i.test(key)) {
-        sanitizedObj[key] = '[REDACTED]';
+      const safeKey = redactSensitiveString(key, secretToRedact);
+      if (
+        /key|token|secret|password|auth|cookie|credential/i.test(key) ||
+        /key|token|secret|password|auth|cookie|credential/i.test(safeKey)
+      ) {
+        sanitizedObj[safeKey] = '[REDACTED]';
       } else {
-        sanitizedObj[key] = sanitizeErrorDetails(value, secretToRedact, seen);
+        sanitizedObj[safeKey] = sanitizeErrorDetails(
+          value,
+          secretToRedact,
+          seen,
+        );
       }
     }
     return sanitizedObj;
@@ -282,10 +333,24 @@ export function classifyIngestionError(
 
   const rawMsg = err instanceof Error ? err.message : String(err);
   const msg = redactSensitiveString(rawMsg, apiKeyToRedact);
-  const details =
-    err instanceof Error && err.cause
-      ? sanitizeErrorDetails(err.cause, apiKeyToRedact)
-      : undefined;
+  let details: unknown = undefined;
+  if (err instanceof Error) {
+    if (err.cause !== undefined) {
+      details = sanitizeErrorDetails(err.cause, apiKeyToRedact);
+    } else {
+      const customProps: Record<string, unknown> = {};
+      for (const [k, v] of Object.entries(err)) {
+        if (k !== 'name' && k !== 'message' && k !== 'stack') {
+          customProps[k] = v;
+        }
+      }
+      if (Object.keys(customProps).length > 0) {
+        details = sanitizeErrorDetails(customProps, apiKeyToRedact);
+      }
+    }
+  } else if (err !== null && typeof err === 'object') {
+    details = sanitizeErrorDetails(err, apiKeyToRedact);
+  }
 
   if (
     /HTTP\s*(?:401|403)|unauthorized|forbidden|api key.*(?:invalid|required|missing)/i.test(

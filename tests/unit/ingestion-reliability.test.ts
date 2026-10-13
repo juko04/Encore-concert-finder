@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
+import fs from 'node:fs';
+import path from 'node:path';
+import crypto from 'node:crypto';
+import type { EventCandidate } from '@/lib/domain';
 import {
   classifyIngestionError,
+  ensureTicketmasterSource,
   PipelineDatabaseError,
   runTicketmasterIngestion,
   TicketmasterApiClient,
@@ -175,6 +180,62 @@ describe('Phase 2 PR 3: Ingestion Reliability & Discover Improvements', () => {
       expect(parsed.details.url).toContain('apikey=[REDACTED]');
       expect(parsed.details.nested.message).toContain('[REDACTED]');
     });
+
+    it('sanitizes nested Error metadata, code, statusCode, and untrusted names/keys without leaking secrets', () => {
+      const secret = 'tm_secret_key_12345';
+      const bearerSecret = 'jwt_bearer_token_98765';
+
+      const causeError = Object.assign(
+        new Error('Connection abort with api key: tm_secret_key_12345'),
+        {
+          name: `CustomProviderError_${secret}`,
+          code: `ERR_CODE_${secret}`,
+          statusCode: '401_leaked_secret',
+          metadata: {
+            clientSecret: 'nested_secret_val',
+            token: bearerSecret,
+            config: {
+              authHeader: `Bearer ${bearerSecret}`,
+              rawRequest: `Bearer ${bearerSecret}`,
+              nestedKey: secret,
+            },
+          },
+          [secret]: 'value_stored_under_secret_key',
+        },
+      );
+
+      const rootError = new TicketmasterNetworkError(
+        `Failed to reach Ticketmaster API at https://api.tm.com?apikey=${secret}`,
+        {
+          cause: causeError,
+        },
+      );
+
+      const report = classifyIngestionError(rootError, secret);
+      expect(report.category).toBe('network_error');
+
+      const serialized = JSON.stringify(report);
+      expect(serialized).toBeDefined();
+
+      // Ensure NO secrets leaked anywhere in the entire JSON string
+      expect(serialized).not.toContain(secret);
+      expect(serialized).not.toContain(bearerSecret);
+      expect(serialized).not.toContain('nested_secret_val');
+      expect(serialized).not.toContain('value_stored_under_secret_key');
+      expect(serialized).toContain('[REDACTED]');
+
+      const parsed = JSON.parse(serialized);
+      expect(parsed.details.name).not.toContain(secret);
+      expect(parsed.details.name).toContain('[REDACTED]');
+      expect(parsed.details.code).not.toContain(secret);
+      expect(parsed.details.code).toContain('[REDACTED]');
+      expect(parsed.details.metadata.clientSecret).toBe('[REDACTED]');
+      expect(parsed.details.metadata.token).toBe('[REDACTED]');
+      expect(parsed.details.metadata.config.authHeader).toBe('[REDACTED]');
+      expect(parsed.details.metadata.config.rawRequest).toBe(
+        'Bearer [REDACTED]',
+      );
+    });
   });
 
   describe('Ingestion Telemetry & Replay Invariants', () => {
@@ -242,6 +303,7 @@ describe('Phase 2 PR 3: Ingestion Reliability & Discover Improvements', () => {
       expect(run1.candidatesParsed).toBe(6);
       expect(run1.candidatesPersisted).toBe(6);
       expect(run1.candidatesReused).toBe(0);
+      expect(run1.candidatesSkipped).toBe(0);
       expect(run1.canonicalEventsCreated).toBe(5);
       expect(run1.canonicalEventsMatched).toBe(0);
       expect(run1.candidatesNeedsReview).toBe(1);
@@ -270,6 +332,7 @@ describe('Phase 2 PR 3: Ingestion Reliability & Discover Improvements', () => {
       // Candidates are reused; 0 newly persisted candidate rows
       expect(run2.candidatesPersisted).toBe(0);
       expect(run2.candidatesReused).toBe(6);
+      expect(run2.candidatesSkipped).toBe(6);
 
       // CRITICAL REPLAY INVARIANT: zero new events created, and previously created events are NOT reported as matched!
       expect(run2.canonicalEventsCreated).toBe(0);
@@ -338,6 +401,7 @@ describe('Phase 2 PR 3: Ingestion Reliability & Discover Improvements', () => {
       expect(updateRun.rawIngestsReused).toBe(0);
       expect(updateRun.candidatesPersisted).toBe(1);
       expect(updateRun.candidatesReused).toBe(0);
+      expect(updateRun.candidatesSkipped).toBe(0);
 
       // It matched against the existing canonical event, updating it instead of creating a duplicate
       expect(updateRun.canonicalEventsCreated).toBe(0);
@@ -346,6 +410,150 @@ describe('Phase 2 PR 3: Ingestion Reliability & Discover Improvements', () => {
 
       // Total canonical events remains 5 (no duplicates created!)
       expect(catalogRepo.events.size).toBe(5);
+    });
+
+    it('correctly tracks candidate reuse and skipped resolutions after interrupted ingestion and recovery', async () => {
+      const { sourceRepo, rawIngestRepo, candidateRepo, catalogRepo, adapter } =
+        setupTestPipeline();
+
+      // 1. Simulate Interrupted Ingestion:
+      // A previous run persisted raw ingest and candidate rows, but crashed before resolving candidates
+      const source = await ensureTicketmasterSource(sourceRepo);
+      const fixtureJson = fs.readFileSync(
+        path.resolve(
+          process.cwd(),
+          'tests/fixtures/ticketmaster-events-response.json',
+        ),
+        'utf-8',
+      );
+      const contentHash = crypto
+        .createHash('sha256')
+        .update(fixtureJson)
+        .digest('hex');
+
+      const raw = await rawIngestRepo.create({
+        sourceId: source.id,
+        sourceUrl:
+          'https://app.ticketmaster.com/discovery/v2/events.json?classificationName=Music&stateCode=CO',
+        acquisitionMethod: 'api',
+        fetchedAt: new Date().toISOString(),
+        contentHash,
+        contentType: 'application/json',
+        rawContent: fixtureJson,
+        httpStatus: 200,
+        parserVersion: adapter.parserVersion,
+      });
+
+      const parsedCandidates = await adapter.parse([raw]);
+      for (const cand of parsedCandidates) {
+        await candidateRepo.create(
+          cand as EventCandidate & { rawIngestId: string; sourceId: string },
+        );
+      }
+
+      // At this stage, candidates exist in database, but 0 events and 0 resolutions exist
+      const existingCandidates = await candidateRepo.getByRawIngestId(raw.id);
+      expect(existingCandidates.length).toBe(6);
+      expect(catalogRepo.events.size).toBe(0);
+      expect(await catalogRepo.countResolutions()).toBe(0);
+
+      // 2. Recovery Ingestion Run:
+      // The recovery run re-processes the fixture. Existing candidate records MUST be counted under candidatesReused,
+      // and because no prior resolutions exist, candidatesSkipped MUST be 0 and canonicalEventsCreated MUST be 5.
+      const recoveryRun = await runTicketmasterIngestion({
+        sourceRepo,
+        rawIngestRepo,
+        candidateRepo,
+        catalogRepo,
+        adapter,
+        useFixture: true,
+        persist: true,
+      });
+
+      expect(recoveryRun.rawIngestsPersisted).toBe(0);
+      expect(recoveryRun.rawIngestsReused).toBe(1);
+      expect(recoveryRun.candidatesParsed).toBe(6);
+      expect(recoveryRun.candidatesPersisted).toBe(0); // 0 new candidate rows written
+      expect(recoveryRun.candidatesReused).toBe(6); // 6 candidate records reused from database!
+      expect(recoveryRun.candidatesSkipped).toBe(0); // 0 skipped because no prior resolutions existed
+      expect(recoveryRun.canonicalEventsCreated).toBe(5); // Now successfully canonicalized!
+      expect(recoveryRun.canonicalEventsMatched).toBe(0);
+      expect(recoveryRun.candidatesNeedsReview).toBe(1);
+      expect(catalogRepo.events.size).toBe(5);
+
+      // 3. Subsequent Identical Replay Run:
+      // Now that resolutions exist, candidate records are reused AND canonicalization is skipped.
+      const replayRun = await runTicketmasterIngestion({
+        sourceRepo,
+        rawIngestRepo,
+        candidateRepo,
+        catalogRepo,
+        adapter,
+        useFixture: true,
+        persist: true,
+      });
+
+      expect(replayRun.rawIngestsPersisted).toBe(0);
+      expect(replayRun.rawIngestsReused).toBe(1);
+      expect(replayRun.candidatesPersisted).toBe(0);
+      expect(replayRun.candidatesReused).toBe(6); // Candidate records reused
+      expect(replayRun.candidatesSkipped).toBe(6); // Resolutions previously resolved, so skipped!
+      expect(replayRun.canonicalEventsCreated).toBe(0);
+      expect(replayRun.canonicalEventsMatched).toBe(0);
+      expect(catalogRepo.events.size).toBe(5);
+    });
+
+    it('records source failure when adapter.fetch fails in persistence mode', async () => {
+      const { sourceRepo, rawIngestRepo, candidateRepo, catalogRepo } =
+        setupTestPipeline();
+
+      const failingAdapter = new TicketmasterDiscoveryAdapter();
+      failingAdapter.fetch = async () => {
+        throw new TicketmasterRateLimitError('HTTP 429 Too Many Requests', {
+          statusCode: 429,
+        });
+      };
+
+      await expect(
+        runTicketmasterIngestion({
+          sourceRepo,
+          rawIngestRepo,
+          candidateRepo,
+          catalogRepo,
+          adapter: failingAdapter,
+          persist: true,
+        }),
+      ).rejects.toThrow(TicketmasterRateLimitError);
+
+      const source = await sourceRepo.getBySlug('ticketmaster-discovery');
+      expect(source?.consecutiveFailures).toBe(1);
+    });
+
+    it('strictly preserves read-only dry run on fetch failure: zero source health writes', async () => {
+      const { sourceRepo, rawIngestRepo, candidateRepo, catalogRepo } =
+        setupTestPipeline();
+
+      const failingAdapter = new TicketmasterDiscoveryAdapter();
+      failingAdapter.fetch = async () => {
+        throw new TicketmasterAuthError(
+          'HTTP 401 Unauthorized: Invalid API key',
+          { statusCode: 401 },
+        );
+      };
+
+      await expect(
+        runTicketmasterIngestion({
+          sourceRepo,
+          rawIngestRepo,
+          candidateRepo,
+          catalogRepo,
+          adapter: failingAdapter,
+          persist: false, // Dry run mode
+        }),
+      ).rejects.toThrow(TicketmasterAuthError);
+
+      const source = await sourceRepo.getBySlug('ticketmaster-discovery');
+      expect(source?.consecutiveFailures).toBe(0);
     });
 
     it('does not label parsing or validation failures as database errors, and invokes recordFailure', async () => {

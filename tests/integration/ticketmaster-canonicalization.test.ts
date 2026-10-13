@@ -218,6 +218,7 @@ describe('Supabase Integration: Ticketmaster Ingestion & Canonicalization', () =
     expect(replayRun.rawIngestsPersisted).toBe(0);
     expect(replayRun.rawIngestsReused).toBeGreaterThan(0);
     expect(replayRun.candidatesReused).toBeGreaterThan(0);
+    expect(replayRun.candidatesSkipped).toBeGreaterThan(0);
     expect(replayRun.canonicalEventsCreated).toBe(0);
     expect(replayRun.canonicalEventsMatched).toBe(0);
 
@@ -245,7 +246,8 @@ describe('Supabase Integration: Ticketmaster Ingestion & Canonicalization', () =
       reprocess: true,
     });
 
-    expect(reprocessRun.candidatesReused).toBe(0);
+    expect(reprocessRun.candidatesSkipped).toBe(0);
+    expect(reprocessRun.candidatesReused).toBeGreaterThan(0);
     expect(reprocessRun.canonicalEventsCreated).toBe(0);
     expect(reprocessRun.canonicalEventsMatched).toBeGreaterThan(0);
   });

@@ -40,6 +40,7 @@ export interface TicketmasterIngestionResult {
   candidatesParsed: number;
   candidatesPersisted: number;
   candidatesReused: number;
+  candidatesSkipped: number;
   canonicalEventsCreated: number;
   canonicalEventsMatched: number;
   candidatesNeedsReview: number;
@@ -111,14 +112,21 @@ export async function runTicketmasterIngestion(
       },
     ];
   } else {
-    rawIngests = await adapter.fetch({
-      sourceId: source.id,
-      sourceType: adapter.sourceType,
-      acquisitionMethod: adapter.acquisitionMethod,
-      targetUrl: 'https://app.ticketmaster.com/discovery/v2/events.json',
-      crawlStartedAt: new Date().toISOString(),
-      metadata: (options.queryParams ?? {}) as Record<string, unknown>,
-    });
+    try {
+      rawIngests = await adapter.fetch({
+        sourceId: source.id,
+        sourceType: adapter.sourceType,
+        acquisitionMethod: adapter.acquisitionMethod,
+        targetUrl: 'https://app.ticketmaster.com/discovery/v2/events.json',
+        crawlStartedAt: new Date().toISOString(),
+        metadata: (options.queryParams ?? {}) as Record<string, unknown>,
+      });
+    } catch (fetchErr) {
+      if (persist) {
+        await options.sourceRepo.recordFailure(source.id).catch(() => {});
+      }
+      throw fetchErr;
+    }
   }
 
   // 1. Dry-run mode: parse in memory without writing to database
@@ -150,6 +158,7 @@ export async function runTicketmasterIngestion(
       candidatesParsed: parsedCandidates.length,
       candidatesPersisted: 0,
       candidatesReused: 0,
+      candidatesSkipped: 0,
       canonicalEventsCreated: 0,
       canonicalEventsMatched: 0,
       candidatesNeedsReview: Object.values(reviewReasons).reduce(
@@ -232,6 +241,7 @@ export async function runTicketmasterIngestion(
       EventCandidate & { id: string; rawIngestId: string; sourceId: string }
     > = [];
     let candidatesPersisted = 0;
+    let candidatesReused = 0;
 
     for (const candidate of candidates) {
       const existingForRaw = candidate.rawIngestId
@@ -246,6 +256,7 @@ export async function runTicketmasterIngestion(
       );
 
       if (existingCand) {
+        candidatesReused++;
         persistedCandidates.push(existingCand);
       } else {
         const savedCand = await options.candidateRepo.create(
@@ -265,7 +276,7 @@ export async function runTicketmasterIngestion(
     let canonicalEventsMatched = 0;
     let candidatesNeedsReview = 0;
     let candidatesRejected = 0;
-    let candidatesReused = 0;
+    let candidatesSkipped = 0;
     const reviewReasons: Record<string, number> = {};
     const persistedEventIds: string[] = [];
 
@@ -275,7 +286,7 @@ export async function runTicketmasterIngestion(
         const existingRes =
           await options.catalogRepo.findResolutionByCandidateId(cand.id);
         if (existingRes) {
-          candidatesReused++;
+          candidatesSkipped++;
           if (existingRes.eventId) {
             persistedEventIds.push(existingRes.eventId);
           }
@@ -327,6 +338,7 @@ export async function runTicketmasterIngestion(
       candidatesParsed: candidates.length,
       candidatesPersisted,
       candidatesReused,
+      candidatesSkipped,
       canonicalEventsCreated,
       canonicalEventsMatched,
       candidatesNeedsReview,

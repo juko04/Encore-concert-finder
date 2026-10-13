@@ -220,7 +220,8 @@ describe('Phase 2 PR 2: Ticketmaster Canonicalization Integration', () => {
 
     expect(reprocessRun.rawIngestsPersisted).toBe(0);
     expect(reprocessRun.rawIngestsReused).toBe(1);
-    expect(reprocessRun.candidatesReused).toBe(0); // Deliberately did not skip candidates
+    expect(reprocessRun.candidatesReused).toBe(6); // Reused candidate records from database
+    expect(reprocessRun.candidatesSkipped).toBe(0); // Deliberately did not skip candidates because reprocess: true
     expect(reprocessRun.canonicalEventsCreated).toBe(0);
     expect(reprocessRun.canonicalEventsMatched).toBe(5);
 

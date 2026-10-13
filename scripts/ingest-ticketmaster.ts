@@ -322,6 +322,7 @@ async function run(): Promise<void> {
     console.log(`  Candidates Parsed:          ${result.candidatesParsed}`);
     console.log(`  Candidates Persisted:       ${result.candidatesPersisted}`);
     console.log(`  Candidates Reused:          ${result.candidatesReused}`);
+    console.log(`  Candidates Skipped:         ${result.candidatesSkipped}`);
     console.log(
       `  Canonical Events Created:   ${result.canonicalEventsCreated}`,
     );
