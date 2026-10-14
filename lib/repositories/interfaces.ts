@@ -25,6 +25,7 @@ export type { CanonicalizationPayload };
 import type { EventCandidate } from '@/lib/domain/event-candidate';
 import type { RawIngest, Source } from '@/lib/domain/source';
 import type {
+  PreferenceLevel,
   SavePreferenceInput,
   UserArtistPreference,
 } from '@/lib/domain/user-preference';
@@ -251,5 +252,10 @@ export interface IUserPreferenceRepository {
     preferenceId: string,
   ): Promise<UserArtistPreference | null>;
   savePreference(input: SavePreferenceInput): Promise<UserArtistPreference>;
+  updatePreferenceLevel(
+    userId: string,
+    preferenceId: string,
+    preferenceLevel: PreferenceLevel,
+  ): Promise<UserArtistPreference>;
   deletePreference(userId: string, preferenceId: string): Promise<boolean>;
 }

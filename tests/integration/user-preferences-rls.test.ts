@@ -1,8 +1,8 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { execSync } from 'child_process';
-import fs from 'fs';
-import path from 'path';
+import { assertSafeDatabaseTarget } from '@/lib/supabase/destination-guard';
+import { SupabaseUserPreferenceRepository } from '@/lib/repositories/user-preference-repository';
 
 interface LocalCredentials {
   url: string;
@@ -79,6 +79,12 @@ describe('Row Level Security (RLS) on public.user_artist_preferences', () => {
       return;
     }
 
+    assertSafeDatabaseTarget(
+      credentials.url,
+      false,
+      'User preferences integration test suite',
+    );
+
     try {
       const response = await fetch(`${credentials.url}/auth/v1/health`, {
         headers: { apikey: credentials.anonKey },
@@ -109,25 +115,6 @@ describe('Row Level Security (RLS) on public.user_artist_preferences', () => {
     anonClient = createClient(credentials.url, credentials.anonKey, {
       auth: { autoRefreshToken: false, persistSession: false },
     });
-
-    // Ensure migration is applied in test environment if needed
-    try {
-      const migrationSql = fs.readFileSync(
-        path.join(
-          process.cwd(),
-          'supabase/migrations/20261014000000_create_user_artist_preferences.sql',
-        ),
-        'utf-8',
-      );
-      // Execute via pg / rpc if available, or assume applied by supabase db reset
-      try {
-        await adminClient.rpc('execute_sql', { sql: migrationSql });
-      } catch {
-        // Ignored if RPC is not available
-      }
-    } catch {
-      // Ignored if file or RPC is not enabled
-    }
 
     const timestamp = Date.now();
     const emailA = `test_pref_a_${timestamp}@encore.test`;
@@ -214,6 +201,36 @@ describe('Row Level Security (RLS) on public.user_artist_preferences', () => {
         .eq('user_id', userBId);
       await adminClient.auth.admin.deleteUser(userBId);
     }
+  });
+
+  it('enforces destination guard safety against non-local and spoofed database hosts', () => {
+    expect(() =>
+      assertSafeDatabaseTarget(
+        'https://evil-local.com',
+        false,
+        'Integration destination test',
+      ),
+    ).toThrow(
+      /Target database .* is not a verified local or development instance/,
+    );
+    expect(() =>
+      assertSafeDatabaseTarget(
+        'https://attacker.dev',
+        false,
+        'Integration destination test',
+      ),
+    ).toThrow(
+      /Target database .* is not a verified local or development instance/,
+    );
+    expect(() =>
+      assertSafeDatabaseTarget(
+        'https://project-ref.supabase.co',
+        false,
+        'Integration destination test',
+      ),
+    ).toThrow(
+      /Target database .* is not a verified local or development instance/,
+    );
   });
 
   it('allows an authenticated user to insert, read, and update their own preference', async () => {
@@ -437,6 +454,92 @@ describe('Row Level Security (RLS) on public.user_artist_preferences', () => {
     expect(survivingArchived?.artist_id).toBeNull();
     expect(survivingArchived?.archived_artist_id).toBe(ghostArtistId);
     expect(survivingArchived?.preference_level).toBe('favorite');
+  });
+
+  it('updates archived preference and uncataloged preference independently when they share the same artist name', async () => {
+    if (!isDbAvailable || !clientA || !adminClient || !userAId) return;
+
+    const timestamp = Date.now();
+    const artistName = `Shared Name Artist ${timestamp}`;
+    const normalizedName = `shared name artist ${timestamp}`;
+    const repo = new SupabaseUserPreferenceRepository(clientA);
+
+    // 1. Add uncataloged preference
+    const uncatPref = await repo.savePreference({
+      userId: userAId,
+      artistName,
+      preferenceLevel: 'interested',
+    });
+
+    // 2. Add canonical artist and canonical preference
+    const canonicalId = crypto.randomUUID();
+    const { error: artErr } = await adminClient.from('artists').insert({
+      id: canonicalId,
+      name: artistName,
+      normalized_name: normalizedName,
+    });
+    expect(artErr).toBeNull();
+
+    const canPref = await repo.savePreference({
+      userId: userAId,
+      artistId: canonicalId,
+      artistName,
+      preferenceLevel: 'like',
+    });
+
+    // 3. Delete canonical artist so the canonical preference becomes archived
+    const { error: delErr } = await adminClient
+      .from('artists')
+      .delete()
+      .eq('id', canonicalId);
+    expect(delErr).toBeNull();
+
+    // Verify both exist with same name
+    const listBefore = await repo.getPreferences(userAId);
+    const uncatBefore = listBefore.find((p) => p.id === uncatPref.id);
+    const archBefore = listBefore.find((p) => p.id === canPref.id);
+    expect(uncatBefore).toBeDefined();
+    expect(archBefore).toBeDefined();
+    expect(uncatBefore?.artistName).toBe(artistName);
+    expect(archBefore?.artistName).toBe(artistName);
+    expect(archBefore?.archivedArtistId).toBe(canonicalId);
+    expect(archBefore?.artistId).toBeNull();
+    expect(uncatBefore?.preferenceLevel).toBe('interested');
+    expect(archBefore?.preferenceLevel).toBe('like');
+
+    // 4. Update uncataloged preference via updatePreferenceLevel by ID
+    const updatedUncat = await repo.updatePreferenceLevel(
+      userAId,
+      uncatPref.id,
+      'favorite',
+    );
+    expect(updatedUncat.preferenceLevel).toBe('favorite');
+
+    // Invariant: Archived preference must remain unchanged ('like')
+    const listAfterFirst = await repo.getPreferences(userAId);
+    const uncatCheck1 = listAfterFirst.find((p) => p.id === uncatPref.id);
+    const archCheck1 = listAfterFirst.find((p) => p.id === canPref.id);
+    expect(uncatCheck1?.preferenceLevel).toBe('favorite');
+    expect(archCheck1?.preferenceLevel).toBe('like');
+
+    // 5. Update archived preference via updatePreferenceLevel by ID
+    const updatedArch = await repo.updatePreferenceLevel(
+      userAId,
+      canPref.id,
+      'dislike',
+    );
+    expect(updatedArch.preferenceLevel).toBe('dislike');
+
+    // Invariant: Uncataloged preference must remain unchanged ('favorite')
+    const listAfterSecond = await repo.getPreferences(userAId);
+    const uncatCheck2 = listAfterSecond.find((p) => p.id === uncatPref.id);
+    const archCheck2 = listAfterSecond.find((p) => p.id === canPref.id);
+    expect(uncatCheck2?.preferenceLevel).toBe('favorite');
+    expect(archCheck2?.preferenceLevel).toBe('dislike');
+
+    // Clean up preferences
+    await repo.deletePreference(userAId, uncatPref.id);
+    await repo.deletePreference(userAId, canPref.id);
   });
 
   it('executes full authenticated user lifecycle: sign in, create, verify, update, delete, sign out', async () => {

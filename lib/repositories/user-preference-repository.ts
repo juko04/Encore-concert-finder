@@ -250,6 +250,42 @@ export class SupabaseUserPreferenceRepository implements IUserPreferenceReposito
     return mapRowToDomain(inserted as unknown as UserArtistPreferenceRow);
   }
 
+  async updatePreferenceLevel(
+    userId: string,
+    preferenceId: string,
+    preferenceLevel: PreferenceLevel,
+  ): Promise<UserArtistPreference> {
+    if (!userId || !userId.trim()) {
+      throw new Error('User ID is required');
+    }
+    if (!preferenceId || !preferenceId.trim()) {
+      throw new Error('Preference ID is required');
+    }
+    if (!VALID_PREFERENCE_LEVELS.includes(preferenceLevel)) {
+      throw new Error(`Invalid preference level: ${preferenceLevel}`);
+    }
+
+    const { data, error } = await this.client
+      .from('user_artist_preferences')
+      .update({
+        preference_level: preferenceLevel,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', preferenceId)
+      .eq('user_id', userId)
+      .select('*, artists(id, name, image_url)')
+      .maybeSingle();
+
+    if (error) {
+      throw new Error(`Failed to update user preference: ${error.message}`);
+    }
+    if (!data) {
+      throw new Error(`Preference not found: ${preferenceId}`);
+    }
+
+    return mapRowToDomain(data as unknown as UserArtistPreferenceRow);
+  }
+
   async deletePreference(
     userId: string,
     preferenceId: string,

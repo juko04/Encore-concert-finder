@@ -29,6 +29,7 @@ import {
   normalizeUrl,
 } from '@/lib/domain/value-objects';
 import {
+  type PreferenceLevel,
   type SavePreferenceInput,
   type UserArtistPreference,
   VALID_PREFERENCE_LEVELS,
@@ -1359,6 +1360,31 @@ export class MemoryUserPreferenceRepository implements IUserPreferenceRepository
 
     this.preferences.set(newPref.id, newPref);
     return { ...newPref };
+  }
+
+  async updatePreferenceLevel(
+    userId: string,
+    preferenceId: string,
+    preferenceLevel: PreferenceLevel,
+  ): Promise<UserArtistPreference> {
+    if (!userId || !userId.trim()) {
+      throw new Error('User ID is required');
+    }
+    if (!preferenceId || !preferenceId.trim()) {
+      throw new Error('Preference ID is required');
+    }
+    if (!VALID_PREFERENCE_LEVELS.includes(preferenceLevel)) {
+      throw new Error(`Invalid preference level: ${preferenceLevel}`);
+    }
+
+    const existing = this.preferences.get(preferenceId);
+    if (!existing || existing.userId !== userId) {
+      throw new Error(`Preference not found: ${preferenceId}`);
+    }
+
+    existing.preferenceLevel = preferenceLevel;
+    existing.updatedAt = new Date().toISOString();
+    return { ...existing };
   }
 
   async deletePreference(

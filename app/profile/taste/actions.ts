@@ -49,9 +49,51 @@ export async function savePreferenceAction(input: {
     revalidatePath('/profile/taste');
     return { success: true, preference };
   } catch (err) {
-    const message =
-      err instanceof Error ? err.message : 'Failed to save preference.';
-    return { error: message };
+    console.error('[savePreferenceAction error]:', err);
+    const isCatalogValidation =
+      err instanceof Error && err.message.includes('catalog');
+    return {
+      error: isCatalogValidation
+        ? (err as Error).message
+        : 'Unable to save artist preference. Please try again.',
+    };
+  }
+}
+
+export async function updatePreferenceLevelAction(input: {
+  preferenceId: string;
+  preferenceLevel: PreferenceLevel;
+}): Promise<PreferenceActionResult> {
+  const user = await getAuthenticatedUser();
+  if (!user) {
+    return { error: 'You must be signed in to manage preferences.' };
+  }
+
+  if (!input.preferenceId || typeof input.preferenceId !== 'string') {
+    return { error: 'Invalid preference ID.' };
+  }
+
+  if (!VALID_PREFERENCE_LEVELS.includes(input.preferenceLevel)) {
+    return { error: `Invalid preference level: ${input.preferenceLevel}` };
+  }
+
+  try {
+    const supabase = await createClient();
+    const repo = new SupabaseUserPreferenceRepository(supabase);
+
+    const preference = await repo.updatePreferenceLevel(
+      user.id,
+      input.preferenceId,
+      input.preferenceLevel,
+    );
+
+    revalidatePath('/profile/taste');
+    return { success: true, preference };
+  } catch (err) {
+    console.error('[updatePreferenceLevelAction error]:', err);
+    return {
+      error: 'Unable to update preference level. Please try again.',
+    };
   }
 }
 
@@ -79,8 +121,7 @@ export async function deletePreferenceAction(
     revalidatePath('/profile/taste');
     return { success: true };
   } catch (err) {
-    const message =
-      err instanceof Error ? err.message : 'Failed to delete preference.';
-    return { error: message };
+    console.error('[deletePreferenceAction error]:', err);
+    return { error: 'Unable to delete preference. Please try again.' };
   }
 }

@@ -10,6 +10,7 @@ import { ArtistPreferenceCard } from './ArtistPreferenceCard';
 import {
   deletePreferenceAction,
   savePreferenceAction,
+  updatePreferenceLevelAction,
 } from '@/app/profile/taste/actions';
 
 interface TasteProfileManagerProps {
@@ -76,12 +77,7 @@ export function TasteProfileManager({
         if (result.preference) {
           const saved = result.preference;
           setPreferences((prev) => {
-            const index = prev.findIndex(
-              (p) =>
-                (saved.artistId && p.artistId === saved.artistId) ||
-                (!saved.artistId &&
-                  p.normalizedArtistName === saved.normalizedArtistName),
-            );
+            const index = prev.findIndex((p) => p.id === saved.id);
             if (index >= 0) {
               const updated = [...prev];
               updated[index] = saved;
@@ -104,7 +100,7 @@ export function TasteProfileManager({
     setError(null);
     const prevPreferences = [...preferences];
 
-    // Optimistic update
+    // Optimistic update by preference ID
     setPreferences((prev) =>
       prev.map((p) =>
         p.id === preference.id ? { ...p, preferenceLevel: newLevel } : p,
@@ -113,9 +109,8 @@ export function TasteProfileManager({
 
     startTransition(async () => {
       try {
-        const result = await savePreferenceAction({
-          artistId: preference.artistId,
-          artistName: preference.artistName,
+        const result = await updatePreferenceLevelAction({
+          preferenceId: preference.id,
           preferenceLevel: newLevel,
         });
 

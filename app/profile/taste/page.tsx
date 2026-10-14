@@ -22,10 +22,9 @@ export default async function TasteProfilePage() {
       const repo = new SupabaseUserPreferenceRepository(supabase);
       preferences = await repo.getPreferences(user.id);
     } catch (err) {
+      console.error('[TasteProfilePage load error]:', err);
       loadError =
-        err instanceof Error
-          ? err.message
-          : 'Unable to load your music preferences right now.';
+        'Unable to load your music preferences right now. Please try refreshing the page.';
     }
   }
 
@@ -96,8 +95,7 @@ export default async function TasteProfilePage() {
                 Unable to Load Music Preferences
               </h2>
               <p className="mx-auto mt-2 max-w-md text-sm text-zinc-400">
-                We encountered an error loading your taste profile from the
-                database: {loadError}. Please try refreshing the page.
+                {loadError}
               </p>
               <div className="mt-6 flex justify-center gap-3">
                 <Link

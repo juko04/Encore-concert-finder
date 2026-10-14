@@ -5,7 +5,10 @@ import {
 } from '@/lib/repositories/memory-repositories';
 import { escapeLikePattern, normalizeName } from '@/lib/domain/value-objects';
 import { sanitizeRedirectPath } from '@/lib/auth/redirect';
-import type { PreferenceLevel } from '@/lib/domain/user-preference';
+import type {
+  PreferenceLevel,
+  UserArtistPreference,
+} from '@/lib/domain/user-preference';
 
 describe('Authentication Redirect Sanitization', () => {
   it('allows valid internal relative paths', () => {
@@ -342,5 +345,72 @@ describe('Phase 2 PR 4A — User Artist Preferences & Search Safety', () => {
         preferenceLevel: 'love_it' as unknown as PreferenceLevel,
       }),
     ).rejects.toThrow('Invalid preference level');
+  });
+
+  it('updates archived vs free-text preferences with the same artist name independently by preference ID', async () => {
+    const prefRepo = new MemoryUserPreferenceRepository();
+    const userId = 'user-archived-test';
+    const artistName = 'Collision Band';
+
+    // 1. Add free-text (uncataloged) preference
+    const freeTextPref = await prefRepo.savePreference({
+      userId,
+      artistName,
+      artistId: null,
+      preferenceLevel: 'interested',
+    });
+    expect(freeTextPref.artistId).toBeNull();
+    expect(freeTextPref.archivedArtistId).toBeNull();
+
+    // 2. Add an archived preference directly into repo state (simulating a deleted canonical artist)
+    const archivedId = 'archived-pref-uuid';
+    const originalArtistId = 'canonical-artist-uuid';
+    const now = new Date().toISOString();
+    const archivedPref: UserArtistPreference = {
+      id: archivedId,
+      userId,
+      artistId: null,
+      archivedArtistId: originalArtistId,
+      artistName,
+      normalizedArtistName: normalizeName(artistName),
+      preferenceLevel: 'favorite',
+      createdAt: now,
+      updatedAt: now,
+    };
+    (
+      prefRepo as unknown as {
+        preferences: Map<string, UserArtistPreference>;
+      }
+    ).preferences.set(archivedId, archivedPref);
+
+    // Both preferences exist for user with exact same artist name
+    const all = await prefRepo.getPreferences(userId);
+    expect(all.length).toBe(2);
+
+    // 3. Update archived preference level to 'like' using updatePreferenceLevel
+    const updatedArchived = await prefRepo.updatePreferenceLevel(
+      userId,
+      archivedId,
+      'like',
+    );
+    expect(updatedArchived.id).toBe(archivedId);
+    expect(updatedArchived.preferenceLevel).toBe('like');
+
+    // Invariant: Free-text preference remains completely unchanged!
+    const freeTextAfter = await prefRepo.getPreference(userId, freeTextPref.id);
+    expect(freeTextAfter?.preferenceLevel).toBe('interested');
+
+    // 4. Update free-text preference level to 'dislike' using updatePreferenceLevel
+    const updatedFreeText = await prefRepo.updatePreferenceLevel(
+      userId,
+      freeTextPref.id,
+      'dislike',
+    );
+    expect(updatedFreeText.id).toBe(freeTextPref.id);
+    expect(updatedFreeText.preferenceLevel).toBe('dislike');
+
+    // Invariant: Archived preference remains completely unchanged!
+    const archivedAfter = await prefRepo.getPreference(userId, archivedId);
+    expect(archivedAfter?.preferenceLevel).toBe('like');
   });
 });
