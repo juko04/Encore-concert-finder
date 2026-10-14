@@ -11,18 +11,20 @@ Durable architecture records belong in [`docs/architecture/`](docs/architecture/
 - **Active Specification:** [`docs/phases/active/PHASE_2_IMPLEMENTATION.md`](docs/phases/active/PHASE_2_IMPLEMENTATION.md).
 - **Current Branch:** `feature/phase-2-music-preferences`
 - **Active Implementing Agent:** Google Antigravity
-- **Current Task:** Phase 2, PR 4A: Manual Music Taste Profile — THIRD INDEPENDENT REVIEW REMEDIATION COMPLETE.
+- **Current Task:** Phase 2, PR 4A: Manual Music Taste Profile — FINAL REVIEW TEST-INFRASTRUCTURE REMEDIATION COMPLETE.
 - **Deliverables & Remediation:**
-  1. **Strict CI Enforcement for Authenticated Browser E2E Test:** Updated `tests/e2e/taste-auth.spec.ts` so that in CI (`process.env.CI`), an unavailable database immediately throws a hard error and fails the build rather than producing a successful skip. Added default local Supabase credentials to `playwright.config.ts` `webServer.env` so Next.js server can authenticate during test execution. Configured `.github/workflows/ci.yml` to start local Supabase (`npm run db:start && npm run db:reset`) before running browser E2E tests, ensuring the full authenticated browser lifecycle (sign-in, preference creation, reload persistence, editing, deletion, sign-out, guest isolation) genuinely executes and passes in CI.
-  2. **Removed All Raw Database Error Exposure:** Replaced fragile substring matching on `"catalog"` in `app/profile/taste/actions.ts` with explicit `InvalidCatalogArtistError` domain error handling in `lib/domain/user-preference.ts`. Any unexpected database or catalog lookup error logs server-side diagnostics and returns the generic user-facing message `'Unable to save artist preference. Please try again.'`. Added unit test suite in `tests/unit/taste-actions.test.ts` verifying that internal database errors containing PostgreSQL details, table names, and line numbers are never exposed to the client.
+  1. **Pre-Playwright Supabase Initialization in CI:** Configured `.github/workflows/ci.yml` to start local Supabase (`npm run db:start && npm run db:reset`) and dynamically export authoritative credentials (`NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`, and `SUPABASE_SERVICE_ROLE_KEY`) to `$GITHUB_ENV` before Next.js production build and Playwright execution. Removed all database startup and reset logic from `tests/e2e/taste-auth.spec.ts`'s `beforeAll` hook.
+  2. **Eliminated Hardcoded Fallback JWTs:** Removed hardcoded demo JWT fallback strings from `playwright.config.ts`, `tests/e2e/taste-auth.spec.ts`, and all integration test suites (`catalog-rls`, `golden-path`, `profiles-rls`, `ticketmaster-canonicalization`, `user-preferences-rls`). All test files and Playwright configuration now dynamically resolve credentials from the live running instance via environment variables or `npx supabase status -o json`, returning `null` if unavailable.
+  3. **Fail-Closed CI Verification:** `tests/e2e/taste-auth.spec.ts` enforces fail-closed behavior in CI (`process.env.CI`): if credentials cannot be resolved or local Supabase is unresponsive, the test immediately throws a hard error. In local development without Docker, tests continue to skip cleanly with diagnostic messaging.
+  4. **Strict Security & Destination Safeguards:** Preserved `assertSafeDatabaseTarget` across all test suites, prohibiting remote or non-local database execution.
 - **Verification State:** ALL VERIFICATIONS PASSING:
   - `npm run format:check`: 100% compliant with Prettier.
   - `npm run lint`: 0 warnings, 0 errors.
   - `npm run typecheck`: Strict TypeScript compile passed with 0 errors.
   - `npm test`: 223/223 unit tests passing across 17 test suites (100% pass rate).
   - `npm run build`: Production Next.js build passes cleanly.
-- **Immediate Next Action:** Push branch `feature/phase-2-music-preferences`, verify GitHub CI on PR #9, and report remediation results for review. Do NOT merge automatically; do NOT begin PR 4B (Spotify) until PR 4A is reviewed and merged.
-- **Phase 2 Status:** **ACTIVE — PR 4A THIRD REVIEW REMEDIATION COMPLETE, AWAITING FINAL REVIEW.**
+- **Immediate Next Action:** Push branch `feature/phase-2-music-preferences`, verify GitHub Actions CI passes all checks on PR #9 (including all 7 browser tests passing with 0 skipped and full integration suite), and report evidence for final approval. Do NOT merge automatically; do NOT begin PR 4B (Spotify) until PR 4A is reviewed and merged.
+- **Phase 2 Status:** **ACTIVE — PR 4A FINAL REVIEW REMEDIATION COMPLETE, AWAITING PR APPROVAL.**
 
 ---
 

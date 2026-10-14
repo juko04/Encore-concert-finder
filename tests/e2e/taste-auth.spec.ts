@@ -10,15 +10,17 @@ interface LocalCredentials {
 }
 
 function resolveSupabaseCredentials(): LocalCredentials | null {
-  if (
-    process.env.NEXT_PUBLIC_SUPABASE_URL &&
-    process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY &&
-    process.env.SUPABASE_SERVICE_ROLE_KEY
-  ) {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const anonKey =
+    process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ||
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+  if (url && anonKey && serviceRoleKey) {
     return {
-      url: process.env.NEXT_PUBLIC_SUPABASE_URL,
-      anonKey: process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY,
-      serviceRoleKey: process.env.SUPABASE_SERVICE_ROLE_KEY,
+      url,
+      anonKey,
+      serviceRoleKey,
     };
   }
 
@@ -35,26 +37,16 @@ function resolveSupabaseCredentials(): LocalCredentials | null {
 
     if (parsed.API_URL && parsed.ANON_KEY && parsed.SERVICE_ROLE_KEY) {
       return {
-        url: parsed.API_URL,
-        anonKey: parsed.ANON_KEY,
-        serviceRoleKey: parsed.SERVICE_ROLE_KEY,
+        url: url || parsed.API_URL,
+        anonKey: anonKey || parsed.ANON_KEY,
+        serviceRoleKey: serviceRoleKey || parsed.SERVICE_ROLE_KEY,
       };
     }
   } catch {
     // Supabase CLI status not available
   }
 
-  const defaultUrl = 'http://127.0.0.1:54321';
-  const defaultAnonKey =
-    'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6ImFub24iLCJpYXQiOjE2MTQ1NTIwMDAsImV4cCI6MTk3MDEwODAwMH0.09X-XbQhJ191y_bS09YmKjX8X8x8_bS09YmKjX8X8x8';
-  const defaultServiceRoleKey =
-    'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTYxNDU1MjAwMCwiZXhwIjoxOTcwMTA4MDAwfQ.09X-XbQhJ191y_bS09YmKjX8X8x8_bS09YmKjX8X8x8';
-
-  return {
-    url: defaultUrl,
-    anonKey: defaultAnonKey,
-    serviceRoleKey: defaultServiceRoleKey,
-  };
+  return null;
 }
 
 test.describe('Authenticated Music Taste Profile Browser E2E Flow', () => {
@@ -70,7 +62,9 @@ test.describe('Authenticated Music Taste Profile Browser E2E Flow', () => {
   test.beforeAll(async () => {
     if (!credentials) {
       if (process.env.CI) {
-        throw new Error('Supabase credentials could not be resolved in CI.');
+        throw new Error(
+          'Supabase credentials could not be resolved from environment or CLI in CI.',
+        );
       }
       return;
     }
@@ -90,26 +84,6 @@ test.describe('Authenticated Music Taste Profile Browser E2E Flow', () => {
       }
     } catch {
       isDbAvailable = false;
-    }
-
-    if (!isDbAvailable && process.env.CI) {
-      console.log(
-        'Local Supabase is not running. Starting local Supabase stack in CI...',
-      );
-      try {
-        execSync('npm run db:start && npm run db:reset', {
-          stdio: 'inherit',
-          timeout: 120000,
-        });
-        const retryRes = await fetch(`${credentials.url}/auth/v1/health`, {
-          headers: { apikey: credentials.anonKey },
-        });
-        if (retryRes.ok) {
-          isDbAvailable = true;
-        }
-      } catch (err) {
-        console.error('Failed to start Supabase in CI:', err);
-      }
     }
 
     if (!isDbAvailable) {
@@ -155,10 +129,10 @@ test.describe('Authenticated Music Taste Profile Browser E2E Flow', () => {
   test('executes complete taste profile lifecycle: sign in, save preference, reload verify, update level, delete, sign out, and verify guest isolation', async ({
     page,
   }) => {
-    if (!isDbAvailable) {
+    if (!credentials || !isDbAvailable) {
       if (process.env.CI) {
         throw new Error(
-          `Local Supabase is not available at ${credentials?.url} in CI. Authenticated browser tests must execute against live local database.`,
+          `Local Supabase is not available at ${credentials?.url ?? 'unknown'} in CI. Authenticated browser tests must execute against live local database.`,
         );
       }
       test.skip(

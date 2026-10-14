@@ -11,15 +11,17 @@ interface LocalCredentials {
 }
 
 function resolveSupabaseCredentials(): LocalCredentials | null {
-  if (
-    process.env.NEXT_PUBLIC_SUPABASE_URL &&
-    process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY &&
-    process.env.SUPABASE_SERVICE_ROLE_KEY
-  ) {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const anonKey =
+    process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ||
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+  if (url && anonKey && serviceRoleKey) {
     return {
-      url: process.env.NEXT_PUBLIC_SUPABASE_URL,
-      anonKey: process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY,
-      serviceRoleKey: process.env.SUPABASE_SERVICE_ROLE_KEY,
+      url,
+      anonKey,
+      serviceRoleKey,
     };
   }
 
@@ -36,22 +38,16 @@ function resolveSupabaseCredentials(): LocalCredentials | null {
 
     if (parsed.API_URL && parsed.ANON_KEY && parsed.SERVICE_ROLE_KEY) {
       return {
-        url: parsed.API_URL,
-        anonKey: parsed.ANON_KEY,
-        serviceRoleKey: parsed.SERVICE_ROLE_KEY,
+        url: url || parsed.API_URL,
+        anonKey: anonKey || parsed.ANON_KEY,
+        serviceRoleKey: serviceRoleKey || parsed.SERVICE_ROLE_KEY,
       };
     }
   } catch {
     // Ignore
   }
 
-  return {
-    url: 'http://127.0.0.1:54321',
-    anonKey:
-      'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6ImFub24iLCJpYXQiOjE2MTQ1NTIwMDAsImV4cCI6MTk3MDEwODAwMH0.09X-XbQhJ191y_bS09YmKjX8X8x8_bS09YmKjX8X8x8',
-    serviceRoleKey:
-      'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTYxNDU1MjAwMCwiZXhwIjoxOTcwMTA4MDAwfQ.09X-XbQhJ191y_bS09YmKjX8X8x8_bS09YmKjX8X8x8',
-  };
+  return null;
 }
 
 describe('Catalog RLS, Security & Canonicalization Atomicity', () => {
