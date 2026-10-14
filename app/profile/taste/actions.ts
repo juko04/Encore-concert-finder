@@ -5,6 +5,7 @@ import { getAuthenticatedUser } from '@/lib/auth/session';
 import { createClient } from '@/lib/supabase/server';
 import { SupabaseUserPreferenceRepository } from '@/lib/repositories/user-preference-repository';
 import {
+  InvalidCatalogArtistError,
   type PreferenceLevel,
   type UserArtistPreference,
   VALID_PREFERENCE_LEVELS,
@@ -50,12 +51,11 @@ export async function savePreferenceAction(input: {
     return { success: true, preference };
   } catch (err) {
     console.error('[savePreferenceAction error]:', err);
-    const isCatalogValidation =
-      err instanceof Error && err.message.includes('catalog');
+    if (err instanceof InvalidCatalogArtistError) {
+      return { error: err.message };
+    }
     return {
-      error: isCatalogValidation
-        ? (err as Error).message
-        : 'Unable to save artist preference. Please try again.',
+      error: 'Unable to save artist preference. Please try again.',
     };
   }
 }

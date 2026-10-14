@@ -92,9 +92,34 @@ test.describe('Authenticated Music Taste Profile Browser E2E Flow', () => {
       isDbAvailable = false;
     }
 
+    if (!isDbAvailable && process.env.CI) {
+      console.log(
+        'Local Supabase is not running. Starting local Supabase stack in CI...',
+      );
+      try {
+        execSync('npm run db:start && npm run db:reset', {
+          stdio: 'inherit',
+          timeout: 120000,
+        });
+        const retryRes = await fetch(`${credentials.url}/auth/v1/health`, {
+          headers: { apikey: credentials.anonKey },
+        });
+        if (retryRes.ok) {
+          isDbAvailable = true;
+        }
+      } catch (err) {
+        console.error('Failed to start Supabase in CI:', err);
+      }
+    }
+
     if (!isDbAvailable) {
+      if (process.env.CI) {
+        throw new Error(
+          `Local Supabase stack is not responding at ${credentials.url} in CI. Database validation is required for E2E tests on pull requests.`,
+        );
+      }
       console.warn(
-        `Local Supabase stack is not responding at ${credentials.url}. Skipping authenticated taste profile E2E browser test.`,
+        `Local Supabase stack is not responding at ${credentials.url}. Skipping authenticated taste profile E2E browser test locally.`,
       );
       return;
     }
@@ -130,10 +155,17 @@ test.describe('Authenticated Music Taste Profile Browser E2E Flow', () => {
   test('executes complete taste profile lifecycle: sign in, save preference, reload verify, update level, delete, sign out, and verify guest isolation', async ({
     page,
   }) => {
-    test.skip(
-      !isDbAvailable,
-      'Local Supabase is offline. Skipping authenticated taste profile E2E browser test.',
-    );
+    if (!isDbAvailable) {
+      if (process.env.CI) {
+        throw new Error(
+          `Local Supabase is not available at ${credentials?.url} in CI. Authenticated browser tests must execute against live local database.`,
+        );
+      }
+      test.skip(
+        true,
+        'Local Supabase is offline. Skipping authenticated taste profile E2E browser test locally.',
+      );
+    }
 
     // 1. Visit login page with redirectTo=/profile/taste
     await page.goto('/login?redirectTo=/profile/taste');

@@ -29,6 +29,7 @@ import {
   normalizeUrl,
 } from '@/lib/domain/value-objects';
 import {
+  InvalidCatalogArtistError,
   type PreferenceLevel,
   type SavePreferenceInput,
   type UserArtistPreference,
@@ -1273,9 +1274,7 @@ export class MemoryUserPreferenceRepository implements IUserPreferenceRepository
       if (this.catalogRepo) {
         const canonical = await this.catalogRepo.getArtistById(input.artistId);
         if (!canonical) {
-          throw new Error(
-            `Invalid canonical artist ID: ${input.artistId} does not exist in catalog.`,
-          );
+          throw new InvalidCatalogArtistError(input.artistId);
         }
         authoritativeName = canonical.name;
         authoritativeNorm = canonical.normalizedName;

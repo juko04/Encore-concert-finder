@@ -1,6 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { normalizeName } from '@/lib/domain/value-objects';
 import {
+  InvalidCatalogArtistError,
   type PreferenceLevel,
   type SavePreferenceInput,
   type UserArtistPreference,
@@ -117,13 +118,11 @@ export class SupabaseUserPreferenceRepository implements IUserPreferenceReposito
 
       if (lookupErr) {
         throw new Error(
-          `Failed to verify canonical artist in catalog: ${lookupErr.message}`,
+          `Failed to verify canonical artist in database: ${lookupErr.message}`,
         );
       }
       if (!canonicalArtist) {
-        throw new Error(
-          `Invalid canonical artist ID: ${input.artistId} does not exist in catalog.`,
-        );
+        throw new InvalidCatalogArtistError(input.artistId);
       }
 
       // Authoritative attributes derived from verified catalog record

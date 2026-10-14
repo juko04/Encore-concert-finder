@@ -38,3 +38,14 @@ export interface SavePreferenceInput {
   artistName: string;
   preferenceLevel: PreferenceLevel;
 }
+
+export class InvalidCatalogArtistError extends Error {
+  readonly artistId: string;
+
+  constructor(artistId: string) {
+    super('Selected artist does not exist in the concert catalog.');
+    this.name = 'InvalidCatalogArtistError';
+    this.artistId = artistId;
+    Object.setPrototypeOf(this, InvalidCatalogArtistError.prototype);
+  }
+}

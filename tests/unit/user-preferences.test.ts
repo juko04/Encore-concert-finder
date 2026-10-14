@@ -5,9 +5,10 @@ import {
 } from '@/lib/repositories/memory-repositories';
 import { escapeLikePattern, normalizeName } from '@/lib/domain/value-objects';
 import { sanitizeRedirectPath } from '@/lib/auth/redirect';
-import type {
-  PreferenceLevel,
-  UserArtistPreference,
+import {
+  InvalidCatalogArtistError,
+  type PreferenceLevel,
+  type UserArtistPreference,
 } from '@/lib/domain/user-preference';
 
 describe('Authentication Redirect Sanitization', () => {
@@ -230,9 +231,7 @@ describe('Phase 2 PR 4A — User Artist Preferences & Search Safety', () => {
         artistId: 'fake-catalog-uuid',
         preferenceLevel: 'like',
       }),
-    ).rejects.toThrow(
-      'Invalid canonical artist ID: fake-catalog-uuid does not exist in catalog.',
-    );
+    ).rejects.toThrow(InvalidCatalogArtistError);
   });
 
   it('preserves preferences when catalog records change or canonical artist is deleted (ON DELETE SET NULL behavior)', async () => {
