@@ -1,3 +1,4 @@
+import Link from 'next/link';
 import { Container } from '@/components/foundation/Container';
 import { StatusBadge } from '@/components/foundation/StatusBadge';
 
@@ -24,6 +25,23 @@ export default function HomePage() {
           Personalized live-music discovery ranking concerts, festivals, and
           local events by personalized value.
         </p>
+
+        <div className="mt-8 flex flex-wrap justify-center gap-4">
+          <Link
+            href="/discover"
+            data-testid="home-discover-btn"
+            className="rounded-xl bg-indigo-600 px-6 py-3 text-sm font-semibold text-white shadow-lg transition-colors hover:bg-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+          >
+            Discover Live Music
+          </Link>
+          <Link
+            href="/profile/taste"
+            data-testid="home-taste-btn"
+            className="rounded-xl border border-zinc-700 bg-zinc-900/80 px-6 py-3 text-sm font-semibold text-zinc-200 shadow transition-colors hover:border-indigo-500 hover:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+          >
+            Music Taste Profile
+          </Link>
+        </div>
 
         <div className="mt-10 rounded-xl border border-slate-800 bg-slate-900/50 p-6 text-left shadow-xl backdrop-blur sm:p-8">
           <h2 className="text-sm font-semibold uppercase tracking-wider text-slate-400">

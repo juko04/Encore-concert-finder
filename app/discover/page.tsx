@@ -36,6 +36,16 @@ export default async function DiscoverPage() {
               sources.
             </p>
           </div>
+
+          <div className="flex items-center gap-3">
+            <Link
+              href="/profile/taste"
+              data-testid="discover-taste-link"
+              className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-700 bg-zinc-900/80 px-3.5 py-2 text-xs font-semibold text-zinc-200 transition-colors hover:border-indigo-500 hover:text-white"
+            >
+              <span>🎵</span> Music Taste
+            </Link>
+          </div>
         </header>
 
         {events.length === 0 ? (

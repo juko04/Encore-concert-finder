@@ -12,4 +12,5 @@ export type {
   EventCandidate,
 } from './event-candidate';
 export * from './source';
+export * from './user-preference';
 export * from './value-objects';

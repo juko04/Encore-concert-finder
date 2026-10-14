@@ -28,12 +28,18 @@ import {
   normalizeName,
   normalizeUrl,
 } from '@/lib/domain/value-objects';
+import {
+  type SavePreferenceInput,
+  type UserArtistPreference,
+  VALID_PREFERENCE_LEVELS,
+} from '@/lib/domain/user-preference';
 import type {
   EventListFilters,
   ICatalogRepository,
   IEventCandidateRepository,
   IRawIngestRepository,
   ISourceRepository,
+  IUserPreferenceRepository,
 } from './interfaces';
 import {
   TICKETMASTER_DEFAULT_SOURCE_ID,
@@ -501,6 +507,24 @@ export class MemoryCatalogRepository implements ICatalogRepository {
     }
 
     return summaries;
+  }
+
+  async searchArtists(query: string, limit = 10): Promise<Artist[]> {
+    const trimmed = query.trim().toLowerCase();
+    if (!trimmed) return [];
+    const safeLimit = Math.min(Math.max(1, limit), 25);
+
+    const matches: Artist[] = [];
+    for (const artist of this.artists.values()) {
+      if (
+        artist.name.toLowerCase().includes(trimmed) ||
+        artist.normalizedName.includes(trimmed)
+      ) {
+        matches.push(artist);
+        if (matches.length >= safeLimit) break;
+      }
+    }
+    return matches;
   }
 
   async findArtistByName(normalizedName: string): Promise<Artist | null> {
@@ -1180,5 +1204,149 @@ export class MemoryCatalogRepository implements ICatalogRepository {
       this.candidateResolutions = snapCandidateResolutions;
       throw err;
     }
+  }
+}
+
+export class MemoryUserPreferenceRepository implements IUserPreferenceRepository {
+  private preferences = new Map<string, UserArtistPreference>();
+  private catalogRepo?: ICatalogRepository;
+
+  constructor(catalogRepo?: ICatalogRepository) {
+    this.catalogRepo = catalogRepo;
+  }
+
+  async getPreferences(userId: string): Promise<UserArtistPreference[]> {
+    const userPrefs: UserArtistPreference[] = [];
+    for (const pref of this.preferences.values()) {
+      if (pref.userId === userId) {
+        userPrefs.push({ ...pref });
+      }
+    }
+    userPrefs.sort(
+      (a, b) =>
+        new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+    );
+    return userPrefs;
+  }
+
+  async getPreference(
+    userId: string,
+    preferenceId: string,
+  ): Promise<UserArtistPreference | null> {
+    const pref = this.preferences.get(preferenceId);
+    if (!pref || pref.userId !== userId) {
+      return null;
+    }
+    return { ...pref };
+  }
+
+  async savePreference(
+    input: SavePreferenceInput,
+  ): Promise<UserArtistPreference> {
+    if (!input.userId || !input.userId.trim()) {
+      throw new Error('User ID is required');
+    }
+    const artistName = input.artistName?.trim();
+    if (!artistName) {
+      throw new Error('Artist name must not be empty');
+    }
+    if (!VALID_PREFERENCE_LEVELS.includes(input.preferenceLevel)) {
+      throw new Error(`Invalid preference level: ${input.preferenceLevel}`);
+    }
+
+    const normalizedName = normalizeName(artistName);
+    const now = new Date().toISOString();
+
+    // Check for existing preference for this user
+    let existingPref: UserArtistPreference | undefined;
+
+    for (const pref of this.preferences.values()) {
+      if (pref.userId !== input.userId) continue;
+
+      // Match by canonical artistId if provided
+      if (input.artistId && pref.artistId === input.artistId) {
+        existingPref = pref;
+        break;
+      }
+
+      // Match by normalized name if artistId is not set or matches unresolved
+      if (
+        !input.artistId &&
+        !pref.artistId &&
+        pref.normalizedArtistName === normalizedName
+      ) {
+        existingPref = pref;
+        break;
+      }
+
+      // If user is adding canonical artist and had an unresolved entry with same normalized name, upgrade it
+      if (
+        input.artistId &&
+        !pref.artistId &&
+        pref.normalizedArtistName === normalizedName
+      ) {
+        existingPref = pref;
+        break;
+      }
+    }
+
+    if (existingPref) {
+      existingPref.preferenceLevel = input.preferenceLevel;
+      existingPref.updatedAt = now;
+      if (input.artistId && !existingPref.artistId) {
+        existingPref.artistId = input.artistId;
+      }
+      return { ...existingPref };
+    }
+
+    const newPref: UserArtistPreference = {
+      id: crypto.randomUUID(),
+      userId: input.userId,
+      artistId: input.artistId || null,
+      artistName,
+      normalizedArtistName: normalizedName,
+      preferenceLevel: input.preferenceLevel,
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    if (newPref.artistId && this.catalogRepo) {
+      const canonical = await this.catalogRepo.findArtistByName(normalizedName);
+      if (canonical) {
+        newPref.canonicalArtist = {
+          id: canonical.id,
+          name: canonical.name,
+          imageUrl: canonical.imageUrl,
+        };
+      }
+    }
+
+    this.preferences.set(newPref.id, newPref);
+    return { ...newPref };
+  }
+
+  async deletePreference(
+    userId: string,
+    preferenceId: string,
+  ): Promise<boolean> {
+    const pref = this.preferences.get(preferenceId);
+    if (!pref || pref.userId !== userId) {
+      return false;
+    }
+    return this.preferences.delete(preferenceId);
+  }
+
+  // Test helper: simulate catalog deletion setting artist_id to null
+  simulateCanonicalArtistDeletion(artistId: string): void {
+    for (const pref of this.preferences.values()) {
+      if (pref.artistId === artistId) {
+        pref.artistId = null;
+        pref.canonicalArtist = null;
+      }
+    }
+  }
+
+  clear(): void {
+    this.preferences.clear();
   }
 }

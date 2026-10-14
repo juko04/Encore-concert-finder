@@ -24,6 +24,10 @@ import type {
 export type { CanonicalizationPayload };
 import type { EventCandidate } from '@/lib/domain/event-candidate';
 import type { RawIngest, Source } from '@/lib/domain/source';
+import type {
+  SavePreferenceInput,
+  UserArtistPreference,
+} from '@/lib/domain/user-preference';
 
 export interface EventListFilters {
   fromDate?: string;
@@ -40,6 +44,7 @@ export interface ICatalogRepository {
   // Read operations (public catalog)
   getEventById(id: string): Promise<CanonicalEventDetail | null>;
   listEvents(filters?: EventListFilters): Promise<CanonicalEventSummary[]>;
+  searchArtists(query: string, limit?: number): Promise<Artist[]>;
   findArtistByName(normalizedName: string): Promise<Artist | null>;
   findArtistsByName(normalizedName: string): Promise<Artist[]>;
   findArtistByExternalId(
@@ -236,4 +241,14 @@ export interface IEventCandidateRepository {
     | (EventCandidate & { id: string; rawIngestId: string; sourceId: string })
     | null
   >;
+}
+
+export interface IUserPreferenceRepository {
+  getPreferences(userId: string): Promise<UserArtistPreference[]>;
+  getPreference(
+    userId: string,
+    preferenceId: string,
+  ): Promise<UserArtistPreference | null>;
+  savePreference(input: SavePreferenceInput): Promise<UserArtistPreference>;
+  deletePreference(userId: string, preferenceId: string): Promise<boolean>;
 }
