@@ -23,6 +23,7 @@ export interface UserArtistPreference {
   id: string;
   userId: string;
   artistId: string | null;
+  archivedArtistId?: string | null;
   artistName: string;
   normalizedArtistName: string;
   preferenceLevel: PreferenceLevel;

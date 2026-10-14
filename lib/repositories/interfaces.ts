@@ -44,6 +44,7 @@ export interface ICatalogRepository {
   // Read operations (public catalog)
   getEventById(id: string): Promise<CanonicalEventDetail | null>;
   listEvents(filters?: EventListFilters): Promise<CanonicalEventSummary[]>;
+  getArtistById(id: string): Promise<Artist | null>;
   searchArtists(query: string, limit?: number): Promise<Artist[]>;
   findArtistByName(normalizedName: string): Promise<Artist | null>;
   findArtistsByName(normalizedName: string): Promise<Artist[]>;

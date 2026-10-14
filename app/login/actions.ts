@@ -3,6 +3,7 @@
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';
+import { sanitizeRedirectPath } from '@/lib/auth/redirect';
 
 export interface AuthActionResult {
   error?: string;
@@ -15,7 +16,9 @@ export async function signInAction(
 ): Promise<AuthActionResult> {
   const email = formData.get('email')?.toString().trim();
   const password = formData.get('password')?.toString();
-  const redirectTo = formData.get('redirectTo')?.toString() || '/profile/taste';
+  const redirectTo = sanitizeRedirectPath(
+    formData.get('redirectTo')?.toString(),
+  );
 
   if (!email || !password) {
     return { error: 'Email and password are required.' };
@@ -40,7 +43,9 @@ export async function signUpAction(
 ): Promise<AuthActionResult> {
   const email = formData.get('email')?.toString().trim();
   const password = formData.get('password')?.toString();
-  const redirectTo = formData.get('redirectTo')?.toString() || '/profile/taste';
+  const redirectTo = sanitizeRedirectPath(
+    formData.get('redirectTo')?.toString(),
+  );
 
   if (!email || !password) {
     return { error: 'Email and password are required.' };

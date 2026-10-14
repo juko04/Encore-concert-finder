@@ -606,6 +606,20 @@ export class SupabaseCatalogRepository implements ICatalogRepository {
     return summaries;
   }
 
+  async getArtistById(id: string): Promise<Artist | null> {
+    const { data, error } = await this.client
+      .from('artists')
+      .select('*')
+      .eq('id', id)
+      .maybeSingle();
+
+    if (error) {
+      throw new Error(`Failed to get artist by ID: ${error.message}`);
+    }
+
+    return data ? mapArtistRow(data as ArtistRow) : null;
+  }
+
   async searchArtists(query: string, limit = 10): Promise<Artist[]> {
     const trimmed = query.trim();
     if (!trimmed) {

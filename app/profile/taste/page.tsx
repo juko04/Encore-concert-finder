@@ -14,13 +14,18 @@ export default async function TasteProfilePage() {
   const user = await getAuthenticatedUser();
 
   let preferences: UserArtistPreference[] = [];
+  let loadError: string | null = null;
+
   if (user) {
     try {
       const supabase = await createClient();
       const repo = new SupabaseUserPreferenceRepository(supabase);
       preferences = await repo.getPreferences(user.id);
-    } catch {
-      preferences = [];
+    } catch (err) {
+      loadError =
+        err instanceof Error
+          ? err.message
+          : 'Unable to load your music preferences right now.';
     }
   }
 
@@ -78,10 +83,43 @@ export default async function TasteProfilePage() {
         </header>
 
         {user ? (
-          <TasteProfileManager
-            initialPreferences={preferences}
-            userEmail={user.email}
-          />
+          loadError ? (
+            <div
+              data-testid="profile-load-error"
+              role="alert"
+              className="rounded-2xl border border-red-800/80 bg-red-950/40 p-8 text-center backdrop-blur sm:p-12"
+            >
+              <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-xl bg-red-900/50 text-xl font-bold text-red-200 ring-1 ring-red-700/50">
+                ⚠
+              </div>
+              <h2 className="mt-4 text-lg font-bold text-white">
+                Unable to Load Music Preferences
+              </h2>
+              <p className="mx-auto mt-2 max-w-md text-sm text-zinc-400">
+                We encountered an error loading your taste profile from the
+                database: {loadError}. Please try refreshing the page.
+              </p>
+              <div className="mt-6 flex justify-center gap-3">
+                <Link
+                  href="/profile/taste"
+                  className="rounded-lg bg-zinc-800 px-4 py-2 text-xs font-semibold text-zinc-200 transition-colors hover:bg-zinc-700 hover:text-white"
+                >
+                  Reload Page
+                </Link>
+                <Link
+                  href="/discover"
+                  className="rounded-lg border border-zinc-700 bg-transparent px-4 py-2 text-xs font-medium text-zinc-400 hover:text-zinc-200"
+                >
+                  Go to Discover
+                </Link>
+              </div>
+            </div>
+          ) : (
+            <TasteProfileManager
+              initialPreferences={preferences}
+              userEmail={user.email}
+            />
+          )
         ) : (
           <GuestTastePrompt />
         )}

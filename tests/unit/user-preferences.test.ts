@@ -4,7 +4,53 @@ import {
   MemoryUserPreferenceRepository,
 } from '@/lib/repositories/memory-repositories';
 import { escapeLikePattern, normalizeName } from '@/lib/domain/value-objects';
+import { sanitizeRedirectPath } from '@/lib/auth/redirect';
 import type { PreferenceLevel } from '@/lib/domain/user-preference';
+
+describe('Authentication Redirect Sanitization', () => {
+  it('allows valid internal relative paths', () => {
+    expect(sanitizeRedirectPath('/profile/taste')).toBe('/profile/taste');
+    expect(sanitizeRedirectPath('/taste')).toBe('/taste');
+    expect(sanitizeRedirectPath('/discover?genre=electronic#top')).toBe(
+      '/discover?genre=electronic#top',
+    );
+    expect(sanitizeRedirectPath('/events/123')).toBe('/events/123');
+  });
+
+  it('rejects external URLs, protocol-relative paths, and schemes, defaulting to fallback', () => {
+    expect(sanitizeRedirectPath('https://evil.com')).toBe('/profile/taste');
+    expect(sanitizeRedirectPath('http://attacker.com/steal')).toBe(
+      '/profile/taste',
+    );
+    expect(sanitizeRedirectPath('//evil.com')).toBe('/profile/taste');
+    expect(sanitizeRedirectPath('///evil.com')).toBe('/profile/taste');
+    expect(sanitizeRedirectPath('/\\evil.com')).toBe('/profile/taste');
+    expect(sanitizeRedirectPath('javascript:alert(1)')).toBe('/profile/taste');
+    expect(sanitizeRedirectPath('/javascript:alert(1)')).toBe('/profile/taste');
+    expect(
+      sanitizeRedirectPath('data:text/html,<script>alert(1)</script>'),
+    ).toBe('/profile/taste');
+  });
+
+  it('rejects backslashes, control characters, and whitespace anomalies', () => {
+    expect(sanitizeRedirectPath('\\evil.com')).toBe('/profile/taste');
+    expect(sanitizeRedirectPath('/foo\\bar')).toBe('/profile/taste');
+    expect(sanitizeRedirectPath('/foo\nbar')).toBe('/profile/taste');
+    expect(sanitizeRedirectPath('/foo\u0000bar')).toBe('/profile/taste');
+    expect(sanitizeRedirectPath('relative/path/without/leading/slash')).toBe(
+      '/profile/taste',
+    );
+    expect(sanitizeRedirectPath('')).toBe('/profile/taste');
+    expect(sanitizeRedirectPath(null)).toBe('/profile/taste');
+    expect(sanitizeRedirectPath(undefined)).toBe('/profile/taste');
+  });
+
+  it('honors custom fallback when provided', () => {
+    expect(sanitizeRedirectPath('https://evil.com', '/discover')).toBe(
+      '/discover',
+    );
+  });
+});
 
 describe('Phase 2 PR 4A — User Artist Preferences & Search Safety', () => {
   it('escapes SQL LIKE wildcard characters to ensure literal substring searching', () => {
@@ -123,8 +169,9 @@ describe('Phase 2 PR 4A — User Artist Preferences & Search Safety', () => {
     expect(userPrefs[0].preferenceLevel).toBe('like');
   });
 
-  it('upgrades an uncataloged artist preference when canonical artist is linked', async () => {
-    const prefRepo = new MemoryUserPreferenceRepository();
+  it('does not silently link or upgrade uncataloged artist preferences by name alone', async () => {
+    const catalogRepo = new MemoryCatalogRepository();
+    const prefRepo = new MemoryUserPreferenceRepository(catalogRepo);
     const userId = 'user-uuid-1';
 
     // 1. User originally added as uncataloged
@@ -136,40 +183,77 @@ describe('Phase 2 PR 4A — User Artist Preferences & Search Safety', () => {
     });
     expect(uncataloged.artistId).toBeNull();
 
-    // 2. Later, Khruangbin is linked to canonical catalog ID
-    const upgraded = await prefRepo.savePreference({
+    // 2. Later, canonical artist exists in catalog
+    const canonical = await catalogRepo.createArtist({
+      name: 'Khruangbin',
+      normalizedName: normalizeName('Khruangbin'),
+    });
+
+    // 3. User adds canonical artist explicitly
+    const canonicalPref = await prefRepo.savePreference({
       userId,
       artistName: 'Khruangbin',
-      artistId: 'artist-khruangbin-id',
+      artistId: canonical.id,
       preferenceLevel: 'favorite',
     });
 
-    expect(upgraded.id).toBe(uncataloged.id);
-    expect(upgraded.artistId).toBe('artist-khruangbin-id');
-    expect(upgraded.preferenceLevel).toBe('favorite');
+    // Invariant: Uncataloged preference remains uncataloged and separate;
+    // it is NOT silently upgraded or overwritten!
+    expect(canonicalPref.id).not.toBe(uncataloged.id);
+    expect(canonicalPref.artistId).toBe(canonical.id);
+    expect(canonicalPref.preferenceLevel).toBe('favorite');
 
     const list = await prefRepo.getPreferences(userId);
-    expect(list.length).toBe(1);
+    expect(list.length).toBe(2);
+    expect(
+      list.some((p) => p.id === uncataloged.id && p.artistId === null),
+    ).toBe(true);
+    expect(
+      list.some(
+        (p) => p.id === canonicalPref.id && p.artistId === canonical.id,
+      ),
+    ).toBe(true);
+  });
+
+  it('validates canonical artist existence against catalog when artistId is provided', async () => {
+    const catalogRepo = new MemoryCatalogRepository();
+    const prefRepo = new MemoryUserPreferenceRepository(catalogRepo);
+    const userId = 'user-uuid-1';
+
+    await expect(
+      prefRepo.savePreference({
+        userId,
+        artistName: 'Nonexistent Band',
+        artistId: 'fake-catalog-uuid',
+        preferenceLevel: 'like',
+      }),
+    ).rejects.toThrow(
+      'Invalid canonical artist ID: fake-catalog-uuid does not exist in catalog.',
+    );
   });
 
   it('preserves preferences when catalog records change or canonical artist is deleted (ON DELETE SET NULL behavior)', async () => {
     const catalogRepo = new MemoryCatalogRepository();
     const prefRepo = new MemoryUserPreferenceRepository(catalogRepo);
     const userId = 'user-uuid-1';
-    const canonicalArtistId = 'canonical-artist-123';
+
+    const canonicalArtist = await catalogRepo.createArtist({
+      name: 'Daft Punk',
+      normalizedName: normalizeName('Daft Punk'),
+    });
 
     // User favorites a canonical artist
     const pref = await prefRepo.savePreference({
       userId,
       artistName: 'Daft Punk',
-      artistId: canonicalArtistId,
+      artistId: canonicalArtist.id,
       preferenceLevel: 'favorite',
     });
 
-    expect(pref.artistId).toBe(canonicalArtistId);
+    expect(pref.artistId).toBe(canonicalArtist.id);
 
     // Simulate canonical artist retiring or being deleted from catalog
-    prefRepo.simulateCanonicalArtistDeletion(canonicalArtistId);
+    prefRepo.simulateCanonicalArtistDeletion(canonicalArtist.id);
 
     // User preference must NOT be deleted!
     const retrieved = await prefRepo.getPreference(userId, pref.id);

@@ -1,6 +1,6 @@
-import React from 'react';
 import Link from 'next/link';
 import { LoginForm } from '@/components/auth/LoginForm';
+import { sanitizeRedirectPath } from '@/lib/auth/redirect';
 
 interface LoginPageProps {
   searchParams?: Promise<{
@@ -10,7 +10,7 @@ interface LoginPageProps {
 
 export default async function LoginPage({ searchParams }: LoginPageProps) {
   const resolvedParams = searchParams ? await searchParams : {};
-  const redirectTo = resolvedParams.redirectTo || '/profile/taste';
+  const redirectTo = sanitizeRedirectPath(resolvedParams.redirectTo);
 
   return (
     <main className="flex min-h-screen flex-col items-center justify-center bg-zinc-950 px-4 py-12 text-zinc-100 sm:px-6 lg:px-8">

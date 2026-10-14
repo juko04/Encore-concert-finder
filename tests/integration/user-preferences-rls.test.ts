@@ -350,4 +350,192 @@ describe('Row Level Security (RLS) on public.user_artist_preferences', () => {
     expect(preserved.artist_name).toBe('Temporary Band'); // Name preserved
     expect(preserved.preference_level).toBe('favorite'); // Preference preserved
   });
+
+  it('prevents uniqueness collision when canonical artist is deleted and user already has an uncataloged preference with the same normalized name', async () => {
+    if (!isDbAvailable || !clientA || !adminClient || !userAId) return;
+
+    const timestamp = Date.now();
+    const artistName = `Ghost Band ${timestamp}`;
+    const normalizedName = `ghost band ${timestamp}`;
+
+    // 1. User A adds an uncataloged preference for "Ghost Band"
+    const { data: uncatalogedPref, error: uncatErr } = await clientA
+      .from('user_artist_preferences')
+      .insert({
+        user_id: userAId,
+        artist_id: null,
+        archived_artist_id: null,
+        artist_name: artistName,
+        normalized_artist_name: normalizedName,
+        preference_level: 'interested',
+      })
+      .select()
+      .single();
+
+    expect(uncatErr).toBeNull();
+    expect(uncatalogedPref).not.toBeNull();
+    expect(uncatalogedPref.artist_id).toBeNull();
+
+    // 2. A canonical artist with the exact same name is added to the catalog
+    const ghostArtistId = crypto.randomUUID();
+    const { error: artErr } = await adminClient.from('artists').insert({
+      id: ghostArtistId,
+      name: artistName,
+      normalized_name: normalizedName,
+    });
+    expect(artErr).toBeNull();
+
+    // 3. User A also adds a canonical preference for this artist
+    const { data: canonicalPref, error: canErr } = await clientA
+      .from('user_artist_preferences')
+      .insert({
+        user_id: userAId,
+        artist_id: ghostArtistId,
+        archived_artist_id: null,
+        artist_name: artistName,
+        normalized_artist_name: normalizedName,
+        preference_level: 'favorite',
+      })
+      .select()
+      .single();
+
+    expect(canErr).toBeNull();
+    expect(canonicalPref).not.toBeNull();
+    expect(canonicalPref.artist_id).toBe(ghostArtistId);
+
+    // 4. Now delete the canonical artist from catalog
+    // The trigger sets archived_artist_id = ghostArtistId and artist_id = null
+    // preventing any uniqueness collision with uncatalogedPref
+    const { error: delErr } = await adminClient
+      .from('artists')
+      .delete()
+      .eq('id', ghostArtistId);
+
+    expect(delErr).toBeNull();
+
+    // 5. Invariant: Both preferences survive independently without collision or deletion
+    const { data: userPrefs, error: fetchErr } = await clientA
+      .from('user_artist_preferences')
+      .select('*')
+      .eq('user_id', userAId)
+      .eq('normalized_artist_name', normalizedName);
+
+    expect(fetchErr).toBeNull();
+    expect(userPrefs?.length).toBe(2);
+
+    const survivingUncataloged = userPrefs?.find(
+      (p) => p.id === uncatalogedPref.id,
+    );
+    const survivingArchived = userPrefs?.find((p) => p.id === canonicalPref.id);
+
+    expect(survivingUncataloged).toBeDefined();
+    expect(survivingUncataloged?.artist_id).toBeNull();
+    expect(survivingUncataloged?.archived_artist_id).toBeNull();
+    expect(survivingUncataloged?.preference_level).toBe('interested');
+
+    expect(survivingArchived).toBeDefined();
+    expect(survivingArchived?.artist_id).toBeNull();
+    expect(survivingArchived?.archived_artist_id).toBe(ghostArtistId);
+    expect(survivingArchived?.preference_level).toBe('favorite');
+  });
+
+  it('executes full authenticated user lifecycle: sign in, create, verify, update, delete, sign out', async () => {
+    if (!isDbAvailable || !adminClient || !credentials) return;
+
+    const timestamp = Date.now();
+    const lifecycleEmail = `lifecycle_${timestamp}@encore.test`;
+    const lifecyclePassword = 'Password123!Secure';
+
+    // 1. Create dedicated user for lifecycle test
+    const { data: created, error: createErr } =
+      await adminClient.auth.admin.createUser({
+        email: lifecycleEmail,
+        password: lifecyclePassword,
+        email_confirm: true,
+      });
+    expect(createErr).toBeNull();
+    const lifecycleUserId = created.user!.id;
+
+    try {
+      // 2. Sign in as user
+      const userSessionClient = createClient(
+        credentials.url,
+        credentials.anonKey,
+        {
+          auth: { autoRefreshToken: false, persistSession: false },
+        },
+      );
+      const { data: authData, error: signInErr } =
+        await userSessionClient.auth.signInWithPassword({
+          email: lifecycleEmail,
+          password: lifecyclePassword,
+        });
+      expect(signInErr).toBeNull();
+      expect(authData.session).not.toBeNull();
+
+      // 3. Add preference
+      const { data: addedPref, error: addErr } = await userSessionClient
+        .from('user_artist_preferences')
+        .insert({
+          user_id: lifecycleUserId,
+          artist_name: 'Lifecycle Artist',
+          normalized_artist_name: 'lifecycle artist',
+          preference_level: 'interested',
+        })
+        .select()
+        .single();
+      expect(addErr).toBeNull();
+      expect(addedPref.preference_level).toBe('interested');
+
+      // 4. Verify persistence on new read
+      const { data: readList, error: readErr } = await userSessionClient
+        .from('user_artist_preferences')
+        .select('*')
+        .eq('user_id', lifecycleUserId);
+      expect(readErr).toBeNull();
+      expect(readList?.length).toBe(1);
+      expect(readList?.[0].id).toBe(addedPref.id);
+
+      // 5. Update preference
+      const { data: updatedPref, error: updateErr } = await userSessionClient
+        .from('user_artist_preferences')
+        .update({ preference_level: 'favorite' })
+        .eq('id', addedPref.id)
+        .select()
+        .single();
+      expect(updateErr).toBeNull();
+      expect(updatedPref.preference_level).toBe('favorite');
+
+      // 6. Remove preference
+      const { error: deleteErr } = await userSessionClient
+        .from('user_artist_preferences')
+        .delete()
+        .eq('id', addedPref.id);
+      expect(deleteErr).toBeNull();
+
+      // Verify deletion
+      const { data: emptyList, error: emptyErr } = await userSessionClient
+        .from('user_artist_preferences')
+        .select('*')
+        .eq('user_id', lifecycleUserId);
+      expect(emptyErr).toBeNull();
+      expect(emptyList?.length).toBe(0);
+
+      // 7. Sign out
+      await userSessionClient.auth.signOut();
+
+      // 8. Verify preferences are inaccessible without authentication
+      const { error: unauthErr } = await userSessionClient
+        .from('user_artist_preferences')
+        .insert({
+          user_id: lifecycleUserId,
+          artist_name: 'Unauth Artist',
+          normalized_artist_name: 'unauth artist',
+          preference_level: 'interested',
+        });
+      expect(unauthErr).not.toBeNull();
+    } finally {
+      await adminClient.auth.admin.deleteUser(lifecycleUserId);
+    }
+  });
 });

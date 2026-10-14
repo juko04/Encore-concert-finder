@@ -7,6 +7,7 @@ import { ArtistPreferenceCard } from '@/components/taste/ArtistPreferenceCard';
 import { GuestTastePrompt } from '@/components/taste/GuestTastePrompt';
 import { ArtistSearchInput } from '@/components/taste/ArtistSearchInput';
 import { LoginForm } from '@/components/auth/LoginForm';
+import { TasteProfileManager } from '@/components/taste/TasteProfileManager';
 import type { UserArtistPreference } from '@/lib/domain/user-preference';
 
 describe('Taste UI Components', () => {
@@ -215,6 +216,57 @@ describe('Taste UI Components', () => {
       expect(screen.getByText('Welcome Back')).toBeInTheDocument();
       expect(screen.getByTestId('auth-submit-btn')).toHaveTextContent(
         'Sign In',
+      );
+    });
+  });
+
+  describe('TasteProfileManager', () => {
+    it('renders empty view when user has no preferences', () => {
+      render(
+        <TasteProfileManager
+          initialPreferences={[]}
+          userEmail="user@example.com"
+        />,
+      );
+
+      expect(screen.getByTestId('empty-preferences-view')).toBeInTheDocument();
+      expect(
+        screen.getByText('No artist preferences added yet'),
+      ).toBeInTheDocument();
+      expect(screen.getByTestId('filter-tab-all')).toHaveTextContent('All (0)');
+    });
+
+    it('renders populated preference cards and correct count on filter tabs', () => {
+      const mockPref: UserArtistPreference = {
+        id: 'pref-foo',
+        userId: 'user-foo',
+        artistId: null,
+        artistName: 'Tycho',
+        normalizedArtistName: 'tycho',
+        preferenceLevel: 'favorite',
+        createdAt: '2026-10-14T00:00:00Z',
+        updatedAt: '2026-10-14T00:00:00Z',
+      };
+
+      render(
+        <TasteProfileManager
+          initialPreferences={[mockPref]}
+          userEmail="user@example.com"
+        />,
+      );
+
+      expect(
+        screen.queryByTestId('empty-preferences-view'),
+      ).not.toBeInTheDocument();
+      expect(screen.getByTestId('artist-name-pref-foo')).toHaveTextContent(
+        'Tycho',
+      );
+      expect(screen.getByTestId('filter-tab-all')).toHaveTextContent('All (1)');
+      expect(screen.getByTestId('filter-tab-favorite')).toHaveTextContent(
+        'Favorites (1)',
+      );
+      expect(screen.getByTestId('filter-tab-like')).toHaveTextContent(
+        'Liked (0)',
       );
     });
   });
