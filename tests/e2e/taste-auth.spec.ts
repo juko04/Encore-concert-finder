@@ -174,13 +174,17 @@ test.describe('Authenticated Music Taste Profile Browser E2E Flow', () => {
     await page.getByTestId('confirm-add-btn').click();
 
     // 5. Verify preference card is rendered in list with "Interested"
-    await expect(page.getByText(customArtistName)).toBeVisible();
+    await expect(
+      page.getByRole('heading', { level: 3, name: customArtistName }),
+    ).toBeVisible();
     await expect(page.getByTestId('badge-interested')).toBeVisible();
 
     // 6. Reload page and verify persistence across browser reloads
     await page.reload();
     await expect(page.getByTestId('taste-profile-manager')).toBeVisible();
-    await expect(page.getByText(customArtistName)).toBeVisible();
+    await expect(
+      page.getByRole('heading', { level: 3, name: customArtistName }),
+    ).toBeVisible();
     await expect(page.getByTestId('badge-interested')).toBeVisible();
 
     // 7. Update preference level to "favorite"
@@ -196,7 +200,9 @@ test.describe('Authenticated Music Taste Profile Browser E2E Flow', () => {
     // Reload again to prove level update persisted in PostgreSQL
     await page.reload();
     await expect(page.getByTestId('taste-profile-manager')).toBeVisible();
-    await expect(page.getByText(customArtistName)).toBeVisible();
+    await expect(
+      page.getByRole('heading', { level: 3, name: customArtistName }),
+    ).toBeVisible();
     await expect(page.getByTestId('badge-favorite')).toBeVisible();
 
     // 8. Delete preference from profile
@@ -208,12 +214,16 @@ test.describe('Authenticated Music Taste Profile Browser E2E Flow', () => {
 
     // Verify empty state is displayed
     await expect(page.getByTestId('empty-preferences-view')).toBeVisible();
-    await expect(page.getByText(customArtistName)).not.toBeVisible();
+    await expect(
+      page.getByRole('heading', { level: 3, name: customArtistName }),
+    ).not.toBeVisible();
 
     // Reload to verify deletion persistence
     await page.reload();
     await expect(page.getByTestId('empty-preferences-view')).toBeVisible();
-    await expect(page.getByText(customArtistName)).not.toBeVisible();
+    await expect(
+      page.getByRole('heading', { level: 3, name: customArtistName }),
+    ).not.toBeVisible();
 
     // 9. Sign out
     const signOutBtn = page.getByTestId('sign-out-btn');
