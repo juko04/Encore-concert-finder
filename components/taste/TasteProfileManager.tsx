@@ -1,21 +1,43 @@
 'use client';
 
-import React, { useState, useTransition } from 'react';
+import React, { useEffect, useState, useTransition } from 'react';
 import type {
   PreferenceLevel,
   UserArtistPreference,
 } from '@/lib/domain/user-preference';
+import type {
+  SpotifyConnectionStatus,
+  SpotifyTimeRange,
+  SpotifyTopArtist,
+} from '@/lib/domain/spotify';
 import { ArtistSearchInput, type SelectedArtist } from './ArtistSearchInput';
 import { ArtistPreferenceCard } from './ArtistPreferenceCard';
+import { SpotifyConnectionCard } from './SpotifyConnectionCard';
+import { SpotifyTastePreview } from './SpotifyTastePreview';
 import {
   deletePreferenceAction,
+  disconnectSpotifyAction,
+  getSpotifyTopArtistsAction,
   savePreferenceAction,
   updatePreferenceLevelAction,
 } from '@/app/profile/taste/actions';
 
+export interface InitialSpotifyStatus {
+  connected: boolean;
+  spotifyAccountId?: string;
+  status?: SpotifyConnectionStatus;
+  lastSyncedAt?: string | null;
+  isConfigured: boolean;
+}
+
 interface TasteProfileManagerProps {
   initialPreferences: UserArtistPreference[];
   userEmail?: string;
+  initialSpotifyStatus?: InitialSpotifyStatus;
+  spotifyBanner?: {
+    type: 'success' | 'error';
+    message: string;
+  } | null;
 }
 
 type FilterTier = 'all' | PreferenceLevel;
@@ -23,6 +45,8 @@ type FilterTier = 'all' | PreferenceLevel;
 export function TasteProfileManager({
   initialPreferences,
   userEmail,
+  initialSpotifyStatus = { connected: false, isConfigured: false },
+  spotifyBanner = null,
 }: TasteProfileManagerProps) {
   const [preferences, setPreferences] =
     useState<UserArtistPreference[]>(initialPreferences);
@@ -32,7 +56,55 @@ export function TasteProfileManager({
   );
   const [addLevel, setAddLevel] = useState<PreferenceLevel>('favorite');
   const [error, setError] = useState<string | null>(null);
+  const [banner, setBanner] = useState<{
+    type: 'success' | 'error';
+    message: string;
+  } | null>(spotifyBanner);
   const [isPending, startTransition] = useTransition();
+
+  // Spotify state
+  const [spotifyStatus, setSpotifyStatus] =
+    useState<InitialSpotifyStatus>(initialSpotifyStatus);
+  const [isSyntheticDemo, setIsSyntheticDemo] = useState<boolean>(false);
+  const [spotifyTimeRange, setSpotifyTimeRange] =
+    useState<SpotifyTimeRange>('short_term');
+  const [spotifyArtists, setSpotifyArtists] = useState<SpotifyTopArtist[]>([]);
+  const [isLoadingSpotify, setIsLoadingSpotify] = useState<boolean>(false);
+  const [isDisconnecting, setIsDisconnecting] = useState<boolean>(false);
+
+  // Load Spotify top artists whenever connected or demo mode changes
+  useEffect(() => {
+    const shouldFetch = spotifyStatus.connected || isSyntheticDemo;
+    if (!shouldFetch) {
+      setSpotifyArtists([]);
+      return;
+    }
+
+    let isSubscribed = true;
+    setIsLoadingSpotify(true);
+
+    getSpotifyTopArtistsAction(spotifyTimeRange, isSyntheticDemo)
+      .then((res) => {
+        if (!isSubscribed) return;
+        setSpotifyArtists(res.artists);
+        if (res.error && !isSyntheticDemo) {
+          setError(res.error);
+        }
+      })
+      .catch((err) => {
+        if (!isSubscribed) return;
+        console.error('Failed to load Spotify artists:', err);
+      })
+      .finally(() => {
+        if (isSubscribed) {
+          setIsLoadingSpotify(false);
+        }
+      });
+
+    return () => {
+      isSubscribed = false;
+    };
+  }, [spotifyStatus.connected, isSyntheticDemo, spotifyTimeRange]);
 
   const filteredPreferences = preferences.filter((pref) => {
     if (filter === 'all') return true;
@@ -93,6 +165,39 @@ export function TasteProfileManager({
     });
   }
 
+  async function handleAddSpotifyArtistToInterests(
+    artistName: string,
+    level: PreferenceLevel,
+  ): Promise<void> {
+    setError(null);
+    try {
+      const result = await savePreferenceAction({
+        artistName,
+        preferenceLevel: level,
+      });
+
+      if (result.error) {
+        setError(result.error);
+        return;
+      }
+
+      if (result.preference) {
+        const saved = result.preference;
+        setPreferences((prev) => {
+          const index = prev.findIndex((p) => p.id === saved.id);
+          if (index >= 0) {
+            const updated = [...prev];
+            updated[index] = saved;
+            return updated;
+          }
+          return [saved, ...prev];
+        });
+      }
+    } catch {
+      setError('Failed to import artist to live preferences.');
+    }
+  }
+
   function handleUpdateLevel(
     preference: UserArtistPreference,
     newLevel: PreferenceLevel,
@@ -100,7 +205,6 @@ export function TasteProfileManager({
     setError(null);
     const prevPreferences = [...preferences];
 
-    // Optimistic update by preference ID
     setPreferences((prev) =>
       prev.map((p) =>
         p.id === preference.id ? { ...p, preferenceLevel: newLevel } : p,
@@ -116,7 +220,7 @@ export function TasteProfileManager({
 
         if (result.error) {
           setError(result.error);
-          setPreferences(prevPreferences); // Rollback
+          setPreferences(prevPreferences);
         } else if (result.preference) {
           const updated = result.preference;
           setPreferences((prev) =>
@@ -125,7 +229,7 @@ export function TasteProfileManager({
         }
       } catch {
         setError('Failed to update preference level.');
-        setPreferences(prevPreferences); // Rollback
+        setPreferences(prevPreferences);
       }
     });
   }
@@ -134,7 +238,6 @@ export function TasteProfileManager({
     setError(null);
     const prevPreferences = [...preferences];
 
-    // Optimistic delete
     setPreferences((prev) => prev.filter((p) => p.id !== preferenceId));
 
     startTransition(async () => {
@@ -142,17 +245,87 @@ export function TasteProfileManager({
         const result = await deletePreferenceAction(preferenceId);
         if (result.error) {
           setError(result.error);
-          setPreferences(prevPreferences); // Rollback
+          setPreferences(prevPreferences);
         }
       } catch {
         setError('Failed to remove preference.');
-        setPreferences(prevPreferences); // Rollback
+        setPreferences(prevPreferences);
       }
     });
   }
 
+  async function handleDisconnectSpotify(): Promise<void> {
+    setIsDisconnecting(true);
+    setError(null);
+    try {
+      const result = await disconnectSpotifyAction();
+      if (result.success) {
+        setSpotifyStatus({
+          connected: false,
+          isConfigured: spotifyStatus.isConfigured,
+        });
+        setSpotifyArtists([]);
+        setIsSyntheticDemo(false);
+      } else if (result.error) {
+        setError(result.error);
+      }
+    } catch {
+      setError('Failed to disconnect Spotify.');
+    } finally {
+      setIsDisconnecting(false);
+    }
+  }
+
   return (
     <div className="space-y-8" data-testid="taste-profile-manager">
+      {/* Dynamic Status / Error Banner */}
+      {banner && (
+        <div
+          data-testid="spotify-status-banner"
+          className={`flex items-start justify-between rounded-xl p-4 text-xs ${
+            banner.type === 'success'
+              ? 'border border-emerald-800/60 bg-emerald-950/40 text-emerald-200'
+              : 'border border-red-800/60 bg-red-950/40 text-red-200'
+          }`}
+        >
+          <div>{banner.message}</div>
+          <button
+            type="button"
+            onClick={() => setBanner(null)}
+            className="text-zinc-400 hover:text-white"
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
+      {/* Spotify Connection & Preview Section */}
+      <section className="space-y-4">
+        <SpotifyConnectionCard
+          connected={spotifyStatus.connected}
+          spotifyAccountId={spotifyStatus.spotifyAccountId}
+          status={spotifyStatus.status}
+          lastSyncedAt={spotifyStatus.lastSyncedAt}
+          isConfigured={spotifyStatus.isConfigured}
+          isSyntheticDemo={isSyntheticDemo}
+          onToggleDemoMode={() => setIsSyntheticDemo((prev) => !prev)}
+          onDisconnect={handleDisconnectSpotify}
+          isDisconnecting={isDisconnecting}
+        />
+
+        {(spotifyStatus.connected || isSyntheticDemo) && (
+          <SpotifyTastePreview
+            artists={spotifyArtists}
+            timeRange={spotifyTimeRange}
+            onChangeTimeRange={setSpotifyTimeRange}
+            existingPreferences={preferences}
+            onAddPreference={handleAddSpotifyArtistToInterests}
+            isLoading={isLoadingSpotify}
+            isSyntheticPreview={isSyntheticDemo}
+          />
+        )}
+      </section>
+
       {/* Search and Add Area */}
       <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-6 backdrop-blur">
         <h2 className="text-base font-semibold text-white">
