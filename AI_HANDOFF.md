@@ -17,14 +17,14 @@ Durable architecture records belong in [`docs/architecture/`](docs/architecture/
   2. **Eliminated Hardcoded Fallback JWTs:** Removed hardcoded demo JWT fallback strings from `playwright.config.ts`, `tests/e2e/taste-auth.spec.ts`, and all integration test suites (`catalog-rls`, `golden-path`, `profiles-rls`, `ticketmaster-canonicalization`, `user-preferences-rls`). All test files and Playwright configuration now dynamically resolve credentials from the live running instance via environment variables or `npx supabase status -o json`, returning `null` if unavailable.
   3. **Fail-Closed CI Verification:** `tests/e2e/taste-auth.spec.ts` enforces fail-closed behavior in CI (`process.env.CI`): if credentials cannot be resolved or local Supabase is unresponsive, the test immediately throws a hard error. In local development without Docker, tests continue to skip cleanly with diagnostic messaging.
   4. **Strict Security & Destination Safeguards:** Preserved `assertSafeDatabaseTarget` across all test suites, prohibiting remote or non-local database execution.
-- **Verification State:** ALL VERIFICATIONS PASSING:
-  - `npm run format:check`: 100% compliant with Prettier.
-  - `npm run lint`: 0 warnings, 0 errors.
-  - `npm run typecheck`: Strict TypeScript compile passed with 0 errors.
-  - `npm test`: 223/223 unit tests passing across 17 test suites (100% pass rate).
-  - `npm run build`: Production Next.js build passes cleanly.
-- **Immediate Next Action:** Push branch `feature/phase-2-music-preferences`, verify GitHub Actions CI passes all checks on PR #9 (including all 7 browser tests passing with 0 skipped and full integration suite), and report evidence for final approval. Do NOT merge automatically; do NOT begin PR 4B (Spotify) until PR 4A is reviewed and merged.
-- **Phase 2 Status:** **ACTIVE — PR 4A FINAL REVIEW REMEDIATION COMPLETE, AWAITING PR APPROVAL.**
+- **Verification State:** ALL VERIFICATIONS PASSING GREEN IN GITHUB ACTIONS CI (Run ID `38800991661` on commit `e570b4c`):
+  - **CI Workflow Status:** 100% green (`gh pr checks 9` passed).
+  - **Browser E2E Suite:** All 7/7 browser tests executed and passed (0 skipped), including the authenticated lifecycle test (`taste-auth.spec.ts`) executing against the live local Supabase stack in CI.
+  - **PostgreSQL Integration Suite:** All 37/37 integration tests passed against live local Supabase across 5 suites (`golden-path`, `catalog-rls`, `user-preferences-rls`, `profiles-rls`, `ticketmaster-canonicalization`).
+  - **Unit Suite:** 223/223 unit tests passing across 17 test suites (100% pass rate).
+  - **Build & Quality:** `format:check`, `lint`, and both pre-build and post-build `typecheck` passed with 0 warnings and 0 errors; production Next.js build compiled cleanly.
+- **Immediate Next Action:** Hand off PR #9 for final review and approval. Do NOT merge automatically; do NOT begin PR 4B (Spotify) until PR 4A is approved and merged.
+- **Phase 2 Status:** **ACTIVE — PR 4A READY FOR MERGE APPROVAL.**
 
 ---
 
