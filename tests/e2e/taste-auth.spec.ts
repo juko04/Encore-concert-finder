@@ -153,7 +153,9 @@ test.describe('Authenticated Music Taste Profile Browser E2E Flow', () => {
     // 3. Confirm redirected to /profile/taste and authenticated UI loaded
     await expect(page).toHaveURL(/\/profile\/taste/);
     await expect(page.getByTestId('taste-profile-manager')).toBeVisible();
-    await expect(page.getByText(testEmail)).toBeVisible();
+    await expect(
+      page.getByTestId('taste-profile-manager').getByText(testEmail),
+    ).toBeVisible();
 
     // 4. Search and add a custom uncataloged artist
     const customArtistName = `E2E Wave Band ${timestamp}`;
@@ -173,13 +175,13 @@ test.describe('Authenticated Music Taste Profile Browser E2E Flow', () => {
 
     // 5. Verify preference card is rendered in list with "Interested"
     await expect(page.getByText(customArtistName)).toBeVisible();
-    await expect(page.getByText('Interested')).toBeVisible();
+    await expect(page.getByTestId('badge-interested')).toBeVisible();
 
     // 6. Reload page and verify persistence across browser reloads
     await page.reload();
     await expect(page.getByTestId('taste-profile-manager')).toBeVisible();
     await expect(page.getByText(customArtistName)).toBeVisible();
-    await expect(page.getByText('Interested')).toBeVisible();
+    await expect(page.getByTestId('badge-interested')).toBeVisible();
 
     // 7. Update preference level to "favorite"
     const levelSelect = page.getByRole('combobox', {
@@ -189,13 +191,13 @@ test.describe('Authenticated Music Taste Profile Browser E2E Flow', () => {
     await levelSelect.selectOption('favorite');
 
     // Verify UI reflects update
-    await expect(page.getByText('Favorite')).toBeVisible();
+    await expect(page.getByTestId('badge-favorite')).toBeVisible();
 
     // Reload again to prove level update persisted in PostgreSQL
     await page.reload();
     await expect(page.getByTestId('taste-profile-manager')).toBeVisible();
     await expect(page.getByText(customArtistName)).toBeVisible();
-    await expect(page.getByText('Favorite')).toBeVisible();
+    await expect(page.getByTestId('badge-favorite')).toBeVisible();
 
     // 8. Delete preference from profile
     const deleteBtn = page.getByRole('button', {
