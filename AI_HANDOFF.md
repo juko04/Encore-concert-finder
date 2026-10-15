@@ -9,42 +9,36 @@ Durable architecture records belong in [`docs/architecture/`](docs/architecture/
 
 - **Current Milestone:** **Phase 2 — Live Ingestion & Personalization**.
 - **Active Specification:** [`docs/phases/active/PHASE_2_IMPLEMENTATION.md`](docs/phases/active/PHASE_2_IMPLEMENTATION.md).
-- **Current Branch:** `feature/phase-2-ingestion-reliability`
+- **Current Branch:** `feature/phase-2-music-preferences`
 - **Active Implementing Agent:** Google Antigravity
-- **Current Task:** Phase 2, PR 3: Ingestion Reliability & Discover Improvements — INDEPENDENT REVIEW REMEDIATIONS COMPLETE.
+- **Current Task:** Phase 2, PR 4A: Manual Music Taste Profile — FINAL REVIEW TEST-INFRASTRUCTURE REMEDIATION COMPLETE.
 - **Deliverables & Remediation:**
-  1. **Removed Fabricated Source Attribution:** Eliminated URL substring and partial UUID matching in `MemoryCatalogRepository.listEvents()`; removed `"Verified"` fallback in `EventCard.tsx` in favor of a neutral `Unknown Source` state without implying verification. Added unit tests for known, unknown, and multiple sources.
-  2. **Safe Error Report Serialization & Nested Metadata:** Implemented recursive `sanitizeErrorDetails()` with strict validation for `statusCode` and `code`, recursive sanitization of custom Error metadata and properties, redaction of untrusted Error names and object keys, circular reference protection, and credential stripping. Added regression test asserting zero secrets in serialized report.
-  3. **Truthful Telemetry Under Replay & Interrupted Recovery:** Decoupled `candidatesReused` (existing candidate records reused from database) from `candidatesSkipped` (candidates whose canonicalization is skipped due to existing resolutions). Verified telemetry counters across First Ingestion, Interrupted Recovery, Identical Replay, Reprocess, and Updated Observations.
-  4. **Database-Backed Catalog Regression Coverage:** Added targeted PostgreSQL integration tests in `tests/integration/catalog-rls.test.ts` verifying source joins, multiple current sources, exclusion of inactive/historical relationships, missing data handling, and anon RLS read support after the N+1 query refactor.
-  5. **Failure Classification & Source-Health Tracking Across Fetch & Persistence:** Wrapped `adapter.fetch()` in persistence mode to invoke `sourceRepo.recordFailure()` on network/rate-limit/auth/validation failures while preserving strict zero-write read-only dry-run isolation.
-- **Verification State:** ALL GREEN:
-  - `npm run format:check`: 100% compliant with Prettier.
-  - `npm run lint`: 0 warnings, 0 errors.
-  - `npm run typecheck`: Strict TypeScript compile passed with 0 errors.
-  - `npm test`: 191/191 unit tests passing across 14 test suites (100% pass rate).
-  - `npm run build`: Next.js production compile successful.
-  - `npm run test:e2e`: 3/3 Playwright browser smoke tests passing.
-  - `npm run test:integration`: 29/29 integration tests passing (or skipping gracefully when local DB is offline).
-- **Immediate Next Action:** PR #8 CI is 100% green on commit `7b6deaf`. Await final independent code review approval before merge. Do not merge automatically.
-- **Phase 2 Status:** **ACTIVE — PR 3 SECOND-REVIEW REMEDIATIONS COMPLETE, CI 100% GREEN, AWAITING FINAL REVIEW.**
+  1. **Pre-Playwright Supabase Initialization in CI:** Configured `.github/workflows/ci.yml` to start local Supabase (`npm run db:start && npm run db:reset`) and dynamically export authoritative credentials (`NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`, and `SUPABASE_SERVICE_ROLE_KEY`) to `$GITHUB_ENV` before Next.js production build and Playwright execution. Removed all database startup and reset logic from `tests/e2e/taste-auth.spec.ts`'s `beforeAll` hook.
+  2. **Eliminated Hardcoded Fallback JWTs:** Removed hardcoded demo JWT fallback strings from `playwright.config.ts`, `tests/e2e/taste-auth.spec.ts`, and all integration test suites (`catalog-rls`, `golden-path`, `profiles-rls`, `ticketmaster-canonicalization`, `user-preferences-rls`). All test files and Playwright configuration now dynamically resolve credentials from the live running instance via environment variables or `npx supabase status -o json`, returning `null` if unavailable.
+  3. **Fail-Closed CI Verification:** `tests/e2e/taste-auth.spec.ts` enforces fail-closed behavior in CI (`process.env.CI`): if credentials cannot be resolved or local Supabase is unresponsive, the test immediately throws a hard error. In local development without Docker, tests continue to skip cleanly with diagnostic messaging.
+  4. **Strict Security & Destination Safeguards:** Preserved `assertSafeDatabaseTarget` across all test suites, prohibiting remote or non-local database execution.
+- **Verification State:** ALL VERIFICATIONS PASSING GREEN IN GITHUB ACTIONS CI (Run ID `38800991661` on commit `e570b4c`):
+  - **CI Workflow Status:** 100% green (`gh pr checks 9` passed).
+  - **Browser E2E Suite:** All 7/7 browser tests executed and passed (0 skipped), including the authenticated lifecycle test (`taste-auth.spec.ts`) executing against the live local Supabase stack in CI.
+  - **PostgreSQL Integration Suite:** All 37/37 integration tests passed against live local Supabase across 5 suites (`golden-path`, `catalog-rls`, `user-preferences-rls`, `profiles-rls`, `ticketmaster-canonicalization`).
+  - **Unit Suite:** 223/223 unit tests passing across 17 test suites (100% pass rate).
+  - **Build & Quality:** `format:check`, `lint`, and both pre-build and post-build `typecheck` passed with 0 warnings and 0 errors; production Next.js build compiled cleanly.
+- **Immediate Next Action:** Hand off PR #9 for final review and approval. Do NOT merge automatically; do NOT begin PR 4B (Spotify) until PR 4A is approved and merged.
+- **Phase 2 Status:** **ACTIVE — PR 4A READY FOR MERGE APPROVAL.**
 
 ---
 
 ## What the Next Agent Must Know
 
-1. **Phase 2 PR 3 Architecture & Delivery:**
-   - **Error Taxonomy:** Located in `lib/sources/ticketmaster/errors.ts`. All client and pipeline errors classify cleanly with credential redaction.
-   - **Telemetry:** Pipeline returns `durationMs`, `startedAt`, `completedAt`. CLI runner formats human-readable run summaries and structured failure reports.
-   - **Source Attribution:** `event_sources` joined with `sources` batch-loaded without N+1 queries. Displayed via `data-testid="source-badge"` in `components/catalog/EventCard.tsx`.
-   - **Venue TBA Badge:** Missing venue names display `Venue TBA / Unknown` via `data-testid="venue-tba-badge"`.
-   - **N+1 Query Elimination:** `SupabaseCatalogRepository.listEvents` queries in 4 batch requests.
-2. **Upcoming PR 4 Scope (Spotify Authentication & Taste Ingestion):**
-   - OAuth Authorization Code Flow with PKCE via server-side API routes (`/api/auth/spotify/login`, `/api/auth/spotify/callback`).
-   - Secure token persistence in `user_spotify_connections` with strict RLS (`auth.uid() = user_id`) and service-role write.
-   - Ingestion of user top artists into `user_artist_affinities`.
-   - Preserve manual user artist preference selection as a first-class alternative (mitigates Spotify Development Mode 25-user limit).
-   - Do NOT implement recommendation scoring in PR 4 (deferred to PR 5 & 6).
+1. **PR 4A Architecture & Invariants:**
+   - **Catalog Independence:** Preferences have `artist_id ... ON DELETE SET NULL`. Canonical artist changes or deletions never delete user preference records.
+   - **No Free-Text Canonicalization:** Uncataloged user artist entries are stored with `artist_id = NULL` and never create rows in `public.artists`.
+   - **No Auto-Reconciliation by Name:** Unmatched preferences remain unmatched until explicit user selection, verified disambiguation, or trusted external identifier matching occurs.
+   - **RLS Ownership:** Every preference mutation is scoped to `auth.uid() = user_id`. Never bypass via service-role key for user CRUD.
+2. **Upcoming PR 4B Scope (Spotify Authentication & Taste Ingestion):**
+   - Spotify Development Mode quota: up to five (5) authorized user accounts per app (the 25-limit applies to developer client IDs per account).
+   - Use standard loopback address `http://127.0.0.1:3000/...` for local OAuth callbacks.
+   - Implement PKCE flow and store tokens server-side in `user_spotify_connections`.
+   - Ingest listening data into a separate relational structure (`user_artist_affinities`) without modifying or overwriting explicit manual preferences in `user_artist_preferences`.
 3. **Deterministic Fixtures Only in CI:** Unit tests and CI must NEVER make live external API calls to Ticketmaster or Spotify.
 4. **Security & Secrets:** All API keys (`TICKETMASTER_API_KEY`, `SPOTIFY_CLIENT_ID`, `SPOTIFY_CLIENT_SECRET`, `SUPABASE_SERVICE_ROLE_KEY`) are server-only. Never expose secrets in client bundles.
-5. **Read-Only Project Hub:** The Project Hub at `/hub` remains strictly read-only and unaffected by ingestion routines.

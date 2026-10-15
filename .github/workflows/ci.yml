@@ -39,19 +39,30 @@ jobs:
       - name: Install Playwright Chromium dependencies
         run: npx playwright install --with-deps chromium
 
+      - name: Start local Supabase and apply migrations
+        run: |
+          npm run db:start
+          npm run db:reset
+          STATUS_JSON=$(npx supabase status -o json)
+          SUPABASE_URL=$(echo "$STATUS_JSON" | jq -r '.API_URL')
+          ANON_KEY=$(echo "$STATUS_JSON" | jq -r '.ANON_KEY')
+          SERVICE_ROLE_KEY=$(echo "$STATUS_JSON" | jq -r '.SERVICE_ROLE_KEY')
+          if [ -z "$SUPABASE_URL" ] || [ "$SUPABASE_URL" = "null" ]; then
+            echo "Failed to resolve Supabase API_URL from CLI status" >&2
+            exit 1
+          fi
+          echo "NEXT_PUBLIC_SUPABASE_URL=$SUPABASE_URL" >> $GITHUB_ENV
+          echo "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=$ANON_KEY" >> $GITHUB_ENV
+          echo "SUPABASE_SERVICE_ROLE_KEY=$SERVICE_ROLE_KEY" >> $GITHUB_ENV
+
       - name: Build Next.js application
         run: npm run build
 
       - name: Type check (post-build regression check)
         run: npm run typecheck
 
-      - name: Run browser smoke test
+      - name: Run browser smoke and authenticated E2E tests
         run: npm run test:e2e
-
-      - name: Start local Supabase and apply migrations
-        run: |
-          npm run db:start
-          npm run db:reset
 
       - name: Run database integration tests (RLS & Golden Path)
         run: npm run test:integration

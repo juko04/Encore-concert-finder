@@ -221,9 +221,10 @@ lib/
   - `event_artists`, `event_ticket_links`, `event_sources`, `event_field_evidence`
   - `candidate_resolutions` (`created`, `matched`, `needs_review`)
   - `profiles` (User profile & preferences)
-- **New Tables Proposed (Workstream C):**
-  - `user_spotify_connections`: Secure storage for Spotify OAuth tokens (`user_id`, `access_token`, `refresh_token`, `token_expires_at`, `scopes`, `created_at`, `updated_at`) with strict RLS (`auth.uid() = user_id`) and service-role write.
-  - `user_artist_affinities`: Ingested taste profile linking `user_id`, `artist_id` (nullable canonical reference), `spotify_artist_id`, `affinity_score`, `affinity_tier` (`top_short`, `top_medium`, `top_long`, `saved`).
+- **New Tables Introduced in Phase 2:**
+  - `user_artist_preferences` (PR 4A): Stores explicit manual user preferences (`user_id`, `artist_id` references `artists(id) on delete set null`, `artist_name`, `normalized_artist_name`, `preference_level`, `created_at`, `updated_at`). Catalog independent via `ON DELETE SET NULL`. RLS strictly enforced (`auth.uid() = user_id`).
+  - `user_spotify_connections` (PR 4B): Secure storage for Spotify OAuth tokens (`user_id`, `access_token`, `refresh_token`, `token_expires_at`, `scopes`, `created_at`, `updated_at`) with strict RLS (`auth.uid() = user_id`) and server-only handling.
+  - `user_artist_affinities` (PR 4B): Ingested listening taste profile linking `user_id`, `artist_id` (nullable canonical reference), `spotify_artist_id`, `time_range`, `rank`, `imported_at`. Kept strictly separate from explicit manual live-attendance preferences.
 
 ---
 
@@ -248,8 +249,8 @@ lib/
   - `/v1/me/top/artists` (time_range: `short_term`, `medium_term`, `long_term`, limit: 50)
   - `/v1/me/following?type=artist` (limit: 50)
 - **Scopes Required:** `user-top-read`, `user-follow-read`.
-- **Development Mode Risk:** Spotify developer apps in Development Mode are restricted to 25 pre-approved user accounts. Manual artist preference entry is preserved as an independent fallback.
-- **Token Exchange:** OAuth 2.0 Authorization Code Flow via `https://accounts.spotify.com/api/token`.
+- **Development Mode Risk:** As of 2026, Spotify developer apps in Development Mode are restricted to up to five (5) authorized user accounts (the limit of 25 applies to developer client IDs per account). Manual artist preference entry is a first-class, permanent requirement and does not depend on Spotify.
+- **Token Exchange:** OAuth 2.0 Authorization Code Flow via `https://accounts.spotify.com/api/token` using standard loopback redirect (`http://127.0.0.1:3000/...`).
 
 ---
 

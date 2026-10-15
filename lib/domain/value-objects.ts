@@ -253,3 +253,14 @@ export function computeCandidateFingerprint(candidate: {
 
   return `cand:${normTitle}|${normArtists}|${normVenue}|${dateOrTime}|${normUrl}`;
 }
+
+/**
+ * Escapes characters that have special meaning in SQL LIKE / ILIKE patterns (%, _, \).
+ * Allows treating user input as literal substrings in SQL search patterns.
+ */
+export function escapeLikePattern(input: string): string {
+  if (!input || typeof input !== 'string') {
+    return '';
+  }
+  return input.replace(/[%_\\]/g, '\\$&');
+}

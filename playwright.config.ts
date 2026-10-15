@@ -1,7 +1,54 @@
 import { defineConfig, devices } from '@playwright/test';
+import { execSync } from 'child_process';
 
 const PORT = process.env.PORT || 3000;
 const baseURL = process.env.BASE_URL || `http://127.0.0.1:${PORT}`;
+
+function resolveLocalSupabaseEnv(): Record<string, string> {
+  const env: Record<string, string> = {};
+
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const anonKey =
+    process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ||
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+  if (url && anonKey && serviceRoleKey) {
+    return {
+      NEXT_PUBLIC_SUPABASE_URL: url,
+      NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: anonKey,
+      SUPABASE_SERVICE_ROLE_KEY: serviceRoleKey,
+    };
+  }
+
+  try {
+    const rawOutput = execSync('npx supabase status -o json', {
+      encoding: 'utf-8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    });
+    const parsed = JSON.parse(rawOutput) as {
+      API_URL?: string;
+      ANON_KEY?: string;
+      SERVICE_ROLE_KEY?: string;
+    };
+
+    if (parsed.API_URL && parsed.ANON_KEY && parsed.SERVICE_ROLE_KEY) {
+      return {
+        NEXT_PUBLIC_SUPABASE_URL: url || parsed.API_URL,
+        NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: anonKey || parsed.ANON_KEY,
+        SUPABASE_SERVICE_ROLE_KEY: serviceRoleKey || parsed.SERVICE_ROLE_KEY,
+      };
+    }
+  } catch {
+    // Supabase CLI is not available or stack is not running
+  }
+
+  if (url) env.NEXT_PUBLIC_SUPABASE_URL = url;
+  if (anonKey) env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY = anonKey;
+  if (serviceRoleKey) env.SUPABASE_SERVICE_ROLE_KEY = serviceRoleKey;
+
+  return env;
+}
 
 export default defineConfig({
   testDir: './tests/e2e',
@@ -29,5 +76,9 @@ export default defineConfig({
     url: baseURL,
     reuseExistingServer: !process.env.CI,
     timeout: 120 * 1000,
+    env: {
+      PORT: `${PORT}`,
+      ...resolveLocalSupabaseEnv(),
+    },
   },
 });

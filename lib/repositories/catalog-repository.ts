@@ -21,7 +21,7 @@ import type {
   TicketInventoryStatus,
   Venue,
 } from '@/lib/domain/catalog';
-import { normalizeUrl } from '@/lib/domain/value-objects';
+import { escapeLikePattern, normalizeUrl } from '@/lib/domain/value-objects';
 import { createAdminClient } from '@/lib/supabase/admin';
 import type { EventListFilters, ICatalogRepository } from './interfaces';
 
@@ -604,6 +604,43 @@ export class SupabaseCatalogRepository implements ICatalogRepository {
     }
 
     return summaries;
+  }
+
+  async getArtistById(id: string): Promise<Artist | null> {
+    const { data, error } = await this.client
+      .from('artists')
+      .select('*')
+      .eq('id', id)
+      .maybeSingle();
+
+    if (error) {
+      throw new Error(`Failed to get artist by ID: ${error.message}`);
+    }
+
+    return data ? mapArtistRow(data as ArtistRow) : null;
+  }
+
+  async searchArtists(query: string, limit = 10): Promise<Artist[]> {
+    const trimmed = query.trim();
+    if (!trimmed) {
+      return [];
+    }
+
+    const safeLimit = Math.min(Math.max(1, limit), 25);
+    const escaped = escapeLikePattern(trimmed);
+
+    const { data, error } = await this.client
+      .from('artists')
+      .select('*')
+      .ilike('name', `%${escaped}%`)
+      .order('name', { ascending: true })
+      .limit(safeLimit);
+
+    if (error) {
+      throw new Error(`Failed to search artists: ${error.message}`);
+    }
+
+    return ((data as ArtistRow[]) || []).map(mapArtistRow);
   }
 
   async findArtistByName(normalizedName: string): Promise<Artist | null> {

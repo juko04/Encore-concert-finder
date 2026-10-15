@@ -8,3 +8,4 @@ export * from './interfaces';
 export * from './memory-repositories';
 export * from './raw-ingest-repository';
 export * from './source-repository';
+export * from './user-preference-repository';
