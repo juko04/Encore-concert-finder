@@ -67,6 +67,9 @@ export function TasteProfileManager({
     useState<InitialSpotifyStatus>(initialSpotifyStatus);
   const [isSyntheticDemo, setIsSyntheticDemo] = useState<boolean>(false);
   const [isSyntheticResult, setIsSyntheticResult] = useState<boolean>(false);
+  const [simulatedDemoPreferences, setSimulatedDemoPreferences] = useState<
+    UserArtistPreference[]
+  >([]);
   const [spotifyTimeRange, setSpotifyTimeRange] =
     useState<SpotifyTimeRange>('short_term');
   const [spotifyArtists, setSpotifyArtists] = useState<SpotifyTopArtist[]>([]);
@@ -175,7 +178,7 @@ export function TasteProfileManager({
     setError(null);
     try {
       if (isSyntheticDemo || isSyntheticResult) {
-        // Isolated demo simulation: do not mutate production database with synthetic observations
+        // Isolated demo simulation: keep synthetic observations in dedicated demo state
         const simulatedPref: UserArtistPreference = {
           id: `demo-${artist.id}-${Date.now()}`,
           userId: userEmail || 'demo-user',
@@ -187,13 +190,17 @@ export function TasteProfileManager({
           updatedAt: new Date().toISOString(),
           spotifyArtistId: artist.id,
         };
-        setPreferences((prev) => [simulatedPref, ...prev]);
+        setSimulatedDemoPreferences((prev) => {
+          const filtered = prev.filter((p) => p.spotifyArtistId !== artist.id);
+          return [simulatedPref, ...filtered];
+        });
         return;
       }
 
       const result = await savePreferenceAction({
         artistName: artist.name,
         preferenceLevel: level,
+        spotifyArtistId: artist.id,
       });
 
       if (result.error) {
@@ -202,10 +209,7 @@ export function TasteProfileManager({
       }
 
       if (result.preference) {
-        const saved: UserArtistPreference = {
-          ...result.preference,
-          spotifyArtistId: artist.id,
-        };
+        const saved = result.preference;
         setPreferences((prev) => {
           const index = prev.findIndex((p) => p.id === saved.id);
           if (index >= 0) {
@@ -226,15 +230,6 @@ export function TasteProfileManager({
     newLevel: PreferenceLevel,
   ) {
     setError(null);
-    if (preference.id.startsWith('demo-')) {
-      setPreferences((prev) =>
-        prev.map((p) =>
-          p.id === preference.id ? { ...p, preferenceLevel: newLevel } : p,
-        ),
-      );
-      return;
-    }
-
     const prevPreferences = [...preferences];
 
     setPreferences((prev) =>
@@ -268,11 +263,6 @@ export function TasteProfileManager({
 
   function handleDelete(preferenceId: string) {
     setError(null);
-    if (preferenceId.startsWith('demo-')) {
-      setPreferences((prev) => prev.filter((p) => p.id !== preferenceId));
-      return;
-    }
-
     const prevPreferences = [...preferences];
 
     setPreferences((prev) => prev.filter((p) => p.id !== preferenceId));
@@ -291,6 +281,17 @@ export function TasteProfileManager({
     });
   }
 
+  function handleToggleDemoMode() {
+    setIsSyntheticDemo((prev) => {
+      const next = !prev;
+      if (!next) {
+        // Exiting demo mode: discard simulated selections while retaining all actual saved preferences
+        setSimulatedDemoPreferences([]);
+      }
+      return next;
+    });
+  }
+
   async function handleDisconnectSpotify(): Promise<void> {
     setIsDisconnecting(true);
     setError(null);
@@ -303,6 +304,7 @@ export function TasteProfileManager({
         });
         setSpotifyArtists([]);
         setIsSyntheticDemo(false);
+        setSimulatedDemoPreferences([]);
       } else if (result.error) {
         setError(result.error);
       }
@@ -345,7 +347,7 @@ export function TasteProfileManager({
           lastSyncedAt={spotifyStatus.lastSyncedAt}
           isConfigured={spotifyStatus.isConfigured}
           isSyntheticDemo={isSyntheticDemo}
-          onToggleDemoMode={() => setIsSyntheticDemo((prev) => !prev)}
+          onToggleDemoMode={handleToggleDemoMode}
           onDisconnect={handleDisconnectSpotify}
           isDisconnecting={isDisconnecting}
         />
@@ -355,13 +357,71 @@ export function TasteProfileManager({
             artists={spotifyArtists}
             timeRange={spotifyTimeRange}
             onChangeTimeRange={setSpotifyTimeRange}
-            existingPreferences={preferences}
+            existingPreferences={[...preferences, ...simulatedDemoPreferences]}
             onAddPreference={handleAddSpotifyArtistToInterests}
             isLoading={isLoadingSpotify}
             isSyntheticPreview={isSyntheticResult || isSyntheticDemo}
           />
         )}
       </section>
+
+      {/* Isolated Interactive Preview Simulation Box */}
+      {isSyntheticDemo && simulatedDemoPreferences.length > 0 && (
+        <div
+          data-testid="simulated-demo-preferences-container"
+          className="rounded-2xl border border-amber-900/60 bg-amber-950/20 p-5 backdrop-blur"
+        >
+          <div className="flex flex-col gap-2 border-b border-amber-900/40 pb-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="rounded bg-amber-500/20 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-amber-300">
+                  Interactive Preview Simulation
+                </span>
+                <span className="text-xs font-medium text-amber-200/80">
+                  ({simulatedDemoPreferences.length} simulated selection
+                  {simulatedDemoPreferences.length > 1 ? 's' : ''})
+                </span>
+              </div>
+              <p className="mt-1 text-xs text-zinc-400">
+                Simulated selections are kept separate from your actual saved
+                profile and will be discarded when exiting demo mode.
+              </p>
+            </div>
+            <button
+              type="button"
+              data-testid="clear-demo-selections-btn"
+              onClick={() => setSimulatedDemoPreferences([])}
+              className="text-xs text-zinc-400 underline hover:text-amber-300"
+            >
+              Clear Simulated
+            </button>
+          </div>
+
+          <div className="mt-4 grid grid-cols-1 gap-3">
+            {simulatedDemoPreferences.map((simPref) => (
+              <ArtistPreferenceCard
+                key={simPref.id}
+                preference={simPref}
+                onUpdateLevel={(pref, newLevel) => {
+                  setSimulatedDemoPreferences((prev) =>
+                    prev.map((p) =>
+                      p.id === pref.id
+                        ? { ...p, preferenceLevel: newLevel }
+                        : p,
+                    ),
+                  );
+                }}
+                onDelete={(id) => {
+                  setSimulatedDemoPreferences((prev) =>
+                    prev.filter((p) => p.id !== id),
+                  );
+                }}
+                isUpdating={false}
+              />
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Search and Add Area */}
       <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-6 backdrop-blur">

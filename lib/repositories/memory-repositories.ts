@@ -1343,7 +1343,89 @@ export class MemoryUserPreferenceRepository implements IUserPreferenceRepository
       return { ...newPref };
     }
 
-    // Uncataloged entry: match only against existing uncataloged preferences
+    const trimmedSpotifyId = input.spotifyArtistId?.trim() || null;
+
+    // 2. Explicit Spotify Artist ID provided
+    if (trimmedSpotifyId) {
+      let matchedCanonicalArtistId: string | null = null;
+      let authoritativeName = rawArtistName;
+      let authoritativeNorm = normalizeName(rawArtistName);
+      let canonicalSummary: CanonicalArtistSummary | null = null;
+
+      if (this.catalogRepo) {
+        try {
+          const canonicalArtist = await this.catalogRepo.findArtistByExternalId(
+            'spotify',
+            trimmedSpotifyId,
+          );
+          if (canonicalArtist) {
+            matchedCanonicalArtistId = canonicalArtist.id;
+            authoritativeName = canonicalArtist.name;
+            authoritativeNorm = canonicalArtist.normalizedName;
+            canonicalSummary = {
+              id: canonicalArtist.id,
+              name: canonicalArtist.name,
+              imageUrl: canonicalArtist.imageUrl,
+              spotifyArtistId: trimmedSpotifyId,
+            };
+          }
+        } catch {
+          // Fallback if findArtistByExternalId is not available
+        }
+      }
+
+      // Check if user already has a preference for this Spotify artist ID
+      let existingPref: UserArtistPreference | undefined;
+      for (const pref of this.preferences.values()) {
+        if (
+          pref.userId === input.userId &&
+          pref.spotifyArtistId === trimmedSpotifyId
+        ) {
+          existingPref = pref;
+          break;
+        }
+        if (
+          matchedCanonicalArtistId &&
+          pref.userId === input.userId &&
+          pref.artistId === matchedCanonicalArtistId
+        ) {
+          existingPref = pref;
+          break;
+        }
+      }
+
+      if (existingPref) {
+        existingPref.preferenceLevel = input.preferenceLevel;
+        existingPref.artistName = authoritativeName;
+        existingPref.normalizedArtistName = authoritativeNorm;
+        existingPref.spotifyArtistId = trimmedSpotifyId;
+        existingPref.updatedAt = now;
+        if (canonicalSummary) {
+          existingPref.artistId = matchedCanonicalArtistId;
+          existingPref.canonicalArtist = canonicalSummary;
+        }
+        return { ...existingPref };
+      }
+
+      const newPref: UserArtistPreference = {
+        id: crypto.randomUUID(),
+        userId: input.userId,
+        artistId: matchedCanonicalArtistId,
+        archivedArtistId: null,
+        artistName: authoritativeName,
+        normalizedArtistName: authoritativeNorm,
+        preferenceLevel: input.preferenceLevel,
+        createdAt: now,
+        updatedAt: now,
+        canonicalArtist: canonicalSummary,
+        spotifyArtistId: trimmedSpotifyId,
+      };
+
+      this.preferences.set(newPref.id, newPref);
+      return { ...newPref };
+    }
+
+    // 3. Uncataloged free-text entry: match only against existing non-Spotify uncataloged preferences
     const normalizedName = normalizeName(rawArtistName);
     let existingUnresolved: UserArtistPreference | undefined;
 
@@ -1352,6 +1434,7 @@ export class MemoryUserPreferenceRepository implements IUserPreferenceRepository
         pref.userId === input.userId &&
         !pref.artistId &&
         !pref.archivedArtistId &&
+        !pref.spotifyArtistId &&
         pref.normalizedArtistName === normalizedName
       ) {
         existingUnresolved = pref;
@@ -1376,6 +1459,7 @@ export class MemoryUserPreferenceRepository implements IUserPreferenceRepository
       preferenceLevel: input.preferenceLevel,
       createdAt: now,
       updatedAt: now,
+      spotifyArtistId: null,
     };
 
     this.preferences.set(newPref.id, newPref);

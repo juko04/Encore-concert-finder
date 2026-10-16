@@ -139,14 +139,39 @@ export async function GET(request: Request) {
         });
       } catch (refreshErr) {
         console.warn('[Spotify Token Refresh Error]:', refreshErr);
-        await repo.updateStatus(user.id, 'expired');
+        if (refreshErr instanceof SpotifyAuthenticationError) {
+          await repo.updateStatus(user.id, 'expired');
+          return NextResponse.json(
+            {
+              error: 'reauthorization_required',
+              message:
+                'Spotify authorization expired or revoked. Please reconnect.',
+            },
+            { status: 401 },
+          );
+        }
+        if (refreshErr instanceof SpotifyRateLimitError) {
+          return NextResponse.json(
+            {
+              error: 'rate_limited',
+              message: refreshErr.message,
+              retryAfterSeconds: refreshErr.retryAfterSeconds,
+            },
+            {
+              status: 429,
+              headers: {
+                'Retry-After': String(refreshErr.retryAfterSeconds),
+              },
+            },
+          );
+        }
         return NextResponse.json(
           {
-            error: 'reauthorization_required',
+            error: 'temporary_failure',
             message:
-              'Spotify authorization expired or revoked. Please reconnect.',
+              'Spotify service temporarily unavailable. Please try again shortly.',
           },
-          { status: 401 },
+          { status: 503 },
         );
       }
     }

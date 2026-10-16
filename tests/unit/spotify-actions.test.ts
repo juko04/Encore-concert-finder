@@ -56,6 +56,10 @@ vi.mock('@/lib/env/server', () => ({
   getServerEnv: vi.fn().mockImplementation(() => mockServerEnv),
 }));
 
+import {
+  SpotifyAuthenticationError,
+  SpotifyRateLimitError,
+} from '@/lib/domain/spotify';
 import { getAuthenticatedUser } from '@/lib/auth/session';
 import {
   disconnectSpotifyAction,
@@ -104,6 +108,27 @@ describe('Spotify Server Actions', () => {
       expect(status.connected).toBe(false);
       expect(status.isConfigured).toBe(true);
     });
+
+    it('discovers connection and reports connected: true even when encryption key is absent', async () => {
+      const prevKey = mockServerEnv.SPOTIFY_TOKEN_ENCRYPTION_KEY;
+      (mockServerEnv as any).SPOTIFY_TOKEN_ENCRYPTION_KEY = '';
+      mockGetConnection.mockResolvedValueOnce({
+        userId: 'test-user-id',
+        spotifyAccountId: 'spot-acc-777',
+        status: 'connected',
+        lastSyncedAt: '2026-10-15T10:00:00Z',
+        scopes: ['user-top-read'],
+      });
+
+      try {
+        const status = await getSpotifyStatusAction();
+        expect(status.connected).toBe(true);
+        expect(status.spotifyAccountId).toBe('spot-acc-777');
+        expect(status.isConfigured).toBe(false);
+      } finally {
+        mockServerEnv.SPOTIFY_TOKEN_ENCRYPTION_KEY = prevKey;
+      }
+    });
   });
 
   describe('disconnectSpotifyAction', () => {
@@ -133,6 +158,35 @@ describe('Spotify Server Actions', () => {
       try {
         const result = await disconnectSpotifyAction();
         expect(result.success).toBe(true);
+        expect(mockDeleteConnection).toHaveBeenCalledWith('test-user-id');
+      } finally {
+        mockServerEnv.SPOTIFY_TOKEN_ENCRYPTION_KEY = prevKey;
+      }
+    });
+    it('supports connecting, removing encryption-key configuration, discovering connection, and successfully disconnecting', async () => {
+      // 1. Connection exists
+      mockGetConnection.mockResolvedValue({
+        userId: 'test-user-id',
+        spotifyAccountId: 'spot-acc-lifecycle',
+        status: 'connected',
+        lastSyncedAt: '2026-10-15T12:00:00Z',
+        scopes: ['user-top-read'],
+      });
+      mockDeleteConnection.mockResolvedValueOnce(true);
+
+      // 2. Remove encryption key from configuration
+      const prevKey = mockServerEnv.SPOTIFY_TOKEN_ENCRYPTION_KEY;
+      (mockServerEnv as any).SPOTIFY_TOKEN_ENCRYPTION_KEY = '';
+
+      try {
+        // UI discovers connection even with missing key
+        const status = await getSpotifyStatusAction();
+        expect(status.connected).toBe(true);
+        expect(status.spotifyAccountId).toBe('spot-acc-lifecycle');
+
+        // Disconnect completes successfully without requiring key
+        const disconnectResult = await disconnectSpotifyAction();
+        expect(disconnectResult.success).toBe(true);
         expect(mockDeleteConnection).toHaveBeenCalledWith('test-user-id');
       } finally {
         mockServerEnv.SPOTIFY_TOKEN_ENCRYPTION_KEY = prevKey;
@@ -224,6 +278,67 @@ describe('Spotify Server Actions', () => {
       expect(result.isSyntheticPreview).toBe(false);
       expect(result.artists).toEqual(liveArtists);
       expect(mockRecordSync).toHaveBeenCalledWith('test-user-id');
+    });
+
+    it('marks connection expired when token refresh fails with permanent SpotifyAuthenticationError', async () => {
+      mockGetConnectionTokens.mockResolvedValueOnce({
+        accessToken: 'expired-access-token',
+        refreshToken: 'revoked-refresh-token',
+        tokenExpiresAt: new Date(Date.now() - 60 * 1000),
+        reauthorizationDeadline: new Date(Date.now() + 180 * 86400 * 1000),
+        scopes: ['user-top-read'],
+      });
+
+      mockRefreshAccessToken.mockRejectedValueOnce(
+        new SpotifyAuthenticationError('Refresh token revoked'),
+      );
+
+      const result = await getSpotifyTopArtistsAction('short_term', false);
+      expect(result.artists).toEqual([]);
+      expect(result.error).toContain(
+        'Spotify authorization expired or revoked',
+      );
+      expect(mockUpdateStatus).toHaveBeenCalledWith('test-user-id', 'expired');
+    });
+
+    it('preserves connection status and returns rate limit error when token refresh encounters SpotifyRateLimitError (transient)', async () => {
+      mockGetConnectionTokens.mockResolvedValueOnce({
+        accessToken: 'expiring-access-token',
+        refreshToken: 'valid-refresh-token',
+        tokenExpiresAt: new Date(Date.now() + 10 * 1000),
+        reauthorizationDeadline: new Date(Date.now() + 180 * 86400 * 1000),
+        scopes: ['user-top-read'],
+      });
+
+      mockRefreshAccessToken.mockRejectedValueOnce(
+        new SpotifyRateLimitError(30),
+      );
+
+      const result = await getSpotifyTopArtistsAction('short_term', false);
+      expect(result.artists).toEqual([]);
+      expect(result.error).toContain('Spotify rate limit exceeded');
+      // Invariant: Transient rate limits MUST NOT mark connection expired
+      expect(mockUpdateStatus).not.toHaveBeenCalled();
+    });
+
+    it('preserves connection status and returns temporary failure message on 5xx or network refresh error (transient)', async () => {
+      mockGetConnectionTokens.mockResolvedValueOnce({
+        accessToken: 'expiring-access-token',
+        refreshToken: 'valid-refresh-token',
+        tokenExpiresAt: new Date(Date.now() + 10 * 1000),
+        reauthorizationDeadline: new Date(Date.now() + 180 * 86400 * 1000),
+        scopes: ['user-top-read'],
+      });
+
+      mockRefreshAccessToken.mockRejectedValueOnce(
+        new Error('Spotify 502 Bad Gateway or network timeout'),
+      );
+
+      const result = await getSpotifyTopArtistsAction('short_term', false);
+      expect(result.artists).toEqual([]);
+      expect(result.error).toContain('Spotify service temporarily unavailable');
+      // Invariant: Transient server/network failures MUST NOT mark connection expired
+      expect(mockUpdateStatus).not.toHaveBeenCalled();
     });
 
     it('returns explicit error on live Spotify request failure without silent synthetic fallback', async () => {

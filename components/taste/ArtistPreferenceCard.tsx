@@ -53,7 +53,14 @@ export function ArtistPreferenceCard({
               {preference.artistName}
             </h3>
 
-            {isCatalogMatched ? (
+            {preference.id.startsWith('demo-') ? (
+              <span
+                data-testid={`demo-badge-${preference.id}`}
+                className="inline-flex items-center rounded-md border border-amber-800/60 bg-amber-950/40 px-2 py-0.5 text-[10px] font-semibold text-amber-300"
+              >
+                Simulated Preview
+              </span>
+            ) : isCatalogMatched ? (
               <span
                 data-testid={`catalog-badge-${preference.id}`}
                 className="inline-flex items-center rounded-md border border-emerald-800/50 bg-emerald-950/40 px-2 py-0.5 text-[10px] font-medium text-emerald-300"

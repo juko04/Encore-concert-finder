@@ -87,7 +87,10 @@ import {
   SPOTIFY_OAUTH_STATE_COOKIE,
   SPOTIFY_OAUTH_VERIFIER_COOKIE,
 } from '@/lib/sources/spotify/oauth';
-import { SpotifyAccountConflictError } from '@/lib/domain/spotify';
+import {
+  SpotifyAccountConflictError,
+  SpotifyRateLimitError,
+} from '@/lib/domain/spotify';
 import { MemoryUserPreferenceRepository } from '@/lib/repositories/memory-repositories';
 
 describe('Spotify OAuth Flow & API Endpoints (Mocked / Zero-Network)', () => {
@@ -393,6 +396,58 @@ describe('Spotify OAuth Flow & API Endpoints (Mocked / Zero-Network)', () => {
     expect(mockGetTopArtists).not.toHaveBeenCalled();
   });
 
+  it('Scenario 6 (cont): handles rate limit during token refresh without expiring connection', async () => {
+    mockGetConnectionTokens.mockResolvedValueOnce({
+      accessToken: 'expired-access-token',
+      refreshToken: 'valid-refresh-token',
+      tokenExpiresAt: new Date(Date.now() - 5000), // expired
+      reauthorizationDeadline: new Date(Date.now() + 3600 * 1000),
+      scopes: ['user-top-read'],
+    });
+
+    mockRefreshAccessToken.mockRejectedValueOnce(new SpotifyRateLimitError(60));
+
+    const req = new Request(
+      'http://localhost:3000/api/integrations/spotify/top-artists?time_range=short_term',
+    );
+    const res = await topArtistsHandler(req);
+
+    expect(res.status).toBe(429);
+    expect(res.headers.get('Retry-After')).toBe('60');
+    const body = await res.json();
+    expect(body.error).toBe('rate_limited');
+    expect(body.retryAfterSeconds).toBe(60);
+
+    // Invariant: Status must NOT be marked expired on transient rate limit
+    expect(mockUpdateStatus).not.toHaveBeenCalledWith(userA.id, 'expired');
+  });
+
+  it('Scenario 6 (cont): handles transient upstream 5xx errors during refresh without expiring connection', async () => {
+    mockGetConnectionTokens.mockResolvedValueOnce({
+      accessToken: 'expired-access-token',
+      refreshToken: 'valid-refresh-token',
+      tokenExpiresAt: new Date(Date.now() - 5000), // expired
+      reauthorizationDeadline: new Date(Date.now() + 3600 * 1000),
+      scopes: ['user-top-read'],
+    });
+
+    mockRefreshAccessToken.mockRejectedValueOnce(
+      new Error('503 Service Unavailable: upstream timeout'),
+    );
+
+    const req = new Request(
+      'http://localhost:3000/api/integrations/spotify/top-artists?time_range=short_term',
+    );
+    const res = await topArtistsHandler(req);
+
+    expect(res.status).toBe(503);
+    const body = await res.json();
+    expect(body.error).toBe('temporary_failure');
+
+    // Invariant: Status must NOT be marked expired on transient 5xx error
+    expect(mockUpdateStatus).not.toHaveBeenCalledWith(userA.id, 'expired');
+  });
+
   // Scenario 7: Disconnect and credential deletion
   it('Scenario 7: disconnects Spotify and removes credentials from repository', async () => {
     mockDeleteConnection.mockResolvedValueOnce(true);
@@ -430,5 +485,94 @@ describe('Spotify OAuth Flow & API Endpoints (Mocked / Zero-Network)', () => {
     expect(prefs[0].id).toBe(manualPref.id);
     expect(prefs[0].artistName).toBe('LCD Soundsystem');
     expect(prefs[0].preferenceLevel).toBe('favorite');
+  });
+
+  // Scenario 9: Spotify artist identity persistence and disambiguation of same-name acts
+  it('Scenario 9: preserves Spotify artist identity and disambiguates distinct acts sharing a name', async () => {
+    const mockCatalog = {
+      findArtistByExternalId: vi.fn(async (provider: string, extId: string) => {
+        if (provider === 'spotify' && extId === 'spotify-known-artist-123') {
+          return {
+            id: 'canonical-artist-999',
+            name: 'The National',
+            normalizedName: 'the national',
+            imageUrl: 'https://cdn.example.com/the-national.jpg',
+          };
+        }
+        return null;
+      }),
+      getArtistById: vi.fn(async () => null),
+      findArtistExternalIds: vi.fn(async () => []),
+    };
+
+    const memoryPrefRepo = new MemoryUserPreferenceRepository(
+      mockCatalog as any,
+    );
+
+    // 1. Known Spotify artist resolves to canonical artist via authoritative external ID mapping
+    const prefKnown = await memoryPrefRepo.savePreference({
+      userId: userA.id,
+      artistName: 'The National (user string)',
+      preferenceLevel: 'favorite',
+      spotifyArtistId: 'spotify-known-artist-123',
+    });
+
+    expect(prefKnown.artistId).toBe('canonical-artist-999');
+    expect(prefKnown.artistName).toBe('The National'); // Authoritative catalog name
+    expect(prefKnown.spotifyArtistId).toBe('spotify-known-artist-123');
+    expect(prefKnown.canonicalArtist?.id).toBe('canonical-artist-999');
+
+    // 2. Uncataloged Spotify artist preserves spotifyArtistId with artistId = null
+    const prefSpotifyGhost1 = await memoryPrefRepo.savePreference({
+      userId: userA.id,
+      artistName: 'Ghost',
+      preferenceLevel: 'favorite',
+      spotifyArtistId: 'spotify-ghost-metal-band',
+    });
+
+    expect(prefSpotifyGhost1.artistId).toBeNull();
+    expect(prefSpotifyGhost1.artistName).toBe('Ghost');
+    expect(prefSpotifyGhost1.spotifyArtistId).toBe('spotify-ghost-metal-band');
+
+    // 3. Distinct Spotify artist with the SAME name 'Ghost' does NOT collide or overwrite
+    const prefSpotifyGhost2 = await memoryPrefRepo.savePreference({
+      userId: userA.id,
+      artistName: 'Ghost',
+      preferenceLevel: 'interested',
+      spotifyArtistId: 'spotify-ghost-indie-pop',
+    });
+
+    expect(prefSpotifyGhost2.id).not.toBe(prefSpotifyGhost1.id);
+    expect(prefSpotifyGhost2.artistId).toBeNull();
+    expect(prefSpotifyGhost2.artistName).toBe('Ghost');
+    expect(prefSpotifyGhost2.spotifyArtistId).toBe('spotify-ghost-indie-pop');
+    expect(prefSpotifyGhost2.preferenceLevel).toBe('interested');
+
+    // 4. Free-text manual preference (no spotifyArtistId) also does not overwrite Spotify acts
+    const prefManualGhost = await memoryPrefRepo.savePreference({
+      userId: userA.id,
+      artistName: 'Ghost',
+      preferenceLevel: 'dislike',
+    });
+
+    expect(prefManualGhost.id).not.toBe(prefSpotifyGhost1.id);
+    expect(prefManualGhost.id).not.toBe(prefSpotifyGhost2.id);
+    expect(prefManualGhost.spotifyArtistId).toBeNull();
+    expect(prefManualGhost.preferenceLevel).toBe('dislike');
+
+    // 5. Updating an existing Spotify preference updates it in-place
+    const updatedPref = await memoryPrefRepo.savePreference({
+      userId: userA.id,
+      artistName: 'Ghost',
+      preferenceLevel: 'like',
+      spotifyArtistId: 'spotify-ghost-metal-band',
+    });
+
+    expect(updatedPref.id).toBe(prefSpotifyGhost1.id);
+    expect(updatedPref.preferenceLevel).toBe('like');
+
+    // All distinct preferences coexist correctly
+    const allPrefs = await memoryPrefRepo.getPreferences(userA.id);
+    expect(allPrefs).toHaveLength(4);
   });
 });

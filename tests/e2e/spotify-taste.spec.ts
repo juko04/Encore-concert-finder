@@ -222,7 +222,13 @@ test.describe('Spotify Taste Explorer & Preview E2E Flow', () => {
       page.locator('[data-testid="already-saved-badge-synth-chappell-roan"]'),
     ).toContainText('★ Favorite');
 
-    // 8. Verify artist is also displayed in user's manual concert preferences during demo session
+    // 8. Verify artist is displayed in the dedicated simulated demo preferences container
+    const demoContainer = page.locator(
+      '[data-testid="simulated-demo-preferences-container"]',
+    );
+    await expect(demoContainer).toBeVisible();
+    await expect(demoContainer).toContainText('Chappell Roan');
+
     const prefCard = page.locator('[data-testid^="preference-card-"]').first();
     await expect(prefCard).toBeVisible();
     await expect(prefCard).toContainText('Chappell Roan');

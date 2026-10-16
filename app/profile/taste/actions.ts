@@ -38,6 +38,7 @@ export async function savePreferenceAction(input: {
   artistId?: string | null;
   artistName: string;
   preferenceLevel: PreferenceLevel;
+  spotifyArtistId?: string | null;
 }): Promise<PreferenceActionResult> {
   const user = await getAuthenticatedUser();
   if (!user) {
@@ -62,6 +63,7 @@ export async function savePreferenceAction(input: {
       artistId: input.artistId || null,
       artistName,
       preferenceLevel: input.preferenceLevel,
+      spotifyArtistId: input.spotifyArtistId?.trim() || null,
     });
 
     revalidatePath('/profile/taste');
@@ -166,10 +168,6 @@ export async function getSpotifyStatusAction(): Promise<SpotifyStatusResult> {
       serverEnv.SPOTIFY_REDIRECT_URI &&
       serverEnv.SPOTIFY_TOKEN_ENCRYPTION_KEY,
     );
-
-    if (!serverEnv.SPOTIFY_TOKEN_ENCRYPTION_KEY) {
-      return { connected: false, isConfigured };
-    }
 
     const adminClient = createAdminClient();
     const repo = new SupabaseSpotifyConnectionRepository(
@@ -330,12 +328,28 @@ export async function getSpotifyTopArtistsAction(
           refreshToken: refreshed.refreshToken,
           tokenExpiresAt: refreshed.tokenExpiresAt,
         });
-      } catch {
-        await repo.updateStatus(user.id, 'expired');
+      } catch (refreshErr) {
+        if (refreshErr instanceof SpotifyAuthenticationError) {
+          await repo.updateStatus(user.id, 'expired');
+          return {
+            artists: [],
+            isSyntheticPreview: false,
+            error:
+              'Spotify authorization expired or revoked. Please reconnect.',
+          };
+        }
+        if (refreshErr instanceof SpotifyRateLimitError) {
+          return {
+            artists: [],
+            isSyntheticPreview: false,
+            error: refreshErr.message,
+          };
+        }
         return {
           artists: [],
           isSyntheticPreview: false,
-          error: 'Spotify authorization expired or revoked. Please reconnect.',
+          error:
+            'Spotify service temporarily unavailable. Please try again shortly.',
         };
       }
     }

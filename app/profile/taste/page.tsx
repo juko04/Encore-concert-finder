@@ -91,22 +91,20 @@ export default async function TasteProfilePage({
         serverEnv.SPOTIFY_TOKEN_ENCRYPTION_KEY,
       );
 
-      if (serverEnv.SPOTIFY_TOKEN_ENCRYPTION_KEY) {
-        const adminSupabase = createAdminClient();
-        const spotifyRepo = new SupabaseSpotifyConnectionRepository(
-          adminSupabase,
-          serverEnv.SPOTIFY_TOKEN_ENCRYPTION_KEY,
-        );
-        const conn = await spotifyRepo.getConnection(user.id);
-        if (conn) {
-          spotifyStatus = {
-            connected: conn.status === 'connected',
-            spotifyAccountId: conn.spotifyAccountId,
-            status: conn.status,
-            lastSyncedAt: conn.lastSyncedAt,
-            isConfigured: spotifyStatus.isConfigured,
-          };
-        }
+      const adminSupabase = createAdminClient();
+      const spotifyRepo = new SupabaseSpotifyConnectionRepository(
+        adminSupabase,
+        serverEnv.SPOTIFY_TOKEN_ENCRYPTION_KEY,
+      );
+      const conn = await spotifyRepo.getConnection(user.id);
+      if (conn) {
+        spotifyStatus = {
+          connected: conn.status === 'connected',
+          spotifyAccountId: conn.spotifyAccountId,
+          status: conn.status,
+          lastSyncedAt: conn.lastSyncedAt,
+          isConfigured: spotifyStatus.isConfigured,
+        };
       }
     } catch (err) {
       console.warn('[TasteProfilePage spotify status warning]:', err);
