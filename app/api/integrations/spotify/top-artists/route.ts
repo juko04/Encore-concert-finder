@@ -11,7 +11,10 @@ import {
   SpotifyRateLimitError,
   VALID_SPOTIFY_TIME_RANGES,
 } from '@/lib/domain/spotify';
-import { getSyntheticTopArtists } from '@/lib/sources/spotify/synthetic-preview';
+import {
+  getSyntheticTopArtists,
+  isSyntheticPreviewAllowed,
+} from '@/lib/sources/spotify/synthetic-preview';
 
 export const dynamic = 'force-dynamic';
 
@@ -35,8 +38,19 @@ export async function GET(request: Request) {
   }
   const timeRange = rawRange as SpotifyTimeRange;
 
-  // If synthetic preview requested or Spotify disabled, return preview data
+  // 1. Explicit synthetic preview mode
   if (preview) {
+    if (!isSyntheticPreviewAllowed()) {
+      return NextResponse.json(
+        {
+          error: 'preview_disabled_in_production',
+          message:
+            'Spotify synthetic preview mode is only available in development and testing environments.',
+        },
+        { status: 403 },
+      );
+    }
+
     const artists = getSyntheticTopArtists(timeRange);
     return NextResponse.json({
       artists,
@@ -45,6 +59,7 @@ export async function GET(request: Request) {
     });
   }
 
+  // 2. Live Spotify data path
   try {
     let serverEnv;
     try {
@@ -61,13 +76,13 @@ export async function GET(request: Request) {
       !serverEnv.SPOTIFY_REDIRECT_URI ||
       !serverEnv.SPOTIFY_TOKEN_ENCRYPTION_KEY
     ) {
-      // Fallback to preview if live integration is not configured
-      const artists = getSyntheticTopArtists(timeRange);
-      return NextResponse.json({
-        artists,
-        isSyntheticPreview: true,
-        timeRange,
-      });
+      return NextResponse.json(
+        {
+          error: 'spotify_not_configured',
+          message: 'Spotify integration is not configured in this environment.',
+        },
+        { status: 503 },
+      );
     }
 
     const adminClient = createAdminClient();
@@ -78,13 +93,27 @@ export async function GET(request: Request) {
 
     const tokens = await repo.getConnectionTokens(user.id);
     if (!tokens) {
-      // User is not connected to Spotify; return preview data if requested or 404
-      const artists = getSyntheticTopArtists(timeRange);
-      return NextResponse.json({
-        artists,
-        isSyntheticPreview: true,
-        timeRange,
-      });
+      return NextResponse.json(
+        {
+          error: 'not_connected',
+          message:
+            'No active Spotify connection found. Please connect your account.',
+        },
+        { status: 404 },
+      );
+    }
+
+    // Enforce long-term reauthorization deadline before attempting use or refresh
+    if (tokens.reauthorizationDeadline.getTime() <= Date.now()) {
+      await repo.updateStatus(user.id, 'expired');
+      return NextResponse.json(
+        {
+          error: 'reauthorization_required',
+          message:
+            'Spotify authorization has expired. Please reconnect your account.',
+        },
+        { status: 401 },
+      );
     }
 
     const spotifyClient = new SpotifyApiClient({
@@ -95,7 +124,7 @@ export async function GET(request: Request) {
 
     let currentAccessToken = tokens.accessToken;
 
-    // Check if token expired (or expiring in next 60 seconds)
+    // Check if access token expired (or expiring in next 60 seconds)
     if (tokens.tokenExpiresAt.getTime() <= Date.now() + 60 * 1000) {
       try {
         const refreshed = await spotifyClient.refreshAccessToken(
@@ -109,17 +138,16 @@ export async function GET(request: Request) {
           tokenExpiresAt: refreshed.tokenExpiresAt,
         });
       } catch (refreshErr) {
-        if (refreshErr instanceof SpotifyAuthenticationError) {
-          await repo.updateStatus(user.id, 'expired');
-          return NextResponse.json(
-            {
-              error: 'reauthorization_required',
-              message: 'Spotify authorization expired. Please reconnect.',
-            },
-            { status: 401 },
-          );
-        }
-        throw refreshErr;
+        console.warn('[Spotify Token Refresh Error]:', refreshErr);
+        await repo.updateStatus(user.id, 'expired');
+        return NextResponse.json(
+          {
+            error: 'reauthorization_required',
+            message:
+              'Spotify authorization expired or revoked. Please reconnect.',
+          },
+          { status: 401 },
+        );
       }
     }
 

@@ -21,6 +21,19 @@ export const SYNTHETIC_USER_PROFILE: SpotifyUserProfile = {
   product: 'premium',
 };
 
+/**
+ * Checks whether synthetic preview data generation is permitted in the current environment.
+ * Synthetic preview is strictly restricted to development/test environments unless explicitly
+ * enabled via ENABLE_SPOTIFY_DEV_PREVIEW=true.
+ */
+export function isSyntheticPreviewAllowed(
+  nodeEnv = process.env.NODE_ENV,
+  devPreviewFlag = process.env.ENABLE_SPOTIFY_DEV_PREVIEW,
+): boolean {
+  if (devPreviewFlag === 'true') return true;
+  return nodeEnv !== 'production';
+}
+
 interface BaseArtistCatalogEntry {
   id: string;
   name: string;

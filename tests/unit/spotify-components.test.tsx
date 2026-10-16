@@ -134,6 +134,7 @@ describe('Spotify UI Components', () => {
         preferenceLevel: 'favorite',
         createdAt: '2026-10-15T00:00:00Z',
         updatedAt: '2026-10-15T00:00:00Z',
+        spotifyArtistId: 'artist-2',
       },
     ];
 
@@ -176,7 +177,7 @@ describe('Spotify UI Components', () => {
       expect(screen.getByTestId('trend-badge-consistent')).toBeDefined();
       expect(screen.getByTestId('trend-badge-fading')).toBeDefined();
 
-      // Khruangbin is already saved as favorite
+      // Khruangbin has matching spotifyArtistId: 'artist-2'
       const savedBadge = screen.getByTestId('already-saved-badge-artist-2');
       expect(savedBadge.textContent).toContain('★ Favorite');
     });
@@ -205,7 +206,64 @@ describe('Spotify UI Components', () => {
         fireEvent.click(confirmBtn);
       });
 
-      expect(onAdd).toHaveBeenCalledWith('Chappell Roan', 'favorite');
+      expect(onAdd).toHaveBeenCalledWith(mockArtists[0], 'favorite');
+    });
+
+    it('Finding 5 regression: does NOT treat equal names as proof of equal identities when external ID differs', () => {
+      // User has preference for artist named "Aurora", but with different Spotify ID (or local band without external ID)
+      const preferencesWithNameCollision: UserArtistPreference[] = [
+        {
+          id: 'pref-aurora-local',
+          userId: 'user-1',
+          artistId: null,
+          archivedArtistId: null,
+          artistName: 'Aurora',
+          normalizedArtistName: 'aurora',
+          preferenceLevel: 'favorite',
+          createdAt: '2026-10-15T00:00:00Z',
+          updatedAt: '2026-10-15T00:00:00Z',
+          spotifyArtistId: 'spotify-aurora-local-indie',
+        },
+      ];
+
+      const spotifyArtistAuroraPop: SpotifyTopArtist = {
+        id: 'spotify-aurora-pop-star',
+        name: 'Aurora',
+        rank: 1,
+        imageUrl: null,
+        spotifyUrl: 'https://open.spotify.com/artist/aurora-pop',
+        genres: ['norwegian pop'],
+        popularity: 88,
+        trend: 'rising',
+        timeRange: 'short_term',
+      };
+
+      render(
+        <SpotifyTastePreview
+          artists={[spotifyArtistAuroraPop]}
+          timeRange="short_term"
+          onChangeTimeRange={vi.fn()}
+          existingPreferences={preferencesWithNameCollision}
+          onAddPreference={vi.fn()}
+        />,
+      );
+
+      // Invariant: Must NOT show as already saved
+      expect(
+        screen.queryByTestId('already-saved-badge-spotify-aurora-pop-star'),
+      ).toBeNull();
+
+      // Must show Distinct Act disambiguation badge
+      const collisionBadge = screen.getByTestId(
+        'name-collision-badge-spotify-aurora-pop-star',
+      );
+      expect(collisionBadge).toBeDefined();
+      expect(collisionBadge.textContent).toBe('Distinct Act');
+
+      // User must be able to add this distinct act
+      expect(
+        screen.getByTestId('import-artist-btn-spotify-aurora-pop-star'),
+      ).toBeDefined();
     });
   });
 });

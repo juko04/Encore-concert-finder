@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { decryptSecret, encryptSecret } from '@/lib/security/crypto';
 
 /**
  * Phase 2, PR #10 Spotify OAuth 2.0 PKCE Helpers
@@ -7,11 +8,70 @@ import crypto from 'node:crypto';
 
 export const SPOTIFY_OAUTH_STATE_COOKIE = 'encore_spotify_oauth_state';
 export const SPOTIFY_OAUTH_VERIFIER_COOKIE = 'encore_spotify_oauth_verifier';
+export const SPOTIFY_OAUTH_BINDING_COOKIE = 'encore_spotify_oauth_binding';
 
 export const SPOTIFY_AUTH_ENDPOINT = 'https://accounts.spotify.com/authorize';
 export const SPOTIFY_TOKEN_ENDPOINT = 'https://accounts.spotify.com/api/token';
 
 export const DEFAULT_SPOTIFY_SCOPES = ['user-top-read'];
+
+export interface OAuthHandshakePayload {
+  state: string;
+  codeVerifier: string;
+  userId: string;
+  createdAt: number;
+}
+
+/**
+ * Encrypts and securely binds the OAuth state, PKCE verifier, and initiating Encore user ID.
+ */
+export function createOAuthHandshakeToken(
+  payload: OAuthHandshakePayload,
+  encryptionKey: string,
+): string {
+  if (!payload.state || !payload.codeVerifier || !payload.userId) {
+    throw new Error(
+      'OAuth handshake payload must include state, codeVerifier, and userId.',
+    );
+  }
+  const serialized = JSON.stringify({
+    state: payload.state,
+    codeVerifier: payload.codeVerifier,
+    userId: payload.userId,
+    createdAt: payload.createdAt || Date.now(),
+  });
+  return encryptSecret(serialized, encryptionKey);
+}
+
+/**
+ * Decrypts and verifies the OAuth handshake token, enforcing expiration and payload integrity.
+ */
+export function verifyOAuthHandshakeToken(
+  token: string,
+  encryptionKey: string,
+  maxAgeMs = 10 * 60 * 1000,
+): OAuthHandshakePayload | null {
+  if (!token || typeof token !== 'string') return null;
+  try {
+    const decrypted = decryptSecret(token, encryptionKey);
+    const parsed = JSON.parse(decrypted) as OAuthHandshakePayload;
+    if (
+      !parsed.state ||
+      !parsed.codeVerifier ||
+      !parsed.userId ||
+      typeof parsed.createdAt !== 'number'
+    ) {
+      return null;
+    }
+    const age = Date.now() - parsed.createdAt;
+    if (age < 0 || age > maxAgeMs) {
+      return null;
+    }
+    return parsed;
+  } catch {
+    return null;
+  }
+}
 
 /**
  * Generates a cryptographically random RFC 7636 code verifier.

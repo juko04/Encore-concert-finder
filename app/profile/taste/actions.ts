@@ -18,9 +18,15 @@ import {
   type SpotifyConnectionStatus,
   type SpotifyTimeRange,
   type SpotifyTopArtist,
+  SpotifyAuthenticationError,
+  SpotifyForbiddenError,
+  SpotifyRateLimitError,
   VALID_SPOTIFY_TIME_RANGES,
 } from '@/lib/domain/spotify';
-import { getSyntheticTopArtists } from '@/lib/sources/spotify/synthetic-preview';
+import {
+  getSyntheticTopArtists,
+  isSyntheticPreviewAllowed,
+} from '@/lib/sources/spotify/synthetic-preview';
 
 export interface PreferenceActionResult {
   success?: boolean;
@@ -199,15 +205,9 @@ export async function disconnectSpotifyAction(): Promise<{
   }
 
   try {
-    const serverEnv = getServerEnv();
-    if (serverEnv.SPOTIFY_TOKEN_ENCRYPTION_KEY) {
-      const adminClient = createAdminClient();
-      const repo = new SupabaseSpotifyConnectionRepository(
-        adminClient,
-        serverEnv.SPOTIFY_TOKEN_ENCRYPTION_KEY,
-      );
-      await repo.deleteConnection(user.id);
-    }
+    const adminClient = createAdminClient();
+    const repo = new SupabaseSpotifyConnectionRepository(adminClient);
+    await repo.deleteConnection(user.id);
 
     revalidatePath('/profile/taste');
     return { success: true };
@@ -244,13 +244,24 @@ export async function getSpotifyTopArtistsAction(
     };
   }
 
+  // 1. Explicit synthetic preview mode
   if (preview) {
+    if (!isSyntheticPreviewAllowed()) {
+      return {
+        artists: [],
+        isSyntheticPreview: false,
+        error:
+          'Spotify synthetic preview mode is only available in development and testing environments.',
+      };
+    }
+
     return {
       artists: getSyntheticTopArtists(timeRange),
       isSyntheticPreview: true,
     };
   }
 
+  // 2. Live Spotify data path
   try {
     let serverEnv;
     try {
@@ -268,8 +279,9 @@ export async function getSpotifyTopArtistsAction(
       !serverEnv.SPOTIFY_TOKEN_ENCRYPTION_KEY
     ) {
       return {
-        artists: getSyntheticTopArtists(timeRange),
-        isSyntheticPreview: true,
+        artists: [],
+        isSyntheticPreview: false,
+        error: 'Spotify integration is not configured in this environment.',
       };
     }
 
@@ -282,8 +294,21 @@ export async function getSpotifyTopArtistsAction(
     const tokens = await repo.getConnectionTokens(user.id);
     if (!tokens) {
       return {
-        artists: getSyntheticTopArtists(timeRange),
-        isSyntheticPreview: true,
+        artists: [],
+        isSyntheticPreview: false,
+        error:
+          'No active Spotify connection found. Please connect your account.',
+      };
+    }
+
+    // Enforce long-term reauthorization deadline
+    if (tokens.reauthorizationDeadline.getTime() <= Date.now()) {
+      await repo.updateStatus(user.id, 'expired');
+      return {
+        artists: [],
+        isSyntheticPreview: false,
+        error:
+          'Spotify authorization has expired. Please reconnect your account.',
       };
     }
 
@@ -310,7 +335,7 @@ export async function getSpotifyTopArtistsAction(
         return {
           artists: [],
           isSyntheticPreview: false,
-          error: 'Spotify authorization expired. Please reconnect.',
+          error: 'Spotify authorization expired or revoked. Please reconnect.',
         };
       }
     }
@@ -327,10 +352,21 @@ export async function getSpotifyTopArtistsAction(
     };
   } catch (err) {
     console.error('[getSpotifyTopArtistsAction error]:', err);
+
+    let errorMsg = 'Failed to fetch Spotify top artists.';
+    if (err instanceof SpotifyAuthenticationError) {
+      errorMsg = 'Spotify session expired. Please reconnect.';
+    } else if (err instanceof SpotifyForbiddenError) {
+      errorMsg =
+        'Spotify Developer Mode requires allowlisted beta user accounts.';
+    } else if (err instanceof SpotifyRateLimitError) {
+      errorMsg = err.message;
+    }
+
     return {
-      artists: getSyntheticTopArtists(timeRange),
-      isSyntheticPreview: true,
-      error: 'Unable to fetch live Spotify taste. Showing preview mode.',
+      artists: [],
+      isSyntheticPreview: false,
+      error: errorMsg,
     };
   }
 }

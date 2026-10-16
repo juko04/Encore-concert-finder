@@ -2,11 +2,13 @@ import { describe, expect, it } from 'vitest';
 import {
   buildSpotifyAuthorizeUrl,
   computeCodeChallenge,
+  createOAuthHandshakeToken,
   generateCodeVerifier,
   generateOAuthState,
   getOAuthCookieOptions,
   shouldUseSecureCookies,
   SPOTIFY_AUTH_ENDPOINT,
+  verifyOAuthHandshakeToken,
 } from '@/lib/sources/spotify/oauth';
 
 describe('Spotify OAuth PKCE Utilities', () => {
@@ -97,5 +99,73 @@ describe('Spotify OAuth PKCE Utilities', () => {
     expect(options.sameSite).toBe('lax');
     expect(options.path).toBe('/');
     expect(options.maxAge).toBe(600); // 10 minutes
+  });
+
+  describe('OAuth Handshake User Binding', () => {
+    const validKey =
+      '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
+
+    it('encrypts and verifies handshake binding containing state, codeVerifier, and userId', () => {
+      const payload = {
+        state: 'oauth-state-abc',
+        codeVerifier: 'verifier-xyz-12345',
+        userId: 'encore-user-uuid-999',
+        createdAt: Date.now(),
+      };
+
+      const token = createOAuthHandshakeToken(payload, validKey);
+      expect(typeof token).toBe('string');
+      expect(token).toContain(':'); // IV:tag:ciphertext
+
+      const verified = verifyOAuthHandshakeToken(token, validKey);
+      expect(verified).not.toBeNull();
+      expect(verified?.state).toBe(payload.state);
+      expect(verified?.codeVerifier).toBe(payload.codeVerifier);
+      expect(verified?.userId).toBe(payload.userId);
+    });
+
+    it('rejects expired handshake binding tokens', () => {
+      const expiredPayload = {
+        state: 'oauth-state-abc',
+        codeVerifier: 'verifier-xyz-12345',
+        userId: 'encore-user-uuid-999',
+        createdAt: Date.now() - 15 * 60 * 1000, // 15 minutes ago
+      };
+
+      const token = createOAuthHandshakeToken(expiredPayload, validKey);
+      const verified = verifyOAuthHandshakeToken(
+        token,
+        validKey,
+        10 * 60 * 1000,
+      );
+      expect(verified).toBeNull();
+    });
+
+    it('rejects tampered handshake binding tokens', () => {
+      const payload = {
+        state: 'oauth-state-abc',
+        codeVerifier: 'verifier-xyz-12345',
+        userId: 'encore-user-uuid-999',
+        createdAt: Date.now(),
+      };
+
+      const token = createOAuthHandshakeToken(payload, validKey);
+      const tampered = token.slice(0, -4) + 'ffff';
+      expect(verifyOAuthHandshakeToken(tampered, validKey)).toBeNull();
+    });
+
+    it('fails if required properties are missing when creating token', () => {
+      expect(() =>
+        createOAuthHandshakeToken(
+          {
+            state: '',
+            codeVerifier: 'verifier',
+            userId: 'user',
+            createdAt: Date.now(),
+          },
+          validKey,
+        ),
+      ).toThrow('OAuth handshake payload must include state');
+    });
   });
 });

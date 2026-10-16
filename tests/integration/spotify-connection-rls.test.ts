@@ -155,11 +155,19 @@ describe('PostgreSQL RLS & Invariants on public.user_spotify_connections', () =>
         .from('user_spotify_connections')
         .delete()
         .eq('user_id', userAId);
+      await adminClient
+        .from('user_artist_preferences')
+        .delete()
+        .eq('user_id', userAId);
       await adminClient.auth.admin.deleteUser(userAId);
     }
     if (userBId) {
       await adminClient
         .from('user_spotify_connections')
+        .delete()
+        .eq('user_id', userBId);
+      await adminClient
+        .from('user_artist_preferences')
         .delete()
         .eq('user_id', userBId);
       await adminClient.auth.admin.deleteUser(userBId);
@@ -304,5 +312,119 @@ describe('PostgreSQL RLS & Invariants on public.user_spotify_connections', () =>
         scopes: ['user-top-read'],
       }),
     ).rejects.toThrow(SpotifyAccountConflictError);
+  });
+
+  it('reliably disconnects Spotify and purges encrypted credentials', async () => {
+    if (!isDbAvailable || !adminClient || !userAId) return;
+
+    const repo = new SupabaseSpotifyConnectionRepository(
+      adminClient,
+      TEST_ENCRYPTION_KEY,
+    );
+
+    await repo.saveConnection({
+      userId: userAId,
+      spotifyAccountId: `spotify_acc_disc_${Date.now()}`,
+      accessToken: 'token_to_delete',
+      refreshToken: 'refresh_to_delete',
+      tokenExpiresAt: new Date(Date.now() + 3600 * 1000),
+      reauthorizationDeadline: new Date(Date.now() + 180 * 86400 * 1000),
+      scopes: ['user-top-read'],
+    });
+
+    const beforeTokens = await repo.getConnectionTokens(userAId);
+    expect(beforeTokens).not.toBeNull();
+
+    // Disconnect
+    const deleted = await repo.deleteConnection(userAId);
+    expect(deleted).toBe(true);
+
+    // Verify tokens and connection are purged
+    const afterTokens = await repo.getConnectionTokens(userAId);
+    expect(afterTokens).toBeNull();
+    const afterConn = await repo.getConnection(userAId);
+    expect(afterConn).toBeNull();
+
+    // Direct database verification
+    const { data: rows } = await adminClient
+      .from('user_spotify_connections')
+      .select('*')
+      .eq('user_id', userAId);
+    expect(rows).toEqual([]);
+  });
+
+  it('preserves user_artist_preferences across Spotify connection and disconnection', async () => {
+    if (!isDbAvailable || !adminClient || !userAId) return;
+
+    const repo = new SupabaseSpotifyConnectionRepository(
+      adminClient,
+      TEST_ENCRYPTION_KEY,
+    );
+
+    // 1. User has an explicit manual concert preference
+    const artistName = 'The Cure';
+    const normalizedName = 'the cure';
+    const { data: pref, error: insertErr } = await adminClient
+      .from('user_artist_preferences')
+      .insert({
+        user_id: userAId,
+        artist_name: artistName,
+        normalized_artist_name: normalizedName,
+        preference_level: 'favorite',
+      })
+      .select()
+      .single();
+
+    expect(insertErr).toBeNull();
+    expect(pref).toBeDefined();
+
+    // 2. User connects Spotify
+    await repo.saveConnection({
+      userId: userAId,
+      spotifyAccountId: `spotify_pref_test_${Date.now()}`,
+      accessToken: 'token_pref_test',
+      refreshToken: 'refresh_pref_test',
+      tokenExpiresAt: new Date(Date.now() + 3600 * 1000),
+      reauthorizationDeadline: new Date(Date.now() + 180 * 86400 * 1000),
+      scopes: ['user-top-read'],
+    });
+
+    // 3. User disconnects Spotify
+    await repo.deleteConnection(userAId);
+
+    // 4. Verify manual preference is intact and unaltered
+    const { data: prefAfterDisconnect, error: fetchErr } = await adminClient
+      .from('user_artist_preferences')
+      .select('*')
+      .eq('user_id', userAId);
+
+    expect(fetchErr).toBeNull();
+    expect(prefAfterDisconnect).toHaveLength(1);
+    expect(prefAfterDisconnect![0].artist_name).toBe(artistName);
+    expect(prefAfterDisconnect![0].preference_level).toBe('favorite');
+  });
+
+  it('enforces reauthorization deadline: transitions connection to expired', async () => {
+    if (!isDbAvailable || !adminClient || !userAId) return;
+
+    const repo = new SupabaseSpotifyConnectionRepository(
+      adminClient,
+      TEST_ENCRYPTION_KEY,
+    );
+
+    // Connection with deadline in the past
+    await repo.saveConnection({
+      userId: userAId,
+      spotifyAccountId: `spotify_expired_test_${Date.now()}`,
+      accessToken: 'token_expired',
+      refreshToken: 'refresh_expired',
+      tokenExpiresAt: new Date(Date.now() + 3600 * 1000),
+      reauthorizationDeadline: new Date(Date.now() - 10000),
+      scopes: ['user-top-read'],
+    });
+
+    await repo.updateStatus(userAId, 'expired');
+    const conn = await repo.getConnection(userAId);
+    expect(conn?.status).toBe('expired');
   });
 });

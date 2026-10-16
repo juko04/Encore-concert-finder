@@ -13,11 +13,25 @@ interface SpotifyTastePreviewProps {
   onChangeTimeRange: (range: SpotifyTimeRange) => void;
   existingPreferences: UserArtistPreference[];
   onAddPreference: (
-    artistName: string,
+    artist: SpotifyTopArtist,
     level: PreferenceLevel,
   ) => Promise<void>;
   isLoading?: boolean;
   isSyntheticPreview?: boolean;
+}
+
+function findMatchingPreference(
+  artist: SpotifyTopArtist,
+  preferences: UserArtistPreference[],
+): UserArtistPreference | null {
+  for (const p of preferences) {
+    const prefSpotifyId =
+      p.spotifyArtistId || p.canonicalArtist?.spotifyArtistId;
+    if (prefSpotifyId && prefSpotifyId === artist.id) {
+      return p;
+    }
+  }
+  return null;
 }
 
 export function SpotifyTastePreview({
@@ -29,25 +43,18 @@ export function SpotifyTastePreview({
   isLoading = false,
   isSyntheticPreview = false,
 }: SpotifyTastePreviewProps) {
-  const [addingArtistName, setAddingArtistName] = useState<string | null>(null);
+  const [addingArtistId, setAddingArtistId] = useState<string | null>(null);
   const [selectedLevel, setSelectedLevel] =
     useState<PreferenceLevel>('favorite');
-  const [submittingName, setSubmittingName] = useState<string | null>(null);
+  const [submittingId, setSubmittingId] = useState<string | null>(null);
 
-  // Map existing preferences by lowercase normalized artist name for quick lookup
-  const prefMap = new Map<string, UserArtistPreference>();
-  for (const p of existingPreferences) {
-    prefMap.set(p.normalizedArtistName.toLowerCase(), p);
-    prefMap.set(p.artistName.toLowerCase().trim(), p);
-  }
-
-  async function handleConfirmAdd(artistName: string) {
-    setSubmittingName(artistName);
+  async function handleConfirmAdd(artist: SpotifyTopArtist) {
+    setSubmittingId(artist.id);
     try {
-      await onAddPreference(artistName, selectedLevel);
-      setAddingArtistName(null);
+      await onAddPreference(artist, selectedLevel);
+      setAddingArtistId(null);
     } finally {
-      setSubmittingName(null);
+      setSubmittingId(null);
     }
   }
 
@@ -160,10 +167,21 @@ export function SpotifyTastePreview({
       ) : (
         <div className="divide-y divide-zinc-800/60 rounded-xl border border-zinc-800 bg-zinc-950/40">
           {artists.map((artist) => {
-            const existingPref =
-              prefMap.get(artist.name.toLowerCase().trim()) || null;
-            const isAddingThis = addingArtistName === artist.name;
-            const isSubmittingThis = submittingName === artist.name;
+            const existingPref = findMatchingPreference(
+              artist,
+              existingPreferences,
+            );
+            const hasNameCollision =
+              !existingPref &&
+              existingPreferences.some(
+                (p) =>
+                  p.normalizedArtistName.toLowerCase() ===
+                    artist.name.toLowerCase().trim() ||
+                  p.artistName.toLowerCase().trim() ===
+                    artist.name.toLowerCase().trim(),
+              );
+            const isAddingThis = addingArtistId === artist.id;
+            const isSubmittingThis = submittingId === artist.id;
 
             return (
               <div
@@ -199,6 +217,17 @@ export function SpotifyTastePreview({
                       >
                         {artist.name}
                       </a>
+
+                      {/* Disambiguation badge when another artist has the same name */}
+                      {hasNameCollision && (
+                        <span
+                          data-testid={`name-collision-badge-${artist.id}`}
+                          className="rounded border border-amber-800/40 bg-amber-950/60 px-2 py-0.5 text-[10px] font-semibold text-amber-300"
+                          title="An artist preference with this name already exists in your profile. Adding this will register it as a distinct Spotify artist."
+                        >
+                          Distinct Act
+                        </span>
+                      )}
 
                       {/* Trend Badge */}
                       {artist.trend === 'rising' && (
@@ -267,7 +296,7 @@ export function SpotifyTastePreview({
                       <button
                         type="button"
                         data-testid={`confirm-import-btn-${artist.id}`}
-                        onClick={() => handleConfirmAdd(artist.name)}
+                        onClick={() => handleConfirmAdd(artist)}
                         disabled={isSubmittingThis}
                         className="rounded-lg bg-indigo-600 px-3 py-1 text-xs font-semibold text-white shadow hover:bg-indigo-500 disabled:opacity-50"
                       >
@@ -275,7 +304,7 @@ export function SpotifyTastePreview({
                       </button>
                       <button
                         type="button"
-                        onClick={() => setAddingArtistName(null)}
+                        onClick={() => setAddingArtistId(null)}
                         className="rounded-lg border border-zinc-700 bg-transparent px-2 py-1 text-xs font-medium text-zinc-400 hover:text-white"
                       >
                         Cancel
@@ -286,7 +315,7 @@ export function SpotifyTastePreview({
                       type="button"
                       data-testid={`import-artist-btn-${artist.id}`}
                       onClick={() => {
-                        setAddingArtistName(artist.name);
+                        setAddingArtistId(artist.id);
                         setSelectedLevel('favorite');
                       }}
                       className="rounded-lg border border-indigo-900/60 bg-indigo-950/40 px-3 py-1.5 text-xs font-semibold text-indigo-300 transition-colors hover:border-indigo-700 hover:bg-indigo-900/60 hover:text-white"

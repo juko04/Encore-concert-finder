@@ -29,6 +29,7 @@ import {
   normalizeUrl,
 } from '@/lib/domain/value-objects';
 import {
+  type CanonicalArtistSummary,
   InvalidCatalogArtistError,
   type PreferenceLevel,
   type SavePreferenceInput,
@@ -1274,11 +1275,7 @@ export class MemoryUserPreferenceRepository implements IUserPreferenceRepository
     if (input.artistId) {
       let authoritativeName = rawArtistName;
       let authoritativeNorm = normalizeName(rawArtistName);
-      let canonicalSummary: {
-        id: string;
-        name: string;
-        imageUrl?: string | null;
-      } | null = null;
+      let canonicalSummary: CanonicalArtistSummary | null = null;
 
       if (this.catalogRepo) {
         const canonical = await this.catalogRepo.getArtistById(input.artistId);
@@ -1287,10 +1284,21 @@ export class MemoryUserPreferenceRepository implements IUserPreferenceRepository
         }
         authoritativeName = canonical.name;
         authoritativeNorm = canonical.normalizedName;
+
+        let spotifyExtId = input.spotifyArtistId ?? null;
+        if (!spotifyExtId && this.catalogRepo) {
+          const extIds = await this.catalogRepo.findArtistExternalIds(
+            input.artistId,
+          );
+          const match = extIds.find((e) => e.provider === 'spotify');
+          if (match) spotifyExtId = match.externalId;
+        }
+
         canonicalSummary = {
           id: canonical.id,
           name: canonical.name,
           imageUrl: canonical.imageUrl,
+          spotifyArtistId: spotifyExtId,
         };
       }
 
@@ -1310,6 +1318,8 @@ export class MemoryUserPreferenceRepository implements IUserPreferenceRepository
         existingPref.updatedAt = now;
         if (canonicalSummary) {
           existingPref.canonicalArtist = canonicalSummary;
+          existingPref.spotifyArtistId =
+            canonicalSummary.spotifyArtistId ?? existingPref.spotifyArtistId;
         }
         return { ...existingPref };
       }
@@ -1325,6 +1335,8 @@ export class MemoryUserPreferenceRepository implements IUserPreferenceRepository
         createdAt: now,
         updatedAt: now,
         canonicalArtist: canonicalSummary,
+        spotifyArtistId:
+          canonicalSummary?.spotifyArtistId ?? input.spotifyArtistId ?? null,
       };
 
       this.preferences.set(newPref.id, newPref);

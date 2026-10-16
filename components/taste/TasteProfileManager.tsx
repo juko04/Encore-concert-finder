@@ -66,6 +66,7 @@ export function TasteProfileManager({
   const [spotifyStatus, setSpotifyStatus] =
     useState<InitialSpotifyStatus>(initialSpotifyStatus);
   const [isSyntheticDemo, setIsSyntheticDemo] = useState<boolean>(false);
+  const [isSyntheticResult, setIsSyntheticResult] = useState<boolean>(false);
   const [spotifyTimeRange, setSpotifyTimeRange] =
     useState<SpotifyTimeRange>('short_term');
   const [spotifyArtists, setSpotifyArtists] = useState<SpotifyTopArtist[]>([]);
@@ -77,6 +78,7 @@ export function TasteProfileManager({
     const shouldFetch = spotifyStatus.connected || isSyntheticDemo;
     if (!shouldFetch) {
       setSpotifyArtists([]);
+      setIsSyntheticResult(false);
       return;
     }
 
@@ -87,6 +89,7 @@ export function TasteProfileManager({
       .then((res) => {
         if (!isSubscribed) return;
         setSpotifyArtists(res.artists);
+        setIsSyntheticResult(Boolean(res.isSyntheticPreview));
         if (res.error && !isSyntheticDemo) {
           setError(res.error);
         }
@@ -166,13 +169,30 @@ export function TasteProfileManager({
   }
 
   async function handleAddSpotifyArtistToInterests(
-    artistName: string,
+    artist: SpotifyTopArtist,
     level: PreferenceLevel,
   ): Promise<void> {
     setError(null);
     try {
+      if (isSyntheticDemo || isSyntheticResult) {
+        // Isolated demo simulation: do not mutate production database with synthetic observations
+        const simulatedPref: UserArtistPreference = {
+          id: `demo-${artist.id}-${Date.now()}`,
+          userId: userEmail || 'demo-user',
+          artistId: null,
+          artistName: artist.name,
+          normalizedArtistName: artist.name.toLowerCase().trim(),
+          preferenceLevel: level,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          spotifyArtistId: artist.id,
+        };
+        setPreferences((prev) => [simulatedPref, ...prev]);
+        return;
+      }
+
       const result = await savePreferenceAction({
-        artistName,
+        artistName: artist.name,
         preferenceLevel: level,
       });
 
@@ -182,7 +202,10 @@ export function TasteProfileManager({
       }
 
       if (result.preference) {
-        const saved = result.preference;
+        const saved: UserArtistPreference = {
+          ...result.preference,
+          spotifyArtistId: artist.id,
+        };
         setPreferences((prev) => {
           const index = prev.findIndex((p) => p.id === saved.id);
           if (index >= 0) {
@@ -203,6 +226,15 @@ export function TasteProfileManager({
     newLevel: PreferenceLevel,
   ) {
     setError(null);
+    if (preference.id.startsWith('demo-')) {
+      setPreferences((prev) =>
+        prev.map((p) =>
+          p.id === preference.id ? { ...p, preferenceLevel: newLevel } : p,
+        ),
+      );
+      return;
+    }
+
     const prevPreferences = [...preferences];
 
     setPreferences((prev) =>
@@ -236,6 +268,11 @@ export function TasteProfileManager({
 
   function handleDelete(preferenceId: string) {
     setError(null);
+    if (preferenceId.startsWith('demo-')) {
+      setPreferences((prev) => prev.filter((p) => p.id !== preferenceId));
+      return;
+    }
+
     const prevPreferences = [...preferences];
 
     setPreferences((prev) => prev.filter((p) => p.id !== preferenceId));
@@ -321,7 +358,7 @@ export function TasteProfileManager({
             existingPreferences={preferences}
             onAddPreference={handleAddSpotifyArtistToInterests}
             isLoading={isLoadingSpotify}
-            isSyntheticPreview={isSyntheticDemo}
+            isSyntheticPreview={isSyntheticResult || isSyntheticDemo}
           />
         )}
       </section>

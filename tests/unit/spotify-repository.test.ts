@@ -342,5 +342,45 @@ describe('SpotifyConnectionRepository', () => {
         }),
       ).rejects.toThrow(SpotifyAccountConflictError);
     });
+
+    it('allows deleting connection and reading metadata without an encryption key', async () => {
+      const mockClient = createMockSupabase([
+        {
+          user_id: 'user-to-disconnect',
+          spotify_account_id: 'spot-disconnect',
+          encrypted_access_token: 'enc-access',
+          encrypted_refresh_token: 'enc-refresh',
+          token_expires_at: new Date().toISOString(),
+          reauthorization_deadline: new Date().toISOString(),
+          scopes: ['user-top-read'],
+          status: 'connected',
+          last_synced_at: null,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        },
+      ]);
+
+      // Instantiate repository WITHOUT an encryption key
+      const repoNoKey = new SupabaseSpotifyConnectionRepository(
+        mockClient as any,
+      );
+
+      // Metadata read must work without key
+      const conn = await repoNoKey.getConnection('user-to-disconnect');
+      expect(conn).not.toBeNull();
+      expect(conn?.spotifyAccountId).toBe('spot-disconnect');
+
+      // Attempting to decrypt tokens without key must fail
+      await expect(
+        repoNoKey.getConnectionTokens('user-to-disconnect'),
+      ).rejects.toThrow('requires an encryption key to decrypt tokens');
+
+      // Deleting connection without encryption key must succeed
+      const deleted = await repoNoKey.deleteConnection('user-to-disconnect');
+      expect(deleted).toBe(true);
+
+      const afterDelete = await repoNoKey.getConnection('user-to-disconnect');
+      expect(afterDelete).toBeNull();
+    });
   });
 });

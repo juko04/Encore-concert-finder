@@ -23,10 +23,18 @@ interface UserArtistPreferenceRow {
     id: string;
     name: string;
     image_url: string | null;
+    artist_external_ids?: Array<{
+      provider: string;
+      external_id: string;
+    }> | null;
   } | null;
 }
 
 function mapRowToDomain(row: UserArtistPreferenceRow): UserArtistPreference {
+  const spotifyExtId =
+    row.artists?.artist_external_ids?.find((e) => e.provider === 'spotify')
+      ?.external_id ?? null;
+
   return {
     id: row.id,
     userId: row.user_id,
@@ -42,10 +50,15 @@ function mapRowToDomain(row: UserArtistPreferenceRow): UserArtistPreference {
           id: row.artists.id,
           name: row.artists.name,
           imageUrl: row.artists.image_url,
+          spotifyArtistId: spotifyExtId,
         }
       : null,
+    spotifyArtistId: spotifyExtId,
   };
 }
+
+const PREFERENCE_SELECT_QUERY =
+  '*, artists(id, name, image_url, artist_external_ids(provider, external_id))';
 
 export class SupabaseUserPreferenceRepository implements IUserPreferenceRepository {
   private client: SupabaseClient;
@@ -59,7 +72,7 @@ export class SupabaseUserPreferenceRepository implements IUserPreferenceReposito
 
     const { data, error } = await this.client
       .from('user_artist_preferences')
-      .select('*, artists(id, name, image_url)')
+      .select(PREFERENCE_SELECT_QUERY)
       .eq('user_id', userId)
       .order('created_at', { ascending: false });
 
@@ -80,7 +93,7 @@ export class SupabaseUserPreferenceRepository implements IUserPreferenceReposito
 
     const { data, error } = await this.client
       .from('user_artist_preferences')
-      .select('*, artists(id, name, image_url)')
+      .select(PREFERENCE_SELECT_QUERY)
       .eq('id', preferenceId)
       .eq('user_id', userId)
       .maybeSingle();
@@ -153,7 +166,7 @@ export class SupabaseUserPreferenceRepository implements IUserPreferenceReposito
             updated_at: new Date().toISOString(),
           })
           .eq('id', existing.id)
-          .select('*, artists(id, name, image_url)')
+          .select(PREFERENCE_SELECT_QUERY)
           .single();
 
         if (updateError) {
@@ -175,7 +188,7 @@ export class SupabaseUserPreferenceRepository implements IUserPreferenceReposito
           normalized_artist_name: authoritativeNorm,
           preference_level: input.preferenceLevel,
         })
-        .select('*, artists(id, name, image_url)')
+        .select(PREFERENCE_SELECT_QUERY)
         .single();
 
       if (insertError) {
@@ -215,7 +228,7 @@ export class SupabaseUserPreferenceRepository implements IUserPreferenceReposito
           updated_at: new Date().toISOString(),
         })
         .eq('id', existingUnresolved.id)
-        .select('*, artists(id, name, image_url)')
+        .select(PREFERENCE_SELECT_QUERY)
         .single();
 
       if (updateError) {
@@ -237,7 +250,7 @@ export class SupabaseUserPreferenceRepository implements IUserPreferenceReposito
         normalized_artist_name: normalizedName,
         preference_level: input.preferenceLevel,
       })
-      .select('*, artists(id, name, image_url)')
+      .select(PREFERENCE_SELECT_QUERY)
       .single();
 
     if (insertError) {
@@ -272,7 +285,7 @@ export class SupabaseUserPreferenceRepository implements IUserPreferenceReposito
       })
       .eq('id', preferenceId)
       .eq('user_id', userId)
-      .select('*, artists(id, name, image_url)')
+      .select(PREFERENCE_SELECT_QUERY)
       .maybeSingle();
 
     if (error) {

@@ -5,9 +5,11 @@ import { getServerEnv } from '@/lib/env/server';
 import {
   buildSpotifyAuthorizeUrl,
   computeCodeChallenge,
+  createOAuthHandshakeToken,
   generateCodeVerifier,
   generateOAuthState,
   getOAuthCookieOptions,
+  SPOTIFY_OAUTH_BINDING_COOKIE,
   SPOTIFY_OAUTH_STATE_COOKIE,
   SPOTIFY_OAUTH_VERIFIER_COOKIE,
 } from '@/lib/sources/spotify/oauth';
@@ -59,6 +61,17 @@ export async function GET(request: Request) {
   const cookieStore = await cookies();
   const cookieOptions = getOAuthCookieOptions(serverEnv.SPOTIFY_REDIRECT_URI);
 
+  const handshakeToken = createOAuthHandshakeToken(
+    {
+      state,
+      codeVerifier: verifier,
+      userId: user.id,
+      createdAt: Date.now(),
+    },
+    serverEnv.SPOTIFY_TOKEN_ENCRYPTION_KEY,
+  );
+
+  cookieStore.set(SPOTIFY_OAUTH_BINDING_COOKIE, handshakeToken, cookieOptions);
   cookieStore.set(SPOTIFY_OAUTH_STATE_COOKIE, state, cookieOptions);
   cookieStore.set(SPOTIFY_OAUTH_VERIFIER_COOKIE, verifier, cookieOptions);
 

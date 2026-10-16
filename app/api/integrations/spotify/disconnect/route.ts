@@ -1,6 +1,5 @@
 import { NextResponse } from 'next/server';
 import { getAuthenticatedUser } from '@/lib/auth/session';
-import { getServerEnv } from '@/lib/env/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { SupabaseSpotifyConnectionRepository } from '@/lib/repositories/spotify-connection-repository';
 
@@ -13,15 +12,9 @@ export async function POST() {
   }
 
   try {
-    const serverEnv = getServerEnv();
-    if (serverEnv.SPOTIFY_TOKEN_ENCRYPTION_KEY) {
-      const adminClient = createAdminClient();
-      const repo = new SupabaseSpotifyConnectionRepository(
-        adminClient,
-        serverEnv.SPOTIFY_TOKEN_ENCRYPTION_KEY,
-      );
-      await repo.deleteConnection(user.id);
-    }
+    const adminClient = createAdminClient();
+    const repo = new SupabaseSpotifyConnectionRepository(adminClient);
+    await repo.deleteConnection(user.id);
 
     return NextResponse.json({ success: true });
   } catch (err) {

@@ -10,8 +10,10 @@ import {
   SpotifyForbiddenError,
 } from '@/lib/domain/spotify';
 import {
+  SPOTIFY_OAUTH_BINDING_COOKIE,
   SPOTIFY_OAUTH_STATE_COOKIE,
   SPOTIFY_OAUTH_VERIFIER_COOKIE,
+  verifyOAuthHandshakeToken,
 } from '@/lib/sources/spotify/oauth';
 
 export const dynamic = 'force-dynamic';
@@ -30,10 +32,10 @@ export async function GET(request: Request) {
   }
 
   const cookieStore = await cookies();
-  const savedState = cookieStore.get(SPOTIFY_OAUTH_STATE_COOKIE)?.value;
-  const codeVerifier = cookieStore.get(SPOTIFY_OAUTH_VERIFIER_COOKIE)?.value;
+  const bindingCookie = cookieStore.get(SPOTIFY_OAUTH_BINDING_COOKIE)?.value;
 
-  // Clear OAuth handshake cookies regardless of outcome
+  // Clear OAuth handshake cookies regardless of outcome to prevent replay
+  cookieStore.delete(SPOTIFY_OAUTH_BINDING_COOKIE);
   cookieStore.delete(SPOTIFY_OAUTH_STATE_COOKIE);
   cookieStore.delete(SPOTIFY_OAUTH_VERIFIER_COOKIE);
 
@@ -50,13 +52,68 @@ export async function GET(request: Request) {
     );
   }
 
-  if (!state || !savedState || state !== savedState) {
-    console.warn('[Spotify Callback] State mismatch or missing state');
+  let serverEnv;
+  try {
+    serverEnv = getServerEnv();
+  } catch (err) {
+    console.warn('[Spotify Callback] Server env configuration error:', err);
+    return NextResponse.redirect(
+      new URL('/profile/taste?spotify_error=not_configured', request.url),
+    );
+  }
+
+  if (
+    !serverEnv.SPOTIFY_CLIENT_ID ||
+    !serverEnv.SPOTIFY_CLIENT_SECRET ||
+    !serverEnv.SPOTIFY_REDIRECT_URI ||
+    !serverEnv.SPOTIFY_TOKEN_ENCRYPTION_KEY
+  ) {
+    return NextResponse.redirect(
+      new URL('/profile/taste?spotify_error=not_configured', request.url),
+    );
+  }
+
+  // 1. Verify encrypted handshake binding exists and is valid
+  if (!bindingCookie) {
+    console.warn('[Spotify Callback] Missing OAuth handshake binding cookie');
     return NextResponse.redirect(
       new URL('/profile/taste?spotify_error=invalid_state', request.url),
     );
   }
 
+  const binding = verifyOAuthHandshakeToken(
+    bindingCookie,
+    serverEnv.SPOTIFY_TOKEN_ENCRYPTION_KEY,
+  );
+
+  if (!binding) {
+    console.warn(
+      '[Spotify Callback] Expired, invalid, or tampered OAuth handshake binding',
+    );
+    return NextResponse.redirect(
+      new URL('/profile/taste?spotify_error=invalid_state', request.url),
+    );
+  }
+
+  // 2. Validate state matches
+  if (!state || state !== binding.state) {
+    console.warn('[Spotify Callback] State mismatch');
+    return NextResponse.redirect(
+      new URL('/profile/taste?spotify_error=invalid_state', request.url),
+    );
+  }
+
+  // 3. Validate the initiating user ID against the current verified session
+  if (binding.userId !== user.id) {
+    console.warn(
+      `[Spotify Callback] User session mismatch: initiated by ${binding.userId}, callback by ${user.id}`,
+    );
+    return NextResponse.redirect(
+      new URL('/profile/taste?spotify_error=session_mismatch', request.url),
+    );
+  }
+
+  const codeVerifier = binding.codeVerifier;
   if (!code || !codeVerifier) {
     console.warn('[Spotify Callback] Missing authorization code or verifier');
     return NextResponse.redirect(
@@ -65,16 +122,6 @@ export async function GET(request: Request) {
   }
 
   try {
-    const serverEnv = getServerEnv();
-    if (
-      !serverEnv.SPOTIFY_CLIENT_ID ||
-      !serverEnv.SPOTIFY_CLIENT_SECRET ||
-      !serverEnv.SPOTIFY_REDIRECT_URI ||
-      !serverEnv.SPOTIFY_TOKEN_ENCRYPTION_KEY
-    ) {
-      throw new Error('Spotify server environment is not configured.');
-    }
-
     const spotifyClient = new SpotifyApiClient({
       clientId: serverEnv.SPOTIFY_CLIENT_ID,
       clientSecret: serverEnv.SPOTIFY_CLIENT_SECRET,

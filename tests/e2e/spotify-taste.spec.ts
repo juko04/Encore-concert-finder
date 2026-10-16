@@ -222,19 +222,25 @@ test.describe('Spotify Taste Explorer & Preview E2E Flow', () => {
       page.locator('[data-testid="already-saved-badge-synth-chappell-roan"]'),
     ).toContainText('★ Favorite');
 
-    // 8. Verify artist is also displayed in user's manual concert preferences
+    // 8. Verify artist is also displayed in user's manual concert preferences during demo session
     const prefCard = page.locator('[data-testid^="preference-card-"]').first();
     await expect(prefCard).toBeVisible();
     await expect(prefCard).toContainText('Chappell Roan');
 
-    // 9. Reload page and confirm database persistence
+    // 9. Reload page and confirm synthetic demo was strictly isolated (NOT persisted to PostgreSQL database)
     await page.reload();
     await expect(page).toHaveURL(/\/profile\/taste/);
     await expect(page.getByTestId('taste-profile-manager')).toBeVisible();
-    const persistedPref = page
-      .locator('[data-testid^="preference-card-"]')
-      .first();
-    await expect(persistedPref).toBeVisible();
-    await expect(persistedPref).toContainText('Chappell Roan');
+    await expect(page.getByTestId('empty-preferences-view')).toBeVisible();
+    await expect(page.locator('[data-testid^="preference-card-"]')).toHaveCount(
+      0,
+    );
+
+    // 10. Verify OAuth banner handling (e.g. account_conflict error banner)
+    await page.goto('/profile/taste?spotify_error=account_conflict');
+    await expect(page.getByTestId('spotify-status-banner')).toBeVisible();
+    await expect(page.getByTestId('spotify-status-banner')).toContainText(
+      'already linked to another Encore account',
+    );
   });
 });

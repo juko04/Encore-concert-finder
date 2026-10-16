@@ -44,14 +44,14 @@ export class SupabaseSpotifyConnectionRepository implements ISpotifyConnectionRe
   private client: SupabaseClient;
   private encryptionKey: string;
 
-  constructor(client: SupabaseClient, encryptionKey: string) {
-    if (!encryptionKey || encryptionKey.length !== 64) {
+  constructor(client: SupabaseClient, encryptionKey?: string) {
+    if (encryptionKey && encryptionKey.length !== 64) {
       throw new Error(
         'SupabaseSpotifyConnectionRepository requires a valid 64-character hex encryption key.',
       );
     }
     this.client = client;
-    this.encryptionKey = encryptionKey;
+    this.encryptionKey = encryptionKey ?? '';
   }
 
   async getConnection(userId: string): Promise<SpotifyConnection | null> {
@@ -92,6 +92,12 @@ export class SupabaseSpotifyConnectionRepository implements ISpotifyConnectionRe
 
     if (row.status === 'disconnected' || row.status === 'revoked') {
       return null;
+    }
+
+    if (!this.encryptionKey) {
+      throw new Error(
+        'SupabaseSpotifyConnectionRepository requires an encryption key to decrypt tokens.',
+      );
     }
 
     const accessToken = decryptSecret(
@@ -153,6 +159,12 @@ export class SupabaseSpotifyConnectionRepository implements ISpotifyConnectionRe
     }
 
     // 2. Encrypt token material before persistence
+    if (!this.encryptionKey) {
+      throw new Error(
+        'SupabaseSpotifyConnectionRepository requires an encryption key to encrypt tokens.',
+      );
+    }
+
     const encryptedAccessToken = encryptSecret(
       input.accessToken,
       this.encryptionKey,
@@ -205,8 +217,10 @@ export class SupabaseSpotifyConnectionRepository implements ISpotifyConnectionRe
     if (!userId || !userId.trim()) {
       throw new Error('User ID is required');
     }
-    if (!input.accessToken) {
-      throw new Error('Access token is required');
+    if (!this.encryptionKey) {
+      throw new Error(
+        'SupabaseSpotifyConnectionRepository requires an encryption key to encrypt tokens.',
+      );
     }
 
     const encryptedAccessToken = encryptSecret(

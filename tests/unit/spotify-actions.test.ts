@@ -32,16 +32,28 @@ vi.mock('@/lib/repositories/spotify-connection-repository', () => ({
   })),
 }));
 
+const mockGetTopArtists = vi.fn();
+const mockRefreshAccessToken = vi.fn();
+
+vi.mock('@/lib/sources/spotify/client', () => ({
+  SpotifyApiClient: vi.fn().mockImplementation(() => ({
+    getTopArtists: mockGetTopArtists,
+    refreshAccessToken: mockRefreshAccessToken,
+  })),
+}));
+
+const mockServerEnv = {
+  ENABLE_SPOTIFY_INTEGRATION: true,
+  SPOTIFY_CLIENT_ID: 'mock-client-id',
+  SPOTIFY_CLIENT_SECRET: 'mock-client-secret',
+  SPOTIFY_REDIRECT_URI:
+    'http://127.0.0.1:3000/api/integrations/spotify/callback',
+  SPOTIFY_TOKEN_ENCRYPTION_KEY:
+    '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
+};
+
 vi.mock('@/lib/env/server', () => ({
-  getServerEnv: vi.fn().mockReturnValue({
-    ENABLE_SPOTIFY_INTEGRATION: true,
-    SPOTIFY_CLIENT_ID: 'mock-client-id',
-    SPOTIFY_CLIENT_SECRET: 'mock-client-secret',
-    SPOTIFY_REDIRECT_URI:
-      'http://127.0.0.1:3000/api/integrations/spotify/callback',
-    SPOTIFY_TOKEN_ENCRYPTION_KEY:
-      '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
-  }),
+  getServerEnv: vi.fn().mockImplementation(() => mockServerEnv),
 }));
 
 import { getAuthenticatedUser } from '@/lib/auth/session';
@@ -111,15 +123,127 @@ describe('Spotify Server Actions', () => {
       expect(result.success).toBe(true);
       expect(mockDeleteConnection).toHaveBeenCalledWith('test-user-id');
     });
+
+    it('succeeds in deleting connection even when encryption key is absent', async () => {
+      // Temporarily clear encryption key
+      const prevKey = mockServerEnv.SPOTIFY_TOKEN_ENCRYPTION_KEY;
+      (mockServerEnv as any).SPOTIFY_TOKEN_ENCRYPTION_KEY = '';
+      mockDeleteConnection.mockResolvedValueOnce(true);
+
+      try {
+        const result = await disconnectSpotifyAction();
+        expect(result.success).toBe(true);
+        expect(mockDeleteConnection).toHaveBeenCalledWith('test-user-id');
+      } finally {
+        mockServerEnv.SPOTIFY_TOKEN_ENCRYPTION_KEY = prevKey;
+      }
+    });
   });
 
   describe('getSpotifyTopArtistsAction', () => {
-    it('returns synthetic preview data when preview: true', async () => {
+    it('returns synthetic preview data when preview: true in development/test', async () => {
       const result = await getSpotifyTopArtistsAction('short_term', true);
       expect(result.isSyntheticPreview).toBe(true);
       expect(result.artists.length).toBeGreaterThan(0);
       expect(result.artists[0].name).toBe('Chappell Roan');
       expect(result.error).toBeUndefined();
+    });
+
+    it('blocks synthetic preview in production unless explicitly enabled', async () => {
+      const prevEnv = process.env.NODE_ENV;
+      const prevFlag = process.env.ENABLE_SPOTIFY_DEV_PREVIEW;
+      try {
+        (process.env as Record<string, string | undefined>).NODE_ENV =
+          'production';
+        delete process.env.ENABLE_SPOTIFY_DEV_PREVIEW;
+
+        const result = await getSpotifyTopArtistsAction('short_term', true);
+        expect(result.isSyntheticPreview).toBe(false);
+        expect(result.artists).toEqual([]);
+        expect(result.error).toContain('only available in development');
+      } finally {
+        (process.env as Record<string, string | undefined>).NODE_ENV = prevEnv;
+        if (prevFlag !== undefined) {
+          process.env.ENABLE_SPOTIFY_DEV_PREVIEW = prevFlag;
+        } else {
+          delete process.env.ENABLE_SPOTIFY_DEV_PREVIEW;
+        }
+      }
+    });
+
+    it('returns explicit error when user has no active Spotify connection without synthetic fallback', async () => {
+      mockGetConnectionTokens.mockResolvedValueOnce(null);
+
+      const result = await getSpotifyTopArtistsAction('short_term', false);
+      expect(result.isSyntheticPreview).toBe(false);
+      expect(result.artists).toEqual([]);
+      expect(result.error).toContain('No active Spotify connection found');
+    });
+
+    it('enforces reauthorization deadline: marks status expired and avoids calling Spotify', async () => {
+      mockGetConnectionTokens.mockResolvedValueOnce({
+        accessToken: 'valid-access-token',
+        refreshToken: 'valid-refresh-token',
+        tokenExpiresAt: new Date(Date.now() + 3600 * 1000), // access token not expired
+        reauthorizationDeadline: new Date(Date.now() - 1000), // deadline expired in past
+        scopes: ['user-top-read'],
+      });
+
+      const result = await getSpotifyTopArtistsAction('short_term', false);
+      expect(result.isSyntheticPreview).toBe(false);
+      expect(result.artists).toEqual([]);
+      expect(result.error).toContain('Spotify authorization has expired');
+      expect(mockUpdateStatus).toHaveBeenCalledWith('test-user-id', 'expired');
+      expect(mockGetTopArtists).not.toHaveBeenCalled();
+    });
+
+    it('fetches live artists with valid, not-yet-expired credentials', async () => {
+      mockGetConnectionTokens.mockResolvedValueOnce({
+        accessToken: 'valid-access-token',
+        refreshToken: 'valid-refresh-token',
+        tokenExpiresAt: new Date(Date.now() + 3600 * 1000),
+        reauthorizationDeadline: new Date(Date.now() + 180 * 86400 * 1000),
+        scopes: ['user-top-read'],
+      });
+
+      const liveArtists = [
+        {
+          id: 'live-artist-1',
+          name: 'The National',
+          rank: 1,
+          imageUrl: null,
+          spotifyUrl: 'https://open.spotify.com/artist/live-1',
+          genres: ['indie rock'],
+          popularity: 80,
+          timeRange: 'short_term',
+        },
+      ];
+      mockGetTopArtists.mockResolvedValueOnce(liveArtists);
+
+      const result = await getSpotifyTopArtistsAction('short_term', false);
+      expect(result.isSyntheticPreview).toBe(false);
+      expect(result.artists).toEqual(liveArtists);
+      expect(mockRecordSync).toHaveBeenCalledWith('test-user-id');
+    });
+
+    it('returns explicit error on live Spotify request failure without silent synthetic fallback', async () => {
+      mockGetConnectionTokens.mockResolvedValueOnce({
+        accessToken: 'valid-access-token',
+        refreshToken: 'valid-refresh-token',
+        tokenExpiresAt: new Date(Date.now() + 3600 * 1000),
+        reauthorizationDeadline: new Date(Date.now() + 180 * 86400 * 1000),
+        scopes: ['user-top-read'],
+      });
+
+      mockGetTopArtists.mockRejectedValueOnce(
+        new Error('Rate limit or upstream API failure'),
+      );
+
+      const result = await getSpotifyTopArtistsAction('short_term', false);
+      // Invariant: Live failure must produce explicit error, NEVER synthetic data
+      expect(result.isSyntheticPreview).toBe(false);
+      expect(result.artists).toEqual([]);
+      expect(result.error).toBe('Failed to fetch Spotify top artists.');
     });
 
     it('rejects invalid timeRange', async () => {

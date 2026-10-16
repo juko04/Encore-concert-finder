@@ -62,6 +62,9 @@ export default async function TasteProfilePage({
         'Spotify integration is not configured or disabled in this environment. Use the Interactive Preview below.';
     } else if (err === 'access_denied') {
       message = 'Spotify connection cancelled or permissions denied.';
+    } else if (err === 'session_mismatch') {
+      message =
+        'Spotify connection failed: the logged-in user changed during authorization. Please restart the connection flow.';
     }
 
     spotifyBanner = { type: 'error', message };
