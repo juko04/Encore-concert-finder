@@ -61,4 +61,3 @@ describe('Synthetic Spotify Preview Provider', () => {
     }
   });
 });
-
