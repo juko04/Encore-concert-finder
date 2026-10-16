@@ -633,4 +633,154 @@ describe('Row Level Security (RLS) on public.user_artist_preferences', () => {
       await adminClient.auth.admin.deleteUser(lifecycleUserId);
     }
   });
+
+  it('preserves spotify_artist_id across PostgreSQL persistence and allows distinct same-name Spotify acts without collision', async () => {
+    if (!isDbAvailable || !clientA || !adminClient || !userAId) return;
+
+    const timestamp = Date.now();
+    const artistName = `Ghost ${timestamp}`;
+    const repo = new SupabaseUserPreferenceRepository(clientA);
+
+    // 1. Add first Spotify artist with name "Ghost <timestamp>" and Spotify ID 1
+    const pref1 = await repo.savePreference({
+      userId: userAId,
+      artistName,
+      preferenceLevel: 'favorite',
+      spotifyArtistId: `spotify-ghost-1-${timestamp}`,
+    });
+
+    expect(pref1.spotifyArtistId).toBe(`spotify-ghost-1-${timestamp}`);
+    expect(pref1.artistName).toBe(artistName);
+    expect(pref1.preferenceLevel).toBe('favorite');
+
+    // 2. Add second Spotify artist with the SAME name "Ghost <timestamp>" but different Spotify ID 2
+    const pref2 = await repo.savePreference({
+      userId: userAId,
+      artistName,
+      preferenceLevel: 'interested',
+      spotifyArtistId: `spotify-ghost-2-${timestamp}`,
+    });
+
+    expect(pref2.id).not.toBe(pref1.id);
+    expect(pref2.spotifyArtistId).toBe(`spotify-ghost-2-${timestamp}`);
+    expect(pref2.artistName).toBe(artistName);
+    expect(pref2.preferenceLevel).toBe('interested');
+
+    // 3. Add manual uncataloged preference with the SAME name "Ghost <timestamp>" and NO Spotify ID
+    const prefManual = await repo.savePreference({
+      userId: userAId,
+      artistName,
+      preferenceLevel: 'dislike',
+    });
+
+    expect(prefManual.id).not.toBe(pref1.id);
+    expect(prefManual.id).not.toBe(pref2.id);
+    expect(prefManual.spotifyArtistId).toBeNull();
+
+    // 4. Invariant: All three distinct preferences coexist in PostgreSQL
+    const prefs = await repo.getPreferences(userAId);
+    const found1 = prefs.find((p) => p.id === pref1.id);
+    const found2 = prefs.find((p) => p.id === pref2.id);
+    const foundManual = prefs.find((p) => p.id === prefManual.id);
+
+    expect(found1).toBeDefined();
+    expect(found1?.spotifyArtistId).toBe(`spotify-ghost-1-${timestamp}`);
+    expect(found2).toBeDefined();
+    expect(found2?.spotifyArtistId).toBe(`spotify-ghost-2-${timestamp}`);
+    expect(foundManual).toBeDefined();
+    expect(foundManual?.spotifyArtistId).toBeNull();
+
+    // 5. Update preference level by preference ID
+    const updatedPref1 = await repo.updatePreferenceLevel(
+      userAId,
+      pref1.id,
+      'like',
+    );
+    expect(updatedPref1.preferenceLevel).toBe('like');
+    expect(updatedPref1.spotifyArtistId).toBe(`spotify-ghost-1-${timestamp}`);
+
+    // Verify pref2 was not modified
+    const prefsAfter = await repo.getPreferences(userAId);
+    const found2After = prefsAfter.find((p) => p.id === pref2.id);
+    expect(found2After?.preferenceLevel).toBe('interested');
+
+    // Clean up
+    await adminClient
+      .from('user_artist_preferences')
+      .delete()
+      .in('id', [pref1.id, pref2.id, prefManual.id]);
+  });
+
+  it('links to canonical artist when external ID mapping exists in artist_external_ids, but remains uncataloged when mapping is absent', async () => {
+    if (!isDbAvailable || !clientA || !adminClient || !userAId) return;
+
+    const timestamp = Date.now();
+    const canonicalName = `Authoritative Band ${timestamp}`;
+    const canonicalNorm = `authoritative band ${timestamp}`;
+    const spotifyExtId = `spotify-ext-${timestamp}`;
+    const repo = new SupabaseUserPreferenceRepository(clientA);
+
+    // 1. Create canonical artist in database
+    const canonicalId = crypto.randomUUID();
+    const { error: artErr } = await adminClient.from('artists').insert({
+      id: canonicalId,
+      name: canonicalName,
+      normalized_name: canonicalNorm,
+    });
+    expect(artErr).toBeNull();
+
+    // 2. Insert external ID mapping for this canonical artist
+    const { error: extErr } = await adminClient
+      .from('artist_external_ids')
+      .insert({
+        artist_id: canonicalId,
+        provider: 'spotify',
+        external_id: spotifyExtId,
+      });
+    expect(extErr).toBeNull();
+
+    try {
+      // 3. User saves preference providing only the Spotify ID and arbitrary user name
+      const saved = await repo.savePreference({
+        userId: userAId,
+        artistName: 'Random Display Name from Spotify',
+        preferenceLevel: 'favorite',
+        spotifyArtistId: spotifyExtId,
+      });
+
+      // Must link to canonical artist and adopt authoritative name
+      expect(saved.artistId).toBe(canonicalId);
+      expect(saved.artistName).toBe(canonicalName);
+      expect(saved.spotifyArtistId).toBe(spotifyExtId);
+      expect(saved.canonicalArtist?.id).toBe(canonicalId);
+
+      // 4. User saves an uncataloged Spotify artist (no mapping in artist_external_ids)
+      const unknownExtId = `spotify-unknown-${timestamp}`;
+      const uncatalogedSaved = await repo.savePreference({
+        userId: userAId,
+        artistName: `Unknown Indie Act ${timestamp}`,
+        preferenceLevel: 'interested',
+        spotifyArtistId: unknownExtId,
+      });
+
+      // Must remain uncataloged (artistId = null) while preserving spotifyArtistId
+      expect(uncatalogedSaved.artistId).toBeNull();
+      expect(uncatalogedSaved.spotifyArtistId).toBe(unknownExtId);
+      expect(uncatalogedSaved.artistName).toBe(
+        `Unknown Indie Act ${timestamp}`,
+      );
+
+      // Clean up preferences
+      await adminClient
+        .from('user_artist_preferences')
+        .delete()
+        .in('id', [saved.id, uncatalogedSaved.id]);
+    } finally {
+      await adminClient
+        .from('artist_external_ids')
+        .delete()
+        .eq('external_id', spotifyExtId);
+      await adminClient.from('artists').delete().eq('id', canonicalId);
+    }
+  });
 });

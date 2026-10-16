@@ -29,6 +29,7 @@ import {
   normalizeUrl,
 } from '@/lib/domain/value-objects';
 import {
+  type CanonicalArtistSummary,
   InvalidCatalogArtistError,
   type PreferenceLevel,
   type SavePreferenceInput,
@@ -41,8 +42,17 @@ import type {
   IEventCandidateRepository,
   IRawIngestRepository,
   ISourceRepository,
+  ISpotifyConnectionRepository,
   IUserPreferenceRepository,
+  SpotifyConnectionTokens,
 } from './interfaces';
+import {
+  type SaveSpotifyConnectionInput,
+  type SpotifyConnection,
+  type SpotifyConnectionStatus,
+  SpotifyAccountConflictError,
+  type UpdateSpotifyTokensInput,
+} from '@/lib/domain/spotify';
 import {
   TICKETMASTER_DEFAULT_SOURCE_ID,
   TICKETMASTER_SOURCE_SLUG,
@@ -1265,11 +1275,7 @@ export class MemoryUserPreferenceRepository implements IUserPreferenceRepository
     if (input.artistId) {
       let authoritativeName = rawArtistName;
       let authoritativeNorm = normalizeName(rawArtistName);
-      let canonicalSummary: {
-        id: string;
-        name: string;
-        imageUrl?: string | null;
-      } | null = null;
+      let canonicalSummary: CanonicalArtistSummary | null = null;
 
       if (this.catalogRepo) {
         const canonical = await this.catalogRepo.getArtistById(input.artistId);
@@ -1278,10 +1284,21 @@ export class MemoryUserPreferenceRepository implements IUserPreferenceRepository
         }
         authoritativeName = canonical.name;
         authoritativeNorm = canonical.normalizedName;
+
+        let spotifyExtId = input.spotifyArtistId ?? null;
+        if (!spotifyExtId && this.catalogRepo) {
+          const extIds = await this.catalogRepo.findArtistExternalIds(
+            input.artistId,
+          );
+          const match = extIds.find((e) => e.provider === 'spotify');
+          if (match) spotifyExtId = match.externalId;
+        }
+
         canonicalSummary = {
           id: canonical.id,
           name: canonical.name,
           imageUrl: canonical.imageUrl,
+          spotifyArtistId: spotifyExtId,
         };
       }
 
@@ -1301,6 +1318,8 @@ export class MemoryUserPreferenceRepository implements IUserPreferenceRepository
         existingPref.updatedAt = now;
         if (canonicalSummary) {
           existingPref.canonicalArtist = canonicalSummary;
+          existingPref.spotifyArtistId =
+            canonicalSummary.spotifyArtistId ?? existingPref.spotifyArtistId;
         }
         return { ...existingPref };
       }
@@ -1316,13 +1335,97 @@ export class MemoryUserPreferenceRepository implements IUserPreferenceRepository
         createdAt: now,
         updatedAt: now,
         canonicalArtist: canonicalSummary,
+        spotifyArtistId:
+          canonicalSummary?.spotifyArtistId ?? input.spotifyArtistId ?? null,
       };
 
       this.preferences.set(newPref.id, newPref);
       return { ...newPref };
     }
 
-    // Uncataloged entry: match only against existing uncataloged preferences
+    const trimmedSpotifyId = input.spotifyArtistId?.trim() || null;
+
+    // 2. Explicit Spotify Artist ID provided
+    if (trimmedSpotifyId) {
+      let matchedCanonicalArtistId: string | null = null;
+      let authoritativeName = rawArtistName;
+      let authoritativeNorm = normalizeName(rawArtistName);
+      let canonicalSummary: CanonicalArtistSummary | null = null;
+
+      if (this.catalogRepo) {
+        try {
+          const canonicalArtist = await this.catalogRepo.findArtistByExternalId(
+            'spotify',
+            trimmedSpotifyId,
+          );
+          if (canonicalArtist) {
+            matchedCanonicalArtistId = canonicalArtist.id;
+            authoritativeName = canonicalArtist.name;
+            authoritativeNorm = canonicalArtist.normalizedName;
+            canonicalSummary = {
+              id: canonicalArtist.id,
+              name: canonicalArtist.name,
+              imageUrl: canonicalArtist.imageUrl,
+              spotifyArtistId: trimmedSpotifyId,
+            };
+          }
+        } catch {
+          // Fallback if findArtistByExternalId is not available
+        }
+      }
+
+      // Check if user already has a preference for this Spotify artist ID
+      let existingPref: UserArtistPreference | undefined;
+      for (const pref of this.preferences.values()) {
+        if (
+          pref.userId === input.userId &&
+          pref.spotifyArtistId === trimmedSpotifyId
+        ) {
+          existingPref = pref;
+          break;
+        }
+        if (
+          matchedCanonicalArtistId &&
+          pref.userId === input.userId &&
+          pref.artistId === matchedCanonicalArtistId
+        ) {
+          existingPref = pref;
+          break;
+        }
+      }
+
+      if (existingPref) {
+        existingPref.preferenceLevel = input.preferenceLevel;
+        existingPref.artistName = authoritativeName;
+        existingPref.normalizedArtistName = authoritativeNorm;
+        existingPref.spotifyArtistId = trimmedSpotifyId;
+        existingPref.updatedAt = now;
+        if (canonicalSummary) {
+          existingPref.artistId = matchedCanonicalArtistId;
+          existingPref.canonicalArtist = canonicalSummary;
+        }
+        return { ...existingPref };
+      }
+
+      const newPref: UserArtistPreference = {
+        id: crypto.randomUUID(),
+        userId: input.userId,
+        artistId: matchedCanonicalArtistId,
+        archivedArtistId: null,
+        artistName: authoritativeName,
+        normalizedArtistName: authoritativeNorm,
+        preferenceLevel: input.preferenceLevel,
+        createdAt: now,
+        updatedAt: now,
+        canonicalArtist: canonicalSummary,
+        spotifyArtistId: trimmedSpotifyId,
+      };
+
+      this.preferences.set(newPref.id, newPref);
+      return { ...newPref };
+    }
+
+    // 3. Uncataloged free-text entry: match only against existing non-Spotify uncataloged preferences
     const normalizedName = normalizeName(rawArtistName);
     let existingUnresolved: UserArtistPreference | undefined;
 
@@ -1331,6 +1434,7 @@ export class MemoryUserPreferenceRepository implements IUserPreferenceRepository
         pref.userId === input.userId &&
         !pref.artistId &&
         !pref.archivedArtistId &&
+        !pref.spotifyArtistId &&
         pref.normalizedArtistName === normalizedName
       ) {
         existingUnresolved = pref;
@@ -1355,6 +1459,7 @@ export class MemoryUserPreferenceRepository implements IUserPreferenceRepository
       preferenceLevel: input.preferenceLevel,
       createdAt: now,
       updatedAt: now,
+      spotifyArtistId: null,
     };
 
     this.preferences.set(newPref.id, newPref);
@@ -1410,5 +1515,201 @@ export class MemoryUserPreferenceRepository implements IUserPreferenceRepository
 
   clear(): void {
     this.preferences.clear();
+  }
+}
+
+interface StoredSpotifyConnectionRecord {
+  userId: string;
+  spotifyAccountId: string;
+  accessToken: string;
+  refreshToken: string;
+  tokenExpiresAt: Date;
+  reauthorizationDeadline: Date;
+  scopes: string[];
+  status: SpotifyConnectionStatus;
+  lastSyncedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export class MemorySpotifyConnectionRepository implements ISpotifyConnectionRepository {
+  private connections: Map<string, StoredSpotifyConnectionRecord> = new Map();
+
+  async getConnection(userId: string): Promise<SpotifyConnection | null> {
+    if (!userId || !userId.trim()) return null;
+    const record = this.connections.get(userId);
+    if (!record) return null;
+
+    return {
+      userId: record.userId,
+      spotifyAccountId: record.spotifyAccountId,
+      status: record.status,
+      tokenExpiresAt: record.tokenExpiresAt.toISOString(),
+      reauthorizationDeadline: record.reauthorizationDeadline.toISOString(),
+      scopes: [...record.scopes],
+      lastSyncedAt: record.lastSyncedAt,
+      createdAt: record.createdAt,
+      updatedAt: record.updatedAt,
+    };
+  }
+
+  async getConnectionTokens(
+    userId: string,
+  ): Promise<SpotifyConnectionTokens | null> {
+    if (!userId || !userId.trim()) return null;
+    const record = this.connections.get(userId);
+    if (!record) return null;
+
+    if (record.status === 'disconnected' || record.status === 'revoked') {
+      return null;
+    }
+
+    return {
+      accessToken: record.accessToken,
+      refreshToken: record.refreshToken,
+      tokenExpiresAt: new Date(record.tokenExpiresAt),
+      reauthorizationDeadline: new Date(record.reauthorizationDeadline),
+      scopes: [...record.scopes],
+    };
+  }
+
+  async findBySpotifyAccountId(
+    spotifyAccountId: string,
+  ): Promise<SpotifyConnection | null> {
+    if (!spotifyAccountId || !spotifyAccountId.trim()) return null;
+    const trimmed = spotifyAccountId.trim();
+
+    for (const record of this.connections.values()) {
+      if (record.spotifyAccountId === trimmed) {
+        return {
+          userId: record.userId,
+          spotifyAccountId: record.spotifyAccountId,
+          status: record.status,
+          tokenExpiresAt: record.tokenExpiresAt.toISOString(),
+          reauthorizationDeadline: record.reauthorizationDeadline.toISOString(),
+          scopes: [...record.scopes],
+          lastSyncedAt: record.lastSyncedAt,
+          createdAt: record.createdAt,
+          updatedAt: record.updatedAt,
+        };
+      }
+    }
+    return null;
+  }
+
+  async saveConnection(
+    input: SaveSpotifyConnectionInput,
+  ): Promise<SpotifyConnection> {
+    if (!input.userId || !input.userId.trim()) {
+      throw new Error('User ID is required');
+    }
+    const spotifyAccountId = input.spotifyAccountId?.trim();
+    if (!spotifyAccountId) {
+      throw new Error('Spotify account ID is required');
+    }
+    if (!input.accessToken || !input.refreshToken) {
+      throw new Error('Access token and refresh token are required');
+    }
+
+    // 1-to-1 account conflict invariant
+    const existing = await this.findBySpotifyAccountId(spotifyAccountId);
+    if (existing && existing.userId !== input.userId) {
+      throw new SpotifyAccountConflictError(spotifyAccountId);
+    }
+
+    const now = new Date().toISOString();
+    const existingUserRecord = this.connections.get(input.userId);
+
+    const record: StoredSpotifyConnectionRecord = {
+      userId: input.userId,
+      spotifyAccountId,
+      accessToken: input.accessToken,
+      refreshToken: input.refreshToken,
+      tokenExpiresAt: new Date(input.tokenExpiresAt),
+      reauthorizationDeadline: new Date(input.reauthorizationDeadline),
+      scopes: [...input.scopes],
+      status: 'connected',
+      lastSyncedAt: existingUserRecord?.lastSyncedAt ?? null,
+      createdAt: existingUserRecord?.createdAt ?? now,
+      updatedAt: now,
+    };
+
+    this.connections.set(input.userId, record);
+
+    return {
+      userId: record.userId,
+      spotifyAccountId: record.spotifyAccountId,
+      status: record.status,
+      tokenExpiresAt: record.tokenExpiresAt.toISOString(),
+      reauthorizationDeadline: record.reauthorizationDeadline.toISOString(),
+      scopes: [...record.scopes],
+      lastSyncedAt: record.lastSyncedAt,
+      createdAt: record.createdAt,
+      updatedAt: record.updatedAt,
+    };
+  }
+
+  async updateTokens(
+    userId: string,
+    input: UpdateSpotifyTokensInput,
+  ): Promise<SpotifyConnection> {
+    if (!userId || !userId.trim()) {
+      throw new Error('User ID is required');
+    }
+    const record = this.connections.get(userId);
+    if (!record) {
+      throw new Error(`Spotify connection not found for user: ${userId}`);
+    }
+
+    record.accessToken = input.accessToken;
+    record.tokenExpiresAt = new Date(input.tokenExpiresAt);
+    record.status = 'connected';
+    record.updatedAt = new Date().toISOString();
+
+    if (input.refreshToken) {
+      record.refreshToken = input.refreshToken;
+    }
+    if (input.reauthorizationDeadline) {
+      record.reauthorizationDeadline = new Date(input.reauthorizationDeadline);
+    }
+
+    return {
+      userId: record.userId,
+      spotifyAccountId: record.spotifyAccountId,
+      status: record.status,
+      tokenExpiresAt: record.tokenExpiresAt.toISOString(),
+      reauthorizationDeadline: record.reauthorizationDeadline.toISOString(),
+      scopes: [...record.scopes],
+      lastSyncedAt: record.lastSyncedAt,
+      createdAt: record.createdAt,
+      updatedAt: record.updatedAt,
+    };
+  }
+
+  async updateStatus(
+    userId: string,
+    status: SpotifyConnectionStatus,
+  ): Promise<void> {
+    const record = this.connections.get(userId);
+    if (record) {
+      record.status = status;
+      record.updatedAt = new Date().toISOString();
+    }
+  }
+
+  async recordSync(userId: string, syncedAt?: Date): Promise<void> {
+    const record = this.connections.get(userId);
+    if (record) {
+      record.lastSyncedAt = (syncedAt ?? new Date()).toISOString();
+      record.updatedAt = new Date().toISOString();
+    }
+  }
+
+  async deleteConnection(userId: string): Promise<boolean> {
+    return this.connections.delete(userId);
+  }
+
+  clear(): void {
+    this.connections.clear();
   }
 }

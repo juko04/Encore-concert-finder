@@ -64,6 +64,34 @@ describe('Environment Variable Modules', () => {
 
       const env = getServerEnv();
       expect(env.SUPABASE_SERVICE_ROLE_KEY).toBe('test-service-role-key');
+      expect(env.ENABLE_SPOTIFY_INTEGRATION).toBe(false);
+    });
+
+    it('parses Spotify environment variables and converts boolean string flag', () => {
+      process.env.SUPABASE_SERVICE_ROLE_KEY = 'test-service-role-key';
+      process.env.SPOTIFY_CLIENT_ID = 'test-client-id';
+      process.env.SPOTIFY_CLIENT_SECRET = 'test-client-secret';
+      process.env.SPOTIFY_REDIRECT_URI =
+        'http://127.0.0.1:3000/api/integrations/spotify/callback';
+      process.env.SPOTIFY_TOKEN_ENCRYPTION_KEY =
+        '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
+      process.env.ENABLE_SPOTIFY_INTEGRATION = 'true';
+
+      const env = getServerEnv();
+      expect(env.SPOTIFY_CLIENT_ID).toBe('test-client-id');
+      expect(env.ENABLE_SPOTIFY_INTEGRATION).toBe(true);
+      expect(env.SPOTIFY_REDIRECT_URI).toBe(
+        'http://127.0.0.1:3000/api/integrations/spotify/callback',
+      );
+    });
+
+    it('rejects invalid SPOTIFY_TOKEN_ENCRYPTION_KEY length or format', () => {
+      process.env.SUPABASE_SERVICE_ROLE_KEY = 'test-service-role-key';
+      process.env.SPOTIFY_TOKEN_ENCRYPTION_KEY = 'too-short';
+
+      expect(() => getServerEnv()).toThrowError(
+        /SPOTIFY_TOKEN_ENCRYPTION_KEY must be a 64-character hex string/i,
+      );
     });
 
     it('throws error when accessed in browser context', () => {

@@ -17,6 +17,7 @@ export interface CanonicalArtistSummary {
   id: string;
   name: string;
   imageUrl?: string | null;
+  spotifyArtistId?: string | null;
 }
 
 export interface UserArtistPreference {
@@ -30,6 +31,7 @@ export interface UserArtistPreference {
   createdAt: string;
   updatedAt: string;
   canonicalArtist?: CanonicalArtistSummary | null;
+  spotifyArtistId?: string | null;
 }
 
 export interface SavePreferenceInput {
@@ -37,6 +39,7 @@ export interface SavePreferenceInput {
   artistId?: string | null;
   artistName: string;
   preferenceLevel: PreferenceLevel;
+  spotifyArtistId?: string | null;
 }
 
 export class InvalidCatalogArtistError extends Error {
