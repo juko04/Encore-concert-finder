@@ -20,3 +20,4 @@ drop index if exists public.idx_user_artist_prefs_user_unresolved;
 create unique index idx_user_artist_prefs_user_unresolved
   on public.user_artist_preferences (user_id, normalized_artist_name)
   where artist_id is null and archived_artist_id is null and spotify_artist_id is null;
+
