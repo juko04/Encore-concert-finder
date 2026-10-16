@@ -137,19 +137,28 @@ test.describe('Spotify Taste Explorer & Preview E2E Flow', () => {
   test('signs in, explores Spotify preview mode, and intentionally imports top artist into preferences', async ({
     page,
   }) => {
-    if (!isDbAvailable) {
-      test.skip(!isDbAvailable, 'Local Supabase instance is not available.');
-      return;
+    if (!credentials || !isDbAvailable) {
+      if (process.env.CI) {
+        throw new Error(
+          `Local Supabase is not available at ${credentials?.url ?? 'unknown'} in CI. Authenticated browser tests must execute against live local database.`,
+        );
+      }
+      test.skip(
+        true,
+        'Local Supabase is offline. Skipping authenticated Spotify taste profile E2E browser test locally.',
+      );
     }
 
     // 1. Sign in
     await page.goto('/login?redirectTo=/profile/taste');
-    await page.fill('[data-testid="email-input"]', testEmail);
-    await page.fill('[data-testid="password-input"]', testPassword);
-    await page.click('[data-testid="sign-in-btn"]');
+    await expect(page.getByTestId('login-container')).toBeVisible();
+
+    await page.getByTestId('email-input').fill(testEmail);
+    await page.getByTestId('password-input').fill(testPassword);
+    await page.getByTestId('auth-submit-btn').click();
 
     await expect(page).toHaveURL(/\/profile\/taste/);
-    await expect(page.locator('h1')).toContainText('Music Taste Profile');
+    await expect(page.getByTestId('taste-profile-manager')).toBeVisible();
 
     // 2. Verify Spotify connection card
     const spotifyCard = page.locator('[data-testid="spotify-connection-card"]');
@@ -214,15 +223,16 @@ test.describe('Spotify Taste Explorer & Preview E2E Flow', () => {
     ).toContainText('★ Favorite');
 
     // 8. Verify artist is also displayed in user's manual concert preferences
-    const prefCard = page.locator('[data-testid="artist-pref-card"]').first();
+    const prefCard = page.locator('[data-testid^="preference-card-"]').first();
     await expect(prefCard).toBeVisible();
     await expect(prefCard).toContainText('Chappell Roan');
 
     // 9. Reload page and confirm database persistence
     await page.reload();
     await expect(page).toHaveURL(/\/profile\/taste/);
+    await expect(page.getByTestId('taste-profile-manager')).toBeVisible();
     const persistedPref = page
-      .locator('[data-testid="artist-pref-card"]')
+      .locator('[data-testid^="preference-card-"]')
       .first();
     await expect(persistedPref).toBeVisible();
     await expect(persistedPref).toContainText('Chappell Roan');
