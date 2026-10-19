@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   getSyntheticRecencyComparisons,
   getSyntheticTopArtists,
+  isSyntheticPreviewAllowed,
   SYNTHETIC_USER_PROFILE,
 } from '@/lib/sources/spotify/synthetic-preview';
 
@@ -59,5 +60,86 @@ describe('Synthetic Spotify Preview Provider', () => {
       expect(typeof c.rationale).toBe('string');
       expect(c.rationale.length).toBeGreaterThan(10);
     }
+  });
+
+  describe('isSyntheticPreviewAllowed environment guards', () => {
+    it('permits preview in local development by default', () => {
+      expect(
+        isSyntheticPreviewAllowed({
+          nodeEnv: 'development',
+          devPreviewFlag: undefined,
+          isCi: false,
+          isTest: false,
+        }),
+      ).toBe(true);
+    });
+
+    it('permits preview in standard in-memory test runner (NODE_ENV=test)', () => {
+      expect(
+        isSyntheticPreviewAllowed({
+          nodeEnv: 'test',
+          devPreviewFlag: undefined,
+          isCi: false,
+          isTest: false,
+        }),
+      ).toBe(true);
+    });
+
+    it('permits preview in isolated CI test environment when explicitly enabled', () => {
+      expect(
+        isSyntheticPreviewAllowed({
+          nodeEnv: 'production',
+          devPreviewFlag: 'true',
+          isCi: 'true',
+          isTest: false,
+        }),
+      ).toBe(true);
+    });
+
+    it('permits preview in isolated Playwright test environment when explicitly enabled', () => {
+      expect(
+        isSyntheticPreviewAllowed({
+          nodeEnv: 'production',
+          devPreviewFlag: 'true',
+          isCi: false,
+          isTest: 'true',
+        }),
+      ).toBe(true);
+    });
+
+    it('strictly disables preview in normal production deployments', () => {
+      expect(
+        isSyntheticPreviewAllowed({
+          nodeEnv: 'production',
+          devPreviewFlag: undefined,
+          isCi: false,
+          isTest: false,
+        }),
+      ).toBe(false);
+    });
+
+    it('ensures an accidental feature flag in normal production cannot expose synthetic preview', () => {
+      // Security invariant: Even if ENABLE_SPOTIFY_DEV_PREVIEW=true is set in production,
+      // lack of CI/Playwright test environment strictly blocks synthetic data exposure.
+      expect(
+        isSyntheticPreviewAllowed({
+          nodeEnv: 'production',
+          devPreviewFlag: 'true',
+          isCi: false,
+          isTest: false,
+        }),
+      ).toBe(false);
+    });
+
+    it('disables preview in CI if explicit preview flag is not provided', () => {
+      expect(
+        isSyntheticPreviewAllowed({
+          nodeEnv: 'production',
+          devPreviewFlag: undefined,
+          isCi: 'true',
+          isTest: false,
+        }),
+      ).toBe(false);
+    });
   });
 });

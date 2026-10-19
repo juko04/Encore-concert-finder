@@ -22,16 +22,70 @@ export const SYNTHETIC_USER_PROFILE: SpotifyUserProfile = {
 };
 
 /**
+ * Options for evaluating synthetic preview availability.
+ */
+export interface SyntheticPreviewGuardOptions {
+  nodeEnv?: string;
+  devPreviewFlag?: string;
+  isCi?: string | boolean;
+  isTest?: string | boolean;
+}
+
+/**
  * Checks whether synthetic preview data generation is permitted in the current environment.
- * Synthetic preview is strictly restricted to development/test environments unless explicitly
- * enabled via ENABLE_SPOTIFY_DEV_PREVIEW=true.
+ *
+ * Security Invariant:
+ * - Development and in-memory test environments allow synthetic preview by default.
+ * - Ordinary production deployments STRICTLY FORBID synthetic preview.
+ *   An accidental feature flag in a normal production deployment will NEVER expose synthetic data.
+ * - In production mode, preview is only permitted in isolated automated test execution (CI or Playwright test server)
+ *   when explicitly opted into via ENABLE_SPOTIFY_DEV_PREVIEW=true.
  */
 export function isSyntheticPreviewAllowed(
-  nodeEnv = process.env.NODE_ENV,
-  devPreviewFlag = process.env.ENABLE_SPOTIFY_DEV_PREVIEW,
+  optionsOrNodeEnv?: string | SyntheticPreviewGuardOptions,
+  devPreviewFlagParam?: string,
 ): boolean {
-  if (devPreviewFlag === 'true') return true;
-  return nodeEnv !== 'production';
+  let nodeEnv: string | undefined = process.env.NODE_ENV;
+  let devPreviewFlag = process.env.ENABLE_SPOTIFY_DEV_PREVIEW;
+  let isCi: string | boolean | undefined = process.env.CI;
+  let isTest: string | boolean | undefined = process.env.PLAYWRIGHT_TEST;
+
+  if (typeof optionsOrNodeEnv === 'object' && optionsOrNodeEnv !== null) {
+    if (optionsOrNodeEnv.nodeEnv !== undefined)
+      nodeEnv = optionsOrNodeEnv.nodeEnv;
+    if (optionsOrNodeEnv.devPreviewFlag !== undefined)
+      devPreviewFlag = optionsOrNodeEnv.devPreviewFlag;
+    if (optionsOrNodeEnv.isCi !== undefined) isCi = optionsOrNodeEnv.isCi;
+    if (optionsOrNodeEnv.isTest !== undefined) isTest = optionsOrNodeEnv.isTest;
+  } else if (typeof optionsOrNodeEnv === 'string') {
+    nodeEnv = optionsOrNodeEnv;
+    if (devPreviewFlagParam !== undefined) {
+      devPreviewFlag = devPreviewFlagParam;
+    }
+  }
+
+  // 1. Local development and standard test runners permit preview
+  if (nodeEnv === 'development' || nodeEnv === 'test') {
+    return devPreviewFlag !== 'false';
+  }
+
+  // 2. Production: strictly disabled in normal production deployments.
+  // Permitted ONLY if both:
+  //   a) Running in an automated test environment (CI or Playwright runner)
+  //   b) Explicitly enabled via ENABLE_SPOTIFY_DEV_PREVIEW=true
+  const isAutomatedTest =
+    isCi === true ||
+    isCi === 'true' ||
+    isCi === '1' ||
+    isTest === true ||
+    isTest === 'true' ||
+    isTest === '1';
+
+  if (isAutomatedTest && devPreviewFlag === 'true') {
+    return true;
+  }
+
+  return false;
 }
 
 interface BaseArtistCatalogEntry {

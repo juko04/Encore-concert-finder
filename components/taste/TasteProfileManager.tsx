@@ -75,6 +75,9 @@ export function TasteProfileManager({
   const [spotifyArtists, setSpotifyArtists] = useState<SpotifyTopArtist[]>([]);
   const [isLoadingSpotify, setIsLoadingSpotify] = useState<boolean>(false);
   const [isDisconnecting, setIsDisconnecting] = useState<boolean>(false);
+  const [spotifyPreviewError, setSpotifyPreviewError] = useState<string | null>(
+    null,
+  );
 
   // Load Spotify top artists whenever connected or demo mode changes
   useEffect(() => {
@@ -82,6 +85,7 @@ export function TasteProfileManager({
     if (!shouldFetch) {
       setSpotifyArtists([]);
       setIsSyntheticResult(false);
+      setSpotifyPreviewError(null);
       return;
     }
 
@@ -93,13 +97,19 @@ export function TasteProfileManager({
         if (!isSubscribed) return;
         setSpotifyArtists(res.artists);
         setIsSyntheticResult(Boolean(res.isSyntheticPreview));
-        if (res.error && !isSyntheticDemo) {
+        if (res.error) {
           setError(res.error);
+          setSpotifyPreviewError(res.error);
+        } else {
+          setSpotifyPreviewError(null);
         }
       })
       .catch((err) => {
         if (!isSubscribed) return;
         console.error('Failed to load Spotify artists:', err);
+        const fallbackMsg = 'Failed to load Spotify artists. Please try again.';
+        setError(fallbackMsg);
+        setSpotifyPreviewError(fallbackMsg);
       })
       .finally(() => {
         if (isSubscribed) {
@@ -282,6 +292,8 @@ export function TasteProfileManager({
   }
 
   function handleToggleDemoMode() {
+    setError(null);
+    setSpotifyPreviewError(null);
     setIsSyntheticDemo((prev) => {
       const next = !prev;
       if (!next) {
@@ -364,6 +376,7 @@ export function TasteProfileManager({
             onAddPreference={handleAddSpotifyArtistToInterests}
             isLoading={isLoadingSpotify}
             isSyntheticPreview={isSyntheticResult || isSyntheticDemo}
+            error={spotifyPreviewError}
           />
         )}
       </section>

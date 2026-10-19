@@ -219,13 +219,17 @@ describe('Spotify Server Actions', () => {
       expect(result.error).toBeUndefined();
     });
 
-    it('blocks synthetic preview in production unless explicitly enabled', async () => {
+    it('blocks synthetic preview in production when flag is absent', async () => {
       const prevEnv = process.env.NODE_ENV;
       const prevFlag = process.env.ENABLE_SPOTIFY_DEV_PREVIEW;
+      const prevCi = process.env.CI;
+      const prevTest = process.env.PLAYWRIGHT_TEST;
       try {
         (process.env as Record<string, string | undefined>).NODE_ENV =
           'production';
         delete process.env.ENABLE_SPOTIFY_DEV_PREVIEW;
+        delete process.env.CI;
+        delete process.env.PLAYWRIGHT_TEST;
 
         const result = await getSpotifyTopArtistsAction('short_term', true);
         expect(result.isSyntheticPreview).toBe(false);
@@ -238,6 +242,68 @@ describe('Spotify Server Actions', () => {
         } else {
           delete process.env.ENABLE_SPOTIFY_DEV_PREVIEW;
         }
+        if (prevCi !== undefined) process.env.CI = prevCi;
+        else delete process.env.CI;
+        if (prevTest !== undefined) process.env.PLAYWRIGHT_TEST = prevTest;
+        else delete process.env.PLAYWRIGHT_TEST;
+      }
+    });
+
+    it('blocks synthetic preview in normal production even if accidental feature flag is set', async () => {
+      const prevEnv = process.env.NODE_ENV;
+      const prevFlag = process.env.ENABLE_SPOTIFY_DEV_PREVIEW;
+      const prevCi = process.env.CI;
+      const prevTest = process.env.PLAYWRIGHT_TEST;
+      try {
+        (process.env as Record<string, string | undefined>).NODE_ENV =
+          'production';
+        process.env.ENABLE_SPOTIFY_DEV_PREVIEW = 'true';
+        delete process.env.CI;
+        delete process.env.PLAYWRIGHT_TEST;
+
+        const result = await getSpotifyTopArtistsAction('short_term', true);
+        // Invariant: Normal production deployment without CI/test environment must NEVER expose preview
+        expect(result.isSyntheticPreview).toBe(false);
+        expect(result.artists).toEqual([]);
+        expect(result.error).toContain('only available in development');
+      } finally {
+        (process.env as Record<string, string | undefined>).NODE_ENV = prevEnv;
+        if (prevFlag !== undefined) {
+          process.env.ENABLE_SPOTIFY_DEV_PREVIEW = prevFlag;
+        } else {
+          delete process.env.ENABLE_SPOTIFY_DEV_PREVIEW;
+        }
+        if (prevCi !== undefined) process.env.CI = prevCi;
+        else delete process.env.CI;
+        if (prevTest !== undefined) process.env.PLAYWRIGHT_TEST = prevTest;
+        else delete process.env.PLAYWRIGHT_TEST;
+      }
+    });
+
+    it('allows synthetic preview in production during isolated CI/test run with explicit flag', async () => {
+      const prevEnv = process.env.NODE_ENV;
+      const prevFlag = process.env.ENABLE_SPOTIFY_DEV_PREVIEW;
+      const prevCi = process.env.CI;
+      try {
+        (process.env as Record<string, string | undefined>).NODE_ENV =
+          'production';
+        process.env.ENABLE_SPOTIFY_DEV_PREVIEW = 'true';
+        process.env.CI = 'true';
+
+        const result = await getSpotifyTopArtistsAction('short_term', true);
+        expect(result.isSyntheticPreview).toBe(true);
+        expect(result.artists.length).toBeGreaterThan(0);
+        expect(result.artists[0].name).toBe('Chappell Roan');
+        expect(result.error).toBeUndefined();
+      } finally {
+        (process.env as Record<string, string | undefined>).NODE_ENV = prevEnv;
+        if (prevFlag !== undefined) {
+          process.env.ENABLE_SPOTIFY_DEV_PREVIEW = prevFlag;
+        } else {
+          delete process.env.ENABLE_SPOTIFY_DEV_PREVIEW;
+        }
+        if (prevCi !== undefined) process.env.CI = prevCi;
+        else delete process.env.CI;
       }
     });
 

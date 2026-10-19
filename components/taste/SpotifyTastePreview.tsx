@@ -18,6 +18,7 @@ interface SpotifyTastePreviewProps {
   ) => Promise<void>;
   isLoading?: boolean;
   isSyntheticPreview?: boolean;
+  error?: string | null;
 }
 
 function findMatchingPreference(
@@ -42,6 +43,7 @@ export function SpotifyTastePreview({
   onAddPreference,
   isLoading = false,
   isSyntheticPreview = false,
+  error = null,
 }: SpotifyTastePreviewProps) {
   const [addingArtistId, setAddingArtistId] = useState<string | null>(null);
   const [selectedLevel, setSelectedLevel] =
@@ -156,6 +158,13 @@ export function SpotifyTastePreview({
           className="flex h-48 items-center justify-center text-xs text-zinc-500"
         >
           Loading Spotify listening taste...
+        </div>
+      ) : error ? (
+        <div
+          data-testid="spotify-preview-error-state"
+          className="rounded-xl border border-red-900/60 bg-red-950/40 p-6 text-center text-xs text-red-200"
+        >
+          {error}
         </div>
       ) : artists.length === 0 ? (
         <div

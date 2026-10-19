@@ -303,5 +303,29 @@ describe('Spotify UI Components', () => {
         screen.getByTestId('import-artist-btn-spotify-aurora-pop-star'),
       ).toBeDefined();
     });
+
+    it('displays a clear error state when preview is unavailable rather than a misleading empty artist list', () => {
+      const errorMessage =
+        'Spotify synthetic preview mode is only available in development and testing environments.';
+
+      render(
+        <SpotifyTastePreview
+          artists={[]}
+          timeRange="short_term"
+          onChangeTimeRange={vi.fn()}
+          existingPreferences={[]}
+          onAddPreference={vi.fn()}
+          error={errorMessage}
+        />,
+      );
+
+      // Invariant: The explicit error state MUST be shown
+      const errorBox = screen.getByTestId('spotify-preview-error-state');
+      expect(errorBox).toBeDefined();
+      expect(errorBox.textContent).toContain(errorMessage);
+
+      // Invariant: Misleading "No top artists returned" empty state MUST NOT be shown
+      expect(screen.queryByTestId('spotify-taste-empty')).toBeNull();
+    });
   });
 });
