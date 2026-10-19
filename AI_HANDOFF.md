@@ -29,16 +29,16 @@ Durable architecture records belong in [`docs/architecture/`](docs/architecture/
      - Added 7 unit tests in `tests/unit/spotify-preview.test.ts` verifying all guard conditions (dev, test, CI flag, Playwright flag, normal production, accidental flag rejection, missing CI flag).
      - Added server action tests in `tests/unit/spotify-actions.test.ts` for production security and isolated CI execution.
      - Added component test in `tests/unit/spotify-components.test.tsx` verifying explicit error state rendering.
-- **Verification State:** ALL VERIFICATIONS GREEN:
+- **Verification State:** ALL VERIFICATIONS GREEN (Local & Remote GitHub Actions CI Run 39292038163):
   - **Unit Tests:** 319/319 passing across 25 test suites (100% pass rate).
   - **Code Style & Formatting:** `npm run format:check` passing clean (Prettier).
   - **Linting:** `npm run lint` passing with 0 errors and 0 warnings (Next.js ESLint).
-  - **Type Checking:** `npm run typecheck` (`tsc --noEmit`) passing with 0 errors.
+  - **Type Checking:** `npm run typecheck` (`tsc --noEmit`) passing with 0 errors (both pre-build and post-build).
   - **Production Build:** `npm run build` compiled successfully (10/10 static/dynamic routes generated).
-  - **Playwright E2E:** 6 passed (2 skipped when Supabase offline locally; verified synthetic container isolation, 8 passed expected in CI with running Supabase).
+  - **Playwright E2E:** 8 passed, 0 skipped, 0 failed in GitHub Actions CI against real local Supabase with synthetic fixtures.
   - **PostgreSQL Integration:** 50/50 tests passing across 6 suites (`catalog-rls`, `golden-path`, `profiles-rls`, `spotify-connection-rls`, `ticketmaster-canonicalization`, `user-preferences-rls`).
-- **Immediate Next Action:** Hand off PR #10 for final approval. Do NOT merge automatically; do NOT implement recommendation scoring algorithms until PR #10 is approved and merged.
-- **Phase 2 Status:** **ACTIVE — PR #10 CI E2E FIX & THIRD REVIEW REMEDIATION COMPLETE & GREEN.**
+- **Immediate Next Action:** Hand off PR #10 for final user approval and merge. Do NOT merge automatically; do NOT implement recommendation scoring algorithms until PR #10 is merged.
+- **Phase 2 Status:** **ACTIVE — PR #10 CI E2E & THIRD REVIEW REMEDIATIONS VERIFIED GREEN IN CI.**
 
 ---
 
