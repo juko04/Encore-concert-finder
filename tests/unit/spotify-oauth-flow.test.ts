@@ -29,6 +29,7 @@ vi.mock('@/lib/supabase/admin', () => ({
 }));
 
 const mockSaveConnection = vi.fn();
+const mockGetConnection = vi.fn();
 const mockGetConnectionTokens = vi.fn();
 const mockUpdateTokens = vi.fn();
 const mockDeleteConnection = vi.fn();
@@ -38,6 +39,7 @@ const mockRecordSync = vi.fn();
 vi.mock('@/lib/repositories/spotify-connection-repository', () => ({
   SupabaseSpotifyConnectionRepository: vi.fn().mockImplementation(() => ({
     saveConnection: mockSaveConnection,
+    getConnection: mockGetConnection,
     getConnectionTokens: mockGetConnectionTokens,
     updateTokens: mockUpdateTokens,
     deleteConnection: mockDeleteConnection,
@@ -91,7 +93,10 @@ import {
   SpotifyAccountConflictError,
   SpotifyRateLimitError,
 } from '@/lib/domain/spotify';
-import { MemoryUserPreferenceRepository } from '@/lib/repositories/memory-repositories';
+import {
+  MemorySpotifyConnectionRepository,
+  MemoryUserPreferenceRepository,
+} from '@/lib/repositories/memory-repositories';
 
 describe('Spotify OAuth Flow & API Endpoints (Mocked / Zero-Network)', () => {
   const userA: User = {
@@ -106,6 +111,17 @@ describe('Spotify OAuth Flow & API Endpoints (Mocked / Zero-Network)', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mockGetConnection.mockReset();
+    mockGetConnection.mockResolvedValue(null);
+    mockDeleteConnection.mockReset();
+    mockDeleteConnection.mockImplementation(async () => {
+      mockGetConnection.mockResolvedValue(null);
+      return true;
+    });
+    mockGetConnectionTokens.mockReset();
+    mockUpdateTokens.mockReset();
+    mockUpdateStatus.mockReset();
+    mockRecordSync.mockReset();
     cookieMap.clear();
     vi.mocked(getAuthenticatedUser).mockResolvedValue(userA);
   });
@@ -574,5 +590,87 @@ describe('Spotify OAuth Flow & API Endpoints (Mocked / Zero-Network)', () => {
     // All distinct preferences coexist correctly
     const allPrefs = await memoryPrefRepo.getPreferences(userA.id);
     expect(allPrefs).toHaveLength(4);
+  });
+
+  // Scenario 10: Complete expired connection lifecycle: block Spotify calls, allow disconnect, purge credentials, preserve manual preferences
+  it('Scenario 10: enforces expired connection lifecycle (no Spotify calls, allows disconnect, purges credentials, preserves manual preferences)', async () => {
+    const memoryConnRepo = new MemorySpotifyConnectionRepository();
+    const memoryPrefRepo = new MemoryUserPreferenceRepository();
+
+    // 1. User has an explicit manual concert preference
+    const manualPref = await memoryPrefRepo.savePreference({
+      userId: userA.id,
+      artistName: 'Sigur Rós',
+      preferenceLevel: 'favorite',
+    });
+
+    // 2. Connect account
+    await memoryConnRepo.saveConnection({
+      userId: userA.id,
+      spotifyAccountId: 'spot-acc-scenario-10',
+      accessToken: 'valid-token',
+      refreshToken: 'valid-refresh',
+      tokenExpiresAt: new Date(Date.now() + 3600 * 1000),
+      reauthorizationDeadline: new Date(Date.now() + 180 * 86400 * 1000),
+      scopes: ['user-top-read'],
+    });
+
+    const activeConn = await memoryConnRepo.getConnection(userA.id);
+    expect(activeConn?.status).toBe('connected');
+
+    // 3. Mark connection expired
+    await memoryConnRepo.updateStatus(userA.id, 'expired');
+    const expiredConn = await memoryConnRepo.getConnection(userA.id);
+    expect(expiredConn?.status).toBe('expired');
+
+    // 4. Confirm getConnectionTokens() refuses to return usable tokens for expired connection
+    const tokens = await memoryConnRepo.getConnectionTokens(userA.id);
+    expect(tokens).toBeNull();
+
+    // 5. Confirm top-artists endpoint refuses to call Spotify API when connection is expired
+    mockGetConnectionTokens.mockResolvedValueOnce(null);
+    mockGetConnection.mockResolvedValueOnce({
+      userId: userA.id,
+      spotifyAccountId: 'spot-acc-scenario-10',
+      status: 'expired',
+      reauthorizationDeadline: new Date(Date.now() + 180 * 86400 * 1000),
+      scopes: ['user-top-read'],
+      lastSyncedAt: null,
+    });
+
+    const topReq = new Request(
+      'http://localhost:3000/api/integrations/spotify/top-artists?time_range=short_term',
+    );
+    const topRes = await topArtistsHandler(topReq);
+
+    expect(topRes.status).toBe(401);
+    const topBody = await topRes.json();
+    expect(topBody.error).toBe('reauthorization_required');
+    expect(mockGetTopArtists).not.toHaveBeenCalled();
+
+    // 6. Confirm user can still disconnect an expired account
+    mockDeleteConnection.mockImplementationOnce(async () => {
+      await memoryConnRepo.deleteConnection(userA.id);
+      mockGetConnection.mockResolvedValueOnce(null);
+      return true;
+    });
+
+    const discRes = await disconnectHandler();
+    expect(discRes.status).toBe(200);
+    const discBody = await discRes.json();
+    expect(discBody.success).toBe(true);
+
+    // 7. Verify credentials in repository are completely deleted
+    const postDiscConn = await memoryConnRepo.getConnection(userA.id);
+    expect(postDiscConn).toBeNull();
+    const postDiscTokens = await memoryConnRepo.getConnectionTokens(userA.id);
+    expect(postDiscTokens).toBeNull();
+
+    // 8. Verify user's manual concert preference is completely intact and unaltered
+    const survivingPrefs = await memoryPrefRepo.getPreferences(userA.id);
+    expect(survivingPrefs).toHaveLength(1);
+    expect(survivingPrefs[0].id).toBe(manualPref.id);
+    expect(survivingPrefs[0].artistName).toBe('Sigur Rós');
+    expect(survivingPrefs[0].preferenceLevel).toBe('favorite');
   });
 });

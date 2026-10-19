@@ -16,6 +16,15 @@ export async function POST() {
     const repo = new SupabaseSpotifyConnectionRepository(adminClient);
     await repo.deleteConnection(user.id);
 
+    // Confirm credential deletion before reporting success
+    const remaining = await repo.getConnection(user.id);
+    if (remaining) {
+      return NextResponse.json(
+        { error: 'Failed to verify Spotify credential deletion' },
+        { status: 500 },
+      );
+    }
+
     return NextResponse.json({ success: true });
   } catch (err) {
     console.error('[Spotify Disconnect Error]:', err);

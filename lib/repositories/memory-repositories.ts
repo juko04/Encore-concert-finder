@@ -30,6 +30,7 @@ import {
 } from '@/lib/domain/value-objects';
 import {
   type CanonicalArtistSummary,
+  ConflictingArtistIdentityError,
   InvalidCatalogArtistError,
   type PreferenceLevel,
   type SavePreferenceInput,
@@ -1271,11 +1272,13 @@ export class MemoryUserPreferenceRepository implements IUserPreferenceRepository
     }
 
     const now = new Date().toISOString();
+    const trimmedSpotifyId = input.spotifyArtistId?.trim() || null;
 
     if (input.artistId) {
       let authoritativeName = rawArtistName;
       let authoritativeNorm = normalizeName(rawArtistName);
       let canonicalSummary: CanonicalArtistSummary | null = null;
+      let canonicalSpotifyExtId: string | null = null;
 
       if (this.catalogRepo) {
         const canonical = await this.catalogRepo.getArtistById(input.artistId);
@@ -1285,20 +1288,51 @@ export class MemoryUserPreferenceRepository implements IUserPreferenceRepository
         authoritativeName = canonical.name;
         authoritativeNorm = canonical.normalizedName;
 
-        let spotifyExtId = input.spotifyArtistId ?? null;
-        if (!spotifyExtId && this.catalogRepo) {
-          const extIds = await this.catalogRepo.findArtistExternalIds(
-            input.artistId,
+        const extIds = await this.catalogRepo.findArtistExternalIds(
+          input.artistId,
+        );
+        const match = extIds.find((e) => e.provider === 'spotify');
+        if (match) canonicalSpotifyExtId = match.externalId;
+
+        if (trimmedSpotifyId) {
+          const mappedArtist = await this.catalogRepo.findArtistByExternalId(
+            'spotify',
+            trimmedSpotifyId,
           );
-          const match = extIds.find((e) => e.provider === 'spotify');
-          if (match) spotifyExtId = match.externalId;
+
+          if (mappedArtist && mappedArtist.id !== input.artistId) {
+            throw new ConflictingArtistIdentityError(
+              `Supplied Spotify artist ID '${trimmedSpotifyId}' is mapped to a different canonical artist ('${mappedArtist.id}') than '${input.artistId}'.`,
+              input.artistId,
+              trimmedSpotifyId,
+            );
+          }
+
+          if (
+            canonicalSpotifyExtId &&
+            canonicalSpotifyExtId !== trimmedSpotifyId
+          ) {
+            throw new ConflictingArtistIdentityError(
+              `Canonical artist '${input.artistId}' is already mapped to Spotify artist '${canonicalSpotifyExtId}', which conflicts with supplied Spotify artist '${trimmedSpotifyId}'.`,
+              input.artistId,
+              trimmedSpotifyId,
+            );
+          }
+
+          if (!mappedArtist && !canonicalSpotifyExtId) {
+            throw new ConflictingArtistIdentityError(
+              `Supplied Spotify artist ID '${trimmedSpotifyId}' cannot be verified against canonical artist '${input.artistId}' via trusted external-ID mappings.`,
+              input.artistId,
+              trimmedSpotifyId,
+            );
+          }
         }
 
         canonicalSummary = {
           id: canonical.id,
           name: canonical.name,
           imageUrl: canonical.imageUrl,
-          spotifyArtistId: spotifyExtId,
+          spotifyArtistId: trimmedSpotifyId ?? canonicalSpotifyExtId,
         };
       }
 
@@ -1311,15 +1345,37 @@ export class MemoryUserPreferenceRepository implements IUserPreferenceRepository
         }
       }
 
+      if (!existingPref && (trimmedSpotifyId || canonicalSpotifyExtId)) {
+        const targetSpotifyId = trimmedSpotifyId ?? canonicalSpotifyExtId;
+        for (const pref of this.preferences.values()) {
+          if (
+            pref.userId === input.userId &&
+            pref.spotifyArtistId === targetSpotifyId
+          ) {
+            existingPref = pref;
+            break;
+          }
+        }
+      }
+
+      const finalSpotifyId =
+        trimmedSpotifyId ??
+        existingPref?.spotifyArtistId ??
+        canonicalSpotifyExtId ??
+        null;
+
       if (existingPref) {
         existingPref.preferenceLevel = input.preferenceLevel;
         existingPref.artistName = authoritativeName;
         existingPref.normalizedArtistName = authoritativeNorm;
+        existingPref.artistId = input.artistId;
+        existingPref.spotifyArtistId = finalSpotifyId;
         existingPref.updatedAt = now;
         if (canonicalSummary) {
-          existingPref.canonicalArtist = canonicalSummary;
-          existingPref.spotifyArtistId =
-            canonicalSummary.spotifyArtistId ?? existingPref.spotifyArtistId;
+          existingPref.canonicalArtist = {
+            ...canonicalSummary,
+            spotifyArtistId: finalSpotifyId,
+          };
         }
         return { ...existingPref };
       }
@@ -1334,16 +1390,15 @@ export class MemoryUserPreferenceRepository implements IUserPreferenceRepository
         preferenceLevel: input.preferenceLevel,
         createdAt: now,
         updatedAt: now,
-        canonicalArtist: canonicalSummary,
-        spotifyArtistId:
-          canonicalSummary?.spotifyArtistId ?? input.spotifyArtistId ?? null,
+        canonicalArtist: canonicalSummary
+          ? { ...canonicalSummary, spotifyArtistId: finalSpotifyId }
+          : null,
+        spotifyArtistId: finalSpotifyId,
       };
 
       this.preferences.set(newPref.id, newPref);
       return { ...newPref };
     }
-
-    const trimmedSpotifyId = input.spotifyArtistId?.trim() || null;
 
     // 2. Explicit Spotify Artist ID provided
     if (trimmedSpotifyId) {
@@ -1560,7 +1615,15 @@ export class MemorySpotifyConnectionRepository implements ISpotifyConnectionRepo
     const record = this.connections.get(userId);
     if (!record) return null;
 
-    if (record.status === 'disconnected' || record.status === 'revoked') {
+    if (
+      record.status === 'disconnected' ||
+      record.status === 'revoked' ||
+      record.status === 'expired'
+    ) {
+      return null;
+    }
+
+    if (new Date(record.reauthorizationDeadline).getTime() <= Date.now()) {
       return null;
     }
 

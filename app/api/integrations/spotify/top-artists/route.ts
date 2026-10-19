@@ -93,17 +93,56 @@ export async function GET(request: Request) {
 
     const tokens = await repo.getConnectionTokens(user.id);
     if (!tokens) {
+      const conn = await repo.getConnection(user.id);
+      if (!conn) {
+        return NextResponse.json(
+          {
+            error: 'not_connected',
+            message:
+              'No active Spotify connection found. Please connect your account.',
+          },
+          { status: 404 },
+        );
+      }
+
+      if (
+        conn.status === 'expired' ||
+        new Date(conn.reauthorizationDeadline).getTime() <= Date.now()
+      ) {
+        if (conn.status !== 'expired') {
+          await repo.updateStatus(user.id, 'expired');
+        }
+        return NextResponse.json(
+          {
+            error: 'reauthorization_required',
+            message:
+              'Spotify authorization has expired. Please reconnect your account.',
+          },
+          { status: 401 },
+        );
+      }
+
+      if (conn.status === 'revoked' || conn.status === 'disconnected') {
+        return NextResponse.json(
+          {
+            error: 'connection_revoked',
+            message:
+              'Spotify connection is inactive or revoked. Please connect your account.',
+          },
+          { status: 403 },
+        );
+      }
+
       return NextResponse.json(
         {
-          error: 'not_connected',
+          error: 'reauthorization_required',
           message:
-            'No active Spotify connection found. Please connect your account.',
+            'Spotify connection has expired or tokens are unavailable. Please reconnect your account.',
         },
-        { status: 404 },
+        { status: 401 },
       );
     }
 
-    // Enforce long-term reauthorization deadline before attempting use or refresh
     if (tokens.reauthorizationDeadline.getTime() <= Date.now()) {
       await repo.updateStatus(user.id, 'expired');
       return NextResponse.json(

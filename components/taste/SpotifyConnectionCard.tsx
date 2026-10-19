@@ -28,6 +28,11 @@ export function SpotifyConnectionCard({
 }: SpotifyConnectionCardProps) {
   const [showConfirmDisconnect, setShowConfirmDisconnect] = useState(false);
 
+  const hasStoredConnection =
+    connected ||
+    (status && status !== 'disconnected') ||
+    Boolean(spotifyAccountId);
+
   return (
     <div
       data-testid="spotify-connection-card"
@@ -66,6 +71,13 @@ export function SpotifyConnectionCard({
                 >
                   ⚠ Reauthorization Required
                 </span>
+              ) : status === 'revoked' ? (
+                <span
+                  data-testid="spotify-revoked-badge"
+                  className="rounded-full border border-red-800/40 bg-red-950/60 px-2.5 py-0.5 text-[11px] font-semibold text-red-400"
+                >
+                  ⚠ Connection Revoked
+                </span>
               ) : isSyntheticDemo ? (
                 <span
                   data-testid="spotify-demo-badge"
@@ -86,38 +98,51 @@ export function SpotifyConnectionCard({
             <p className="mt-1 text-xs text-zinc-400">
               {connected
                 ? 'Your Spotify account is connected. Inspect your listening history below and intentionally add artists to your live concert interests.'
-                : 'Connect your Spotify account to inspect your top listening history across recent and historical windows, or test with our interactive preview.'}
+                : status === 'expired'
+                  ? 'Your Spotify authorization has expired. Reconnect your account to refresh listening preferences, or disconnect to remove your stored credentials.'
+                  : status === 'revoked'
+                    ? 'Your Spotify connection was revoked. Reconnect your account, or disconnect to clear stored credentials.'
+                    : 'Connect your Spotify account to inspect your top listening history across recent and historical windows, or test with our interactive preview.'}
             </p>
           </div>
         </div>
 
         {/* Action Buttons */}
         <div className="flex flex-wrap items-center gap-2 self-start">
-          {connected ? (
-            showConfirmDisconnect ? (
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  data-testid="confirm-disconnect-btn"
-                  onClick={() => {
-                    setShowConfirmDisconnect(false);
-                    onDisconnect();
-                  }}
-                  disabled={isDisconnecting}
-                  className="rounded-lg bg-red-600 px-3 py-1.5 text-xs font-semibold text-white shadow hover:bg-red-500 disabled:opacity-50"
+          {showConfirmDisconnect ? (
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                data-testid="confirm-disconnect-btn"
+                onClick={() => {
+                  setShowConfirmDisconnect(false);
+                  onDisconnect();
+                }}
+                disabled={isDisconnecting}
+                className="rounded-lg bg-red-600 px-3 py-1.5 text-xs font-semibold text-white shadow hover:bg-red-500 disabled:opacity-50"
+              >
+                {isDisconnecting ? 'Disconnecting...' : 'Yes, Disconnect'}
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowConfirmDisconnect(false)}
+                disabled={isDisconnecting}
+                className="rounded-lg border border-zinc-700 bg-transparent px-2.5 py-1.5 text-xs font-medium text-zinc-400 hover:text-zinc-200"
+              >
+                Cancel
+              </button>
+            </div>
+          ) : hasStoredConnection ? (
+            <div className="flex flex-wrap items-center gap-2">
+              {!connected && (
+                <a
+                  href="/api/integrations/spotify/connect"
+                  data-testid="connect-spotify-btn"
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-[#1DB954] px-3.5 py-2 text-xs font-bold text-black shadow-sm transition hover:bg-[#1ed760] focus:outline-none focus:ring-2 focus:ring-[#1DB954] focus:ring-offset-2 focus:ring-offset-zinc-950"
                 >
-                  {isDisconnecting ? 'Disconnecting...' : 'Yes, Disconnect'}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setShowConfirmDisconnect(false)}
-                  disabled={isDisconnecting}
-                  className="rounded-lg border border-zinc-700 bg-transparent px-2.5 py-1.5 text-xs font-medium text-zinc-400 hover:text-zinc-200"
-                >
-                  Cancel
-                </button>
-              </div>
-            ) : (
+                  Reconnect Spotify
+                </a>
+              )}
               <button
                 type="button"
                 data-testid="disconnect-spotify-btn"
@@ -126,7 +151,21 @@ export function SpotifyConnectionCard({
               >
                 Disconnect
               </button>
-            )
+              {!connected && (
+                <button
+                  type="button"
+                  data-testid="toggle-preview-mode-btn"
+                  onClick={onToggleDemoMode}
+                  className={`rounded-lg border px-3 py-2 text-xs font-semibold transition-colors ${
+                    isSyntheticDemo
+                      ? 'border-indigo-600 bg-indigo-950/50 text-indigo-300'
+                      : 'border-zinc-800 bg-zinc-900 text-zinc-300 hover:border-zinc-700 hover:text-white'
+                  }`}
+                >
+                  {isSyntheticDemo ? 'Exit Preview' : 'Interactive Preview'}
+                </button>
+              )}
+            </div>
           ) : (
             <div className="flex flex-wrap items-center gap-2">
               <a
@@ -153,8 +192,8 @@ export function SpotifyConnectionCard({
         </div>
       </div>
 
-      {/* Connected Account Details */}
-      {connected && (
+      {/* Stored Account Details */}
+      {hasStoredConnection && (
         <div className="mt-4 flex flex-wrap items-center gap-4 rounded-xl border border-zinc-800/80 bg-zinc-950/50 px-4 py-3 text-xs text-zinc-400">
           <div>
             <span className="text-zinc-500">Spotify Account: </span>
@@ -177,6 +216,11 @@ export function SpotifyConnectionCard({
                 })}
               </span>
             </div>
+          )}
+          {status === 'expired' && (
+            <span className="text-[11px] font-medium text-amber-400">
+              (Authorization expired — disconnect to remove stored credentials)
+            </span>
           )}
           <div className="ml-auto flex items-center gap-2">
             <button

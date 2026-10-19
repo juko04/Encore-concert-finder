@@ -52,3 +52,20 @@ export class InvalidCatalogArtistError extends Error {
     Object.setPrototypeOf(this, InvalidCatalogArtistError.prototype);
   }
 }
+
+export class ConflictingArtistIdentityError extends Error {
+  readonly artistId?: string | null;
+  readonly spotifyArtistId?: string | null;
+
+  constructor(
+    message: string = 'Supplied Spotify artist identity conflicts with catalog artist identity.',
+    artistId?: string | null,
+    spotifyArtistId?: string | null,
+  ) {
+    super(message);
+    this.name = 'ConflictingArtistIdentityError';
+    this.artistId = artistId;
+    this.spotifyArtistId = spotifyArtistId;
+    Object.setPrototypeOf(this, ConflictingArtistIdentityError.prototype);
+  }
+}

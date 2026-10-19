@@ -90,7 +90,15 @@ export class SupabaseSpotifyConnectionRepository implements ISpotifyConnectionRe
     if (!data) return null;
     const row = data as SpotifyConnectionRow;
 
-    if (row.status === 'disconnected' || row.status === 'revoked') {
+    if (
+      row.status === 'disconnected' ||
+      row.status === 'revoked' ||
+      row.status === 'expired'
+    ) {
+      return null;
+    }
+
+    if (new Date(row.reauthorization_deadline).getTime() <= Date.now()) {
       return null;
     }
 

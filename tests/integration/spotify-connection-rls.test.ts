@@ -427,4 +427,77 @@ describe('PostgreSQL RLS & Invariants on public.user_spotify_connections', () =>
     const conn = await repo.getConnection(userAId);
     expect(conn?.status).toBe('expired');
   });
+
+  it('allows disconnecting an expired Spotify connection and verifies credentials purged while preferences remain', async () => {
+    if (!isDbAvailable || !adminClient || !userAId) return;
+
+    const repo = new SupabaseSpotifyConnectionRepository(
+      adminClient,
+      TEST_ENCRYPTION_KEY,
+    );
+
+    // 1. User has an explicit manual concert preference
+    const artistName = 'Massive Attack';
+    const { data: pref, error: insertErr } = await adminClient
+      .from('user_artist_preferences')
+      .insert({
+        user_id: userAId,
+        artist_name: artistName,
+        normalized_artist_name: 'massive attack',
+        preference_level: 'favorite',
+      })
+      .select()
+      .single();
+
+    expect(insertErr).toBeNull();
+    expect(pref).toBeDefined();
+
+    // 2. Connect Spotify account and mark it expired
+    await repo.saveConnection({
+      userId: userAId,
+      spotifyAccountId: `spotify_exp_disc_${Date.now()}`,
+      accessToken: 'token_exp_to_delete',
+      refreshToken: 'refresh_exp_to_delete',
+      tokenExpiresAt: new Date(Date.now() + 3600 * 1000),
+      reauthorizationDeadline: new Date(Date.now() + 180 * 86400 * 1000),
+      scopes: ['user-top-read'],
+    });
+
+    await repo.updateStatus(userAId, 'expired');
+
+    // 3. Confirm getConnectionTokens() returns null for expired status
+    const expiredTokens = await repo.getConnectionTokens(userAId);
+    expect(expiredTokens).toBeNull();
+
+    // 4. Disconnect expired connection (instantiated without encryption key to prove key independence)
+    const repoNoKey = new SupabaseSpotifyConnectionRepository(adminClient);
+    const deleted = await repoNoKey.deleteConnection(userAId);
+    expect(deleted).toBe(true);
+
+    // 5. Confirm credential deletion
+    const remainingConn = await repo.getConnection(userAId);
+    expect(remainingConn).toBeNull();
+
+    const { data: rows } = await adminClient
+      .from('user_spotify_connections')
+      .select('*')
+      .eq('user_id', userAId);
+    expect(rows).toEqual([]);
+
+    // 6. Verify manual concert preferences remain unchanged
+    const { data: survivingPrefs } = await adminClient
+      .from('user_artist_preferences')
+      .select('*')
+      .eq('user_id', userAId);
+
+    expect(survivingPrefs).toHaveLength(1);
+    expect(survivingPrefs![0].artist_name).toBe(artistName);
+    expect(survivingPrefs![0].preference_level).toBe('favorite');
+
+    // Cleanup preference
+    await adminClient
+      .from('user_artist_preferences')
+      .delete()
+      .eq('id', pref.id);
+  });
 });

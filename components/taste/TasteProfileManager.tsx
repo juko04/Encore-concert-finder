@@ -300,6 +300,9 @@ export function TasteProfileManager({
       if (result.success) {
         setSpotifyStatus({
           connected: false,
+          status: 'disconnected',
+          spotifyAccountId: undefined,
+          lastSyncedAt: null,
           isConfigured: spotifyStatus.isConfigured,
         });
         setSpotifyArtists([]);

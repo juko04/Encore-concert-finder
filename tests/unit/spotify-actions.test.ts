@@ -70,6 +70,19 @@ import {
 describe('Spotify Server Actions', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockGetConnection.mockReset();
+    mockGetConnection.mockResolvedValue(null);
+    mockDeleteConnection.mockReset();
+    mockDeleteConnection.mockImplementation(async () => {
+      mockGetConnection.mockResolvedValue(null);
+      return true;
+    });
+    mockGetConnectionTokens.mockReset();
+    mockUpdateTokens.mockReset();
+    mockRecordSync.mockReset();
+    mockUpdateStatus.mockReset();
+    mockGetTopArtists.mockReset();
+    mockRefreshAccessToken.mockReset();
     vi.mocked(getAuthenticatedUser).mockResolvedValue({
       id: 'test-user-id',
       email: 'user@encore.test',
@@ -172,7 +185,10 @@ describe('Spotify Server Actions', () => {
         lastSyncedAt: '2026-10-15T12:00:00Z',
         scopes: ['user-top-read'],
       });
-      mockDeleteConnection.mockResolvedValueOnce(true);
+      mockDeleteConnection.mockImplementationOnce(async () => {
+        mockGetConnection.mockResolvedValue(null);
+        return true;
+      });
 
       // 2. Remove encryption key from configuration
       const prevKey = mockServerEnv.SPOTIFY_TOKEN_ENCRYPTION_KEY;

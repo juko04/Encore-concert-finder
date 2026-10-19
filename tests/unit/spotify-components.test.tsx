@@ -84,6 +84,44 @@ describe('Spotify UI Components', () => {
 
       expect(onDisconnect).toHaveBeenCalledTimes(1);
     });
+
+    it('renders expired state with reauthorization warning, reconnect action, and accessible disconnect workflow', () => {
+      const onDisconnect = vi.fn();
+
+      render(
+        <SpotifyConnectionCard
+          connected={false}
+          spotifyAccountId="spotify-user-expired"
+          status="expired"
+          lastSyncedAt="2026-10-15T12:00:00Z"
+          isConfigured={true}
+          isSyntheticDemo={false}
+          onToggleDemoMode={vi.fn()}
+          onDisconnect={onDisconnect}
+        />,
+      );
+
+      expect(screen.getByTestId('spotify-expired-badge')).toBeDefined();
+      expect(screen.getByTestId('spotify-account-id-label').textContent).toBe(
+        'spotify-user-expired',
+      );
+
+      // Reconnect action is available
+      const reconnectLink = screen.getByTestId('connect-spotify-btn');
+      expect(reconnectLink.textContent).toContain('Reconnect Spotify');
+      expect(reconnectLink.getAttribute('href')).toBe(
+        '/api/integrations/spotify/connect',
+      );
+
+      // Disconnect is also available even when expired
+      const disconnectBtn = screen.getByTestId('disconnect-spotify-btn');
+      fireEvent.click(disconnectBtn);
+
+      const confirmBtn = screen.getByTestId('confirm-disconnect-btn');
+      fireEvent.click(confirmBtn);
+
+      expect(onDisconnect).toHaveBeenCalledTimes(1);
+    });
   });
 
   describe('SpotifyTastePreview', () => {

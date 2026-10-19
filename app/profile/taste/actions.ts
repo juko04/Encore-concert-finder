@@ -5,6 +5,7 @@ import { getAuthenticatedUser } from '@/lib/auth/session';
 import { createClient } from '@/lib/supabase/server';
 import { SupabaseUserPreferenceRepository } from '@/lib/repositories/user-preference-repository';
 import {
+  ConflictingArtistIdentityError,
   InvalidCatalogArtistError,
   type PreferenceLevel,
   type UserArtistPreference,
@@ -70,7 +71,10 @@ export async function savePreferenceAction(input: {
     return { success: true, preference };
   } catch (err) {
     console.error('[savePreferenceAction error]:', err);
-    if (err instanceof InvalidCatalogArtistError) {
+    if (
+      err instanceof InvalidCatalogArtistError ||
+      err instanceof ConflictingArtistIdentityError
+    ) {
       return { error: err.message };
     }
     return {
@@ -207,6 +211,15 @@ export async function disconnectSpotifyAction(): Promise<{
     const repo = new SupabaseSpotifyConnectionRepository(adminClient);
     await repo.deleteConnection(user.id);
 
+    // Confirm credential deletion before reporting success
+    const remaining = await repo.getConnection(user.id);
+    if (remaining) {
+      return {
+        success: false,
+        error: 'Failed to verify Spotify credential deletion.',
+      };
+    }
+
     revalidatePath('/profile/taste');
     return { success: true };
   } catch (err) {
@@ -291,6 +304,22 @@ export async function getSpotifyTopArtistsAction(
 
     const tokens = await repo.getConnectionTokens(user.id);
     if (!tokens) {
+      const conn = await repo.getConnection(user.id);
+      if (
+        conn &&
+        (conn.status === 'expired' ||
+          new Date(conn.reauthorizationDeadline).getTime() <= Date.now())
+      ) {
+        if (conn.status !== 'expired') {
+          await repo.updateStatus(user.id, 'expired');
+        }
+        return {
+          artists: [],
+          isSyntheticPreview: false,
+          error:
+            'Spotify authorization has expired. Please reconnect your account.',
+        };
+      }
       return {
         artists: [],
         isSyntheticPreview: false,
@@ -299,7 +328,6 @@ export async function getSpotifyTopArtistsAction(
       };
     }
 
-    // Enforce long-term reauthorization deadline
     if (tokens.reauthorizationDeadline.getTime() <= Date.now()) {
       await repo.updateStatus(user.id, 'expired');
       return {

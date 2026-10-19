@@ -350,8 +350,10 @@ describe('SpotifyConnectionRepository', () => {
           spotify_account_id: 'spot-disconnect',
           encrypted_access_token: 'enc-access',
           encrypted_refresh_token: 'enc-refresh',
-          token_expires_at: new Date().toISOString(),
-          reauthorization_deadline: new Date().toISOString(),
+          token_expires_at: new Date(Date.now() + 3600 * 1000).toISOString(),
+          reauthorization_deadline: new Date(
+            Date.now() + 30 * 86400 * 1000,
+          ).toISOString(),
           scopes: ['user-top-read'],
           status: 'connected',
           last_synced_at: null,
