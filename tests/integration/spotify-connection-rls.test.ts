@@ -402,6 +402,12 @@ describe('PostgreSQL RLS & Invariants on public.user_spotify_connections', () =>
     expect(prefAfterDisconnect).toHaveLength(1);
     expect(prefAfterDisconnect![0].artist_name).toBe(artistName);
     expect(prefAfterDisconnect![0].preference_level).toBe('favorite');
+
+    // Cleanup preference
+    await adminClient
+      .from('user_artist_preferences')
+      .delete()
+      .eq('id', pref.id);
   });
 
   it('enforces reauthorization deadline: transitions connection to expired', async () => {
@@ -430,6 +436,12 @@ describe('PostgreSQL RLS & Invariants on public.user_spotify_connections', () =>
 
   it('allows disconnecting an expired Spotify connection and verifies credentials purged while preferences remain', async () => {
     if (!isDbAvailable || !adminClient || !userAId) return;
+
+    // Ensure clean preference state for test isolation
+    await adminClient
+      .from('user_artist_preferences')
+      .delete()
+      .eq('user_id', userAId);
 
     const repo = new SupabaseSpotifyConnectionRepository(
       adminClient,
