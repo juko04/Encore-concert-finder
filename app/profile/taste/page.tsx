@@ -50,7 +50,7 @@ export default async function TasteProfilePage({
     let message = `Spotify connection failed (${err}).`;
     if (err === 'account_conflict') {
       message =
-        'This Spotify account is already connected to another Encore account. Please disconnect it first or connect a different Spotify account.';
+        'This Spotify account is already linked to another Encore account. Please disconnect it first or connect a different Spotify account.';
     } else if (err === 'developer_mode_restricted') {
       message =
         'Access to the Spotify application is restricted to allowlisted beta users in Development Mode. You can test using the Interactive Preview.';

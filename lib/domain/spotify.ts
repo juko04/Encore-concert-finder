@@ -78,7 +78,7 @@ export class SpotifyAccountConflictError extends Error {
 
   constructor(spotifyAccountId: string) {
     super(
-      'This Spotify account is already connected to another Encore account. Please disconnect it first or connect a different Spotify account.',
+      'This Spotify account is already linked to another Encore account. Please disconnect it first or connect a different Spotify account.',
     );
     this.name = 'SpotifyAccountConflictError';
     this.spotifyAccountId = spotifyAccountId;
