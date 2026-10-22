@@ -2,19 +2,73 @@ import React from 'react';
 import Link from 'next/link';
 import { getAuthenticatedUser } from '@/lib/auth/session';
 import { createClient } from '@/lib/supabase/server';
+import { createAdminClient } from '@/lib/supabase/admin';
+import { getServerEnv } from '@/lib/env/server';
 import { SupabaseUserPreferenceRepository } from '@/lib/repositories/user-preference-repository';
+import { SupabaseSpotifyConnectionRepository } from '@/lib/repositories/spotify-connection-repository';
 import { GuestTastePrompt } from '@/components/taste/GuestTastePrompt';
-import { TasteProfileManager } from '@/components/taste/TasteProfileManager';
+import {
+  TasteProfileManager,
+  type InitialSpotifyStatus,
+} from '@/components/taste/TasteProfileManager';
 import { signOutAction } from '@/app/login/actions';
 import type { UserArtistPreference } from '@/lib/domain/user-preference';
 
 export const revalidate = 0; // Dynamic server rendering for user-scoped data
 
-export default async function TasteProfilePage() {
+interface TasteProfilePageProps {
+  searchParams?: Promise<{
+    spotify_connected?: string;
+    spotify_error?: string;
+  }>;
+}
+
+export default async function TasteProfilePage({
+  searchParams,
+}: TasteProfilePageProps) {
   const user = await getAuthenticatedUser();
+  const resolvedSearchParams = searchParams ? await searchParams : {};
 
   let preferences: UserArtistPreference[] = [];
   let loadError: string | null = null;
+  let spotifyStatus: InitialSpotifyStatus = {
+    connected: false,
+    isConfigured: false,
+  };
+
+  let spotifyBanner: { type: 'success' | 'error'; message: string } | null =
+    null;
+
+  if (resolvedSearchParams.spotify_connected === 'true') {
+    spotifyBanner = {
+      type: 'success',
+      message:
+        'Spotify account successfully connected! Inspect your top artists below to add them to your live concert profile.',
+    };
+  } else if (resolvedSearchParams.spotify_error) {
+    const err = resolvedSearchParams.spotify_error;
+    let message = `Spotify connection failed (${err}).`;
+    if (err === 'account_conflict') {
+      message =
+        'This Spotify account is already linked to another Encore account. Please disconnect it first or connect a different Spotify account.';
+    } else if (err === 'developer_mode_restricted') {
+      message =
+        'Access to the Spotify application is restricted to allowlisted beta users in Development Mode. You can test using the Interactive Preview.';
+    } else if (err === 'invalid_state') {
+      message =
+        'Spotify connection failed: invalid state parameter. Please try connecting again.';
+    } else if (err === 'not_configured') {
+      message =
+        'Spotify integration is not configured or disabled in this environment. Use the Interactive Preview below.';
+    } else if (err === 'access_denied') {
+      message = 'Spotify connection cancelled or permissions denied.';
+    } else if (err === 'session_mismatch') {
+      message =
+        'Spotify connection failed: the logged-in user changed during authorization. Please restart the connection flow.';
+    }
+
+    spotifyBanner = { type: 'error', message };
+  }
 
   if (user) {
     try {
@@ -25,6 +79,35 @@ export default async function TasteProfilePage() {
       console.error('[TasteProfilePage load error]:', err);
       loadError =
         'Unable to load your music preferences right now. Please try refreshing the page.';
+    }
+
+    try {
+      const serverEnv = getServerEnv();
+      spotifyStatus.isConfigured = Boolean(
+        serverEnv.ENABLE_SPOTIFY_INTEGRATION &&
+        serverEnv.SPOTIFY_CLIENT_ID &&
+        serverEnv.SPOTIFY_CLIENT_SECRET &&
+        serverEnv.SPOTIFY_REDIRECT_URI &&
+        serverEnv.SPOTIFY_TOKEN_ENCRYPTION_KEY,
+      );
+
+      const adminSupabase = createAdminClient();
+      const spotifyRepo = new SupabaseSpotifyConnectionRepository(
+        adminSupabase,
+        serverEnv.SPOTIFY_TOKEN_ENCRYPTION_KEY,
+      );
+      const conn = await spotifyRepo.getConnection(user.id);
+      if (conn) {
+        spotifyStatus = {
+          connected: conn.status === 'connected',
+          spotifyAccountId: conn.spotifyAccountId,
+          status: conn.status,
+          lastSyncedAt: conn.lastSyncedAt,
+          isConfigured: spotifyStatus.isConfigured,
+        };
+      }
+    } catch (err) {
+      console.warn('[TasteProfilePage spotify status warning]:', err);
     }
   }
 
@@ -116,6 +199,8 @@ export default async function TasteProfilePage() {
             <TasteProfileManager
               initialPreferences={preferences}
               userEmail={user.email}
+              initialSpotifyStatus={spotifyStatus}
+              spotifyBanner={spotifyBanner}
             />
           )
         ) : (

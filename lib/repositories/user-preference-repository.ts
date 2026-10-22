@@ -1,6 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { normalizeName } from '@/lib/domain/value-objects';
 import {
+  ConflictingArtistIdentityError,
   InvalidCatalogArtistError,
   type PreferenceLevel,
   type SavePreferenceInput,
@@ -8,6 +9,8 @@ import {
   VALID_PREFERENCE_LEVELS,
 } from '@/lib/domain/user-preference';
 import type { IUserPreferenceRepository } from './interfaces';
+
+export { ConflictingArtistIdentityError };
 
 interface UserArtistPreferenceRow {
   id: string;
@@ -17,16 +20,27 @@ interface UserArtistPreferenceRow {
   artist_name: string;
   normalized_artist_name: string;
   preference_level: PreferenceLevel;
+  spotify_artist_id?: string | null;
   created_at: string;
   updated_at: string;
   artists?: {
     id: string;
     name: string;
     image_url: string | null;
+    artist_external_ids?: Array<{
+      provider: string;
+      external_id: string;
+    }> | null;
   } | null;
 }
 
 function mapRowToDomain(row: UserArtistPreferenceRow): UserArtistPreference {
+  const canonicalSpotifyExtId =
+    row.artists?.artist_external_ids?.find((e) => e.provider === 'spotify')
+      ?.external_id ?? null;
+  const effectiveSpotifyArtistId =
+    row.spotify_artist_id ?? canonicalSpotifyExtId;
+
   return {
     id: row.id,
     userId: row.user_id,
@@ -42,10 +56,15 @@ function mapRowToDomain(row: UserArtistPreferenceRow): UserArtistPreference {
           id: row.artists.id,
           name: row.artists.name,
           imageUrl: row.artists.image_url,
+          spotifyArtistId: canonicalSpotifyExtId ?? effectiveSpotifyArtistId,
         }
       : null,
+    spotifyArtistId: effectiveSpotifyArtistId,
   };
 }
+
+const PREFERENCE_SELECT_QUERY =
+  '*, artists(id, name, image_url, artist_external_ids(provider, external_id))';
 
 export class SupabaseUserPreferenceRepository implements IUserPreferenceRepository {
   private client: SupabaseClient;
@@ -59,7 +78,7 @@ export class SupabaseUserPreferenceRepository implements IUserPreferenceReposito
 
     const { data, error } = await this.client
       .from('user_artist_preferences')
-      .select('*, artists(id, name, image_url)')
+      .select(PREFERENCE_SELECT_QUERY)
       .eq('user_id', userId)
       .order('created_at', { ascending: false });
 
@@ -80,7 +99,7 @@ export class SupabaseUserPreferenceRepository implements IUserPreferenceReposito
 
     const { data, error } = await this.client
       .from('user_artist_preferences')
-      .select('*, artists(id, name, image_url)')
+      .select(PREFERENCE_SELECT_QUERY)
       .eq('id', preferenceId)
       .eq('user_id', userId)
       .maybeSingle();
@@ -108,8 +127,10 @@ export class SupabaseUserPreferenceRepository implements IUserPreferenceReposito
       throw new Error(`Invalid preference level: ${input.preferenceLevel}`);
     }
 
+    const trimmedSpotifyId = input.spotifyArtistId?.trim() || null;
+
+    // 1. Explicit canonical artist ID provided (e.g. user selected from catalog search dropdown)
     if (input.artistId) {
-      // 1. Explicit canonical artist association: validate against actual catalog
       const { data: canonicalArtist, error: lookupErr } = await this.client
         .from('artists')
         .select('id, name, normalized_name, image_url')
@@ -125,14 +146,71 @@ export class SupabaseUserPreferenceRepository implements IUserPreferenceReposito
         throw new InvalidCatalogArtistError(input.artistId);
       }
 
-      // Authoritative attributes derived from verified catalog record
       const authoritativeName = canonicalArtist.name;
       const authoritativeNorm = canonicalArtist.normalized_name;
 
+      // Find all external IDs mapped to this canonical artist
+      const { data: canonicalExtIds, error: extErr } = await this.client
+        .from('artist_external_ids')
+        .select('provider, external_id')
+        .eq('artist_id', input.artistId);
+
+      if (extErr) {
+        throw new Error(
+          `Failed to check artist external IDs: ${extErr.message}`,
+        );
+      }
+
+      const canonicalSpotifyExtId =
+        canonicalExtIds?.find((e) => e.provider === 'spotify')?.external_id ??
+        null;
+
+      if (trimmedSpotifyId) {
+        const { data: mappedToArtist, error: mapErr } = await this.client
+          .from('artist_external_ids')
+          .select('artist_id')
+          .eq('provider', 'spotify')
+          .eq('external_id', trimmedSpotifyId)
+          .maybeSingle();
+
+        if (mapErr) {
+          throw new Error(
+            `Failed to verify external ID mapping: ${mapErr.message}`,
+          );
+        }
+
+        if (mappedToArtist && mappedToArtist.artist_id !== input.artistId) {
+          throw new ConflictingArtistIdentityError(
+            `Supplied Spotify artist ID '${trimmedSpotifyId}' is mapped to a different canonical artist ('${mappedToArtist.artist_id}') than '${input.artistId}'.`,
+            input.artistId,
+            trimmedSpotifyId,
+          );
+        }
+
+        if (
+          canonicalSpotifyExtId &&
+          canonicalSpotifyExtId !== trimmedSpotifyId
+        ) {
+          throw new ConflictingArtistIdentityError(
+            `Canonical artist '${input.artistId}' is already mapped to Spotify artist '${canonicalSpotifyExtId}', which conflicts with supplied Spotify artist '${trimmedSpotifyId}'.`,
+            input.artistId,
+            trimmedSpotifyId,
+          );
+        }
+
+        if (!mappedToArtist && !canonicalSpotifyExtId) {
+          throw new ConflictingArtistIdentityError(
+            `Supplied Spotify artist ID '${trimmedSpotifyId}' cannot be verified against canonical artist '${input.artistId}' via trusted external-ID mappings.`,
+            input.artistId,
+            trimmedSpotifyId,
+          );
+        }
+      }
+
       // Check strictly for existing preference for this user with this exact canonical artist_id
-      const { data: existing, error: checkError } = await this.client
+      const { data: existingByArtist, error: checkError } = await this.client
         .from('user_artist_preferences')
-        .select('id')
+        .select('id, spotify_artist_id')
         .eq('user_id', input.userId)
         .eq('artist_id', input.artistId)
         .maybeSingle();
@@ -143,17 +221,42 @@ export class SupabaseUserPreferenceRepository implements IUserPreferenceReposito
         );
       }
 
+      let existing = existingByArtist;
+      const targetSpotifyIdToCheck = trimmedSpotifyId ?? canonicalSpotifyExtId;
+
+      if (!existing && targetSpotifyIdToCheck) {
+        const { data: existingBySpotify } = await this.client
+          .from('user_artist_preferences')
+          .select('id, spotify_artist_id')
+          .eq('user_id', input.userId)
+          .eq('spotify_artist_id', targetSpotifyIdToCheck)
+          .maybeSingle();
+
+        if (existingBySpotify) {
+          existing = existingBySpotify;
+        }
+      }
+
+      // Preserve existing Spotify artist ID if catalog search did not supply a new provider ID
+      const finalSpotifyArtistId =
+        trimmedSpotifyId ??
+        existing?.spotify_artist_id ??
+        canonicalSpotifyExtId ??
+        null;
+
       if (existing) {
         const { data: updated, error: updateError } = await this.client
           .from('user_artist_preferences')
           .update({
+            artist_id: input.artistId,
             preference_level: input.preferenceLevel,
             artist_name: authoritativeName,
             normalized_artist_name: authoritativeNorm,
+            spotify_artist_id: finalSpotifyArtistId,
             updated_at: new Date().toISOString(),
           })
           .eq('id', existing.id)
-          .select('*, artists(id, name, image_url)')
+          .select(PREFERENCE_SELECT_QUERY)
           .single();
 
         if (updateError) {
@@ -174,8 +277,9 @@ export class SupabaseUserPreferenceRepository implements IUserPreferenceReposito
           artist_name: authoritativeName,
           normalized_artist_name: authoritativeNorm,
           preference_level: input.preferenceLevel,
+          spotify_artist_id: finalSpotifyArtistId,
         })
-        .select('*, artists(id, name, image_url)')
+        .select(PREFERENCE_SELECT_QUERY)
         .single();
 
       if (insertError) {
@@ -187,7 +291,118 @@ export class SupabaseUserPreferenceRepository implements IUserPreferenceReposito
       return mapRowToDomain(inserted as unknown as UserArtistPreferenceRow);
     }
 
-    // 2. Uncataloged artist entry: store with artist_id = null and archived_artist_id = null
+    // 2. Explicit Spotify Artist ID provided (e.g. from Spotify top artists import)
+    if (trimmedSpotifyId) {
+      // 2a. Check if authoritative external-ID mapping exists in Encore's catalog
+      let matchedCanonicalArtistId: string | null = null;
+      let authoritativeName = rawArtistName;
+      let authoritativeNorm = normalizeName(rawArtistName);
+
+      const { data: extMapping, error: extLookupErr } = await this.client
+        .from('artist_external_ids')
+        .select('artist_id, artists(id, name, normalized_name, image_url)')
+        .eq('provider', 'spotify')
+        .eq('external_id', trimmedSpotifyId)
+        .maybeSingle();
+
+      if (extLookupErr) {
+        throw new Error(
+          `Failed to check artist external ID: ${extLookupErr.message}`,
+        );
+      }
+
+      if (extMapping?.artists) {
+        matchedCanonicalArtistId = extMapping.artist_id;
+        const artistRecord = extMapping.artists as unknown as {
+          id: string;
+          name: string;
+          normalized_name: string;
+        };
+        authoritativeName = artistRecord.name;
+        authoritativeNorm = artistRecord.normalized_name;
+      }
+
+      // 2b. Check if user already has a preference for this Spotify artist ID
+      let existingPrefId: string | null = null;
+      const { data: existingSpotifyPref, error: spotifyPrefError } =
+        await this.client
+          .from('user_artist_preferences')
+          .select('id')
+          .eq('user_id', input.userId)
+          .eq('spotify_artist_id', trimmedSpotifyId)
+          .maybeSingle();
+
+      if (spotifyPrefError) {
+        throw new Error(
+          `Failed to check existing Spotify preference: ${spotifyPrefError.message}`,
+        );
+      }
+
+      if (existingSpotifyPref) {
+        existingPrefId = existingSpotifyPref.id;
+      } else if (matchedCanonicalArtistId) {
+        // Also check if user already had a preference for this canonical artist without spotify_artist_id
+        const { data: existingCanonicalPref } = await this.client
+          .from('user_artist_preferences')
+          .select('id')
+          .eq('user_id', input.userId)
+          .eq('artist_id', matchedCanonicalArtistId)
+          .maybeSingle();
+
+        if (existingCanonicalPref) {
+          existingPrefId = existingCanonicalPref.id;
+        }
+      }
+
+      if (existingPrefId) {
+        const { data: updated, error: updateError } = await this.client
+          .from('user_artist_preferences')
+          .update({
+            preference_level: input.preferenceLevel,
+            artist_id: matchedCanonicalArtistId,
+            artist_name: authoritativeName,
+            normalized_artist_name: authoritativeNorm,
+            spotify_artist_id: trimmedSpotifyId,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', existingPrefId)
+          .select(PREFERENCE_SELECT_QUERY)
+          .single();
+
+        if (updateError) {
+          throw new Error(
+            `Failed to update Spotify user preference: ${updateError.message}`,
+          );
+        }
+
+        return mapRowToDomain(updated as unknown as UserArtistPreferenceRow);
+      }
+
+      // Insert new preference for this Spotify artist
+      const { data: inserted, error: insertError } = await this.client
+        .from('user_artist_preferences')
+        .insert({
+          user_id: input.userId,
+          artist_id: matchedCanonicalArtistId,
+          archived_artist_id: null,
+          artist_name: authoritativeName,
+          normalized_artist_name: authoritativeNorm,
+          preference_level: input.preferenceLevel,
+          spotify_artist_id: trimmedSpotifyId,
+        })
+        .select(PREFERENCE_SELECT_QUERY)
+        .single();
+
+      if (insertError) {
+        throw new Error(
+          `Failed to insert Spotify user preference: ${insertError.message}`,
+        );
+      }
+
+      return mapRowToDomain(inserted as unknown as UserArtistPreferenceRow);
+    }
+
+    // 3. Uncataloged free-text artist entry: store with artist_id = null and spotify_artist_id = null
     const normalizedName = normalizeName(rawArtistName);
 
     const { data: existingUnresolved, error: checkUnresolvedError } =
@@ -197,6 +412,7 @@ export class SupabaseUserPreferenceRepository implements IUserPreferenceReposito
         .eq('user_id', input.userId)
         .is('artist_id', null)
         .is('archived_artist_id', null)
+        .is('spotify_artist_id', null)
         .eq('normalized_artist_name', normalizedName)
         .maybeSingle();
 
@@ -215,7 +431,7 @@ export class SupabaseUserPreferenceRepository implements IUserPreferenceReposito
           updated_at: new Date().toISOString(),
         })
         .eq('id', existingUnresolved.id)
-        .select('*, artists(id, name, image_url)')
+        .select(PREFERENCE_SELECT_QUERY)
         .single();
 
       if (updateError) {
@@ -236,8 +452,9 @@ export class SupabaseUserPreferenceRepository implements IUserPreferenceReposito
         artist_name: rawArtistName,
         normalized_artist_name: normalizedName,
         preference_level: input.preferenceLevel,
+        spotify_artist_id: null,
       })
-      .select('*, artists(id, name, image_url)')
+      .select(PREFERENCE_SELECT_QUERY)
       .single();
 
     if (insertError) {
@@ -272,7 +489,7 @@ export class SupabaseUserPreferenceRepository implements IUserPreferenceReposito
       })
       .eq('id', preferenceId)
       .eq('user_id', userId)
-      .select('*, artists(id, name, image_url)')
+      .select(PREFERENCE_SELECT_QUERY)
       .maybeSingle();
 
     if (error) {

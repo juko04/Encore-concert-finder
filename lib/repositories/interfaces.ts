@@ -29,6 +29,12 @@ import type {
   SavePreferenceInput,
   UserArtistPreference,
 } from '@/lib/domain/user-preference';
+import type {
+  SaveSpotifyConnectionInput,
+  SpotifyConnection,
+  SpotifyConnectionStatus,
+  UpdateSpotifyTokensInput,
+} from '@/lib/domain/spotify';
 
 export interface EventListFilters {
   fromDate?: string;
@@ -258,4 +264,28 @@ export interface IUserPreferenceRepository {
     preferenceLevel: PreferenceLevel,
   ): Promise<UserArtistPreference>;
   deletePreference(userId: string, preferenceId: string): Promise<boolean>;
+}
+
+export interface SpotifyConnectionTokens {
+  accessToken: string;
+  refreshToken: string;
+  tokenExpiresAt: Date;
+  reauthorizationDeadline: Date;
+  scopes: string[];
+}
+
+export interface ISpotifyConnectionRepository {
+  getConnection(userId: string): Promise<SpotifyConnection | null>;
+  getConnectionTokens(userId: string): Promise<SpotifyConnectionTokens | null>;
+  findBySpotifyAccountId(
+    spotifyAccountId: string,
+  ): Promise<SpotifyConnection | null>;
+  saveConnection(input: SaveSpotifyConnectionInput): Promise<SpotifyConnection>;
+  updateTokens(
+    userId: string,
+    input: UpdateSpotifyTokensInput,
+  ): Promise<SpotifyConnection>;
+  updateStatus(userId: string, status: SpotifyConnectionStatus): Promise<void>;
+  recordSync(userId: string, syncedAt?: Date): Promise<void>;
+  deleteConnection(userId: string): Promise<boolean>;
 }

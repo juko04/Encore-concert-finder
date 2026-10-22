@@ -78,6 +78,8 @@ export default defineConfig({
     timeout: 120 * 1000,
     env: {
       PORT: `${PORT}`,
+      PLAYWRIGHT_TEST: 'true',
+      ENABLE_SPOTIFY_DEV_PREVIEW: 'true',
       ...resolveLocalSupabaseEnv(),
     },
   },

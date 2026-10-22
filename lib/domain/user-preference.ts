@@ -17,6 +17,7 @@ export interface CanonicalArtistSummary {
   id: string;
   name: string;
   imageUrl?: string | null;
+  spotifyArtistId?: string | null;
 }
 
 export interface UserArtistPreference {
@@ -30,6 +31,7 @@ export interface UserArtistPreference {
   createdAt: string;
   updatedAt: string;
   canonicalArtist?: CanonicalArtistSummary | null;
+  spotifyArtistId?: string | null;
 }
 
 export interface SavePreferenceInput {
@@ -37,6 +39,7 @@ export interface SavePreferenceInput {
   artistId?: string | null;
   artistName: string;
   preferenceLevel: PreferenceLevel;
+  spotifyArtistId?: string | null;
 }
 
 export class InvalidCatalogArtistError extends Error {
@@ -47,5 +50,22 @@ export class InvalidCatalogArtistError extends Error {
     this.name = 'InvalidCatalogArtistError';
     this.artistId = artistId;
     Object.setPrototypeOf(this, InvalidCatalogArtistError.prototype);
+  }
+}
+
+export class ConflictingArtistIdentityError extends Error {
+  readonly artistId?: string | null;
+  readonly spotifyArtistId?: string | null;
+
+  constructor(
+    message: string = 'Supplied Spotify artist identity conflicts with catalog artist identity.',
+    artistId?: string | null,
+    spotifyArtistId?: string | null,
+  ) {
+    super(message);
+    this.name = 'ConflictingArtistIdentityError';
+    this.artistId = artistId;
+    this.spotifyArtistId = spotifyArtistId;
+    Object.setPrototypeOf(this, ConflictingArtistIdentityError.prototype);
   }
 }

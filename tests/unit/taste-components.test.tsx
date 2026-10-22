@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import React from 'react';
 import { describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { PreferenceLevelBadge } from '@/components/taste/PreferenceLevelBadge';
 import { ArtistPreferenceCard } from '@/components/taste/ArtistPreferenceCard';
 import { GuestTastePrompt } from '@/components/taste/GuestTastePrompt';
@@ -9,6 +9,38 @@ import { ArtistSearchInput } from '@/components/taste/ArtistSearchInput';
 import { LoginForm } from '@/components/auth/LoginForm';
 import { TasteProfileManager } from '@/components/taste/TasteProfileManager';
 import type { UserArtistPreference } from '@/lib/domain/user-preference';
+
+vi.mock('@/app/profile/taste/actions', () => ({
+  savePreferenceAction: vi.fn(),
+  updatePreferenceLevelAction: vi.fn(),
+  deletePreferenceAction: vi.fn(),
+  searchCatalogArtistsAction: vi.fn().mockResolvedValue({ artists: [] }),
+  getSpotifyStatusAction: vi
+    .fn()
+    .mockResolvedValue({ connected: false, configured: true }),
+  disconnectSpotifyAction: vi.fn().mockResolvedValue({ success: true }),
+  getSpotifyTopArtistsAction: vi
+    .fn()
+    .mockImplementation(async (timeRange: string, isDemo?: boolean) => {
+      if (isDemo) {
+        return {
+          artists: [
+            {
+              id: 'synth-chappell-roan',
+              name: 'Chappell Roan',
+              genres: ['pop', 'indie pop'],
+              imageUrl: 'https://images.example.com/chappell.jpg',
+              popularity: 88,
+              trend: 'rising',
+              timeRange: 'short_term',
+            },
+          ],
+          isSyntheticPreview: true,
+        };
+      }
+      return { artists: [], isSyntheticPreview: false };
+    }),
+}));
 
 describe('Taste UI Components', () => {
   describe('PreferenceLevelBadge', () => {
@@ -268,6 +300,68 @@ describe('Taste UI Components', () => {
       expect(screen.getByTestId('filter-tab-like')).toHaveTextContent(
         'Liked (0)',
       );
+    });
+
+    it('isolates simulated demo preferences into a dedicated container and clears them on exit', async () => {
+      const mockPref: UserArtistPreference = {
+        id: 'pref-real',
+        userId: 'user-foo',
+        artistId: null,
+        artistName: 'Tycho',
+        normalizedArtistName: 'tycho',
+        preferenceLevel: 'favorite',
+        createdAt: '2026-10-14T00:00:00Z',
+        updatedAt: '2026-10-14T00:00:00Z',
+      };
+
+      render(
+        <TasteProfileManager
+          initialPreferences={[mockPref]}
+          userEmail="user@example.com"
+        />,
+      );
+
+      // Open interactive preview
+      const previewToggle = screen.getByTestId('toggle-preview-mode-btn');
+      fireEvent.click(previewToggle);
+
+      // Verify preview container is visible
+      expect(screen.getByTestId('spotify-taste-preview')).toBeInTheDocument();
+
+      // Wait for synthetic artists to load
+      await waitFor(() => {
+        expect(
+          screen.getByTestId('import-artist-btn-synth-chappell-roan'),
+        ).toBeInTheDocument();
+      });
+
+      // Find and import Chappell Roan
+      const importBtn = screen.getByTestId(
+        'import-artist-btn-synth-chappell-roan',
+      );
+      fireEvent.click(importBtn);
+
+      const confirmBtn = screen.getByTestId(
+        'confirm-import-btn-synth-chappell-roan',
+      );
+      fireEvent.click(confirmBtn);
+
+      // Dedicated simulated demo container must now be visible with simulated selection
+      const demoContainer = screen.getByTestId(
+        'simulated-demo-preferences-container',
+      );
+      expect(demoContainer).toBeInTheDocument();
+      expect(demoContainer).toHaveTextContent('Interactive Preview Simulation');
+      expect(demoContainer).toHaveTextContent('Chappell Roan');
+
+      // Real preference count should still be 1 ('All (1)'), keeping real preferences isolated
+      expect(screen.getByTestId('filter-tab-all')).toHaveTextContent('All (1)');
+
+      // Toggling preview mode off clears simulated selections
+      fireEvent.click(previewToggle);
+      expect(
+        screen.queryByTestId('simulated-demo-preferences-container'),
+      ).not.toBeInTheDocument();
     });
   });
 });

@@ -6,6 +6,7 @@ import {
 import { escapeLikePattern, normalizeName } from '@/lib/domain/value-objects';
 import { sanitizeRedirectPath } from '@/lib/auth/redirect';
 import {
+  ConflictingArtistIdentityError,
   InvalidCatalogArtistError,
   type PreferenceLevel,
   type UserArtistPreference,
@@ -411,5 +412,155 @@ describe('Phase 2 PR 4A — User Artist Preferences & Search Safety', () => {
     // Invariant: Archived preference remains completely unchanged!
     const archivedAfter = await prefRepo.getPreference(userId, archivedId);
     expect(archivedAfter?.preferenceLevel).toBe('like');
+  });
+
+  describe('Spotify Identity Preservation and Validation', () => {
+    it('preserves existing spotify_artist_id when catalog search preference update omits provider ID', async () => {
+      const catalogRepo = new MemoryCatalogRepository();
+      const prefRepo = new MemoryUserPreferenceRepository(catalogRepo);
+      const userId = 'user-spotify-preserve-test';
+
+      const canonical = await catalogRepo.createArtist({
+        name: 'Portishead',
+        normalizedName: normalizeName('Portishead'),
+      });
+
+      catalogRepo.artistExternalIds.set('ext-portishead', {
+        id: 'ext-portishead',
+        artistId: canonical.id,
+        provider: 'spotify',
+        externalId: 'spot-portishead-123',
+      });
+
+      // 1. User initially confirms artist via Spotify recommendation
+      const initialPref = await prefRepo.savePreference({
+        userId,
+        artistName: 'Portishead',
+        spotifyArtistId: 'spot-portishead-123',
+        preferenceLevel: 'favorite',
+      });
+
+      expect(initialPref.artistId).toBe(canonical.id);
+      expect(initialPref.spotifyArtistId).toBe('spot-portishead-123');
+
+      // 2. Later, user updates preference level via ordinary catalog search (providing artistId without spotifyArtistId)
+      const updatedPref = await prefRepo.savePreference({
+        userId,
+        artistId: canonical.id,
+        artistName: 'Portishead',
+        preferenceLevel: 'like',
+      });
+
+      // Invariant: Exact preference is updated and spotify_artist_id is preserved!
+      expect(updatedPref.id).toBe(initialPref.id);
+      expect(updatedPref.preferenceLevel).toBe('like');
+      expect(updatedPref.spotifyArtistId).toBe('spot-portishead-123');
+
+      const reloaded = await prefRepo.getPreference(userId, initialPref.id);
+      expect(reloaded?.spotifyArtistId).toBe('spot-portishead-123');
+    });
+
+    it('rejects contradictory canonical and Spotify identities with ConflictingArtistIdentityError', async () => {
+      const catalogRepo = new MemoryCatalogRepository();
+      const prefRepo = new MemoryUserPreferenceRepository(catalogRepo);
+      const userId = 'user-conflict-test';
+
+      const artistA = await catalogRepo.createArtist({
+        name: 'Artist A',
+        normalizedName: normalizeName('Artist A'),
+      });
+      const artistB = await catalogRepo.createArtist({
+        name: 'Artist B',
+        normalizedName: normalizeName('Artist B'),
+      });
+
+      catalogRepo.artistExternalIds.set('ext-a', {
+        id: 'ext-a',
+        artistId: artistA.id,
+        provider: 'spotify',
+        externalId: 'spot-a-111',
+      });
+      catalogRepo.artistExternalIds.set('ext-b', {
+        id: 'ext-b',
+        artistId: artistB.id,
+        provider: 'spotify',
+        externalId: 'spot-b-222',
+      });
+
+      // Client attempts to supply artist A's canonical ID with artist B's Spotify ID
+      await expect(
+        prefRepo.savePreference({
+          userId,
+          artistId: artistA.id,
+          artistName: 'Artist A',
+          spotifyArtistId: 'spot-b-222',
+          preferenceLevel: 'favorite',
+        }),
+      ).rejects.toThrow(ConflictingArtistIdentityError);
+    });
+
+    it('rejects arbitrary unverified Spotify ID provided with canonical artist ID', async () => {
+      const catalogRepo = new MemoryCatalogRepository();
+      const prefRepo = new MemoryUserPreferenceRepository(catalogRepo);
+      const userId = 'user-unverified-test';
+
+      const artistC = await catalogRepo.createArtist({
+        name: 'Artist C',
+        normalizedName: normalizeName('Artist C'),
+      });
+
+      // Artist C has no external IDs mapped
+      await expect(
+        prefRepo.savePreference({
+          userId,
+          artistId: artistC.id,
+          artistName: 'Artist C',
+          spotifyArtistId: 'spot-arbitrary-unverified',
+          preferenceLevel: 'like',
+        }),
+      ).rejects.toThrow(ConflictingArtistIdentityError);
+    });
+
+    it('keeps two distinct same-name Spotify artists independent without collision', async () => {
+      const catalogRepo = new MemoryCatalogRepository();
+      const prefRepo = new MemoryUserPreferenceRepository(catalogRepo);
+      const userId = 'user-same-name-test';
+
+      // 1. Add first artist 'Aurora' (Norway)
+      const pref1 = await prefRepo.savePreference({
+        userId,
+        artistName: 'Aurora',
+        spotifyArtistId: 'spot-aurora-no',
+        preferenceLevel: 'favorite',
+      });
+
+      // 2. Add second artist 'Aurora' (USA)
+      const pref2 = await prefRepo.savePreference({
+        userId,
+        artistName: 'Aurora',
+        spotifyArtistId: 'spot-aurora-us',
+        preferenceLevel: 'interested',
+      });
+
+      // Invariant: Two separate records exist with distinct IDs
+      expect(pref1.id).not.toBe(pref2.id);
+      expect(pref1.spotifyArtistId).toBe('spot-aurora-no');
+      expect(pref2.spotifyArtistId).toBe('spot-aurora-us');
+
+      // 3. Updating pref1 leaves pref2 unchanged
+      const updated1 = await prefRepo.updatePreferenceLevel(
+        userId,
+        pref1.id,
+        'like',
+      );
+      expect(updated1.preferenceLevel).toBe('like');
+
+      const reloaded2 = await prefRepo.getPreference(userId, pref2.id);
+      expect(reloaded2?.preferenceLevel).toBe('interested');
+      expect(reloaded2?.spotifyArtistId).toBe('spot-aurora-us');
+
+      const all = await prefRepo.getPreferences(userId);
+      expect(all.length).toBe(2);
+    });
   });
 });
