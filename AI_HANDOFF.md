@@ -19,9 +19,17 @@ Durable architecture records belong in [`docs/architecture/`](docs/architecture/
   4. Implement bounded travel/distance utility respecting user radius (`default_radius_miles`) and price affordability respecting profile thresholds (`max_normal_ticket_price`, `max_favorite_artist_price`).
   5. Minimal database migration adding `recommendation_preset` to `public.profiles` protected by RLS.
   6. Development-only inspection view at `/discover/scoring-preview` for inspecting real calculations on seeded fixtures.
-- **Verification State:** PR #11 Implementation Verified: All 360 unit tests passing (100%), all 52 PostgreSQL integration tests passing, Next.js production build clean, and Playwright smoke tests passing (7/7).
-- **Immediate Next Action:** Commit, push branch, open PR #11, and await CI / user review.
-- **Phase 2 Status:** **ACTIVE — PR #11 COMPLETE & READY FOR REVIEW.**
+- **Verification State:** PR #11 Verified & Green in CI:
+  - Branch: `feature/phase-2-recommendation-scoring` (Commit `f3cfc6a`)
+  - Pull Request: [PR #11](https://github.com/juko04/Encore-concert-finder/pull/11)
+  - GitHub Actions Run: [39870797920](https://github.com/juko04/Encore-concert-finder/actions/runs/39870797920) (Green / All Successful)
+  - Unit Tests: 360/360 passed across 29 test suites (`npm test`)
+  - PostgreSQL Integration Tests: 52/52 passed across 7 test suites against running Supabase instance (`npm run test:integration`)
+  - Playwright E2E: 7/7 browser tests passed (`npm run test:e2e`)
+  - Production Build: Next.js production build clean (0 errors, 14 routes)
+  - Code Quality: Prettier format clean, ESLint clean, strict TypeScript clean
+- **Immediate Next Action:** Await user / independent reviewer inspection and merge of PR #11. Do NOT auto-merge. Do NOT proceed to PR #12 until PR #11 is merged to `main`.
+- **Phase 2 Status:** **ACTIVE — PR #11 READY FOR INDEPENDENT REVIEW.**
 
 ---
 
