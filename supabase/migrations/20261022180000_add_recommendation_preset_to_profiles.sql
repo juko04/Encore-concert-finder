@@ -6,3 +6,4 @@ alter table public.profiles
   add constraint chk_recommendation_preset check (
     recommendation_preset in ('balanced', 'artist_first', 'nearby', 'value')
   );
+

@@ -144,14 +144,17 @@ describe('PostgreSQL Integration: Recommendation Scoring & Profile RLS', () => {
 
     // Seed test canonical catalog entities using adminClient
     testArtistId = crypto.randomUUID();
-    await adminClient.from('artists').insert({
+    const { error: artistErr } = await adminClient.from('artists').insert({
       id: testArtistId,
       name: `Postgres Rec Artist ${timestamp}`,
       normalized_name: `postgres rec artist ${timestamp}`,
     });
+    if (artistErr) {
+      throw new Error(`Failed to insert test artist: ${artistErr.message}`);
+    }
 
     testVenueId = crypto.randomUUID();
-    await adminClient.from('venues').insert({
+    const { error: venueErr } = await adminClient.from('venues').insert({
       id: testVenueId,
       name: `Test Scoring Hall ${timestamp}`,
       normalized_name: `test scoring hall ${timestamp}`,
@@ -160,9 +163,12 @@ describe('PostgreSQL Integration: Recommendation Scoring & Profile RLS', () => {
       lat: 39.7392,
       lng: -104.9903,
     });
+    if (venueErr) {
+      throw new Error(`Failed to insert test venue: ${venueErr.message}`);
+    }
 
     testEventId = crypto.randomUUID();
-    await adminClient.from('events').insert({
+    const { error: eventErr } = await adminClient.from('events').insert({
       id: testEventId,
       name: `Postgres Rec Artist Live ${timestamp}`,
       normalized_name: `postgres rec artist live ${timestamp}`,
@@ -175,26 +181,44 @@ describe('PostgreSQL Integration: Recommendation Scoring & Profile RLS', () => {
       lng: -104.9903,
       timezone: 'America/Denver',
       local_start_date: '2026-11-20',
+      starts_at: '2026-11-20T20:00:00-07:00',
       start_time_precision: 'instant',
       is_multi_day: false,
     });
+    if (eventErr) {
+      throw new Error(`Failed to insert test event: ${eventErr.message}`);
+    }
 
-    await adminClient.from('event_artists').insert({
-      event_id: testEventId,
-      artist_id: testArtistId,
-      billing_position: 'headliner',
-      sort_order: 1,
-    });
+    const { error: eventArtistErr } = await adminClient
+      .from('event_artists')
+      .insert({
+        event_id: testEventId,
+        artist_id: testArtistId,
+        billing_position: 'headliner',
+        sort_order: 1,
+      });
+    if (eventArtistErr) {
+      throw new Error(
+        `Failed to insert test event artist: ${eventArtistErr.message}`,
+      );
+    }
 
-    await adminClient.from('event_ticket_links').insert({
-      event_id: testEventId,
-      url: `https://tickets.example.com/${testEventId}`,
-      normalized_url: `https://tickets.example.com/${testEventId}`,
-      min_price: 45,
-      max_price: 65,
-      currency: 'USD',
-      inventory_status: 'available',
-    });
+    const { error: ticketLinkErr } = await adminClient
+      .from('event_ticket_links')
+      .insert({
+        event_id: testEventId,
+        url: `https://tickets.example.com/${testEventId}`,
+        normalized_url: `https://tickets.example.com/${testEventId}`,
+        min_price: 45,
+        max_price: 65,
+        currency: 'USD',
+        inventory_status: 'available',
+      });
+    if (ticketLinkErr) {
+      throw new Error(
+        `Failed to insert test ticket link: ${ticketLinkErr.message}`,
+      );
+    }
   });
 
   afterAll(async () => {
@@ -284,7 +308,7 @@ describe('PostgreSQL Integration: Recommendation Scoring & Profile RLS', () => {
     const [profile, preferences, events] = await Promise.all([
       profileRepo.getProfile(userAId),
       prefRepo.getPreferences(userAId),
-      catalogRepo.listEvents({ limit: 50 }),
+      catalogRepo.listEvents({ limit: 100, fromDate: '2026-11-01' }),
     ]);
 
     expect(profile).not.toBeNull();
