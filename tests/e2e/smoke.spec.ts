@@ -88,4 +88,18 @@ test.describe('Application Smoke Tests', () => {
       page.getByRole('heading', { name: 'Music Taste Profile' }),
     ).toBeVisible();
   });
+
+  test('successfully loads the recommendation scoring preview inspector', async ({
+    page,
+  }) => {
+    const response = await page.goto('/discover/scoring-preview');
+
+    expect(response?.status()).toBe(200);
+    await expect(page.getByTestId('scoring-inspector')).toBeVisible();
+    await expect(
+      page.getByRole('heading', { name: 'Recommendation Scoring Inspector' }),
+    ).toBeVisible();
+    await expect(page.getByTestId('preset-switcher')).toBeVisible();
+    await expect(page.getByTestId('toggle-fixtures-checkbox')).toBeVisible();
+  });
 });

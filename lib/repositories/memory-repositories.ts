@@ -38,9 +38,15 @@ import {
   VALID_PREFERENCE_LEVELS,
 } from '@/lib/domain/user-preference';
 import type {
+  RecommendationPreset,
+  UserProfile,
+  UserProfileUpdateInput,
+} from '@/lib/domain/profile';
+import type {
   EventListFilters,
   ICatalogRepository,
   IEventCandidateRepository,
+  IProfileRepository,
   IRawIngestRepository,
   ISourceRepository,
   ISpotifyConnectionRepository,
@@ -430,12 +436,16 @@ export class MemoryCatalogRepository implements ICatalogRepository {
 
     for (const event of paged) {
       const venue = event.venueId ? this.venues.get(event.venueId) : null;
-      const artists: Array<{ name: string; billingPosition: BillingPosition }> =
-        [];
+      const artists: Array<{
+        id?: string;
+        name: string;
+        billingPosition: BillingPosition;
+      }> = [];
       for (const ea of this.eventArtists.values()) {
         if (ea.eventId === event.id) {
           const a = this.artists.get(ea.artistId);
           artists.push({
+            id: ea.artistId,
             name: a?.name ?? 'Unknown Artist',
             billingPosition: ea.billingPosition,
           });
@@ -502,8 +512,11 @@ export class MemoryCatalogRepository implements ICatalogRepository {
         id: event.id,
         title: event.name,
         venueName: venue?.name ?? 'Venue TBA',
+        venueId: event.venueId,
         city: venue?.city ?? event.city ?? undefined,
         region: venue?.region ?? event.region ?? undefined,
+        lat: venue?.lat ?? event.lat ?? null,
+        lng: venue?.lng ?? event.lng ?? null,
         localStartDate: event.localStartDate,
         startsAt: event.startsAt,
         timezone: event.timezone,
@@ -1774,5 +1787,75 @@ export class MemorySpotifyConnectionRepository implements ISpotifyConnectionRepo
 
   clear(): void {
     this.connections.clear();
+  }
+}
+
+export class MemoryProfileRepository implements IProfileRepository {
+  private profiles = new Map<string, UserProfile>();
+
+  async getProfile(userId: string): Promise<UserProfile | null> {
+    const p = this.profiles.get(userId);
+    return p ? { ...p } : null;
+  }
+
+  async upsertProfile(
+    userId: string,
+    input: UserProfileUpdateInput,
+  ): Promise<UserProfile> {
+    const existing = this.profiles.get(userId);
+    const now = new Date().toISOString();
+
+    const updated: UserProfile = {
+      id: userId,
+      homeLatApprox:
+        input.homeLatApprox !== undefined
+          ? input.homeLatApprox
+          : (existing?.homeLatApprox ?? null),
+      homeLngApprox:
+        input.homeLngApprox !== undefined
+          ? input.homeLngApprox
+          : (existing?.homeLngApprox ?? null),
+      defaultRadiusMiles:
+        input.defaultRadiusMiles !== undefined &&
+        input.defaultRadiusMiles !== null
+          ? input.defaultRadiusMiles
+          : (existing?.defaultRadiusMiles ?? 25),
+      maxSpontaneousPrice:
+        input.maxSpontaneousPrice !== undefined
+          ? input.maxSpontaneousPrice
+          : (existing?.maxSpontaneousPrice ?? null),
+      maxNormalTicketPrice:
+        input.maxNormalTicketPrice !== undefined
+          ? input.maxNormalTicketPrice
+          : (existing?.maxNormalTicketPrice ?? null),
+      maxFavoriteArtistPrice:
+        input.maxFavoriteArtistPrice !== undefined
+          ? input.maxFavoriteArtistPrice
+          : (existing?.maxFavoriteArtistPrice ?? null),
+      travelWillingness:
+        input.travelWillingness !== undefined
+          ? input.travelWillingness
+          : (existing?.travelWillingness ?? null),
+      recommendationPreset:
+        input.recommendationPreset !== undefined
+          ? input.recommendationPreset
+          : (existing?.recommendationPreset ?? 'balanced'),
+      createdAt: existing?.createdAt ?? now,
+      updatedAt: now,
+    };
+
+    this.profiles.set(userId, updated);
+    return { ...updated };
+  }
+
+  async updatePreset(
+    userId: string,
+    preset: RecommendationPreset,
+  ): Promise<UserProfile> {
+    return this.upsertProfile(userId, { recommendationPreset: preset });
+  }
+
+  clear(): void {
+    this.profiles.clear();
   }
 }

@@ -36,6 +36,12 @@ import type {
   UpdateSpotifyTokensInput,
 } from '@/lib/domain/spotify';
 
+import type {
+  RecommendationPreset,
+  UserProfile,
+  UserProfileUpdateInput,
+} from '@/lib/domain/profile';
+
 export interface EventListFilters {
   fromDate?: string;
   toDate?: string;
@@ -288,4 +294,16 @@ export interface ISpotifyConnectionRepository {
   updateStatus(userId: string, status: SpotifyConnectionStatus): Promise<void>;
   recordSync(userId: string, syncedAt?: Date): Promise<void>;
   deleteConnection(userId: string): Promise<boolean>;
+}
+
+export interface IProfileRepository {
+  getProfile(userId: string): Promise<UserProfile | null>;
+  upsertProfile(
+    userId: string,
+    input: UserProfileUpdateInput,
+  ): Promise<UserProfile>;
+  updatePreset(
+    userId: string,
+    preset: RecommendationPreset,
+  ): Promise<UserProfile>;
 }

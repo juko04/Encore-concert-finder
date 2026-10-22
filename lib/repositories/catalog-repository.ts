@@ -520,11 +520,12 @@ export class SupabaseCatalogRepository implements ICatalogRepository {
     // Group relations in-memory by event_id
     const artistsByEventId = new Map<
       string,
-      Array<{ name: string; billingPosition: BillingPosition }>
+      Array<{ id?: string; name: string; billingPosition: BillingPosition }>
     >();
     for (const aRow of (allArtistLinks as unknown as EventArtistRow[]) || []) {
       const list = artistsByEventId.get(aRow.event_id) || [];
       list.push({
+        id: aRow.artist_id,
         name: aRow.artists?.name ?? 'Unknown Artist',
         billingPosition: aRow.billing_position,
       });
@@ -586,8 +587,11 @@ export class SupabaseCatalogRepository implements ICatalogRepository {
         id: event.id,
         title: event.name,
         venueName: venue?.name ?? 'Venue TBA',
+        venueId: event.venueId,
         city: venue?.city ?? event.city ?? undefined,
         region: venue?.region ?? event.region ?? undefined,
+        lat: venue?.lat ?? event.lat ?? null,
+        lng: venue?.lng ?? event.lng ?? null,
         localStartDate: event.localStartDate,
         startsAt: event.startsAt,
         timezone: event.timezone,
