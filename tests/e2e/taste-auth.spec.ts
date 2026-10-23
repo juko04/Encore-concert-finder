@@ -233,7 +233,7 @@ test.describe('Authenticated Music Taste Profile Browser E2E Flow', () => {
     const nearbyPresetBtn = page.getByTestId('preset-btn-nearby');
     await expect(nearbyPresetBtn).toBeVisible();
     await nearbyPresetBtn.click();
-    await expect(page.getByText('✓ Saved to profile')).toBeVisible();
+    await expect(page.getByText(/Preset saved to your profile/i)).toBeVisible();
 
     // Reload page to verify saved preset persists for authenticated user
     await page.reload();
