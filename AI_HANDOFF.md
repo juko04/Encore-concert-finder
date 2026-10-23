@@ -9,36 +9,27 @@ Durable architecture records belong in [`docs/architecture/`](docs/architecture/
 
 - **Current Milestone:** **Phase 2 — Live Ingestion & Personalization**.
 - **Active Specification:** [`docs/phases/active/PHASE_2_IMPLEMENTATION.md`](docs/phases/active/PHASE_2_IMPLEMENTATION.md).
-- **Current Branch:** `feature/phase-2-spotify-integration`
+- **Current Branch:** `feature/phase-2-recommendation-scoring`
 - **Active Implementing Agent:** Google Antigravity
-- **Current Task:** Phase 2, PR #10: Spotify Connection & Music Taste Import — CI PREVIEW E2E FIX & THIRD INDEPENDENT REVIEW REMEDIATIONS COMPLETE & GREEN.
-- **CI Preview Failure & Root Cause Resolution:**
-  1. **Root Cause Analysis:**
-     - Next.js production builds (`NODE_ENV=production`) running under Playwright CI lacked explicit test environment variables for the synthetic preview endpoint.
-     - `playwright.config.ts` `webServer.env` did not forward `ENABLE_SPOTIFY_DEV_PREVIEW`, causing `getSpotifyTopArtistsAction` to reject preview access.
-     - `TasteProfileManager.tsx` silently swallowed `res.error` when `isSyntheticDemo` was true, rendering an empty artist list instead of Chappell Roan fixture rows or an error state.
-  2. **Strict Multi-Layer Server Environment Guard (`lib/sources/spotify/synthetic-preview.ts`):**
-     - Permitted in `development` and `test` environments by default unless explicitly disabled.
-     - In `production`, strictly disabled unless running in an isolated automated test runner (`CI=true` or `PLAYWRIGHT_TEST=true`) **and** explicitly opted-in via `ENABLE_SPOTIFY_DEV_PREVIEW=true`.
-     - Invariant: Accidental feature flags in normal production deployments (without CI/test flags) are strictly rejected.
-  3. **Test Infrastructure & UI Error Handling (`playwright.config.ts`, `components/taste/SpotifyTastePreview.tsx`, `components/taste/TasteProfileManager.tsx`):**
-     - Configured `playwright.config.ts` `webServer.env` to supply `PLAYWRIGHT_TEST: 'true'` and `ENABLE_SPOTIFY_DEV_PREVIEW: 'true'` directly to the Next.js production test server process.
-     - Added `error` prop and explicit `data-testid="spotify-preview-error-state"` container to `SpotifyTastePreview`, preventing misleading empty list states when preview is unavailable.
-     - Propagated preview errors in `TasteProfileManager`.
-  4. **Comprehensive Test Coverage:**
-     - Added 7 unit tests in `tests/unit/spotify-preview.test.ts` verifying all guard conditions (dev, test, CI flag, Playwright flag, normal production, accidental flag rejection, missing CI flag).
-     - Added server action tests in `tests/unit/spotify-actions.test.ts` for production security and isolated CI execution.
-     - Added component test in `tests/unit/spotify-components.test.tsx` verifying explicit error state rendering.
-- **Verification State:** ALL VERIFICATIONS GREEN (Local & Remote GitHub Actions CI Run 39292038163):
-  - **Unit Tests:** 319/319 passing across 25 test suites (100% pass rate).
-  - **Code Style & Formatting:** `npm run format:check` passing clean (Prettier).
-  - **Linting:** `npm run lint` passing with 0 errors and 0 warnings (Next.js ESLint).
-  - **Type Checking:** `npm run typecheck` (`tsc --noEmit`) passing with 0 errors (both pre-build and post-build).
-  - **Production Build:** `npm run build` compiled successfully (10/10 static/dynamic routes generated).
-  - **Playwright E2E:** 8 passed, 0 skipped, 0 failed in GitHub Actions CI against real local Supabase with synthetic fixtures.
-  - **PostgreSQL Integration:** 50/50 tests passing across 6 suites (`catalog-rls`, `golden-path`, `profiles-rls`, `spotify-connection-rls`, `ticketmaster-canonicalization`, `user-preferences-rls`).
-- **Immediate Next Action:** Hand off PR #10 for final user approval and merge. Do NOT merge automatically; do NOT implement recommendation scoring algorithms until PR #10 is merged.
-- **Phase 2 Status:** **ACTIVE — PR #10 CI E2E & THIRD REVIEW REMEDIATIONS VERIFIED GREEN IN CI.**
+- **Current Task:** Phase 2, PR #11: Personalized Recommendation Scoring Foundation — Final Independent Review Remediation.
+- **PR #11 Objectives & Scope:**
+  1. Build a pure, deterministic, typed multi-factor recommendation scoring engine (`lib/recommendation/`).
+  2. Implement four fixed priority presets: Balanced (50/20/20/10), Artist-first (65/15/10/10), Nearby (40/35/15/10), Value (40/15/35/10).
+  3. Support explicit artist preferences with identity resolution via verified canonical/external IDs (Favorite=100, Like=75, Interested=55, Unmarked=40, Dislike=0 & suppressed).
+  4. Implement bounded travel/distance utility respecting user radius (`default_radius_miles`) and price affordability respecting profile thresholds (`max_normal_ticket_price`, `max_favorite_artist_price`).
+  5. Minimal database migration adding `recommendation_preset` to `public.profiles` protected by RLS.
+  6. Development-only inspection view at `/discover/scoring-preview` for inspecting real calculations on seeded fixtures.
+  7. Establish permanent repository development standards and mandatory PR review checklist ([`docs/development/PR_REVIEW_CHECKLIST.md`](docs/development/PR_REVIEW_CHECKLIST.md)).
+  8. Remediate final review findings: Fail-closed auth error handling in preview action (no synthetic fallback on infrastructure error), finite score bounds (rejection of NaN/Infinity/invalid coordinates, budgets, radii), fail-closed PostgreSQL integration tests, authoritative UI currency & $0 vs free event presentation, alignment of PHASE_2_IMPLEMENTATION.md, and strengthened browser testing.
+- **Verification State:** PR #11 Final Review Remediation Complete:
+  - Branch: `feature/phase-2-recommendation-scoring`
+  - Pull Request: [PR #11](https://github.com/juko04/Encore-concert-finder/pull/11)
+  - Unit Tests: 402/402 passed across 31 test suites (`npm test`)
+  - PostgreSQL Integration Tests: Fail-closed verification demonstrated (exits code 1 on missing DB; passes 100% in CI against running local Supabase)
+  - Production Build: Next.js production build clean (0 errors, 14 routes)
+  - Code Quality: Prettier format clean, ESLint clean (0 warnings), strict TypeScript clean (0 errors)
+- **Immediate Next Action:** Await user / independent reviewer inspection and merge of PR #11. Do NOT auto-merge. Do NOT proceed to PR #12 until PR #11 is merged to `main`.
+- **Phase 2 Status:** **ACTIVE — PR #11 FINAL INDEPENDENT REVIEW REMEDIATION COMPLETE.**
 
 ---
 

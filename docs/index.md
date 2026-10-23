@@ -10,6 +10,8 @@ This document is the authoritative directory and context router for the Encore c
   *Always read this first for current branch, active tasks, test results, blockers, and next steps.*
 - **AI Agent Guidelines:** [`AGENTS.md`](../AGENTS.md)  
   *Non-negotiable engineering invariants, context-routing rules, and testing requirements.*
+- **PR Review & Self-Audit Checklist:** [`development/PR_REVIEW_CHECKLIST.md`](development/PR_REVIEW_CHECKLIST.md)  
+  *Mandatory cross-layer data tracing, security boundaries, historical regression checks, and self-review protocol.*
 - **Human Contribution Guide:** [`CONTRIBUTING.md`](../CONTRIBUTING.md)
 
 ---

@@ -63,7 +63,9 @@ Keep concurrent agents on different branches/worktrees where possible.
 
 ## Handoff template
 
-When one agent hands work to another, leave a concise note:
+When one agent hands work to another, or marks a PR ready for independent review, follow the mandatory self-audit and use the standardized handoff template defined in [`docs/development/PR_REVIEW_CHECKLIST.md`](../development/PR_REVIEW_CHECKLIST.md).
+
+For quick, temporary branch transitions, leave a concise note:
 
 ```text
 Goal:
@@ -75,7 +77,7 @@ Next recommended action:
 Relevant issue/PR:
 ```
 
-This can be a PR description, issue comment, or `HANDOFF.md` for temporary work.
+This can be a PR description, issue comment, or `AI_HANDOFF.md` for active repository transitions.
 
 ## Direct agent-to-agent communication
 
