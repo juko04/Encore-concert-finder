@@ -11,7 +11,7 @@ Durable architecture records belong in [`docs/architecture/`](docs/architecture/
 - **Active Specification:** [`docs/phases/active/PHASE_2_IMPLEMENTATION.md`](docs/phases/active/PHASE_2_IMPLEMENTATION.md).
 - **Current Branch:** `feature/phase-2-recommendation-scoring`
 - **Active Implementing Agent:** Google Antigravity
-- **Current Task:** Phase 2, PR #11: Personalized Recommendation Scoring Foundation.
+- **Current Task:** Phase 2, PR #11: Personalized Recommendation Scoring Foundation & Permanent Development Standards.
 - **PR #11 Objectives & Scope:**
   1. Build a pure, deterministic, typed multi-factor recommendation scoring engine (`lib/recommendation/`).
   2. Implement four fixed priority presets: Balanced (50/20/20/10), Artist-first (65/15/10/10), Nearby (40/35/15/10), Value (40/15/35/10).
@@ -19,6 +19,7 @@ Durable architecture records belong in [`docs/architecture/`](docs/architecture/
   4. Implement bounded travel/distance utility respecting user radius (`default_radius_miles`) and price affordability respecting profile thresholds (`max_normal_ticket_price`, `max_favorite_artist_price`).
   5. Minimal database migration adding `recommendation_preset` to `public.profiles` protected by RLS.
   6. Development-only inspection view at `/discover/scoring-preview` for inspecting real calculations on seeded fixtures.
+  7. Establish permanent repository development standards and mandatory PR review checklist ([`docs/development/PR_REVIEW_CHECKLIST.md`](docs/development/PR_REVIEW_CHECKLIST.md)).
 - **Verification State:** PR #11 Comprehensive Remediation Verified & Passing:
   - Branch: `feature/phase-2-recommendation-scoring`
   - Pull Request: [PR #11](https://github.com/juko04/Encore-concert-finder/pull/11)
