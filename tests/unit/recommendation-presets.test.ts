@@ -4,6 +4,9 @@ import {
   getPresetWeights,
   PRESET_WEIGHTS,
   validateWeightsSum,
+  isValidScoringPreset,
+  normalizeScoringPreset,
+  InvalidScoringPresetError,
 } from '@/lib/recommendation/presets';
 import { VALID_RECOMMENDATION_PRESETS } from '@/lib/domain/profile';
 import type { ScoringPreset } from '@/lib/recommendation/types';
@@ -58,11 +61,38 @@ describe('Recommendation Presets & Weights', () => {
     }
   });
 
-  it('falls back to default Balanced preset for null or invalid input', () => {
+  it('falls back to default Balanced preset for null or undefined input', () => {
     expect(getPresetWeights(null)).toEqual(PRESET_WEIGHTS[DEFAULT_PRESET]);
     expect(getPresetWeights(undefined)).toEqual(PRESET_WEIGHTS[DEFAULT_PRESET]);
-    expect(getPresetWeights('unknown_preset' as ScoringPreset)).toEqual(
-      PRESET_WEIGHTS[DEFAULT_PRESET],
+  });
+
+  it('rejects invalid or malformed presets with InvalidScoringPresetError', () => {
+    expect(() => getPresetWeights('unknown_preset' as ScoringPreset)).toThrow(
+      InvalidScoringPresetError,
     );
+    expect(() => normalizeScoringPreset('malicious_injection')).toThrow(
+      InvalidScoringPresetError,
+    );
+  });
+
+  it('strictly validates presets with own-property checks, rejecting prototype pollution', () => {
+    expect(isValidScoringPreset('balanced')).toBe(true);
+    expect(isValidScoringPreset('artist_first')).toBe(true);
+    expect(isValidScoringPreset('nearby')).toBe(true);
+    expect(isValidScoringPreset('value')).toBe(true);
+
+    // Reject prototype properties and non-allowlisted strings
+    expect(isValidScoringPreset('toString')).toBe(false);
+    expect(isValidScoringPreset('valueOf')).toBe(false);
+    expect(isValidScoringPreset('__proto__')).toBe(false);
+    expect(isValidScoringPreset('constructor')).toBe(false);
+    expect(isValidScoringPreset('')).toBe(false);
+    expect(isValidScoringPreset(null)).toBe(false);
+    expect(isValidScoringPreset(123)).toBe(false);
+  });
+
+  it('supports artist alias as a valid mapping to artist_first', () => {
+    expect(normalizeScoringPreset('artist')).toBe('artist_first');
+    expect(getPresetWeights('artist')).toEqual(PRESET_WEIGHTS.artist_first);
   });
 });

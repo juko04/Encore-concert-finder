@@ -79,6 +79,7 @@ export interface ScoringContext {
   userProfile?: UserProfile | null;
   artistPreferences: UserArtistPreference[];
   referenceDate?: string; // YYYY-MM-DD for deterministic time calculation
+  referenceInstant?: Date | string; // Explicit instant for timezone-aware testing
   presetOverride?: ScoringPreset;
   timingPreferences?: {
     preferredDays?: string[]; // e.g. ['friday', 'saturday', 'sunday']

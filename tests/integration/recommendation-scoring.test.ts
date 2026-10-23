@@ -351,4 +351,211 @@ describe('PostgreSQL Integration: Recommendation Scoring & Profile RLS', () => {
     expect(matchedRecArtistFirst).toBeDefined();
     expect(matchedRecArtistFirst!.weights.artist).toBe(65);
   });
+
+  it('resolves explicit Spotify provider identity through artist_external_ids, disambiguates same-name artists, and isolates preferences across database reload', async () => {
+    if (
+      !isDbAvailable ||
+      !adminClient ||
+      !clientA ||
+      !clientB ||
+      !userAId ||
+      !userBId ||
+      !testVenueId
+    )
+      return;
+
+    const testNonce = `${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+    const artistAName = `SameName Star ${testNonce}`;
+    const artistAId = crypto.randomUUID();
+    const artistBId = crypto.randomUUID();
+    const spotifyExtA = `spotify_star_a_${testNonce}`;
+    const spotifyExtB = `spotify_star_b_${testNonce}`;
+    const eventAId = crypto.randomUUID();
+    const eventBId = crypto.randomUUID();
+
+    try {
+      // 1. Seed two distinct canonical artists with identical names but different IDs
+      await adminClient.from('artists').insert([
+        {
+          id: artistAId,
+          name: artistAName,
+          normalized_name: artistAName.toLowerCase(),
+        },
+        {
+          id: artistBId,
+          name: artistAName, // Same display name!
+          normalized_name: artistAName.toLowerCase(),
+        },
+      ]);
+
+      // 2. Map provider external IDs
+      await adminClient.from('artist_external_ids').insert([
+        {
+          artist_id: artistAId,
+          provider: 'spotify',
+          external_id: spotifyExtA,
+        },
+        {
+          artist_id: artistBId,
+          provider: 'spotify',
+          external_id: spotifyExtB,
+        },
+      ]);
+
+      // 3. Seed canonical events for Artist A and Artist B
+      await adminClient.from('events').insert([
+        {
+          id: eventAId,
+          name: `${artistAName} Live A`,
+          normalized_name: `${artistAName.toLowerCase()} live a`,
+          event_kind: 'concert',
+          status: 'scheduled',
+          venue_id: testVenueId,
+          city: 'Denver',
+          region: 'CO',
+          lat: 39.7392,
+          lng: -104.9903,
+          timezone: 'America/Denver',
+          local_start_date: '2026-11-22',
+          starts_at: '2026-11-22T20:00:00-07:00',
+          start_time_precision: 'instant',
+          is_multi_day: false,
+        },
+        {
+          id: eventBId,
+          name: `${artistAName} Live B`,
+          normalized_name: `${artistAName.toLowerCase()} live b`,
+          event_kind: 'concert',
+          status: 'scheduled',
+          venue_id: testVenueId,
+          city: 'Denver',
+          region: 'CO',
+          lat: 39.7392,
+          lng: -104.9903,
+          timezone: 'America/Denver',
+          local_start_date: '2026-11-23',
+          starts_at: '2026-11-23T20:00:00-07:00',
+          start_time_precision: 'instant',
+          is_multi_day: false,
+        },
+      ]);
+
+      await adminClient.from('event_artists').insert([
+        {
+          event_id: eventAId,
+          artist_id: artistAId,
+          billing_position: 'headliner',
+          sort_order: 1,
+        },
+        {
+          event_id: eventBId,
+          artist_id: artistBId,
+          billing_position: 'headliner',
+          sort_order: 1,
+        },
+      ]);
+
+      await adminClient.from('event_ticket_links').insert([
+        {
+          event_id: eventAId,
+          url: `https://tickets.example.com/${eventAId}`,
+          normalized_url: `https://tickets.example.com/${eventAId}`,
+          min_price: 50,
+          max_price: 70,
+          currency: 'USD',
+        },
+        {
+          event_id: eventBId,
+          url: `https://tickets.example.com/${eventBId}`,
+          normalized_url: `https://tickets.example.com/${eventBId}`,
+          min_price: 50,
+          max_price: 70,
+          currency: 'USD',
+        },
+      ]);
+
+      // 4. User A saves preference explicitly targeting Artist A's Spotify ID as Favorite
+      const prefRepoA = new SupabaseUserPreferenceRepository(clientA);
+      await prefRepoA.savePreference({
+        userId: userAId,
+        artistName: artistAName,
+        spotifyArtistId: spotifyExtA,
+        preferenceLevel: 'favorite',
+      });
+
+      // 5. Reload preferences directly from database to test persistence
+      const reloadedPrefsA = await prefRepoA.getPreferences(userAId);
+      const matchedPrefA = reloadedPrefsA.find(
+        (p) => p.spotifyArtistId === spotifyExtA,
+      );
+      expect(matchedPrefA).toBeDefined();
+      expect(matchedPrefA!.preferenceLevel).toBe('favorite');
+
+      // 6. User B cannot see User A's preference (RLS)
+      const prefRepoB = new SupabaseUserPreferenceRepository(clientB);
+      const userBPrefs = await prefRepoB.getPreferences(userBId);
+      const leakedPref = userBPrefs.find(
+        (p) => p.spotifyArtistId === spotifyExtA,
+      );
+      expect(leakedPref).toBeUndefined();
+
+      // 7. Catalog lists events and joins artist_external_ids
+      const catalogRepoA = new SupabaseCatalogRepository(clientA);
+      const events = await catalogRepoA.listEvents({
+        limit: 100,
+        fromDate: '2026-11-20',
+      });
+
+      const profileRepoA = new SupabaseProfileRepository(clientA);
+      const profileA = await profileRepoA.getProfile(userAId);
+
+      const rankingResult = rankEvents(events, {
+        userProfile: profileA,
+        artistPreferences: reloadedPrefsA,
+        referenceDate: '2026-11-01',
+      });
+
+      // Event A: Features Artist A -> Must match as Favorite (score 100)
+      const recA = rankingResult.recommendations.find(
+        (r) => r.eventId === eventAId,
+      );
+      expect(recA).toBeDefined();
+      expect(recA!.factors.artist.score).toBe(100);
+      expect(recA!.factors.artist.fieldStatus).toBe('verified');
+      expect(recA!.explanation).toContain('Favorite artist');
+
+      // Event B: Features Artist B (same name, different Spotify ID)
+      // Must NOT inherit Artist A's preference! Must be in exploratory pool (score 40)
+      const recBInRecommended = rankingResult.recommendations.find(
+        (r) => r.eventId === eventBId,
+      );
+      expect(recBInRecommended).toBeUndefined();
+
+      const recBInExploratory = rankingResult.exploratory.find(
+        (r) => r.eventId === eventBId,
+      );
+      expect(recBInExploratory).toBeDefined();
+      expect(recBInExploratory!.factors.artist.score).toBe(40); // Unmarked exploratory
+      expect(recBInExploratory!.isExploratory).toBe(true);
+    } finally {
+      // Clean up test entities
+      await adminClient
+        .from('event_ticket_links')
+        .delete()
+        .in('event_id', [eventAId, eventBId]);
+      await adminClient
+        .from('event_artists')
+        .delete()
+        .in('event_id', [eventAId, eventBId]);
+      await adminClient.from('events').delete().in('id', [eventAId, eventBId]);
+      await adminClient
+        .from('artist_external_ids')
+        .delete()
+        .in('artist_id', [artistAId, artistBId]);
+      await adminClient
+        .from('artists')
+        .delete()
+        .in('id', [artistAId, artistBId]);
+    }
+  });
 });

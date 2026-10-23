@@ -440,14 +440,23 @@ export class MemoryCatalogRepository implements ICatalogRepository {
         id?: string;
         name: string;
         billingPosition: BillingPosition;
+        spotifyArtistId?: string | null;
       }> = [];
       for (const ea of this.eventArtists.values()) {
         if (ea.eventId === event.id) {
           const a = this.artists.get(ea.artistId);
+          let spotifyArtistId: string | null = null;
+          for (const ext of this.artistExternalIds.values()) {
+            if (ext.artistId === ea.artistId && ext.provider === 'spotify') {
+              spotifyArtistId = ext.externalId;
+              break;
+            }
+          }
           artists.push({
             id: ea.artistId,
             name: a?.name ?? 'Unknown Artist',
             billingPosition: ea.billingPosition,
+            spotifyArtistId,
           });
         }
       }
@@ -522,6 +531,7 @@ export class MemoryCatalogRepository implements ICatalogRepository {
         timezone: event.timezone,
         startTimePrecision: event.startTimePrecision,
         status: event.status,
+        eventKind: event.eventKind,
         artists,
         ticketUrl: event.primaryTicketUrl,
         minPrice,

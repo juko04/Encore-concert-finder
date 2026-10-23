@@ -1,11 +1,17 @@
 import React from 'react';
 import Link from 'next/link';
+import { notFound } from 'next/navigation';
 import { ScoringInspector } from '@/components/recommendation/ScoringInspector';
+import { isScoringPreviewAllowed } from '@/lib/recommendation/preview-guard';
 import { getScoringPreviewAction } from './actions';
 
 export const dynamic = 'force-dynamic';
 
 export default async function ScoringPreviewPage() {
+  if (!isScoringPreviewAllowed()) {
+    notFound();
+  }
+
   const initialData = await getScoringPreviewAction({ useFixtures: false });
 
   return (
@@ -26,6 +32,9 @@ export default async function ScoringPreviewPage() {
           initialProfile={initialData.userProfile}
           isGuest={initialData.isGuest}
           usingFixtures={initialData.usingFixtures}
+          isSyntheticDemo={initialData.isSyntheticDemo}
+          isEmptyCatalog={initialData.isEmptyCatalog}
+          initialError={initialData.error}
         />
       </div>
     </main>

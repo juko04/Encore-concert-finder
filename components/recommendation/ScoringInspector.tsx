@@ -19,6 +19,9 @@ interface ScoringInspectorProps {
   initialProfile: UserProfile | null;
   isGuest: boolean;
   usingFixtures: boolean;
+  isSyntheticDemo?: boolean;
+  isEmptyCatalog?: boolean;
+  initialError?: string;
 }
 
 export function ScoringInspector({
@@ -27,10 +30,20 @@ export function ScoringInspector({
   initialProfile,
   isGuest,
   usingFixtures: initialUsingFixtures,
+  isSyntheticDemo: initialIsSyntheticDemo = false,
+  isEmptyCatalog: initialIsEmptyCatalog = false,
+  initialError,
 }: ScoringInspectorProps) {
   const [result, setResult] = useState<RecommendationResult>(initialResult);
   const [preset, setPreset] = useState<ScoringPreset>(initialPreset);
   const [usingFixtures, setUsingFixtures] = useState(initialUsingFixtures);
+  const [isSyntheticDemo, setIsSyntheticDemo] = useState(
+    initialIsSyntheticDemo || initialUsingFixtures,
+  );
+  const [isEmptyCatalog, setIsEmptyCatalog] = useState(initialIsEmptyCatalog);
+  const [errorMessage, setErrorMessage] = useState<string | null>(
+    initialError ?? null,
+  );
   const [expandedDiagnostics, setExpandedDiagnostics] = useState<
     Record<string, boolean>
   >({});
@@ -43,6 +56,7 @@ export function ScoringInspector({
   const handlePresetChange = (newPreset: ScoringPreset) => {
     setPreset(newPreset);
     setSaveStatus(null);
+    setErrorMessage(null);
 
     startTransition(async () => {
       // 1. Fetch updated scoring with new preset
@@ -51,12 +65,19 @@ export function ScoringInspector({
         useFixtures: usingFixtures,
       });
       setResult(res.result);
+      setIsSyntheticDemo(res.isSyntheticDemo);
+      setIsEmptyCatalog(res.isEmptyCatalog);
+      if (res.error) {
+        setErrorMessage(res.error);
+      }
 
       // 2. Persist to profile if authenticated
       if (!isGuest) {
         const saveRes = await updateRecommendationPresetAction(newPreset);
         if (saveRes.success) {
           setSaveStatus('Preset saved to your profile.');
+        } else if (saveRes.error) {
+          setErrorMessage(saveRes.error);
         }
       }
     });
@@ -64,12 +85,18 @@ export function ScoringInspector({
 
   const handleToggleFixtures = (fixtures: boolean) => {
     setUsingFixtures(fixtures);
+    setErrorMessage(null);
     startTransition(async () => {
       const res = await getScoringPreviewAction({
         preset,
         useFixtures: fixtures,
       });
       setResult(res.result);
+      setIsSyntheticDemo(res.isSyntheticDemo);
+      setIsEmptyCatalog(res.isEmptyCatalog);
+      if (res.error) {
+        setErrorMessage(res.error);
+      }
     });
   };
 
@@ -88,9 +115,28 @@ export function ScoringInspector({
       <div className="rounded-2xl border border-indigo-500/30 bg-indigo-950/20 p-6 backdrop-blur">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <div className="inline-flex items-center gap-2 rounded-full border border-indigo-400/40 bg-indigo-500/10 px-3 py-1 text-xs font-semibold text-indigo-300">
-              <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-indigo-400" />
-              Development Inspector · PR #11 Foundation
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="inline-flex items-center gap-2 rounded-full border border-indigo-400/40 bg-indigo-500/10 px-3 py-1 text-xs font-semibold text-indigo-300">
+                <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-indigo-400" />
+                Development Inspector · PR #11 Foundation
+              </div>
+              {isSyntheticDemo ? (
+                <div
+                  data-testid="synthetic-fixtures-badge"
+                  className="inline-flex items-center gap-2 rounded-full border border-amber-500/40 bg-amber-500/10 px-3 py-1 text-xs font-semibold text-amber-300"
+                >
+                  <span className="h-1.5 w-1.5 rounded-full bg-amber-400" />
+                  Authoritative Synthetic Fixtures (Demo)
+                </div>
+              ) : (
+                <div
+                  data-testid="live-catalog-badge"
+                  className="inline-flex items-center gap-2 rounded-full border border-emerald-500/40 bg-emerald-500/10 px-3 py-1 text-xs font-semibold text-emerald-300"
+                >
+                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
+                  Live Canonical Database Catalog
+                </div>
+              )}
             </div>
             <h1 className="mt-3 text-2xl font-bold text-white sm:text-3xl">
               Recommendation Scoring Inspector
@@ -152,6 +198,31 @@ export function ScoringInspector({
           )}
         </div>
       </div>
+
+      {/* Safe Error Banner if query failed */}
+      {errorMessage && (
+        <div
+          data-testid="scoring-preview-error"
+          className="rounded-xl border border-red-500/40 bg-red-950/40 p-4 text-xs font-medium text-red-200"
+        >
+          ⚠️ {errorMessage}
+        </div>
+      )}
+
+      {/* Empty Catalog Notice if live database returned 0 events */}
+      {isEmptyCatalog && (
+        <div
+          data-testid="scoring-empty-catalog"
+          className="rounded-xl border border-zinc-800 bg-zinc-900/60 p-8 text-center text-sm text-zinc-300"
+        >
+          <p className="font-semibold text-white">No Canonical Events Found</p>
+          <p className="mt-1 text-xs text-zinc-400">
+            The live database does not currently contain any upcoming events.
+            Toggle &quot;Use Representative Test Fixtures&quot; above to inspect
+            scoring behavior on seeded edge-case scenarios.
+          </p>
+        </div>
+      )}
 
       {/* Preset Switcher Bar */}
       <div className="rounded-xl border border-zinc-800 bg-zinc-900/60 p-4">

@@ -19,7 +19,11 @@ import { calculateDistanceFactor } from './factors/distance';
 import { calculatePriceFactor } from './factors/price';
 import { calculateTimingFactor } from './factors/timing';
 import { buildRecommendationExplanation } from './explainer';
-import { DEFAULT_PRESET, getPresetWeights } from './presets';
+import {
+  DEFAULT_PRESET,
+  getPresetWeights,
+  normalizeScoringPreset,
+} from './presets';
 import type {
   FactorScore,
   RecommendationResult,
@@ -36,11 +40,11 @@ export function scoreEvent(
   event: CanonicalEventSummary,
   context: ScoringContext,
 ): { scoredEvent: ScoredEvent; isPast: boolean } {
-  const preset: ScoringPreset =
+  const rawPreset =
     context.presetOverride ||
     context.userProfile?.recommendationPreset ||
     DEFAULT_PRESET;
-
+  const preset: ScoringPreset = normalizeScoringPreset(rawPreset);
   const weights: ScoringWeights = getPresetWeights(preset);
 
   // 1. Artist Interest Factor
@@ -66,6 +70,7 @@ export function scoreEvent(
     minPrice: event.minPrice,
     maxPrice: event.maxPrice,
     currency: event.currency,
+    eventKind: event.eventKind,
     maxNormalTicketPrice: context.userProfile?.maxNormalTicketPrice,
     maxFavoriteArtistPrice: context.userProfile?.maxFavoriteArtistPrice,
     maxSpontaneousPrice: context.userProfile?.maxSpontaneousPrice,
@@ -75,9 +80,11 @@ export function scoreEvent(
   // 4. Timing Suitability Factor
   const timingResult = calculateTimingFactor({
     localStartDate: event.localStartDate,
-    referenceDate: context.referenceDate,
     startsAt: event.startsAt,
     timezone: event.timezone,
+    startTimePrecision: event.startTimePrecision,
+    referenceDate: context.referenceDate,
+    referenceInstant: context.referenceInstant,
     preferredDays: context.timingPreferences?.preferredDays,
   });
 
@@ -213,11 +220,11 @@ export function rankEvents(
   events: CanonicalEventSummary[],
   context: ScoringContext,
 ): RecommendationResult {
-  const preset: ScoringPreset =
+  const rawPreset =
     context.presetOverride ||
     context.userProfile?.recommendationPreset ||
     DEFAULT_PRESET;
-
+  const preset: ScoringPreset = normalizeScoringPreset(rawPreset);
   const weights = getPresetWeights(preset);
 
   // Invariant 4: Deduplicate events by ID to prevent duplicate recommendations

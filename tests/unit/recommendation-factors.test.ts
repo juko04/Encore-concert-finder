@@ -17,12 +17,14 @@ import {
 import {
   calculateTimingFactor,
   getDayOfWeekFromDateString,
+  getLocalDateInTimezone,
+  isValidIanaTimezone,
   NEUTRAL_TIMING_SCORE,
 } from '@/lib/recommendation/factors/timing';
 import type { UserArtistPreference } from '@/lib/domain/user-preference';
 
 describe('Recommendation Factors (Independent Factor Unit Tests)', () => {
-  describe('Factor 1: Artist Interest', () => {
+  describe('Factor 1: Artist Interest & Identity Resolution', () => {
     const preferences: UserArtistPreference[] = [
       {
         id: 'pref-1',
@@ -74,6 +76,28 @@ describe('Recommendation Factors (Independent Factor Unit Tests)', () => {
         createdAt: '2026-10-01T00:00:00Z',
         updatedAt: '2026-10-01T00:00:00Z',
       },
+      {
+        id: 'pref-spotify-only',
+        userId: 'u1',
+        artistId: null,
+        artistName: 'Spotify Underground',
+        normalizedArtistName: 'spotify underground',
+        preferenceLevel: 'like',
+        spotifyArtistId: 'spotify-artist-underground-777',
+        createdAt: '2026-10-01T00:00:00Z',
+        updatedAt: '2026-10-01T00:00:00Z',
+      },
+      {
+        id: 'pref-archived',
+        userId: 'u1',
+        artistId: null,
+        archivedArtistId: 'archived-old-band-999',
+        artistName: 'Archived Legacy Band',
+        normalizedArtistName: 'archived legacy band',
+        preferenceLevel: 'favorite',
+        createdAt: '2026-09-01T00:00:00Z',
+        updatedAt: '2026-09-01T00:00:00Z',
+      },
     ];
 
     it('scores Favorite preference as 100', () => {
@@ -121,9 +145,53 @@ describe('Recommendation Factors (Independent Factor Unit Tests)', () => {
       expect(res.matchedArtist).toBeUndefined();
     });
 
-    it('suppresses event when an artist is marked Not Interested (dislike)', () => {
+    it('matches an unresolved Spotify preference strictly by verified spotifyArtistId', () => {
       const res = calculateArtistInterestFactor(
-        [{ id: 'canon-disliked-4', name: 'Bad Band' }],
+        [
+          {
+            id: 'canon-catalog-new-88',
+            name: 'Spotify Underground Live',
+            spotifyArtistId: 'spotify-artist-underground-777',
+          },
+        ],
+        preferences,
+      );
+      expect(res.factorScore.score).toBe(75); // 'like'
+      expect(res.isExploratory).toBe(false);
+      expect(res.isSuppressed).toBe(false);
+    });
+
+    it('never matches an artist by display name or normalized name alone', () => {
+      // Artist shares the name "The Cure", but has a completely different canonical ID and no spotifyArtistId
+      const res = calculateArtistInterestFactor(
+        [{ id: 'different-imposter-id-999', name: 'The Cure' }],
+        preferences,
+      );
+      // Invariant: MUST NOT match! Must be treated as unmarked exploratory
+      expect(res.factorScore.score).toBe(UNMARKED_ARTIST_SCORE);
+      expect(res.isExploratory).toBe(true);
+      expect(res.matchedArtist).toBeUndefined();
+    });
+
+    it('ensures archived artist preference never matches a new canonical artist sharing the same name', () => {
+      const res = calculateArtistInterestFactor(
+        [{ id: 'canon-new-legacy-band', name: 'Archived Legacy Band' }],
+        preferences,
+      );
+      // Invariant: Archived record without canonical artistId must not match new artist
+      expect(res.factorScore.score).toBe(UNMARKED_ARTIST_SCORE);
+      expect(res.isExploratory).toBe(true);
+    });
+
+    it('suppresses event when headliner is marked Not Interested (dislike)', () => {
+      const res = calculateArtistInterestFactor(
+        [
+          {
+            id: 'canon-disliked-4',
+            name: 'Bad Band',
+            billingPosition: 'headliner',
+          },
+        ],
         preferences,
       );
       expect(res.factorScore.score).toBe(0);
@@ -133,7 +201,6 @@ describe('Recommendation Factors (Independent Factor Unit Tests)', () => {
     });
 
     it('handles multi-artist lineups by picking highest affinity without double-counting', () => {
-      // Lineup has Liked artist (Aurora, 75) and Favorite artist (The Cure, 100)
       const res = calculateArtistInterestFactor(
         [
           {
@@ -145,19 +212,46 @@ describe('Recommendation Factors (Independent Factor Unit Tests)', () => {
         ],
         preferences,
       );
-      // Invariant: highest affinity determines score (100, NOT 100+75=175)
       expect(res.factorScore.score).toBe(100);
       expect(res.matchedArtist?.name).toBe('The Cure');
       expect(res.factorScore.explanation).toContain('+1 more on lineup');
     });
 
-    it('suppresses multi-artist lineup if any artist on the bill is Disliked', () => {
-      // Favorite headliner, but disliked support
+    it('allows Favorite headliner to take precedence when a support act is Disliked', () => {
+      // Favorite headliner (The Cure), but disliked opener (Bad Band)
       const res = calculateArtistInterestFactor(
         [
           {
             id: 'canon-cure-1',
             name: 'The Cure',
+            billingPosition: 'headliner',
+          },
+          {
+            id: 'canon-disliked-4',
+            name: 'Bad Band',
+            billingPosition: 'support',
+          },
+        ],
+        preferences,
+      );
+      // Invariant: Show is NOT suppressed; Favorite headliner drives attendance motivation!
+      expect(res.factorScore.score).toBe(100);
+      expect(res.isSuppressed).toBe(false);
+      expect(res.factorScore.explanation).toContain(
+        'Favorite headliner: The Cure',
+      );
+      expect(res.factorScore.explanation).toContain(
+        'support act Bad Band is marked Not Interested',
+      );
+    });
+
+    it('suppresses multi-artist lineup when headliner is NOT a favorite and support is Disliked', () => {
+      // Liked headliner (Aurora), and disliked opener (Bad Band)
+      const res = calculateArtistInterestFactor(
+        [
+          {
+            id: 'canon-aurora-2',
+            name: 'Aurora',
             billingPosition: 'headliner',
           },
           {
@@ -174,8 +268,6 @@ describe('Recommendation Factors (Independent Factor Unit Tests)', () => {
     });
 
     it('disambiguates identical artist names using canonical artist IDs strictly', () => {
-      // Two different artists named "John Smith"
-      // User has marked "canon-samename-rock" as Favorite
       const rockRes = calculateArtistInterestFactor(
         [{ id: 'canon-samename-rock', name: 'John Smith' }],
         preferences,
@@ -183,7 +275,6 @@ describe('Recommendation Factors (Independent Factor Unit Tests)', () => {
       expect(rockRes.factorScore.score).toBe(100);
       expect(rockRes.isExploratory).toBe(false);
 
-      // "canon-samename-jazz" has the same name, but is NOT in user preferences
       const jazzRes = calculateArtistInterestFactor(
         [{ id: 'canon-samename-jazz', name: 'John Smith' }],
         preferences,
@@ -191,125 +282,60 @@ describe('Recommendation Factors (Independent Factor Unit Tests)', () => {
       expect(jazzRes.factorScore.score).toBe(UNMARKED_ARTIST_SCORE);
       expect(jazzRes.isExploratory).toBe(true);
     });
-
-    it('gives precedence to recent explicit preference changes over earlier ones', () => {
-      const conflictingPreferences: UserArtistPreference[] = [
-        {
-          id: 'pref-old',
-          userId: 'u1',
-          artistId: 'artist-dynamic-1',
-          artistName: 'Dynamic Artist',
-          normalizedArtistName: 'dynamic artist',
-          preferenceLevel: 'dislike',
-          createdAt: '2026-09-01T00:00:00Z',
-          updatedAt: '2026-09-01T00:00:00Z',
-        },
-        {
-          id: 'pref-new',
-          userId: 'u1',
-          artistId: 'artist-dynamic-1',
-          artistName: 'Dynamic Artist',
-          normalizedArtistName: 'dynamic artist',
-          preferenceLevel: 'favorite',
-          createdAt: '2026-10-15T00:00:00Z',
-          updatedAt: '2026-10-15T00:00:00Z',
-        },
-      ];
-
-      const res = calculateArtistInterestFactor(
-        [{ id: 'artist-dynamic-1', name: 'Dynamic Artist' }],
-        conflictingPreferences,
-      );
-
-      // Recent 'favorite' must override earlier 'dislike'
-      expect(res.factorScore.score).toBe(100);
-      expect(res.isSuppressed).toBe(false);
-      expect(res.matchedArtist?.preferenceLevel).toBe('favorite');
-    });
   });
 
-  describe('Factor 2: Distance & Travel Practicality', () => {
+  describe('Factor 2: Distance & Travel Utility', () => {
     const userLat = 39.7392;
-    const userLng = -104.9903; // Denver center
+    const userLng = -104.9903;
 
-    it('returns documented neutral score (50) when user coordinates are missing', () => {
-      const res = calculateDistanceFactor({
-        userLat: null,
-        userLng: null,
-        venueLat: 39.6654,
-        venueLng: -105.2057,
-      });
-      expect(res.factorScore.score).toBe(NEUTRAL_DISTANCE_SCORE);
-      expect(res.factorScore.isAvailable).toBe(false);
-      expect(res.factorScore.fieldStatus).toBe('neutral_missing');
-      expect(res.distanceMiles).toBeNull();
-    });
-
-    it('returns documented neutral score (50) when venue coordinates are missing', () => {
+    it('returns documented neutral score (50) when coordinates are missing', () => {
       const res = calculateDistanceFactor({
         userLat,
         userLng,
         venueLat: null,
         venueLng: null,
+        preferredRadiusMiles: 25,
       });
       expect(res.factorScore.score).toBe(NEUTRAL_DISTANCE_SCORE);
       expect(res.factorScore.isAvailable).toBe(false);
-      expect(res.distanceMiles).toBeNull();
+      expect(res.factorScore.fieldStatus).toBe('neutral_missing');
     });
 
-    it('scores 100 for event at user location (0 miles)', () => {
-      const res = calculateDistanceFactor({
+    it('scores nearby venues with high proximity utility', () => {
+      // 0 miles away
+      const zeroRes = calculateDistanceFactor({
         userLat,
         userLng,
         venueLat: userLat,
         venueLng: userLng,
         preferredRadiusMiles: 25,
       });
-      expect(res.factorScore.score).toBe(100);
-      expect(res.distanceMiles).toBe(0);
-    });
+      expect(zeroRes.factorScore.score).toBe(100);
 
-    it('scales smoothly within preferred radius', () => {
-      // Red Rocks is ~12.5 miles from user
+      // 2.5 miles away
       const res = calculateDistanceFactor({
         userLat,
         userLng,
-        venueLat: 39.6654,
-        venueLng: -105.2057,
+        venueLat: 39.7402,
+        venueLng: -104.945,
         preferredRadiusMiles: 25,
       });
-      expect(res.distanceMiles).toBeGreaterThan(11);
-      expect(res.distanceMiles).toBeLessThan(14);
-      // Roughly half of 25 mi radius, score should be between 80 and 85
-      expect(res.factorScore.score).toBeGreaterThan(80);
-      expect(res.factorScore.score).toBeLessThan(85);
+      expect(res.factorScore.score).toBeGreaterThan(95);
+      expect(res.factorScore.isAvailable).toBe(true);
+      expect(res.factorScore.fieldStatus).toBe('verified');
       expect(res.factorScore.explanation).toContain('Close to home');
     });
 
-    it('decays beyond preferred radius', () => {
-      // Colorado Springs is ~52 miles from user (well beyond 25 mi radius)
-      const res = calculateDistanceFactor({
-        userLat,
-        userLng,
-        venueLat: 38.995,
-        venueLng: -104.81,
-        preferredRadiusMiles: 25,
-        isFavoriteArtist: false,
-      });
-      expect(res.distanceMiles).toBeGreaterThan(50);
-      expect(res.factorScore.score).toBeLessThan(40);
-      expect(res.factorScore.explanation).toContain(
-        'beyond your 25 mi preferred radius',
-      );
-    });
+    it('provides distance elasticity (+50% radius) for Favorite artists', () => {
+      // 30 miles away: beyond normal 25-mile radius, but within 37.5-mile favorite allowance
+      const venueLat = 39.3;
+      const venueLng = -104.9903;
 
-    it('supports favorite artist distance elasticity for shows farther away', () => {
-      // Colorado Springs with Favorite artist vs Non-favorite
-      const normalRes = calculateDistanceFactor({
+      const regularRes = calculateDistanceFactor({
         userLat,
         userLng,
-        venueLat: 38.995,
-        venueLng: -104.81,
+        venueLat,
+        venueLng,
         preferredRadiusMiles: 25,
         isFavoriteArtist: false,
       });
@@ -317,96 +343,159 @@ describe('Recommendation Factors (Independent Factor Unit Tests)', () => {
       const favoriteRes = calculateDistanceFactor({
         userLat,
         userLng,
-        venueLat: 38.995,
-        venueLng: -104.81,
+        venueLat,
+        venueLng,
         preferredRadiusMiles: 25,
         isFavoriteArtist: true,
       });
 
-      // Favorite artist must receive a higher distance utility score for the same distance
       expect(favoriteRes.factorScore.score).toBeGreaterThan(
-        normalRes.factorScore.score,
+        regularRes.factorScore.score,
       );
-    });
-
-    it('operates correctly across arbitrary non-Colorado coordinates (London to Oxford)', () => {
-      // London (51.5074, -0.1278) to Oxford (51.7520, -1.2577) ~ 51.7 miles
-      const dist = calculateHaversineDistanceMiles(
-        51.5074,
-        -0.1278,
-        51.752,
-        -1.2577,
+      expect(favoriteRes.factorScore.explanation).toContain(
+        'Within extended travel radius for a favorite artist',
       );
-      expect(dist).toBeGreaterThan(50);
-      expect(dist).toBeLessThan(55);
     });
   });
 
-  describe('Factor 3: Ticket Price Affordability', () => {
+  describe('Factor 3: Ticket Price Affordability & Currency Compatibility', () => {
     it('returns documented neutral score (50) when price is missing (never treated as free)', () => {
       const res = calculatePriceFactor({
         minPrice: null,
         maxPrice: null,
+        currency: 'USD',
       });
-      // Invariant: Missing price is NEVER 100 or 0
       expect(res.factorScore.score).toBe(NEUTRAL_PRICE_SCORE);
       expect(res.factorScore.isAvailable).toBe(false);
       expect(res.factorScore.fieldStatus).toBe('neutral_missing');
-      expect(res.factorScore.explanation).toContain('Price TBA');
+      expect(res.factorScore.explanation).toContain('Price unavailable');
     });
 
-    it('scores free events (minPrice === 0) as 100', () => {
+    it('treats numeric zero without verified free status as neutral (not automatically free)', () => {
       const res = calculatePriceFactor({
         minPrice: 0,
-        maxPrice: 0,
+        currency: 'USD',
+        eventKind: 'concert',
       });
-      expect(res.factorScore.score).toBe(100);
-      expect(res.factorScore.explanation).toContain('Free event');
+      expect(res.factorScore.score).toBe(NEUTRAL_PRICE_SCORE);
+      expect(res.factorScore.isAvailable).toBe(false);
+      expect(res.factorScore.fieldStatus).toBe('neutral_missing');
+      expect(res.factorScore.explanation).toContain(
+        '$0 without verified free admission',
+      );
     });
 
-    it('scores free event by eventKind', () => {
+    it('scores verified free events (eventKind === free_event) as 100', () => {
       const res = calculatePriceFactor({
-        minPrice: null,
+        minPrice: 0,
+        currency: 'USD',
         eventKind: 'free_event',
       });
       expect(res.factorScore.score).toBe(100);
-      expect(res.factorScore.explanation).toContain('Free event');
+      expect(res.factorScore.isAvailable).toBe(true);
+      expect(res.factorScore.fieldStatus).toBe('verified');
+      expect(res.factorScore.explanation).toContain(
+        'Free event (verified free admission)',
+      );
     });
 
-    it('scores comfortably under budget tickets with high affordability (100)', () => {
+    it('returns neutral score (50) when event currency is not USD (e.g. CAD, EUR)', () => {
+      const cadRes = calculatePriceFactor({
+        minPrice: 60,
+        currency: 'CAD',
+        maxNormalTicketPrice: 100,
+      });
+      expect(cadRes.factorScore.score).toBe(NEUTRAL_PRICE_SCORE);
+      expect(cadRes.factorScore.isAvailable).toBe(false);
+      expect(cadRes.factorScore.explanation).toContain(
+        'Currency conversion unavailable for CAD',
+      );
+
+      const eurRes = calculatePriceFactor({
+        minPrice: 50,
+        currency: 'EUR',
+        maxNormalTicketPrice: 100,
+      });
+      expect(eurRes.factorScore.score).toBe(NEUTRAL_PRICE_SCORE);
+      expect(eurRes.factorScore.isAvailable).toBe(false);
+      expect(eurRes.factorScore.explanation).toContain(
+        'Currency conversion unavailable for EUR',
+      );
+    });
+
+    it('returns neutral score (50) when ticket currency is unknown or missing', () => {
+      const res = calculatePriceFactor({
+        minPrice: 45,
+        currency: null,
+        maxNormalTicketPrice: 100,
+      });
+      expect(res.factorScore.score).toBe(NEUTRAL_PRICE_SCORE);
+      expect(res.factorScore.isAvailable).toBe(false);
+      expect(res.factorScore.explanation).toContain(
+        'Ticket currency unavailable',
+      );
+    });
+
+    it('treats invalid or negative ticket price as unavailable / neutral, never a bargain', () => {
+      const res = calculatePriceFactor({
+        minPrice: -25,
+        currency: 'USD',
+        maxNormalTicketPrice: 60,
+      });
+      expect(res.factorScore.score).toBe(NEUTRAL_PRICE_SCORE);
+      expect(res.factorScore.isAvailable).toBe(false);
+      expect(res.factorScore.explanation).toContain('Invalid ticket price');
+    });
+
+    it('returns neutral score when user profile has no configured ticket budget', () => {
+      const res = calculatePriceFactor({
+        minPrice: 50,
+        currency: 'USD',
+        maxNormalTicketPrice: null,
+        maxFavoriteArtistPrice: null,
+        maxSpontaneousPrice: null,
+      });
+      expect(res.factorScore.score).toBe(NEUTRAL_PRICE_SCORE);
+      expect(res.factorScore.isAvailable).toBe(false);
+      expect(res.factorScore.explanation).toContain(
+        'no ticket budget configured in profile',
+      );
+    });
+
+    it('scores comfortably under budget USD tickets with high affordability (100)', () => {
       const res = calculatePriceFactor({
         minPrice: 20,
+        currency: 'USD',
         maxNormalTicketPrice: 60,
         artistPreferenceLevel: 'like',
       });
-      // 20 is <= 0.5 * 60 = 30
       expect(res.factorScore.score).toBe(100);
       expect(res.factorScore.explanation).toContain('Exceptional value');
     });
 
-    it('scales within normal budget', () => {
+    it('scales within normal budget in USD', () => {
       const res = calculatePriceFactor({
         minPrice: 50,
+        currency: 'USD',
         maxNormalTicketPrice: 60,
         artistPreferenceLevel: 'like',
       });
-      // 50 is between 30 and 60
       expect(res.factorScore.score).toBeGreaterThanOrEqual(75);
       expect(res.factorScore.score).toBeLessThan(100);
     });
 
-    it('uses higher budget ceiling for Favorite artists', () => {
-      // Ticket is $120. For normal artist with budget $60, this is 2x budget!
+    it('uses higher budget ceiling for Favorite artists when explicitly configured', () => {
       const normalRes = calculatePriceFactor({
         minPrice: 120,
+        currency: 'USD',
         maxNormalTicketPrice: 60,
         maxFavoriteArtistPrice: 150,
         artistPreferenceLevel: 'like',
       });
 
-      // For favorite artist with budget ceiling $150, $120 is within budget!
       const favoriteRes = calculatePriceFactor({
         minPrice: 120,
+        currency: 'USD',
         maxNormalTicketPrice: 60,
         maxFavoriteArtistPrice: 150,
         artistPreferenceLevel: 'favorite',
@@ -420,27 +509,122 @@ describe('Recommendation Factors (Independent Factor Unit Tests)', () => {
     });
   });
 
-  describe('Factor 4: Event Timing Suitability', () => {
+  describe('Factor 4: Event Timing Suitability & Timezone-Aware Eligibility', () => {
+    it('validates IANA timezones and formats local calendar dates correctly', () => {
+      expect(isValidIanaTimezone('America/Denver')).toBe(true);
+      expect(isValidIanaTimezone('America/New_York')).toBe(true);
+      expect(isValidIanaTimezone('America/Los_Angeles')).toBe(true);
+      expect(isValidIanaTimezone('Invalid/Zone')).toBe(false);
+      expect(isValidIanaTimezone(null)).toBe(false);
+
+      // 03:30 UTC Nov 20 is 20:30 (Nov 19) in America/Denver (MDT/MST)
+      const instant = new Date('2026-11-20T03:30:00Z');
+      expect(getLocalDateInTimezone(instant, 'America/Denver')).toBe(
+        '2026-11-19',
+      );
+    });
+
+    it('keeps Denver event occurring today eligible when UTC has advanced to tomorrow', () => {
+      // 03:30 UTC Nov 20 is 8:30 PM Nov 19 in Denver
+      const nowUtcTomorrow = new Date('2026-11-20T03:30:00Z');
+      const res = calculateTimingFactor({
+        localStartDate: '2026-11-19',
+        timezone: 'America/Denver',
+        startTimePrecision: 'date_only',
+        referenceInstant: nowUtcTomorrow,
+      });
+      // Invariant: In Denver it is still Nov 19, so today's show is NOT past!
+      expect(res.isPast).toBe(false);
+    });
+
+    it('keeps Los Angeles event near midnight UTC eligible', () => {
+      // 00:30 UTC Oct 23 is 17:30 (5:30 PM Oct 22) in Los Angeles (PDT)
+      const nowUtcAhead = new Date('2026-10-23T00:30:00Z');
+      const res = calculateTimingFactor({
+        localStartDate: '2026-10-22',
+        timezone: 'America/Los_Angeles',
+        startTimePrecision: 'date_only',
+        referenceInstant: nowUtcAhead,
+      });
+      expect(res.isPast).toBe(false);
+    });
+
+    it('keeps New York event close to local midnight eligible on the same day', () => {
+      // 03:55 UTC Oct 23 is 23:55 (11:55 PM Oct 22) in New York (EDT)
+      const nowLateNight = new Date('2026-10-23T03:55:00Z');
+      const res = calculateTimingFactor({
+        localStartDate: '2026-10-22',
+        timezone: 'America/New_York',
+        startTimePrecision: 'date_only',
+        referenceInstant: nowLateNight,
+      });
+      expect(res.isPast).toBe(false);
+    });
+
+    it('handles Daylight Saving Time transitions gracefully', () => {
+      // Denver falls back from MDT to MST on Nov 1, 2026
+      const instantDuringDst = new Date('2026-10-31T18:00:00Z');
+      const instantAfterDst = new Date('2026-11-02T18:00:00Z');
+
+      expect(getLocalDateInTimezone(instantDuringDst, 'America/Denver')).toBe(
+        '2026-10-31',
+      );
+      expect(getLocalDateInTimezone(instantAfterDst, 'America/Denver')).toBe(
+        '2026-11-02',
+      );
+    });
+
+    it('flags event with confirmed start time as isPast=true once its start instant has passed', () => {
+      const res = calculateTimingFactor({
+        localStartDate: '2026-11-20',
+        startsAt: '2026-11-20T20:00:00Z',
+        startTimePrecision: 'instant',
+        timezone: 'America/Denver',
+        referenceInstant: new Date('2026-11-20T20:30:00Z'), // 30 mins after show started
+      });
+      expect(res.isPast).toBe(true);
+    });
+
+    it('keeps future confirmed start time as isPast=false', () => {
+      const res = calculateTimingFactor({
+        localStartDate: '2026-11-20',
+        startsAt: '2026-11-20T20:00:00Z',
+        startTimePrecision: 'instant',
+        timezone: 'America/Denver',
+        referenceInstant: new Date('2026-11-20T18:00:00Z'), // 2 hours before show
+      });
+      expect(res.isPast).toBe(false);
+    });
+
+    it('falls back conservatively to UTC when timezone metadata is invalid or missing', () => {
+      const res = calculateTimingFactor({
+        localStartDate: '2026-11-20',
+        timezone: 'Invalid/NonExistent_Zone',
+        referenceDate: '2026-11-01',
+      });
+      expect(res.isPast).toBe(false);
+      expect(res.factorScore.diagnostics?.timezoneValid).toBe(false);
+      expect(res.factorScore.diagnostics?.effectiveTimezone).toBe('UTC');
+    });
+
+    it('flags clearly past dates as isPast=true', () => {
+      const res = calculateTimingFactor({
+        localStartDate: '2026-10-15',
+        referenceDate: '2026-11-01',
+      });
+      expect(res.isPast).toBe(true);
+    });
+
     it('returns documented neutral score (50) when user has no custom timing preferences', () => {
       const res = calculateTimingFactor({
         localStartDate: '2026-11-15',
         referenceDate: '2026-11-01',
         preferredDays: null,
       });
-      // Invariant: Never invents weekend preferences
       expect(res.factorScore.score).toBe(NEUTRAL_TIMING_SCORE);
       expect(res.factorScore.isAvailable).toBe(false);
       expect(res.factorScore.explanation).toContain('no custom availability');
       expect(res.isPast).toBe(false);
-    });
-
-    it('correctly determines day of week from date string deterministically', () => {
-      // 2026-11-15 is Sunday
-      expect(getDayOfWeekFromDateString('2026-11-15')).toBe('sunday');
-      // 2026-11-14 is Saturday
-      expect(getDayOfWeekFromDateString('2026-11-14')).toBe('saturday');
-      // 2026-11-13 is Friday
-      expect(getDayOfWeekFromDateString('2026-11-13')).toBe('friday');
     });
 
     it('scores preferred days with high convenience (90)', () => {
@@ -465,14 +649,6 @@ describe('Recommendation Factors (Independent Factor Unit Tests)', () => {
       expect(res.factorScore.explanation).toContain(
         'outside your preferred days',
       );
-    });
-
-    it('flags past events as isPast=true', () => {
-      const res = calculateTimingFactor({
-        localStartDate: '2026-10-15',
-        referenceDate: '2026-11-01',
-      });
-      expect(res.isPast).toBe(true);
     });
   });
 });

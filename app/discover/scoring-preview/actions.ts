@@ -17,7 +17,13 @@ import {
   FIXTURE_USER_PROFILE,
 } from '@/tests/fixtures/recommendation-fixtures';
 import { rankEvents } from '@/lib/recommendation/engine';
-import { DEFAULT_PRESET } from '@/lib/recommendation/presets';
+import {
+  DEFAULT_PRESET,
+  PRESET_WEIGHTS,
+  isValidScoringPreset,
+  normalizeScoringPreset,
+} from '@/lib/recommendation/presets';
+import { isScoringPreviewAllowed } from '@/lib/recommendation/preview-guard';
 import type {
   RecommendationResult,
   ScoringContext,
@@ -25,21 +31,71 @@ import type {
 } from '@/lib/recommendation/types';
 import type { UserProfile } from '@/lib/domain/profile';
 
+export type RecommendationDataSource =
+  'canonical_catalog' | 'synthetic_fixtures';
+
 export interface ScoringPreviewResponse {
   result: RecommendationResult;
   isGuest: boolean;
   userProfile: UserProfile | null;
   activePreset: ScoringPreset;
   usingFixtures: boolean;
+  dataSource: RecommendationDataSource;
+  isSyntheticDemo: boolean;
+  isEmptyCatalog: boolean;
   error?: string;
 }
 
+const EMPTY_RESULT: RecommendationResult = {
+  recommendations: [],
+  exploratory: [],
+  suppressed: [],
+  ineligibleCount: 0,
+  totalScored: 0,
+  preset: DEFAULT_PRESET,
+  weights: PRESET_WEIGHTS[DEFAULT_PRESET],
+};
+
 export async function getScoringPreviewAction(options?: {
-  preset?: ScoringPreset;
+  preset?: unknown;
   useFixtures?: boolean;
 }): Promise<ScoringPreviewResponse> {
+  // 1. Enforce strict server-side environment guard
+  if (!isScoringPreviewAllowed()) {
+    return {
+      result: EMPTY_RESULT,
+      isGuest: true,
+      userProfile: null,
+      activePreset: DEFAULT_PRESET,
+      usingFixtures: false,
+      dataSource: 'canonical_catalog',
+      isSyntheticDemo: false,
+      isEmptyCatalog: false,
+      error:
+        'Recommendation scoring inspector is disabled in this environment.',
+    };
+  }
+
+  // 2. Validate requested preset if provided
+  let requestedPreset: ScoringPreset | undefined;
+  if (options?.preset !== undefined && options?.preset !== null) {
+    if (!isValidScoringPreset(options.preset)) {
+      return {
+        result: EMPTY_RESULT,
+        isGuest: true,
+        userProfile: null,
+        activePreset: DEFAULT_PRESET,
+        usingFixtures: false,
+        dataSource: 'canonical_catalog',
+        isSyntheticDemo: false,
+        isEmptyCatalog: false,
+        error: `Invalid recommendation preset: '${String(options.preset)}'. Valid options are: balanced, artist_first, nearby, value.`,
+      };
+    }
+    requestedPreset = normalizeScoringPreset(options.preset);
+  }
+
   const useFixtures = options?.useFixtures ?? false;
-  const requestedPreset = options?.preset;
 
   let supabase;
   let user = null;
@@ -50,11 +106,11 @@ export async function getScoringPreviewAction(options?: {
     } = await supabase.auth.getUser();
     user = authUser;
   } catch {
-    // Database or auth client unavailable (e.g. offline build)
+    // Database or auth client unavailable
     user = null;
   }
 
-  // 1. If using fixtures or if guest without real data, provide seeded inspection state
+  // 3. Explicit fixture preview (or guest mode without live database session)
   if (useFixtures || !user || !supabase) {
     const activePreset =
       requestedPreset || FIXTURE_USER_PROFILE.recommendationPreset;
@@ -76,10 +132,13 @@ export async function getScoringPreviewAction(options?: {
       userProfile: context.userProfile ?? null,
       activePreset,
       usingFixtures: true,
+      dataSource: 'synthetic_fixtures',
+      isSyntheticDemo: true,
+      isEmptyCatalog: false,
     };
   }
 
-  // 2. Authenticated user with live database
+  // 4. Authenticated user with live canonical database
   try {
     const activeClient = supabase;
     const profileRepo = new SupabaseProfileRepository(activeClient);
@@ -89,11 +148,29 @@ export async function getScoringPreviewAction(options?: {
     const [userProfile, artistPreferences, events] = await Promise.all([
       profileRepo.getProfile(user.id),
       prefRepo.getPreferences(user.id),
-      catalogRepo.listEvents({ limit: 50 }),
+      catalogRepo.listEvents({ limit: 100 }),
     ]);
 
     const activePreset =
       requestedPreset || userProfile?.recommendationPreset || DEFAULT_PRESET;
+
+    // Distinguish genuine empty catalog result: DO NOT silently substitute fixtures!
+    if (events.length === 0) {
+      return {
+        result: {
+          ...EMPTY_RESULT,
+          preset: activePreset,
+          weights: PRESET_WEIGHTS[activePreset],
+        },
+        isGuest: false,
+        userProfile: userProfile ?? null,
+        activePreset,
+        usingFixtures: false,
+        dataSource: 'canonical_catalog',
+        isSyntheticDemo: false,
+        isEmptyCatalog: true,
+      };
+    }
 
     const context: ScoringContext = {
       userProfile: userProfile || {
@@ -113,47 +190,65 @@ export async function getScoringPreviewAction(options?: {
       presetOverride: activePreset,
     };
 
-    // If catalog has no events yet, fallback gracefully to fixtures for inspection
-    const eventPool = events.length > 0 ? events : FIXTURE_EVENTS;
-    const isUsingFixtures = events.length === 0;
-
-    const result = rankEvents(eventPool, context);
+    const result = rankEvents(events, context);
 
     return {
       result,
       isGuest: false,
       userProfile: context.userProfile ?? null,
       activePreset,
-      usingFixtures: isUsingFixtures,
+      usingFixtures: false,
+      dataSource: 'canonical_catalog',
+      isSyntheticDemo: false,
+      isEmptyCatalog: false,
     };
   } catch (err) {
-    // On unexpected error, return fallback fixtures with error indication
+    // On unexpected database error: Return clean failure without leaking secrets or substituting fake data
+    console.error('[ScoringPreviewAction Error]:', err);
     const activePreset = requestedPreset || DEFAULT_PRESET;
-    const context: ScoringContext = {
-      userProfile: {
-        ...FIXTURE_USER_PROFILE,
-        recommendationPreset: activePreset,
-      },
-      artistPreferences: FIXTURE_ARTIST_PREFERENCES,
-      referenceDate: FIXTURE_REFERENCE_DATE,
-      presetOverride: activePreset,
-    };
-    const result = rankEvents(FIXTURE_EVENTS, context);
 
     return {
-      result,
-      isGuest: true,
-      userProfile: context.userProfile ?? null,
+      result: {
+        ...EMPTY_RESULT,
+        preset: activePreset,
+        weights: PRESET_WEIGHTS[activePreset],
+      },
+      isGuest: false,
+      userProfile: null,
       activePreset,
-      usingFixtures: true,
-      error: err instanceof Error ? err.message : 'Failed to score live events',
+      usingFixtures: false,
+      dataSource: 'canonical_catalog',
+      isSyntheticDemo: false,
+      isEmptyCatalog: false,
+      error:
+        'Unable to load live catalog events from the database. Please verify your connection or inspect representative fixtures above.',
     };
   }
 }
 
 export async function updateRecommendationPresetAction(
-  preset: ScoringPreset,
+  preset: unknown,
 ): Promise<{ success: boolean; preset: ScoringPreset; error?: string }> {
+  // 1. Enforce environment policy
+  if (!isScoringPreviewAllowed()) {
+    return {
+      success: false,
+      preset: DEFAULT_PRESET,
+      error: 'Scoring inspector is disabled in this environment.',
+    };
+  }
+
+  // 2. Strict server-side preset validation
+  if (!isValidScoringPreset(preset)) {
+    return {
+      success: false,
+      preset: DEFAULT_PRESET,
+      error: `Invalid recommendation preset: '${String(preset)}'.`,
+    };
+  }
+
+  const validPreset = normalizeScoringPreset(preset);
+
   try {
     const supabase = await createClient();
     const {
@@ -161,18 +256,23 @@ export async function updateRecommendationPresetAction(
     } = await supabase.auth.getUser();
 
     if (!user) {
-      return { success: false, preset, error: 'Authentication required' };
+      return {
+        success: false,
+        preset: validPreset,
+        error: 'Authentication required',
+      };
     }
 
     const profileRepo = new SupabaseProfileRepository(supabase);
-    await profileRepo.updatePreset(user.id, preset);
+    await profileRepo.updatePreset(user.id, validPreset);
 
-    return { success: true, preset };
+    return { success: true, preset: validPreset };
   } catch (err) {
+    console.error('[UpdatePresetAction Error]:', err);
     return {
       success: false,
-      preset,
-      error: err instanceof Error ? err.message : 'Failed to save preset',
+      preset: validPreset,
+      error: 'Failed to persist preset update to your profile.',
     };
   }
 }

@@ -215,10 +215,12 @@ export interface CanonicalEventSummary {
   timezone: string;
   startTimePrecision: StartTimePrecision;
   status: EventStatus;
+  eventKind?: EventKind;
   artists: Array<{
     id?: string;
     name: string;
     billingPosition: BillingPosition;
+    spotifyArtistId?: string | null;
   }>;
   ticketUrl?: string | null;
   minPrice?: number | null;

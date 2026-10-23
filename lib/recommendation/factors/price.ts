@@ -3,10 +3,19 @@
  * Evaluates ticket prices against user budget thresholds and artist affinity elasticity.
  *
  * Invariants:
- * 1. Missing prices must NEVER be treated as zero-cost tickets; returns neutral score (50).
- * 2. Favorite artists justify higher willingness to pay (max_favorite_artist_price).
- * 3. Free events (minPrice === 0 or eventKind === 'free_event') score 100.
- * 4. Bounded strictly to [0, 100].
+ * 1. Missing or unverified ticket prices receive neutral affordability (50).
+ * 2. Invalid or negative prices must be treated as unavailable/invalid (50), not a bargain.
+ * 3. Currency compatibility: User budget is denominated in USD. Non-USD currencies (CAD, EUR, etc.)
+ *    or unknown currencies must NOT be compared numerically without verified conversion rates;
+ *    they receive neutral affordability (50).
+ * 4. Free admission: A numeric price of zero alone is NOT sufficient evidence that a show is free.
+ *    Only events with verified free classification (e.g. eventKind === 'free_event') qualify as free (100).
+ *    Numeric zero without verified free status is treated as unverified/neutral (50).
+ * 5. Unavailable user budget: If the user profile does not specify applicable budget thresholds,
+ *    affordability is neutral (50) rather than fabricating numbers.
+ * 6. Favorite artist budget elasticity: If the artist is marked Favorite AND the profile configures
+ *    maxFavoriteArtistPrice, that threshold is applied. Otherwise, normal budget applies.
+ * 7. Bounded strictly to [0, 100].
  */
 
 import type { EventKind } from '@/lib/domain/catalog';
@@ -27,16 +36,14 @@ export interface PriceFactorInput {
 export interface PriceFactorResult {
   factorScore: Omit<FactorScore, 'weight' | 'weightedContribution'>;
   minPrice: number | null;
-  budgetCeiling: number;
+  budgetCeiling: number | null;
+  currency: string | null;
 }
 
-export const DEFAULT_NORMAL_BUDGET = 60;
-export const DEFAULT_FAVORITE_BUDGET = 150;
-export const DEFAULT_SPONTANEOUS_BUDGET = 30;
 export const NEUTRAL_PRICE_SCORE = 50;
 
 /**
- * Evaluates ticket affordability based on known verified prices and user profile thresholds.
+ * Evaluates ticket affordability based on verified prices, matching currency, and user profile thresholds.
  */
 export function calculatePriceFactor(
   input: PriceFactorInput,
@@ -51,52 +58,28 @@ export function calculatePriceFactor(
     artistPreferenceLevel,
   } = input;
 
-  // Determine user budget ceiling based on artist tier
-  let budgetCeiling: number;
-  if (artistPreferenceLevel === 'favorite') {
-    budgetCeiling =
-      maxFavoriteArtistPrice && maxFavoriteArtistPrice > 0
-        ? maxFavoriteArtistPrice
-        : DEFAULT_FAVORITE_BUDGET;
-  } else if (
-    artistPreferenceLevel === 'like' ||
-    artistPreferenceLevel === 'interested'
-  ) {
-    budgetCeiling =
-      maxNormalTicketPrice && maxNormalTicketPrice > 0
-        ? maxNormalTicketPrice
-        : DEFAULT_NORMAL_BUDGET;
-  } else {
-    // Unmarked / exploratory
-    budgetCeiling =
-      maxSpontaneousPrice && maxSpontaneousPrice > 0
-        ? maxSpontaneousPrice
-        : maxNormalTicketPrice && maxNormalTicketPrice > 0
-          ? maxNormalTicketPrice
-          : DEFAULT_SPONTANEOUS_BUDGET;
-  }
-
-  // Free show check
-  if (minPrice === 0 || eventKind === 'free_event') {
+  // 1. Check for verified free admission (canonical eventKind === 'free_event')
+  if (eventKind === 'free_event') {
     return {
       factorScore: {
         factor: 'price',
         score: 100,
         isAvailable: true,
         fieldStatus: 'verified',
-        explanation: 'Free event (no admission cost)',
+        explanation: 'Free event (verified free admission)',
         diagnostics: {
           isFree: true,
-          minPrice: 0,
-          budgetCeiling,
+          eventKind: 'free_event',
+          minPrice: minPrice ?? 0,
         },
       },
-      minPrice: 0,
-      budgetCeiling,
+      minPrice: minPrice ?? 0,
+      budgetCeiling: null,
+      currency: currency ?? null,
     };
   }
 
-  // Invariant 1: Missing price must NEVER be treated as zero-cost
+  // 2. Missing price check
   if (minPrice === null || minPrice === undefined || isNaN(minPrice)) {
     return {
       factorScore: {
@@ -104,47 +87,185 @@ export function calculatePriceFactor(
         score: NEUTRAL_PRICE_SCORE,
         isAvailable: false,
         fieldStatus: 'neutral_missing',
-        explanation: 'Price TBA / not yet verified (neutral factor score)',
+        explanation:
+          'Price unavailable / not yet verified (neutral factor score)',
         diagnostics: {
           hasPrice: false,
           fallbackScore: NEUTRAL_PRICE_SCORE,
-          budgetCeiling,
         },
       },
       minPrice: null,
-      budgetCeiling,
+      budgetCeiling: null,
+      currency: currency ?? null,
     };
   }
 
-  const price = Math.max(0, minPrice);
-  const curr = currency ? ` ${currency}` : '';
+  // 3. Invalid or negative price check (must not be treated as a bargain)
+  if (minPrice < 0) {
+    return {
+      factorScore: {
+        factor: 'price',
+        score: NEUTRAL_PRICE_SCORE,
+        isAvailable: false,
+        fieldStatus: 'neutral_missing',
+        explanation: 'Invalid ticket price reported (neutral factor score)',
+        diagnostics: {
+          hasPrice: false,
+          invalidPrice: minPrice,
+          fallbackScore: NEUTRAL_PRICE_SCORE,
+        },
+      },
+      minPrice: null,
+      budgetCeiling: null,
+      currency: currency ?? null,
+    };
+  }
 
+  // 4. Numeric zero without verified free status (eventKind !== 'free_event')
+  // Cannot assume free show without trustworthy free admission classification
+  if (minPrice === 0) {
+    return {
+      factorScore: {
+        factor: 'price',
+        score: NEUTRAL_PRICE_SCORE,
+        isAvailable: false,
+        fieldStatus: 'neutral_missing',
+        explanation:
+          'Price listed as $0 without verified free admission status (neutral factor score)',
+        diagnostics: {
+          minPrice: 0,
+          unverifiedZero: true,
+          eventKind: eventKind ?? 'unknown',
+          fallbackScore: NEUTRAL_PRICE_SCORE,
+        },
+      },
+      minPrice: 0,
+      budgetCeiling: null,
+      currency: currency ?? null,
+    };
+  }
+
+  // 5. Currency verification
+  // Encore user budgets are currently denominated in USD.
+  // If currency is missing or non-USD (CAD, EUR, GBP, etc.), do not compare numerically without verified exchange rates.
+  const normalizedCurrency = currency?.trim().toUpperCase() || null;
+  if (!normalizedCurrency) {
+    return {
+      factorScore: {
+        factor: 'price',
+        score: NEUTRAL_PRICE_SCORE,
+        isAvailable: false,
+        fieldStatus: 'neutral_missing',
+        explanation: 'Ticket currency unavailable (neutral factor score)',
+        diagnostics: {
+          minPrice,
+          currency: null,
+          reason: 'missing_currency',
+        },
+      },
+      minPrice,
+      budgetCeiling: null,
+      currency: null,
+    };
+  }
+
+  if (normalizedCurrency !== 'USD') {
+    return {
+      factorScore: {
+        factor: 'price',
+        score: NEUTRAL_PRICE_SCORE,
+        isAvailable: false,
+        fieldStatus: 'neutral_missing',
+        explanation: `Currency conversion unavailable for ${normalizedCurrency} against USD budget (neutral factor score)`,
+        diagnostics: {
+          minPrice,
+          currency: normalizedCurrency,
+          reason: 'unsupported_currency_conversion',
+        },
+      },
+      minPrice,
+      budgetCeiling: null,
+      currency: normalizedCurrency,
+    };
+  }
+
+  // 6. User budget determination (in USD)
+  // Determine applicable budget threshold based on artist tier
+  let budgetCeiling: number | null = null;
+  let budgetTier = 'none';
+
+  if (artistPreferenceLevel === 'favorite') {
+    if (maxFavoriteArtistPrice && maxFavoriteArtistPrice > 0) {
+      budgetCeiling = maxFavoriteArtistPrice;
+      budgetTier = 'favorite';
+    } else if (maxNormalTicketPrice && maxNormalTicketPrice > 0) {
+      budgetCeiling = maxNormalTicketPrice;
+      budgetTier = 'normal_for_favorite';
+    }
+  } else if (
+    artistPreferenceLevel === 'like' ||
+    artistPreferenceLevel === 'interested'
+  ) {
+    if (maxNormalTicketPrice && maxNormalTicketPrice > 0) {
+      budgetCeiling = maxNormalTicketPrice;
+      budgetTier = 'normal';
+    }
+  } else {
+    // Unmarked / exploratory
+    if (maxSpontaneousPrice && maxSpontaneousPrice > 0) {
+      budgetCeiling = maxSpontaneousPrice;
+      budgetTier = 'spontaneous';
+    } else if (maxNormalTicketPrice && maxNormalTicketPrice > 0) {
+      budgetCeiling = maxNormalTicketPrice;
+      budgetTier = 'normal_for_unmarked';
+    }
+  }
+
+  // If user profile has no applicable budget threshold configured, return neutral score
+  if (!budgetCeiling || budgetCeiling <= 0) {
+    return {
+      factorScore: {
+        factor: 'price',
+        score: NEUTRAL_PRICE_SCORE,
+        isAvailable: false,
+        fieldStatus: 'neutral_missing',
+        explanation: `Tickets from $${minPrice} USD (no ticket budget configured in profile)`,
+        diagnostics: {
+          minPrice,
+          currency: 'USD',
+          budgetCeiling: null,
+          reason: 'no_profile_budget',
+        },
+      },
+      minPrice,
+      budgetCeiling: null,
+      currency: 'USD',
+    };
+  }
+
+  // 7. Calculate affordability against verified USD budget
+  const price = minPrice;
   let score: number;
   let explanation: string;
 
   if (price <= 0.5 * budgetCeiling) {
-    // Exceptional value: 100
     score = 100;
-    explanation = `Exceptional value: tickets from $${price}${curr} (comfortably under your $${budgetCeiling} threshold)`;
+    explanation = `Exceptional value: tickets from $${price} USD (comfortably under your $${budgetCeiling} threshold)`;
   } else if (price <= budgetCeiling) {
-    // Comfortably under budget: scales smoothly from 100 down to 75
     const ratio = (price - 0.5 * budgetCeiling) / (0.5 * budgetCeiling);
     score = 100 - 25 * ratio;
-    explanation = `Under budget: tickets from $${price}${curr} (within your $${budgetCeiling} threshold)`;
+    explanation = `Under budget: tickets from $${price} USD (within your $${budgetCeiling} threshold)`;
   } else if (price <= 1.5 * budgetCeiling) {
-    // Moderately over budget: scales from 75 down to 40
     const ratio = (price - budgetCeiling) / (0.5 * budgetCeiling);
     score = 75 - 35 * ratio;
-    explanation = `Slightly exceeds budget: tickets from $${price}${curr} (above your $${budgetCeiling} threshold)`;
+    explanation = `Slightly exceeds budget: tickets from $${price} USD (above your $${budgetCeiling} threshold)`;
   } else if (price <= 2.0 * budgetCeiling) {
-    // Significantly over budget: scales from 40 down to 15
     const ratio = (price - 1.5 * budgetCeiling) / (0.5 * budgetCeiling);
     score = 40 - 25 * ratio;
-    explanation = `Expensive: tickets from $${price}${curr} (well above your $${budgetCeiling} threshold)`;
+    explanation = `Expensive: tickets from $${price} USD (well above your $${budgetCeiling} threshold)`;
   } else {
-    // Over double budget: floor at 5
     score = 5;
-    explanation = `Prohibitive cost: tickets from $${price}${curr} (more than double your $${budgetCeiling} threshold)`;
+    explanation = `Prohibitive cost: tickets from $${price} USD (more than double your $${budgetCeiling} threshold)`;
   }
 
   const boundedScore = Math.min(100, Math.max(0, Math.round(score * 10) / 10));
@@ -159,10 +280,13 @@ export function calculatePriceFactor(
       diagnostics: {
         price,
         budgetCeiling,
+        budgetTier,
         artistTier: artistPreferenceLevel ?? 'unmarked',
+        currency: 'USD',
       },
     },
     minPrice: price,
     budgetCeiling,
+    currency: 'USD',
   };
 }

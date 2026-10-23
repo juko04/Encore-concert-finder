@@ -95,7 +95,7 @@ interface EventArtistRow {
   billing_position: BillingPosition;
   sort_order: number;
   created_at: string;
-  artists?: ArtistRow;
+  artists?: ArtistRow | null;
 }
 
 interface EventPromoterRow {
@@ -482,7 +482,7 @@ export class SupabaseCatalogRepository implements ICatalogRepository {
     // Batch-fetch artists for all returned events (1 query, ordered by sort_order)
     const { data: allArtistLinks, error: artistError } = await this.client
       .from('event_artists')
-      .select('*, artists(*)')
+      .select('*, artists(*, artist_external_ids(provider, external_id))')
       .in('event_id', eventIds)
       .order('sort_order', { ascending: true });
 
@@ -518,16 +518,39 @@ export class SupabaseCatalogRepository implements ICatalogRepository {
     }
 
     // Group relations in-memory by event_id
+    interface EventArtistWithExtIds extends Omit<EventArtistRow, 'artists'> {
+      artists?:
+        | (ArtistRow & {
+            artist_external_ids?: Array<{
+              provider: string;
+              external_id: string;
+            }>;
+          })
+        | null;
+    }
+
     const artistsByEventId = new Map<
       string,
-      Array<{ id?: string; name: string; billingPosition: BillingPosition }>
+      Array<{
+        id?: string;
+        name: string;
+        billingPosition: BillingPosition;
+        spotifyArtistId?: string | null;
+      }>
     >();
-    for (const aRow of (allArtistLinks as unknown as EventArtistRow[]) || []) {
+    for (const aRow of (allArtistLinks as unknown as EventArtistWithExtIds[]) ||
+      []) {
       const list = artistsByEventId.get(aRow.event_id) || [];
+      const spotifyArtistId =
+        aRow.artists?.artist_external_ids?.find(
+          (ext) => ext.provider === 'spotify',
+        )?.external_id ?? null;
+
       list.push({
         id: aRow.artist_id,
         name: aRow.artists?.name ?? 'Unknown Artist',
         billingPosition: aRow.billing_position,
+        spotifyArtistId,
       });
       artistsByEventId.set(aRow.event_id, list);
     }
@@ -597,6 +620,7 @@ export class SupabaseCatalogRepository implements ICatalogRepository {
         timezone: event.timezone,
         startTimePrecision: event.startTimePrecision,
         status: event.status,
+        eventKind: event.eventKind,
         artists,
         ticketUrl: event.primaryTicketUrl,
         minPrice,

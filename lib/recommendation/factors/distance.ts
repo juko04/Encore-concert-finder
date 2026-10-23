@@ -123,16 +123,17 @@ export function calculateDistanceFactor(
     score = 100 - 35 * ratio;
     explanation = `Close to home (${Math.round(distance)} mi, within your ${radius} mi radius)`;
   } else if (isFavoriteArtist && distance <= effectiveRadius) {
-    // Beyond standard radius, but within extended favorite travel willingness
+    // Beyond standard radius, but within extended favorite travel willingness (1.5x radius)
+    // Smooth decay from 65 at radius down to 50 at 1.5x radius
     const favoriteRatio = (distance - radius) / (effectiveRadius - radius);
     score = 65 - 15 * favoriteRatio;
     explanation = `Within extended travel radius for a favorite artist (${Math.round(distance)} mi)`;
   } else {
-    // Beyond radius: decay smoothly down towards 10 at 3x radius
-    const overflow = distance - effectiveRadius;
-    const maxOverflow = 2 * radius;
+    // Beyond effective radius: steep decay down towards floor of 5
+    const overflow = distance - (isFavoriteArtist ? effectiveRadius : radius);
+    const maxOverflow = 1.5 * radius;
     const decayRatio = Math.min(1, overflow / maxOverflow);
-    score = Math.max(10, 65 - 55 * decayRatio);
+    score = Math.max(5, 50 - 45 * decayRatio);
     explanation = `${Math.round(distance)} mi away (beyond your ${radius} mi preferred radius)`;
   }
 
