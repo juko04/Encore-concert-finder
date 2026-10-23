@@ -225,7 +225,25 @@ test.describe('Authenticated Music Taste Profile Browser E2E Flow', () => {
       page.getByRole('heading', { level: 3, name: customArtistName }),
     ).not.toBeVisible();
 
-    // 9. Sign out
+    // 9. Navigate to Scoring Preview, update recommendation preset, and verify persistence after reload
+    await page.goto('/discover/scoring-preview');
+    await expect(page.getByTestId('scoring-inspector')).toBeVisible();
+    await expect(page.getByText('Authenticated User Profile')).toBeVisible();
+
+    const nearbyPresetBtn = page.getByTestId('preset-btn-nearby');
+    await expect(nearbyPresetBtn).toBeVisible();
+    await nearbyPresetBtn.click();
+    await expect(page.getByText('✓ Saved to profile')).toBeVisible();
+
+    // Reload page to verify saved preset persists for authenticated user
+    await page.reload();
+    await expect(page.getByTestId('scoring-inspector')).toBeVisible();
+    await expect(page.getByTestId('preset-btn-nearby')).toHaveClass(
+      /bg-indigo-600/,
+    );
+
+    // 10. Return to /profile/taste and sign out
+    await page.goto('/profile/taste');
     const signOutBtn = page.getByTestId('sign-out-btn');
     await expect(signOutBtn).toBeVisible();
     await signOutBtn.click();

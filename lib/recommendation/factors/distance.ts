@@ -31,6 +31,38 @@ export const DEFAULT_RADIUS_MILES = 25;
 export const NEUTRAL_DISTANCE_SCORE = 50;
 
 /**
+ * Validates decimal latitude: must be a finite number between -90 and 90 degrees.
+ */
+export function isValidLatitude(lat: unknown): lat is number {
+  return (
+    typeof lat === 'number' && Number.isFinite(lat) && lat >= -90 && lat <= 90
+  );
+}
+
+/**
+ * Validates decimal longitude: must be a finite number between -180 and 180 degrees.
+ */
+export function isValidLongitude(lng: unknown): lng is number {
+  return (
+    typeof lng === 'number' && Number.isFinite(lng) && lng >= -180 && lng <= 180
+  );
+}
+
+/**
+ * Validates a coordinate pair (latitude, longitude).
+ */
+export function isValidCoordinate(lat: unknown, lng: unknown): boolean {
+  return isValidLatitude(lat) && isValidLongitude(lng);
+}
+
+/**
+ * Validates travel radius: must be a finite number strictly greater than 0.
+ */
+export function isValidRadius(radius: unknown): radius is number {
+  return typeof radius === 'number' && Number.isFinite(radius) && radius > 0;
+}
+
+/**
  * Computes great-circle distance between two decimal coordinates in miles using the Haversine formula.
  */
 export function calculateHaversineDistanceMiles(
@@ -51,7 +83,8 @@ export function calculateHaversineDistanceMiles(
       Math.sin(dLon / 2);
 
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-  return EARTH_RADIUS_MILES * c;
+  const dist = EARTH_RADIUS_MILES * c;
+  return Number.isFinite(dist) ? dist : 0;
 }
 
 /**
@@ -69,22 +102,16 @@ export function calculateDistanceFactor(
     isFavoriteArtist,
   } = input;
 
-  const radius =
-    preferredRadiusMiles && preferredRadiusMiles > 0
-      ? preferredRadiusMiles
-      : DEFAULT_RADIUS_MILES;
+  // Validate travel radius: must be finite and positive, otherwise default to 25 miles
+  const radius = isValidRadius(preferredRadiusMiles)
+    ? preferredRadiusMiles
+    : DEFAULT_RADIUS_MILES;
 
-  // Missing coordinates fallback
-  if (
-    userLat === null ||
-    userLat === undefined ||
-    userLng === null ||
-    userLng === undefined ||
-    venueLat === null ||
-    venueLat === undefined ||
-    venueLng === null ||
-    venueLng === undefined
-  ) {
+  // Strict coordinate validation: reject null, undefined, NaN, Infinity, and out-of-range degrees
+  const hasValidUserCoords = isValidCoordinate(userLat, userLng);
+  const hasValidVenueCoords = isValidCoordinate(venueLat, venueLng);
+
+  if (!hasValidUserCoords || !hasValidVenueCoords) {
     return {
       factorScore: {
         factor: 'distance',
@@ -92,10 +119,10 @@ export function calculateDistanceFactor(
         isAvailable: false,
         fieldStatus: 'neutral_missing',
         explanation:
-          'Location neutral (approximate venue or home coordinates unavailable)',
+          'Location neutral (approximate venue or home coordinates unavailable or invalid)',
         diagnostics: {
-          hasUserCoords: userLat !== null && userLat !== undefined,
-          hasVenueCoords: venueLat !== null && venueLat !== undefined,
+          hasUserCoords: hasValidUserCoords,
+          hasVenueCoords: hasValidVenueCoords,
           fallbackScore: NEUTRAL_DISTANCE_SCORE,
         },
       },
@@ -103,11 +130,12 @@ export function calculateDistanceFactor(
     };
   }
 
+  // Type narrowing holds true due to isValidCoordinate checks above
   const distance = calculateHaversineDistanceMiles(
-    userLat,
-    userLng,
-    venueLat,
-    venueLng,
+    userLat as number,
+    userLng as number,
+    venueLat as number,
+    venueLng as number,
   );
   const roundedDist = Math.round(distance * 10) / 10;
 
@@ -119,25 +147,32 @@ export function calculateDistanceFactor(
 
   if (distance <= radius) {
     // Within user's explicit preferred radius: smooth decay from 100 at 0mi to 65 at radius
-    const ratio = distance / radius;
+    const ratio = radius > 0 ? distance / radius : 0;
     score = 100 - 35 * ratio;
     explanation = `Close to home (${Math.round(distance)} mi, within your ${radius} mi radius)`;
   } else if (isFavoriteArtist && distance <= effectiveRadius) {
     // Beyond standard radius, but within extended favorite travel willingness (1.5x radius)
     // Smooth decay from 65 at radius down to 50 at 1.5x radius
-    const favoriteRatio = (distance - radius) / (effectiveRadius - radius);
+    const favoriteDenom = effectiveRadius - radius;
+    const favoriteRatio =
+      favoriteDenom > 0 ? (distance - radius) / favoriteDenom : 0;
     score = 65 - 15 * favoriteRatio;
     explanation = `Within extended travel radius for a favorite artist (${Math.round(distance)} mi)`;
   } else {
     // Beyond effective radius: steep decay down towards floor of 5
     const overflow = distance - (isFavoriteArtist ? effectiveRadius : radius);
     const maxOverflow = 1.5 * radius;
-    const decayRatio = Math.min(1, overflow / maxOverflow);
+    const decayRatio =
+      maxOverflow > 0 ? Math.min(1, overflow / maxOverflow) : 1;
     score = Math.max(5, 50 - 45 * decayRatio);
     explanation = `${Math.round(distance)} mi away (beyond your ${radius} mi preferred radius)`;
   }
 
-  const boundedScore = Math.min(100, Math.max(0, Math.round(score * 10) / 10));
+  const safeScore = Number.isFinite(score) ? score : NEUTRAL_DISTANCE_SCORE;
+  const boundedScore = Math.min(
+    100,
+    Math.max(0, Math.round(safeScore * 10) / 10),
+  );
 
   return {
     factorScore: {
@@ -147,12 +182,12 @@ export function calculateDistanceFactor(
       fieldStatus: 'verified',
       explanation,
       diagnostics: {
-        distanceMiles: roundedDist,
+        distanceMiles: Number.isFinite(roundedDist) ? roundedDist : null,
         preferredRadiusMiles: radius,
         effectiveRadiusMiles: effectiveRadius,
         isFavoriteArtist: !!isFavoriteArtist,
       },
     },
-    distanceMiles: roundedDist,
+    distanceMiles: Number.isFinite(roundedDist) ? roundedDist : null,
   };
 }

@@ -43,6 +43,22 @@ export interface PriceFactorResult {
 export const NEUTRAL_PRICE_SCORE = 50;
 
 /**
+ * Validates monetary ticket price: must be a finite number >= 0.
+ * Rejects null, undefined, NaN, Infinity, -Infinity, and negative numbers.
+ */
+export function isValidPrice(price: unknown): price is number {
+  return typeof price === 'number' && Number.isFinite(price) && price >= 0;
+}
+
+/**
+ * Validates budget ceiling threshold: must be a finite number strictly greater than 0.
+ * Rejects null, undefined, NaN, Infinity, -Infinity, 0, and negative numbers.
+ */
+export function isValidBudget(budget: unknown): budget is number {
+  return typeof budget === 'number' && Number.isFinite(budget) && budget > 0;
+}
+
+/**
  * Evaluates ticket affordability based on verified prices, matching currency, and user profile thresholds.
  */
 export function calculatePriceFactor(
@@ -60,6 +76,7 @@ export function calculatePriceFactor(
 
   // 1. Check for verified free admission (canonical eventKind === 'free_event')
   if (eventKind === 'free_event') {
+    const freePrice = isValidPrice(minPrice) ? minPrice : 0;
     return {
       factorScore: {
         factor: 'price',
@@ -70,17 +87,17 @@ export function calculatePriceFactor(
         diagnostics: {
           isFree: true,
           eventKind: 'free_event',
-          minPrice: minPrice ?? 0,
+          minPrice: freePrice,
         },
       },
-      minPrice: minPrice ?? 0,
+      minPrice: freePrice,
       budgetCeiling: null,
       currency: currency ?? null,
     };
   }
 
   // 2. Missing price check
-  if (minPrice === null || minPrice === undefined || isNaN(minPrice)) {
+  if (minPrice === null || minPrice === undefined) {
     return {
       factorScore: {
         factor: 'price',
@@ -100,8 +117,8 @@ export function calculatePriceFactor(
     };
   }
 
-  // 3. Invalid or negative price check (must not be treated as a bargain)
-  if (minPrice < 0) {
+  // 3. Invalid, negative, or non-finite price check (reject NaN, Infinity, -Infinity, minPrice < 0)
+  if (!isValidPrice(minPrice)) {
     return {
       factorScore: {
         factor: 'price',
@@ -191,14 +208,15 @@ export function calculatePriceFactor(
 
   // 6. User budget determination (in USD)
   // Determine applicable budget threshold based on artist tier
+  // Invariant: Non-finite values (Infinity, NaN) or non-positive values must NOT be accepted as budgets
   let budgetCeiling: number | null = null;
   let budgetTier = 'none';
 
   if (artistPreferenceLevel === 'favorite') {
-    if (maxFavoriteArtistPrice && maxFavoriteArtistPrice > 0) {
+    if (isValidBudget(maxFavoriteArtistPrice)) {
       budgetCeiling = maxFavoriteArtistPrice;
       budgetTier = 'favorite';
-    } else if (maxNormalTicketPrice && maxNormalTicketPrice > 0) {
+    } else if (isValidBudget(maxNormalTicketPrice)) {
       budgetCeiling = maxNormalTicketPrice;
       budgetTier = 'normal_for_favorite';
     }
@@ -206,23 +224,23 @@ export function calculatePriceFactor(
     artistPreferenceLevel === 'like' ||
     artistPreferenceLevel === 'interested'
   ) {
-    if (maxNormalTicketPrice && maxNormalTicketPrice > 0) {
+    if (isValidBudget(maxNormalTicketPrice)) {
       budgetCeiling = maxNormalTicketPrice;
       budgetTier = 'normal';
     }
   } else {
     // Unmarked / exploratory
-    if (maxSpontaneousPrice && maxSpontaneousPrice > 0) {
+    if (isValidBudget(maxSpontaneousPrice)) {
       budgetCeiling = maxSpontaneousPrice;
       budgetTier = 'spontaneous';
-    } else if (maxNormalTicketPrice && maxNormalTicketPrice > 0) {
+    } else if (isValidBudget(maxNormalTicketPrice)) {
       budgetCeiling = maxNormalTicketPrice;
       budgetTier = 'normal_for_unmarked';
     }
   }
 
-  // If user profile has no applicable budget threshold configured, return neutral score
-  if (!budgetCeiling || budgetCeiling <= 0) {
+  // If user profile has no applicable valid budget threshold configured, return neutral score
+  if (!isValidBudget(budgetCeiling)) {
     return {
       factorScore: {
         factor: 'price',
@@ -268,7 +286,11 @@ export function calculatePriceFactor(
     explanation = `Prohibitive cost: tickets from $${price} USD (more than double your $${budgetCeiling} threshold)`;
   }
 
-  const boundedScore = Math.min(100, Math.max(0, Math.round(score * 10) / 10));
+  const safeScore = Number.isFinite(score) ? score : NEUTRAL_PRICE_SCORE;
+  const boundedScore = Math.min(
+    100,
+    Math.max(0, Math.round(safeScore * 10) / 10),
+  );
 
   return {
     factorScore: {

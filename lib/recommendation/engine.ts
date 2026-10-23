@@ -33,6 +33,21 @@ import type {
   ScoringWeights,
 } from './types';
 
+function clampScore(score: unknown, fallback: number = 50): number {
+  if (typeof score !== 'number' || !Number.isFinite(score)) {
+    return fallback;
+  }
+  return Math.min(100, Math.max(0, Math.round(score * 10) / 10));
+}
+
+function computeWeightedContribution(score: number, weight: number): number {
+  const safeS = clampScore(score);
+  const safeW =
+    typeof weight === 'number' && Number.isFinite(weight) ? weight : 0;
+  const raw = (safeS * safeW) / 100;
+  return Math.min(100, Math.max(0, Math.round(raw * 10) / 10));
+}
+
 /**
  * Scores an individual canonical event against a user's scoring context.
  */
@@ -88,40 +103,49 @@ export function scoreEvent(
     preferredDays: context.timingPreferences?.preferredDays,
   });
 
-  // Assemble full factor scores with weights and contributions
+  // Assemble full factor scores with guaranteed finite weights and contributions
+  const artistScore = clampScore(artistResult.factorScore.score, 50);
   const artistFactor: FactorScore = {
     ...artistResult.factorScore,
+    score: artistScore,
     weight: weights.artist,
-    weightedContribution:
-      Math.round(
-        ((artistResult.factorScore.score * weights.artist) / 100) * 10,
-      ) / 10,
+    weightedContribution: computeWeightedContribution(
+      artistScore,
+      weights.artist,
+    ),
   };
 
+  const distanceScore = clampScore(distanceResult.factorScore.score, 50);
   const distanceFactor: FactorScore = {
     ...distanceResult.factorScore,
+    score: distanceScore,
     weight: weights.distance,
-    weightedContribution:
-      Math.round(
-        ((distanceResult.factorScore.score * weights.distance) / 100) * 10,
-      ) / 10,
+    weightedContribution: computeWeightedContribution(
+      distanceScore,
+      weights.distance,
+    ),
   };
 
+  const priceScore = clampScore(priceResult.factorScore.score, 50);
   const priceFactor: FactorScore = {
     ...priceResult.factorScore,
+    score: priceScore,
     weight: weights.price,
-    weightedContribution:
-      Math.round(((priceResult.factorScore.score * weights.price) / 100) * 10) /
-      10,
+    weightedContribution: computeWeightedContribution(
+      priceScore,
+      weights.price,
+    ),
   };
 
+  const timingScore = clampScore(timingResult.factorScore.score, 50);
   const timingFactor: FactorScore = {
     ...timingResult.factorScore,
+    score: timingScore,
     weight: weights.timing,
-    weightedContribution:
-      Math.round(
-        ((timingResult.factorScore.score * weights.timing) / 100) * 10,
-      ) / 10,
+    weightedContribution: computeWeightedContribution(
+      timingScore,
+      weights.timing,
+    ),
   };
 
   // Check event status suppression
@@ -133,16 +157,14 @@ export function scoreEvent(
     suppressionReason = `Event is ${event.status}`;
   }
 
-  // Composite score calculation (0 to 100)
+  // Composite score calculation (guaranteed finite, strictly bounded to 0-100)
   const rawComposite =
     artistFactor.weightedContribution +
     distanceFactor.weightedContribution +
     priceFactor.weightedContribution +
     timingFactor.weightedContribution;
 
-  const score = isSuppressed
-    ? 0
-    : Math.min(100, Math.max(0, Math.round(rawComposite * 10) / 10));
+  const score = isSuppressed ? 0 : clampScore(rawComposite, 50);
 
   const explanation = buildRecommendationExplanation({
     artistFactor,
@@ -198,11 +220,19 @@ export function scoreEvent(
  * 4. Event ID ascending (lexicographical)
  */
 export function compareScoredEvents(a: ScoredEvent, b: ScoredEvent): number {
-  if (b.score !== a.score) {
-    return b.score - a.score;
+  const scoreA = Number.isFinite(a.score) ? a.score : 0;
+  const scoreB = Number.isFinite(b.score) ? b.score : 0;
+  if (scoreB !== scoreA) {
+    return scoreB - scoreA;
   }
-  if (b.factors.artist.score !== a.factors.artist.score) {
-    return b.factors.artist.score - a.factors.artist.score;
+  const artistA = Number.isFinite(a.factors.artist.score)
+    ? a.factors.artist.score
+    : 0;
+  const artistB = Number.isFinite(b.factors.artist.score)
+    ? b.factors.artist.score
+    : 0;
+  if (artistB !== artistA) {
+    return artistB - artistA;
   }
   if (a.event.localStartDate !== b.event.localStartDate) {
     return a.event.localStartDate.localeCompare(b.event.localStartDate);

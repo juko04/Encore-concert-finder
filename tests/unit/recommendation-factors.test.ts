@@ -21,6 +21,12 @@ import {
   isValidIanaTimezone,
   NEUTRAL_TIMING_SCORE,
 } from '@/lib/recommendation/factors/timing';
+import { rankEvents } from '@/lib/recommendation/engine';
+import {
+  FIXTURE_ARTIST_PREFERENCES,
+  FIXTURE_EVENTS,
+  FIXTURE_USER_PROFILE,
+} from '@/tests/fixtures/recommendation-fixtures';
 import type { UserArtistPreference } from '@/lib/domain/user-preference';
 
 describe('Recommendation Factors (Independent Factor Unit Tests)', () => {
@@ -649,6 +655,175 @@ describe('Recommendation Factors (Independent Factor Unit Tests)', () => {
       expect(res.factorScore.explanation).toContain(
         'outside your preferred days',
       );
+    });
+  });
+
+  describe('Factor Robustness & Finite Bounds (PR #11 Review Remediation)', () => {
+    it('Scenario 1: rejects userLat = NaN and returns neutral distance score', () => {
+      const res = calculateDistanceFactor({
+        userLat: NaN,
+        userLng: -104.9903,
+        venueLat: 39.7392,
+        venueLng: -104.9903,
+      });
+
+      expect(res.factorScore.score).toBe(NEUTRAL_DISTANCE_SCORE);
+      expect(res.factorScore.isAvailable).toBe(false);
+      expect(Number.isFinite(res.factorScore.score)).toBe(true);
+      expect(res.distanceMiles).toBeNull();
+    });
+
+    it('Scenario 2: rejects venueLng = Infinity and returns neutral distance score', () => {
+      const res = calculateDistanceFactor({
+        userLat: 39.7392,
+        userLng: -104.9903,
+        venueLat: 39.7392,
+        venueLng: Infinity,
+      });
+
+      expect(res.factorScore.score).toBe(NEUTRAL_DISTANCE_SCORE);
+      expect(res.factorScore.isAvailable).toBe(false);
+      expect(Number.isFinite(res.factorScore.score)).toBe(true);
+      expect(res.distanceMiles).toBeNull();
+    });
+
+    it('Scenario 3: rejects out-of-range latitude = 91 degrees and returns neutral distance score', () => {
+      const res = calculateDistanceFactor({
+        userLat: 91,
+        userLng: -104.9903,
+        venueLat: 39.7392,
+        venueLng: -104.9903,
+      });
+
+      expect(res.factorScore.score).toBe(NEUTRAL_DISTANCE_SCORE);
+      expect(res.factorScore.isAvailable).toBe(false);
+      expect(Number.isFinite(res.factorScore.score)).toBe(true);
+      expect(res.distanceMiles).toBeNull();
+    });
+
+    it('Scenario 4: rejects out-of-range longitude = -181 degrees and returns neutral distance score', () => {
+      const res = calculateDistanceFactor({
+        userLat: 39.7392,
+        userLng: -181,
+        venueLat: 39.7392,
+        venueLng: -104.9903,
+      });
+
+      expect(res.factorScore.score).toBe(NEUTRAL_DISTANCE_SCORE);
+      expect(res.factorScore.isAvailable).toBe(false);
+      expect(Number.isFinite(res.factorScore.score)).toBe(true);
+      expect(res.distanceMiles).toBeNull();
+    });
+
+    it('Scenario 5: rejects invalid preferred radius (NaN, negative, Infinity) and safely defaults to 25 mi', () => {
+      const resNaN = calculateDistanceFactor({
+        userLat: 39.7392,
+        userLng: -104.9903,
+        venueLat: 39.7392,
+        venueLng: -104.9903,
+        preferredRadiusMiles: NaN,
+      });
+      expect(resNaN.factorScore.score).toBe(100);
+      expect(Number.isFinite(resNaN.factorScore.score)).toBe(true);
+
+      const resInf = calculateDistanceFactor({
+        userLat: 39.7392,
+        userLng: -104.9903,
+        venueLat: 39.7392,
+        venueLng: -104.9903,
+        preferredRadiusMiles: Infinity,
+      });
+      expect(resInf.factorScore.score).toBe(100);
+      expect(Number.isFinite(resInf.factorScore.score)).toBe(true);
+
+      const resNeg = calculateDistanceFactor({
+        userLat: 39.7392,
+        userLng: -104.9903,
+        venueLat: 39.7392,
+        venueLng: -104.9903,
+        preferredRadiusMiles: -10,
+      });
+      expect(resNeg.factorScore.score).toBe(100);
+      expect(Number.isFinite(resNeg.factorScore.score)).toBe(true);
+    });
+
+    it('Scenario 6: rejects minPrice = Infinity and returns neutral price score', () => {
+      const res = calculatePriceFactor({
+        minPrice: Infinity,
+        currency: 'USD',
+        maxNormalTicketPrice: 60,
+      });
+
+      expect(res.factorScore.score).toBe(NEUTRAL_PRICE_SCORE);
+      expect(res.factorScore.isAvailable).toBe(false);
+      expect(res.factorScore.explanation).toContain('Invalid ticket price');
+      expect(Number.isFinite(res.factorScore.score)).toBe(true);
+      expect(res.minPrice).toBeNull();
+    });
+
+    it('Scenario 7: rejects maxNormalTicketPrice = Infinity and returns neutral price score', () => {
+      const res = calculatePriceFactor({
+        minPrice: 45,
+        currency: 'USD',
+        maxNormalTicketPrice: Infinity,
+      });
+
+      expect(res.factorScore.score).toBe(NEUTRAL_PRICE_SCORE);
+      expect(res.factorScore.isAvailable).toBe(false);
+      expect(res.factorScore.explanation).toContain(
+        'no ticket budget configured',
+      );
+      expect(Number.isFinite(res.factorScore.score)).toBe(true);
+    });
+
+    it('Scenario 8: complete rankEvents() with invalid optional numeric inputs produces finite, bounded scores without NaN or Infinity', () => {
+      const corruptedEvents = FIXTURE_EVENTS.map((event, idx) => ({
+        ...event,
+        lat: idx === 0 ? NaN : idx === 1 ? 95 : event.lat,
+        lng: idx === 2 ? Infinity : idx === 3 ? -200 : event.lng,
+        minPrice: idx === 4 ? Infinity : idx === 5 ? -99 : event.minPrice,
+      }));
+
+      const corruptedContext = {
+        userProfile: {
+          ...FIXTURE_USER_PROFILE,
+          homeLatApprox: NaN,
+          homeLngApprox: Infinity,
+          defaultRadiusMiles: -50,
+          maxNormalTicketPrice: Infinity,
+          maxFavoriteArtistPrice: NaN,
+        },
+        artistPreferences: FIXTURE_ARTIST_PREFERENCES,
+        presetOverride: 'balanced' as const,
+      };
+
+      const result = rankEvents(corruptedEvents, corruptedContext);
+
+      expect(result.recommendations.length).toBeGreaterThan(0);
+
+      // Verify every single scored event in all categories has strictly finite scores in [0, 100]
+      const allScored = [
+        ...result.recommendations,
+        ...result.exploratory,
+        ...result.suppressed,
+      ];
+
+      for (const scored of allScored) {
+        expect(Number.isFinite(scored.score)).toBe(true);
+        expect(scored.score).toBeGreaterThanOrEqual(0);
+        expect(scored.score).toBeLessThanOrEqual(100);
+
+        for (const fKey of ['artist', 'distance', 'price', 'timing'] as const) {
+          const factor = scored.factors[fKey];
+          expect(Number.isFinite(factor.score)).toBe(true);
+          expect(factor.score).toBeGreaterThanOrEqual(0);
+          expect(factor.score).toBeLessThanOrEqual(100);
+
+          expect(Number.isFinite(factor.weightedContribution)).toBe(true);
+          expect(factor.weightedContribution).toBeGreaterThanOrEqual(0);
+          expect(factor.weightedContribution).toBeLessThanOrEqual(100);
+        }
+      }
     });
   });
 });

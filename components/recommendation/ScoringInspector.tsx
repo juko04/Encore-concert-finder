@@ -13,6 +13,58 @@ import {
   updateRecommendationPresetAction,
 } from '@/app/discover/scoring-preview/actions';
 
+/**
+ * Formats event ticket price for display with authoritative currency representation.
+ * Invariants:
+ * 1. Verified free events (eventKind === 'free_event') display as "Free Event (Verified)".
+ * 2. Unverified $0 prices (minPrice === 0 without free_event status) display as "Unverified $0 (Status TBA)".
+ * 3. Missing prices display as "Price TBA".
+ * 4. Foreign currencies display with authoritative code (e.g. "CAD 35", "EUR 45").
+ * 5. USD prices display with explicit USD indicator (e.g. "$50 USD").
+ * 6. Unknown currencies display as "50 (currency unknown)" - NEVER with $ or USD semantics.
+ * 7. Non-finite or negative prices display as "Invalid Price Reported".
+ */
+export function formatEventPriceDisplay(event: {
+  minPrice?: number | null;
+  maxPrice?: number | null;
+  currency?: string | null;
+  eventKind?: string | null;
+}): string {
+  if (event.eventKind === 'free_event') {
+    return 'Free Event (Verified)';
+  }
+
+  const { minPrice, currency } = event;
+
+  if (minPrice === null || minPrice === undefined) {
+    return 'Price TBA';
+  }
+
+  if (
+    typeof minPrice !== 'number' ||
+    !Number.isFinite(minPrice) ||
+    minPrice < 0
+  ) {
+    return 'Invalid Price Reported';
+  }
+
+  if (minPrice === 0) {
+    return 'Unverified $0 (Status TBA)';
+  }
+
+  const normalizedCurrency = currency?.trim().toUpperCase();
+
+  if (!normalizedCurrency) {
+    return `${minPrice} (currency unknown)`;
+  }
+
+  if (normalizedCurrency === 'USD') {
+    return `$${minPrice} USD`;
+  }
+
+  return `${normalizedCurrency} ${minPrice}`;
+}
+
 interface ScoringInspectorProps {
   initialResult: RecommendationResult;
   initialPreset: ScoringPreset;
@@ -465,9 +517,9 @@ function ScoredEventCard({
                 📍 {event.venueName}
                 {event.city ? `, ${event.city}` : ''}
               </span>
-              {event.minPrice !== null && event.minPrice !== undefined && (
-                <span>🏷️ ${event.minPrice}</span>
-              )}
+              <span data-testid={`event-price-${event.id}`}>
+                🏷️ {formatEventPriceDisplay(event)}
+              </span>
             </div>
 
             {/* Structured Explanation */}
@@ -583,9 +635,10 @@ function ScoredEventCard({
           <div className="border-t border-zinc-900 pt-2 text-[11px] text-zinc-500">
             Raw Metrics: Distance=
             {scoredEvent.diagnostics.rawMetrics.distanceMiles ?? 'null'} mi ·
-            Price=${scoredEvent.diagnostics.rawMetrics.minPrice ?? 'null'} ·
-            BudgetCeiling=$
-            {scoredEvent.diagnostics.rawMetrics.budgetCeiling ?? 'null'}
+            Price={formatEventPriceDisplay(event)} · BudgetCeiling=
+            {scoredEvent.diagnostics.rawMetrics.budgetCeiling
+              ? `$${scoredEvent.diagnostics.rawMetrics.budgetCeiling} USD`
+              : 'none'}
           </div>
         </div>
       )}

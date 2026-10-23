@@ -184,26 +184,36 @@ An audit of the Phase 1 codebase reveals a robust architectural foundation ready
      - Interested: 55
      - Unmarked: 40 (exploratory baseline for discovery)
      - Dislike / Not Interested: 0 (and suppresses the event from standard recommendations)
-     - Multi-artist events: Highest matched affinity determines the score to prevent double-counting; if any artist on the bill is marked "Not interested", the event is suppressed.
-     - Artist resolution: Matches strictly via verified canonical artist ID and trusted external ID (`artist_external_ids`); never matches by name alone.
+     - Multi-artist bill policy: Highest matched affinity determines the score to prevent double-counting. Lineup policy: A Favorite headliner takes precedence over disliked support acts (the concert scores 100 based on the favorite headliner and is not suppressed). A disliked headliner suppresses the concert (`score: 0`, `isSuppressed: true`) regardless of openers. A disliked support act under a non-favorite headliner suppresses the concert.
+     - Artist resolution: Matches strictly via verified canonical artist ID and trusted external ID (`artist_external_ids`); never matches by name alone. Same-name artists remain distinct.
      - Recency: Recent explicit changes take precedence; Spotify listening data is not automatically factored into production scoring pending policy assessment.
    - **Distance and Travel Practicality ($S_{\text{distance}} \in [0, 100]$):**
      - Computes great-circle (Haversine) distance between user's approximate coordinates (`home_lat_approx`, `home_lng_approx`) and event/venue coordinates.
      - Bounded utility decay based on user's preferred radius (`default_radius_miles`). Within radius, score scales smoothly from 100 at 0 miles down to 65 at radius edge; decays further beyond radius.
-     - Favorite artists farther away remain viable due to strong artist score.
+     - Favorite artists farther away remain viable due to extended travel willingness (1.5x effective radius).
      - Missing coordinates: Documented neutral score (50) with reduced explanation certainty.
+     - Coordinate validation: Rejects NaN, infinite, or out-of-range degrees (-90 to 90 lat, -180 to 180 lng) with neutral score (50).
    - **Ticket Price Affordability ($S_{\text{price}} \in [0, 100]$):**
      - Compares verified minimum known price (`minPrice`) against user profile thresholds (`max_normal_ticket_price`, `max_favorite_artist_price`, `max_spontaneous_price`).
-     - Favorite artists unlock higher willingness-to-pay ceiling (`max_favorite_artist_price`).
-     - Free shows (`minPrice === 0` or `eventKind === 'free_event'`) receive 100.
+     - Favorite artists unlock higher willingness-to-pay ceiling (`max_favorite_artist_price`) only when explicitly configured in profile.
+     - Verified free shows (`eventKind === 'free_event'`) receive 100.
+     - Unverified zero-price shows: A numeric price of $0 without verified free classification (`eventKind !== 'free_event'`) receives neutral affordability (50).
      - Missing prices: Documented neutral score (50) labeled "Price TBA / unverified"; NEVER treated as zero-cost.
+     - Currency compatibility: User budgets are denominated in USD. Non-USD currencies (CAD, EUR, GBP) or unknown currencies yield neutral affordability (50) rather than numerical comparison without live exchange rates.
+     - Budget thresholds and price validation: Rejects non-finite (Infinity, NaN) or negative prices with neutral score (50).
    - **Timing Suitability ($S_{\text{timing}} \in [0, 100]$):**
-     - Uses confirmed local dates and user availability preferences where available.
+     - Local calendar dates are strictly computed in the venue's validated IANA timezone (no naive UTC string slicing).
+     - Date-only events (`startTimePrecision === 'date_only'`) remain eligible throughout their local calendar date in the venue's timezone.
+     - Instant precision events (`startTimePrecision === 'instant'`) compare the confirmed start instant directly against the reference instant (`startsAt < referenceInstant`).
+     - Supports deterministic `referenceInstant` parameter for clock-independent testing.
      - Without custom timing preferences, applies documented neutral score (50).
      - Excludes past events completely from recommendation eligibility.
 
-4. **Data Quality & Ineligibility Filtering:**
-   - Excludes past events (`localStartDate < referenceDate`), cancelled or postponed events, and duplicates.
+4. **Data Quality, Ineligibility & Suppression:**
+   - Suppressed events: Concerts with disliked artists or cancelled/postponed status receive `score: 0`, `isSuppressed: true`, and are partitioned into `suppressed` for transparent inspection.
+   - Ineligible / past events: Concerts whose local start has already passed are excluded from recommendations and tallied in `ineligibleCount`.
+   - Guaranteed finite bounds: All factor scores, weighted contributions, and composite scores are strictly finite and bounded to $[0, 100]$.
+   - Deduplication: Duplicate canonical event IDs are filtered out before scoring.
    - Stable deterministic sorting: `score` desc -> `artistInterest` desc -> `localStartDate` asc -> `eventId` asc.
 
 5. **Explainability & Separation:**

@@ -97,21 +97,23 @@ export async function getScoringPreviewAction(options?: {
 
   const useFixtures = options?.useFixtures ?? false;
 
-  let supabase;
-  let user = null;
-  try {
-    supabase = await createClient();
-    const {
-      data: { user: authUser },
-    } = await supabase.auth.getUser();
-    user = authUser;
-  } catch {
-    // Database or auth client unavailable
-    user = null;
-  }
+  // 3. Explicit fixture preview requested
+  // Returns labeled synthetic demo data for approved development/testing preview without requiring live database
+  if (useFixtures) {
+    let isGuest = true;
+    try {
+      const authClient = await createClient();
+      const {
+        data: { user: authUser },
+      } = await authClient.auth.getUser();
+      if (authUser) {
+        isGuest = false;
+      }
+    } catch {
+      // In isolated tests or environments without cookie context, default to guest
+      isGuest = true;
+    }
 
-  // 3. Explicit fixture preview (or guest mode without live database session)
-  if (useFixtures || !user || !supabase) {
     const activePreset =
       requestedPreset || FIXTURE_USER_PROFILE.recommendationPreset;
     const context: ScoringContext = {
@@ -128,7 +130,7 @@ export async function getScoringPreviewAction(options?: {
 
     return {
       result,
-      isGuest: !user,
+      isGuest,
       userProfile: context.userProfile ?? null,
       activePreset,
       usingFixtures: true,
@@ -138,7 +140,121 @@ export async function getScoringPreviewAction(options?: {
     };
   }
 
-  // 4. Authenticated user with live canonical database
+  // 4. Initialize Supabase client for live preview with fail-closed error handling
+  // Never fallback to fixtures on infrastructure error
+  let supabase;
+  try {
+    supabase = await createClient();
+  } catch (err) {
+    console.error('[ScoringPreviewAction Supabase Client Init Error]:', err);
+    const activePreset = requestedPreset || DEFAULT_PRESET;
+    return {
+      result: {
+        ...EMPTY_RESULT,
+        preset: activePreset,
+        weights: PRESET_WEIGHTS[activePreset],
+      },
+      isGuest: true,
+      userProfile: null,
+      activePreset,
+      usingFixtures: false,
+      dataSource: 'canonical_catalog',
+      isSyntheticDemo: false,
+      isEmptyCatalog: false,
+      error:
+        'Authentication client initialization failed. Live scoring preview is unavailable.',
+    };
+  }
+
+  // 5. Verify user session with explicit discrimination between genuine guest and auth service failure
+  let user = null;
+  try {
+    const {
+      data: { user: authUser },
+      error: authError,
+    } = await supabase.auth.getUser();
+
+    if (authError) {
+      const isNormalNoSession =
+        authError.name === 'AuthSessionMissingError' ||
+        authError.message?.toLowerCase().includes('auth session missing') ||
+        (authError.status === 400 &&
+          authError.message?.toLowerCase().includes('session'));
+
+      if (!isNormalNoSession) {
+        console.error('[ScoringPreviewAction Auth Session Error]:', authError);
+        const activePreset = requestedPreset || DEFAULT_PRESET;
+        return {
+          result: {
+            ...EMPTY_RESULT,
+            preset: activePreset,
+            weights: PRESET_WEIGHTS[activePreset],
+          },
+          isGuest: true,
+          userProfile: null,
+          activePreset,
+          usingFixtures: false,
+          dataSource: 'canonical_catalog',
+          isSyntheticDemo: false,
+          isEmptyCatalog: false,
+          error:
+            'Authentication session verification failed. Please try signing in again.',
+        };
+      }
+      user = null;
+    } else {
+      user = authUser;
+    }
+  } catch (err) {
+    console.error('[ScoringPreviewAction Thrown Auth Error]:', err);
+    const activePreset = requestedPreset || DEFAULT_PRESET;
+    return {
+      result: {
+        ...EMPTY_RESULT,
+        preset: activePreset,
+        weights: PRESET_WEIGHTS[activePreset],
+      },
+      isGuest: true,
+      userProfile: null,
+      activePreset,
+      usingFixtures: false,
+      dataSource: 'canonical_catalog',
+      isSyntheticDemo: false,
+      isEmptyCatalog: false,
+      error: 'Authentication service request failed. Unable to verify session.',
+    };
+  }
+
+  // 6. Genuine unauthenticated guest demo mode
+  // Note: Guest demo mode is clearly labeled with isSyntheticDemo: true and dataSource: 'synthetic_fixtures'
+  if (!user) {
+    const activePreset =
+      requestedPreset || FIXTURE_USER_PROFILE.recommendationPreset;
+    const context: ScoringContext = {
+      userProfile: {
+        ...FIXTURE_USER_PROFILE,
+        recommendationPreset: activePreset,
+      },
+      artistPreferences: FIXTURE_ARTIST_PREFERENCES,
+      referenceDate: FIXTURE_REFERENCE_DATE,
+      presetOverride: activePreset,
+    };
+
+    const result = rankEvents(FIXTURE_EVENTS, context);
+
+    return {
+      result,
+      isGuest: true,
+      userProfile: context.userProfile ?? null,
+      activePreset,
+      usingFixtures: true,
+      dataSource: 'synthetic_fixtures',
+      isSyntheticDemo: true,
+      isEmptyCatalog: false,
+    };
+  }
+
+  // 7. Authenticated user with live canonical database
   try {
     const activeClient = supabase;
     const profileRepo = new SupabaseProfileRepository(activeClient);
