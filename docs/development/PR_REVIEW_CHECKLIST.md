@@ -193,11 +193,11 @@ Encore's recommendation engine is deterministic, explainable, and transparent—
 - [ ] **Strict Preset Validation:** Presets are validated against an allowlist (`balanced`, `artist_first`, `nearby`, `value`) with own-property checks resisting prototype pollution (`toString`, `__proto__`). Unrecognized presets throw `InvalidScoringPresetError`.
 - [ ] **Weight Sum Invariant:** Factor weights for every preset must sum exactly to 100%.
 - [ ] **Manual Preference Precedence:** Explicit manual user preferences (`user_artist_preferences`) strictly override external signals (e.g. Spotify top artists).
-- [ ] **Inviolable Not-Interested Suppression:** An artist marked `dislike` / "Not Interested" suppresses the concert (`score: 0`, `isSuppressed: true`). Soft weight tuning cannot unsuppress it.
-- [ ] **Multi-Artist Lineup Policy:**
-  - A Favorite headliner overrides disliked support acts (the concert scores 100 and is not suppressed).
-  - A Disliked headliner suppresses the concert regardless of support acts.
-  - A Disliked support act under a non-favorite headliner suppresses the concert.
+- [ ] **Deterministic Not-Interested Suppression & Lineup Policy:** An artist marked `dislike` / "Not Interested" triggers deterministic suppression (`score: 0`, `isSuppressed: true`):
+  - A disliked headliner always suppresses the concert regardless of support acts.
+  - A disliked support act generally suppresses the concert under a non-favorite headliner.
+  - An explicitly Favorite headliner overrides disliked support acts (the concert scores 100 based on the favorite headliner and is not suppressed).
+  - Changing scoring presets cannot independently override these suppression rules.
 - [ ] **Unmarked Artists Scored Neutrally:** Unmarked/unfamiliar artists receive a neutral discovery score (~40), never treated as disliked.
 - [ ] **Explainable Match Reasons:** Every factor contributes human-readable explanation strings matching the actual numerical factor inputs.
 - [ ] **Deterministic Sorting & Tie-Breaking:** Event ranking applies deterministic tie-breakers (e.g. composite score desc, headliner score desc, local start date asc, canonical event ID asc).

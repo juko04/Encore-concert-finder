@@ -184,7 +184,11 @@ An audit of the Phase 1 codebase reveals a robust architectural foundation ready
      - Interested: 55
      - Unmarked: 40 (exploratory baseline for discovery)
      - Dislike / Not Interested: 0 (and suppresses the event from standard recommendations)
-     - Multi-artist bill policy: Highest matched affinity determines the score to prevent double-counting. Lineup policy: A Favorite headliner takes precedence over disliked support acts (the concert scores 100 based on the favorite headliner and is not suppressed). A disliked headliner suppresses the concert (`score: 0`, `isSuppressed: true`) regardless of openers. A disliked support act under a non-favorite headliner suppresses the concert.
+     - Multi-artist bill policy: Highest matched affinity determines the score to prevent double-counting. Lineup policy follows deterministic rules:
+       - A disliked headliner always suppresses the event (`score: 0`, `isSuppressed: true`) regardless of openers.
+       - A disliked support act generally suppresses the event under a non-favorite headliner.
+       - An explicitly Favorite headliner overrides disliked support acts (the event scores 100 based on the favorite headliner and is not suppressed).
+       - Changing scoring presets cannot independently override these suppression rules.
      - Artist resolution: Matches strictly via verified canonical artist ID and trusted external ID (`artist_external_ids`); never matches by name alone. Same-name artists remain distinct.
      - Recency: Recent explicit changes take precedence; Spotify listening data is not automatically factored into production scoring pending policy assessment.
    - **Distance and Travel Practicality ($S_{\text{distance}} \in [0, 100]$):**
@@ -196,8 +200,8 @@ An audit of the Phase 1 codebase reveals a robust architectural foundation ready
    - **Ticket Price Affordability ($S_{\text{price}} \in [0, 100]$):**
      - Compares verified minimum known price (`minPrice`) against user profile thresholds (`max_normal_ticket_price`, `max_favorite_artist_price`, `max_spontaneous_price`).
      - Favorite artists unlock higher willingness-to-pay ceiling (`max_favorite_artist_price`) only when explicitly configured in profile.
-     - Verified free shows (`eventKind === 'free_event'`) receive 100.
-     - Unverified zero-price shows: A numeric price of $0 without verified free classification (`eventKind !== 'free_event'`) receives neutral affordability (50).
+     - Verified free shows: Consistent free shows (`eventKind === 'free_event'` with no contradictory price or zero price) receive 100. Contradictory pricing evidence (`eventKind === 'free_event'` with positive ticket price) receives neutral affordability (50) and displays as contradictory pricing rather than advertising free admission.
+     - Unverified zero-price shows: A numeric price of 0 without verified free classification (`eventKind !== 'free_event'`) receives neutral affordability (50) and displays with currency-aware indicators ("Unverified $0 USD (Status TBA)", "Unverified CAD 0 (Status TBA)", "Unverified 0 (currency unknown, Status TBA)") without suggesting USD for non-USD or unknown currencies.
      - Missing prices: Documented neutral score (50) labeled "Price TBA / unverified"; NEVER treated as zero-cost.
      - Currency compatibility: User budgets are denominated in USD. Non-USD currencies (CAD, EUR, GBP) or unknown currencies yield neutral affordability (50) rather than numerical comparison without live exchange rates.
      - Budget thresholds and price validation: Rejects non-finite (Infinity, NaN) or negative prices with neutral score (50).

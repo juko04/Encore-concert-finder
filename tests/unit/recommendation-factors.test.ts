@@ -391,7 +391,22 @@ describe('Recommendation Factors (Independent Factor Unit Tests)', () => {
       );
     });
 
-    it('scores verified free events (eventKind === free_event) as 100', () => {
+    it('scores verified free event with no contradictory price as 100', () => {
+      const res = calculatePriceFactor({
+        minPrice: null,
+        currency: 'USD',
+        eventKind: 'free_event',
+      });
+      expect(res.factorScore.score).toBe(100);
+      expect(res.factorScore.isAvailable).toBe(true);
+      expect(res.factorScore.fieldStatus).toBe('verified');
+      expect(res.factorScore.explanation).toContain(
+        'Free event (verified free admission)',
+      );
+      expect(res.factorScore.diagnostics?.isFree).toBe(true);
+    });
+
+    it('scores verified free event with zero price as 100', () => {
       const res = calculatePriceFactor({
         minPrice: 0,
         currency: 'USD',
@@ -403,6 +418,43 @@ describe('Recommendation Factors (Independent Factor Unit Tests)', () => {
       expect(res.factorScore.explanation).toContain(
         'Free event (verified free admission)',
       );
+      expect(res.factorScore.diagnostics?.isFree).toBe(true);
+    });
+
+    it('treats free_event with contradictory positive ticket price as neutral (not 100)', () => {
+      const res = calculatePriceFactor({
+        minPrice: 35,
+        currency: 'USD',
+        eventKind: 'free_event',
+        maxNormalTicketPrice: 60,
+      });
+      // Invariant: Must NOT award unquestioned 100 or advertise free admission on contradictory evidence
+      expect(res.factorScore.score).toBe(NEUTRAL_PRICE_SCORE);
+      expect(res.factorScore.isAvailable).toBe(false);
+      expect(res.factorScore.fieldStatus).toBe('neutral_missing');
+      expect(res.factorScore.explanation).toContain(
+        'Contradictory pricing evidence',
+      );
+      expect(res.factorScore.diagnostics?.contradictoryPricing).toBe(true);
+      expect(res.factorScore.diagnostics?.isFree).toBe(false);
+    });
+
+    it('evaluates ordinary paid event against user budget ceiling', () => {
+      const res = calculatePriceFactor({
+        minPrice: 35,
+        currency: 'USD',
+        eventKind: 'concert',
+        maxNormalTicketPrice: 60,
+        artistPreferenceLevel: 'like',
+      });
+      // Paid event within budget scores positively based on affordability formula
+      expect(res.factorScore.score).toBeGreaterThan(50);
+      expect(res.factorScore.isAvailable).toBe(true);
+      expect(res.factorScore.fieldStatus).toBe('verified');
+      expect(res.factorScore.explanation).toContain(
+        'within your $60 threshold',
+      );
+      expect(res.budgetCeiling).toBe(60);
     });
 
     it('returns neutral score (50) when event currency is not USD (e.g. CAD, EUR)', () => {

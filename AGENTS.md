@@ -45,7 +45,7 @@ Do not load the entire repository documentation into prompt context. Practice pr
 8. **No Test Weakening:** Never silently loosen database constraints, delete assertions, or mock out real boundaries to make CI pass.
 9. **Secrets & Security Boundaries:** Never commit credentials, cookies, tokens, or `.env.local`. Secure all non-public tables with RLS and restrict sensitive stored procedures to `service_role`.
 10. **Accurate Dates, Timezones, Prices & Currencies:** Local calendar dates are strictly computed in the event venue's validated IANA timezone (no naive UTC slicing). Incompatible currencies (CAD, EUR) and unverified $0 tickets score neutrally (50) unless verified. Never convert currencies without a live, trusted exchange rate source.
-11. **Manual Preference Precedence:** Explicit manual user preferences (`user_artist_preferences`) strictly take precedence over inferred external signals. "Not Interested" suppression is inviolable.
+11. **Manual Preference Precedence & Lineup Suppression:** Explicit manual user preferences (`user_artist_preferences`) strictly take precedence over inferred external signals. Lineup suppression follows deterministic rules: a disliked headliner always suppresses the event; a disliked support act generally suppresses the event; an explicitly Favorite headliner overrides disliked support acts (the event scores 100 based on the favorite headliner and is not suppressed). Changing scoring presets cannot independently override these suppression rules.
 12. **Isolation of Synthetic & Demo Data:** Preview fixtures and demo endpoints must never leak into production, write to live user tables, or masquerade as live database results.
 
 ---

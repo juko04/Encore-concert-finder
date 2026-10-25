@@ -76,6 +76,35 @@ export function calculatePriceFactor(
 
   // 1. Check for verified free admission (canonical eventKind === 'free_event')
   if (eventKind === 'free_event') {
+    // Contradictory evidence check:
+    // If ticket metadata reports a positive price (> 0), there is contradictory evidence
+    // between eventKind ('free_event') and verified ticket pricing.
+    // Invariant: Do not advertise free admission or award an unquestioned affordability score of 100.
+    // In accordance with Invariant 10, contradictory pricing evidence scores neutrally (50).
+    if (isValidPrice(minPrice) && minPrice > 0) {
+      return {
+        factorScore: {
+          factor: 'price',
+          score: NEUTRAL_PRICE_SCORE,
+          isAvailable: false,
+          fieldStatus: 'neutral_missing',
+          explanation: `Contradictory pricing evidence: event classified as free but ticket metadata reports price of ${minPrice}${currency ? ` ${currency}` : ''} (neutral factor score)`,
+          diagnostics: {
+            contradictoryPricing: true,
+            isFree: false,
+            eventKind: 'free_event',
+            minPrice,
+            currency: currency ?? null,
+            fallbackScore: NEUTRAL_PRICE_SCORE,
+          },
+        },
+        minPrice,
+        budgetCeiling: null,
+        currency: currency ?? null,
+      };
+    }
+
+    // Consistent free event evidence (no contradictory price or zero price reported)
     const freePrice = isValidPrice(minPrice) ? minPrice : 0;
     return {
       factorScore: {

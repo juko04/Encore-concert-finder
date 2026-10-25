@@ -533,32 +533,96 @@ describe('Recommendation Price Presentation & Currency Formatting', () => {
     expect(formatEventPriceDisplay({ minPrice: undefined })).toBe('Price TBA');
   });
 
-  it('distinguishes unverified $0 price from confirmed free admission', async () => {
+  it('correctly formats unverified zero-price with USD, CAD, and missing currency without misleading $ semantics', async () => {
     const { formatEventPriceDisplay } =
       await import('@/components/recommendation/ScoringInspector');
 
-    const unverifiedZero = formatEventPriceDisplay({
+    // USD: explicit $0 USD
+    const unverifiedUSD = formatEventPriceDisplay({
       minPrice: 0,
       currency: 'USD',
       eventKind: 'concert',
     });
+    expect(unverifiedUSD).toBe('Unverified $0 USD (Status TBA)');
+    expect(unverifiedUSD).toContain('USD');
 
-    expect(unverifiedZero).toBe('Unverified $0 (Status TBA)');
-    expect(unverifiedZero).not.toBe('Free');
-    expect(unverifiedZero).not.toBe('Free Event (Verified)');
+    // CAD: must NOT suggest USD or use $
+    const unverifiedCAD = formatEventPriceDisplay({
+      minPrice: 0,
+      currency: 'CAD',
+      eventKind: 'concert',
+    });
+    expect(unverifiedCAD).toBe('Unverified CAD 0 (Status TBA)');
+    expect(unverifiedCAD).not.toContain('$');
+    expect(unverifiedCAD).not.toContain('USD');
+
+    // Missing currency: must NOT suggest USD or use $
+    const unverifiedUnknown = formatEventPriceDisplay({
+      minPrice: 0,
+      currency: null,
+      eventKind: 'concert',
+    });
+    expect(unverifiedUnknown).toBe(
+      'Unverified 0 (currency unknown, Status TBA)',
+    );
+    expect(unverifiedUnknown).not.toContain('$');
+    expect(unverifiedUnknown).not.toContain('USD');
   });
 
-  it('formats verified free events (eventKind === free_event) as confirmed free admission', async () => {
+  it('formats verified free events with consistent pricing as confirmed free admission', async () => {
     const { formatEventPriceDisplay } =
       await import('@/components/recommendation/ScoringInspector');
 
-    const verifiedFree = formatEventPriceDisplay({
+    // No price reported on free event
+    const freeNoPrice = formatEventPriceDisplay({
+      minPrice: null,
+      eventKind: 'free_event',
+    });
+    expect(freeNoPrice).toBe('Free Event (Verified)');
+
+    // Zero price reported on free event
+    const freeZeroPrice = formatEventPriceDisplay({
       minPrice: 0,
       currency: 'USD',
       eventKind: 'free_event',
     });
+    expect(freeZeroPrice).toBe('Free Event (Verified)');
+  });
 
-    expect(verifiedFree).toBe('Free Event (Verified)');
+  it('does not advertise free admission when free_event reports contradictory positive ticket price', async () => {
+    const { formatEventPriceDisplay } =
+      await import('@/components/recommendation/ScoringInspector');
+
+    const contradictoryFree = formatEventPriceDisplay({
+      minPrice: 25,
+      currency: 'USD',
+      eventKind: 'free_event',
+    });
+
+    expect(contradictoryFree).toBe(
+      'Contradictory Pricing ($25 USD / Free Event)',
+    );
+    expect(contradictoryFree).not.toBe('Free Event (Verified)');
+    expect(contradictoryFree).not.toBe('Free');
+  });
+
+  it('formats ordinary paid events with authoritative currency presentation', async () => {
+    const { formatEventPriceDisplay } =
+      await import('@/components/recommendation/ScoringInspector');
+
+    const ordinaryPaidUSD = formatEventPriceDisplay({
+      minPrice: 25,
+      currency: 'USD',
+      eventKind: 'concert',
+    });
+    expect(ordinaryPaidUSD).toBe('$25 USD');
+
+    const ordinaryPaidCAD = formatEventPriceDisplay({
+      minPrice: 35,
+      currency: 'CAD',
+      eventKind: 'concert',
+    });
+    expect(ordinaryPaidCAD).toBe('CAD 35');
   });
 
   it('handles negative or non-finite prices as invalid price reported', async () => {
