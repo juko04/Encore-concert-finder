@@ -205,14 +205,23 @@ export interface CanonicalEventSummary {
   id: string;
   title: string;
   venueName: string;
+  venueId?: string | null;
   city?: string;
   region?: string;
+  lat?: number | null;
+  lng?: number | null;
   localStartDate: string;
   startsAt?: string | null;
   timezone: string;
   startTimePrecision: StartTimePrecision;
   status: EventStatus;
-  artists: Array<{ name: string; billingPosition: BillingPosition }>;
+  eventKind?: EventKind;
+  artists: Array<{
+    id?: string;
+    name: string;
+    billingPosition: BillingPosition;
+    spotifyArtistId?: string | null;
+  }>;
   ticketUrl?: string | null;
   minPrice?: number | null;
   maxPrice?: number | null;

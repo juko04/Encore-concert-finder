@@ -18,20 +18,26 @@ Avoid multiple agents editing the same branch at the same time.
 
 ## Before coding
 
-- Read `AGENTS.md`.
+- Read `AGENTS.md` and [`docs/development/PR_REVIEW_CHECKLIST.md`](docs/development/PR_REVIEW_CHECKLIST.md).
 - Read `docs/index.md` and relevant specification document(s).
 - Check `AI_HANDOFF.md` for active work.
 - Confirm the task has a clear scope and acceptance criteria.
 
 ## Before requesting merge
 
-Run the checks appropriate to the repository once they exist:
+Follow the mandatory self-audit in [`docs/development/PR_REVIEW_CHECKLIST.md`](docs/development/PR_REVIEW_CHECKLIST.md) and run all standard verification commands:
 
 ```bash
+npm run format:check
 npm run lint
 npm run typecheck
 npm test
 npm run build
+npm run test:e2e
+```
+When local PostgreSQL / Supabase is available:
+```bash
+npm run test:integration
 ```
 
 Add or update tests for changed behavior.

@@ -88,4 +88,44 @@ test.describe('Application Smoke Tests', () => {
       page.getByRole('heading', { name: 'Music Taste Profile' }),
     ).toBeVisible();
   });
+
+  test('successfully loads the recommendation scoring preview inspector and toggles controls', async ({
+    page,
+  }) => {
+    const response = await page.goto('/discover/scoring-preview');
+
+    expect(response?.status()).toBe(200);
+    await expect(page.getByTestId('scoring-inspector')).toBeVisible();
+    await expect(
+      page.getByRole('heading', { name: 'Recommendation Scoring Inspector' }),
+    ).toBeVisible();
+    await expect(page.getByTestId('preset-switcher')).toBeVisible();
+    await expect(page.getByTestId('toggle-fixtures-checkbox')).toBeVisible();
+
+    // Verify representative fixture labeling
+    await expect(page.getByTestId('synthetic-fixtures-badge')).toBeVisible();
+    await expect(page.getByTestId('synthetic-fixtures-badge')).toContainText(
+      'Authoritative Synthetic Fixtures (Demo)',
+    );
+
+    // Verify initial preset is Balanced
+    const balancedBtn = page.getByTestId('preset-btn-balanced');
+    await expect(balancedBtn).toHaveClass(/bg-indigo-600/);
+
+    // Switch to Nearby preset and confirm active state
+    const nearbyBtn = page.getByTestId('preset-btn-nearby');
+    await nearbyBtn.click();
+    await expect(nearbyBtn).toHaveClass(/bg-indigo-600/);
+    await expect(balancedBtn).not.toHaveClass(/bg-indigo-600/);
+
+    // Switch to Artist-First preset and confirm active state
+    const artistFirstBtn = page.getByTestId('preset-btn-artist_first');
+    await artistFirstBtn.click();
+    await expect(artistFirstBtn).toHaveClass(/bg-indigo-600/);
+    await expect(nearbyBtn).not.toHaveClass(/bg-indigo-600/);
+
+    // Switch back to Balanced
+    await balancedBtn.click();
+    await expect(balancedBtn).toHaveClass(/bg-indigo-600/);
+  });
 });

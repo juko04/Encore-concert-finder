@@ -2,11 +2,17 @@
 
 ## Minimum checks for pull requests
 
-- TypeScript typecheck
-- lint
-- unit tests
-- source-adapter parser tests for touched adapters
-- production build
+Before submitting or reviewing pull requests, contributors and agents must follow the mandatory self-audit protocol in [`docs/development/PR_REVIEW_CHECKLIST.md`](../development/PR_REVIEW_CHECKLIST.md).
+
+Minimum automated checks:
+- Code formatting (`npm run format:check`)
+- ESLint (`npm run lint`)
+- TypeScript typecheck (`npm run typecheck`)
+- Fast in-memory unit tests (`npm test`)
+- Source-adapter parser tests for touched adapters
+- Next.js production build (`npm run build`)
+- Playwright browser tests (`npm run test:e2e`)
+- PostgreSQL integration tests (`npm run test:integration` when local Supabase is available)
 
 ## Source adapter tests
 

@@ -80,6 +80,7 @@ export default defineConfig({
       PORT: `${PORT}`,
       PLAYWRIGHT_TEST: 'true',
       ENABLE_SPOTIFY_DEV_PREVIEW: 'true',
+      ENABLE_RECOMMENDATION_DEV_PREVIEW: 'true',
       ...resolveLocalSupabaseEnv(),
     },
   },
