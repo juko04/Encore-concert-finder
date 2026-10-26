@@ -141,9 +141,9 @@ test.describe('Discover Page E2E Suite', () => {
         normalized_name: `e2e ballroom ${timestamp}`,
         city: 'Denver',
         region: 'CO',
-        country: 'US',
-        latitude: 39.75,
-        longitude: -104.99,
+        country_code: 'US',
+        lat: 39.75,
+        lng: -104.99,
         timezone: 'America/Denver',
       })
       .select('id')

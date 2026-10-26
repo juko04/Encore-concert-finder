@@ -184,9 +184,9 @@ describe('PostgreSQL Integration: Personalized Discover Experience', () => {
         normalized_name: 'mission ballroom',
         city: 'Denver',
         region: 'CO',
-        country: 'US',
-        latitude: 39.7738,
-        longitude: -104.9789,
+        country_code: 'US',
+        lat: 39.7738,
+        lng: -104.9789,
         timezone: 'America/Denver',
       })
       .select('id')
