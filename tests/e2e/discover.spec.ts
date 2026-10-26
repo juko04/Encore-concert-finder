@@ -153,18 +153,29 @@ test.describe('Discover Page E2E Suite', () => {
     }
     testVenueId = venueRow.id;
 
-    // Seed test event
+    // Seed test event (in the future relative to execution date)
+    const futureDate = new Date(Date.now() + 30 * 86400 * 1000)
+      .toISOString()
+      .split('T')[0];
+
     const { data: eventRow, error: eventErr } = await adminClient
       .from('events')
       .insert({
-        title: `E2E Headliner Live at E2E Ballroom`,
+        name: `E2E Headliner Live at E2E Ballroom`,
+        normalized_name: `e2e headliner live at e2e ballroom`,
         event_kind: 'concert',
         status: 'scheduled',
         venue_id: testVenueId,
+        city: 'Denver',
+        region: 'CO',
+        country_code: 'US',
+        lat: 39.75,
+        lng: -104.99,
         timezone: 'America/Denver',
-        local_start_date: '2026-12-01',
-        starts_at: '2026-12-02T03:00:00Z',
+        local_start_date: futureDate,
+        starts_at: `${futureDate}T20:00:00-07:00`,
         start_time_precision: 'instant',
+        is_multi_day: false,
       })
       .select('id')
       .single();
@@ -174,21 +185,47 @@ test.describe('Discover Page E2E Suite', () => {
     testEventId = eventRow.id;
 
     // Link event to artist
-    await adminClient.from('event_artists').insert({
-      event_id: testEventId,
-      artist_id: testArtistId,
-      billing_order: 1,
-      billing_role: 'headliner',
-    });
+    const { error: artistLinkErr } = await adminClient
+      .from('event_artists')
+      .insert({
+        event_id: testEventId,
+        artist_id: testArtistId,
+        billing_position: 'headliner',
+        sort_order: 1,
+      });
+    if (artistLinkErr) {
+      throw new Error(`Failed to seed event artist: ${artistLinkErr?.message}`);
+    }
 
     // Add ticket link
-    await adminClient.from('event_ticket_links').insert({
-      event_id: testEventId,
-      source_id: '10000000-0000-0000-0000-000000000001',
-      url: 'https://tickets.example.com/e2e-show',
-      min_price: 50,
-      currency: 'USD',
-    });
+    const { error: ticketLinkErr } = await adminClient
+      .from('event_ticket_links')
+      .insert({
+        event_id: testEventId,
+        url: 'https://tickets.example.com/e2e-show',
+        normalized_url: 'https://tickets.example.com/e2e-show',
+        min_price: 50,
+        max_price: 75,
+        currency: 'USD',
+        inventory_status: 'available',
+      });
+    if (ticketLinkErr) {
+      throw new Error(`Failed to seed ticket link: ${ticketLinkErr?.message}`);
+    }
+
+    // Seed user preference for testUserId so recommendation cards are rendered
+    const { error: prefErr } = await adminClient
+      .from('user_artist_preferences')
+      .insert({
+        user_id: testUserId,
+        artist_id: testArtistId,
+        artist_name: `E2E Headliner ${timestamp}`,
+        normalized_artist_name: `e2e headliner ${timestamp}`,
+        preference_level: 'favorite',
+      });
+    if (prefErr) {
+      throw new Error(`Failed to seed user preference: ${prefErr?.message}`);
+    }
   });
 
   test.afterAll(async () => {

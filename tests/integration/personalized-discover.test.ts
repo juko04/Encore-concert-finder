@@ -199,14 +199,21 @@ describe('PostgreSQL Integration: Personalized Discover Experience', () => {
     const { data: eventRow, error: eventErr } = await adminClient
       .from('events')
       .insert({
-        title: 'The National Live at Mission Ballroom',
+        name: 'The National Live at Mission Ballroom',
+        normalized_name: 'the national live at mission ballroom',
         event_kind: 'concert',
         status: 'scheduled',
         venue_id: testVenueId,
+        city: 'Denver',
+        region: 'CO',
+        country_code: 'US',
+        lat: 39.7738,
+        lng: -104.9789,
         timezone: 'America/Denver',
         local_start_date: '2026-11-20',
         starts_at: '2026-11-21T03:00:00Z',
         start_time_precision: 'instant',
+        is_multi_day: false,
       })
       .select('id')
       .single();
@@ -216,22 +223,33 @@ describe('PostgreSQL Integration: Personalized Discover Experience', () => {
     testEventId = eventRow.id;
 
     // Link artist to event
-    await adminClient.from('event_artists').insert({
-      event_id: testEventId,
-      artist_id: testArtistId,
-      billing_order: 1,
-      billing_role: 'headliner',
-    });
+    const { error: artistLinkErr } = await adminClient
+      .from('event_artists')
+      .insert({
+        event_id: testEventId,
+        artist_id: testArtistId,
+        billing_position: 'headliner',
+        sort_order: 1,
+      });
+    if (artistLinkErr) {
+      throw new Error(`Failed to seed event artist: ${artistLinkErr?.message}`);
+    }
 
     // Insert ticket price link
-    await adminClient.from('event_ticket_links').insert({
-      event_id: testEventId,
-      source_id: '10000000-0000-0000-0000-000000000001',
-      url: 'https://tickets.example.com/the-national',
-      min_price: 65,
-      max_price: 95,
-      currency: 'USD',
-    });
+    const { error: ticketLinkErr } = await adminClient
+      .from('event_ticket_links')
+      .insert({
+        event_id: testEventId,
+        url: 'https://tickets.example.com/the-national',
+        normalized_url: 'https://tickets.example.com/the-national',
+        min_price: 65,
+        max_price: 95,
+        currency: 'USD',
+        inventory_status: 'available',
+      });
+    if (ticketLinkErr) {
+      throw new Error(`Failed to seed ticket link: ${ticketLinkErr?.message}`);
+    }
   });
 
   afterAll(async () => {
