@@ -440,8 +440,22 @@ export class SupabaseCatalogRepository implements ICatalogRepository {
       query = query.eq('region', filters.region);
     }
 
-    // Finding 11: Artist filtering support
-    if (filters?.artistId) {
+    // Artist filtering support (single artistId or multi-artist artistIds)
+    if (filters?.artistIds && filters.artistIds.length > 0) {
+      const { data: ea, error: eaError } = await this.client
+        .from('event_artists')
+        .select('event_id')
+        .in('artist_id', filters.artistIds);
+
+      if (eaError) {
+        throw new Error(`Failed to filter by artist IDs: ${eaError.message}`);
+      }
+      const eventIds = ea?.map((r) => r.event_id) ?? [];
+      if (eventIds.length === 0) {
+        return [];
+      }
+      query = query.in('id', eventIds);
+    } else if (filters?.artistId) {
       const { data: ea, error: eaError } = await this.client
         .from('event_artists')
         .select('event_id')

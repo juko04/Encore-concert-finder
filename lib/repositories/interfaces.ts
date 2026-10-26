@@ -47,6 +47,7 @@ export interface EventListFilters {
   toDate?: string;
   venueId?: string;
   artistId?: string;
+  artistIds?: string[];
   city?: string;
   region?: string;
   limit?: number;

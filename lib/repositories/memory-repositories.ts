@@ -415,7 +415,16 @@ export class MemoryCatalogRepository implements ICatalogRepository {
     if (filters?.region) {
       result = result.filter((e) => e.region === filters.region);
     }
-    if (filters?.artistId) {
+    if (filters?.artistIds && filters.artistIds.length > 0) {
+      const idSet = new Set(filters.artistIds);
+      const matchingEventIds = new Set<string>();
+      for (const ea of this.eventArtists.values()) {
+        if (idSet.has(ea.artistId)) {
+          matchingEventIds.add(ea.eventId);
+        }
+      }
+      result = result.filter((e) => matchingEventIds.has(e.id));
+    } else if (filters?.artistId) {
       // Finding 11: filter by artistId
       const matchingEventIds = new Set<string>();
       for (const ea of this.eventArtists.values()) {
