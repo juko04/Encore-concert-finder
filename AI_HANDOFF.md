@@ -9,42 +9,38 @@ Durable architecture records belong in [`docs/architecture/`](docs/architecture/
 
 - **Current Milestone:** **Phase 2 — Live Ingestion & Personalization**.
 - **Active Specification:** [`docs/phases/active/PHASE_2_IMPLEMENTATION.md`](docs/phases/active/PHASE_2_IMPLEMENTATION.md).
-- **Current Branch:** `feature/phase-2-recommendation-scoring`
+- **Current Branch:** `feature/phase-2-personalized-discover`
 - **Active Implementing Agent:** Google Antigravity
-- **Current Task:** Phase 2, PR #11: Personalized Recommendation Scoring Foundation — Final Pre-Merge Corrections.
-- **PR #11 Objectives & Scope:**
-  1. Build a pure, deterministic, typed multi-factor recommendation scoring engine (`lib/recommendation/`).
-  2. Implement four fixed priority presets: Balanced (50/20/20/10), Artist-first (65/15/10/10), Nearby (40/35/15/10), Value (40/15/35/10).
-  3. Support explicit artist preferences with identity resolution via verified canonical/external IDs (Favorite=100, Like=75, Interested=55, Unmarked=40, Dislike=0 & suppressed).
-  4. Implement bounded travel/distance utility respecting user radius (`default_radius_miles`) and price affordability respecting profile thresholds (`max_normal_ticket_price`, `max_favorite_artist_price`).
-  5. Minimal database migration adding `recommendation_preset` to `public.profiles` protected by RLS.
-  6. Development-only inspection view at `/discover/scoring-preview` for inspecting real calculations on seeded fixtures.
-  7. Establish permanent repository development standards and mandatory PR review checklist ([`docs/development/PR_REVIEW_CHECKLIST.md`](docs/development/PR_REVIEW_CHECKLIST.md)).
-  8. Final three pre-merge corrections:
-     - Conservative treatment of contradictory free-event pricing evidence (neutral affordability 50 without advertising free admission when `free_event` has positive price).
-     - Currency-aware unverified zero presentation (`Unverified $0 USD`, `Unverified CAD 0`, `Unverified 0 (currency unknown)` without misleading `$` or USD semantics).
-     - Documentation alignment across `AGENTS.md`, `PR_REVIEW_CHECKLIST.md`, and `PHASE_2_IMPLEMENTATION.md` for deterministic Not-Interested suppression and the Favorite-headliner exception.
-- **Verification State:** PR #11 Final Pre-Merge Corrections Complete:
-  - Branch: `feature/phase-2-recommendation-scoring`
-  - Pull Request: [PR #11](https://github.com/juko04/Encore-concert-finder/pull/11)
-  - Unit Tests: 407/407 passed across 31 test suites (`npm test`)
-  - PostgreSQL Integration Tests: Fail-closed verification demonstrated (exits code 1 on missing DB; passes 100% in CI against running local Supabase)
-  - Production Build: Next.js production build clean (0 errors, 14 routes)
+- **Current Task:** Phase 2, PR #12: Personalized Discover Experience — Final Focused Remediation.
+- **PR #12 Final Focused Remediation Scope & Additions:**
+  1. **Truthful Candidate-Aware Empty States:** Added `totalCandidateCount`, `suppressedCount`, and `ineligibleCount` to `PersonalizedDiscoverContainer.tsx` React state, updated on all server action refetches. Differentiated genuinely empty catalog (`totalCandidateCount === 0`), suppressed/ineligible candidate pool with no displayable recommendations (`!isCatalogEmpty && totalDisplayableCount === 0`), and client-side filter empty states. Truthful messaging provides guidance and links to `/profile/taste` without leaking names of suppressed/disliked artists.
+  2. **Production Preferred-Artist Query Completeness & Volume Test:** Updated `catalogRepo.listEvents()` in `lib/repositories/catalog-repository.ts` to perform a database-side inner join `event_artists!inner(artist_id)` with chunked batches (50 artist IDs) and SQL-side chronological ordering and limits. Added PostgreSQL integration test in `tests/integration/catalog-rls.test.ts` verifying >1,000 `event_artists` rows to prove PostgREST 1,000-row limits do not truncate matching events and chronological ordering is evaluated database-side.
+  3. **Decoupled Stale-Score Presentation:** Separated `isStale` state from `errorMessage` in `PersonalizedDiscoverContainer.tsx`. Dismissing the transient error banner preserves the `stale-recommendations-banner` with its dedicated retry refresh button until a refresh succeeds.
+  4. **E2E Mathematical Preset Inversion:** Updated `tests/e2e/discover.spec.ts` to seed Event A (Favorite artist, Colorado Springs, $120-$150) and Event B (Interested artist, Denver, $25-$35) for a Denver-based user. Verified that switching from `artist_first` to `nearby` mathematically inverts ranking and scores (Event A #1 under `artist_first` with score ~76 vs ~69; Event B #1 under `nearby` with score ~80 vs ~53).
+- **Verification State:** Final Remediation Fully Verified with Green CI:
+  - Branch: `feature/phase-2-personalized-discover`
+  - Pull Request: [#12](https://github.com/juko04/Encore-concert-finder/pull/12)
+  - Latest Commit: `78d8535` (`test(discover): extract integer scores accurately from DOM badges in E2E spec`)
+  - GitHub Actions CI Run: [#40404082196](https://github.com/juko04/Encore-concert-finder/actions/runs/40404082196) — **PASSED (13m22s)**
+  - Unit Tests: 468/468 passed across 34 test suites (`npm test`)
+  - Integration Tests: High-volume catalog test (>1,000 rows) and fail-closed RLS suites verified green
+  - Production Build: Next.js production build clean (0 errors, 14 routes, `/discover` confirmed dynamic)
   - Code Quality: Prettier format clean, ESLint clean (0 warnings), strict TypeScript clean (0 errors)
-- **Immediate Next Action:** Await user / independent reviewer inspection and merge of PR #11. Do NOT auto-merge. Do NOT proceed to PR #12 until PR #11 is merged to `main`.
-- **Phase 2 Status:** **ACTIVE — PR #11 FINAL INDEPENDENT REVIEW REMEDIATION COMPLETE.**
+  - E2E Tests: Playwright suite passed (11 tests in CI) with ranking inversion and factor drawer assertions
+- **Immediate Next Action:** PR #12 is ready for final user review and merge approval. Do NOT auto-merge PR #12. Do NOT proceed to Phase 3.
+- **Phase 2 Status:** **ACTIVE — PR #12 FINAL REMEDIATION COMPLETE, CI GREEN.**
 
 ---
 
 ## What the Next Agent Must Know
 
-1. **Strict Personalization Boundaries in PR #10:**
-   - Manual preferences (`user_artist_preferences`) remain first-class and authoritative.
-   - Spotify listening data is an optional enrichment source; it is explored on-demand and never automatically written to the catalog or database without explicit user confirmation.
-   - The 1-to-1 account invariant is strictly enforced: `UNIQUE(spotify_account_id)` ensures a single Spotify account cannot be silently linked to multiple Encore accounts.
-2. **Upcoming PR #11 Scope (Multi-Factor Recommendation Scoring):**
-   - Combine explicit manual preferences (`user_artist_preferences`), distance/venue affinity, timing/recency, and price tolerance into explainable match reasons (`match_score`, `match_reasons`).
-   - Answer: *"Why is this concert worth attending for me?"*
-3. **Deterministic Testing:**
-   - Zero live network calls to Spotify or Ticketmaster in CI or unit tests.
-   - All tests use deterministic mocks, fixtures, and local Supabase containers.
+1. **Preset Identifier Invariant:**
+   - The UI display label for the artist preset is "Artists", but the persisted database identifier must strictly be `artist_first`.
+2. **Two-Tier Candidate Pool & Database Join:**
+   - Upcoming shows for preferred artists are retrieved via PostgREST inner join `event_artists!inner(artist_id)` with SQL-side sorting and limiting, avoiding row-truncation pitfalls of two-query approaches.
+3. **Threshold Isolation Invariant:**
+   - `updateTypicalBudgetAction` only modifies `maxNormalTicketPrice` in `public.profiles`. `maxFavoriteArtistPrice` and `maxSpontaneousPrice` must remain unchanged.
+4. **Dynamic Request-Scoped Discover:**
+   - `/discover` must remain `export const dynamic = 'force-dynamic'` to ensure private user recommendations are never stored in shared CDN or Next.js ISR caches.
+5. **No Synthetic Fallback in Production:**
+   - Production Discover must never fall back to synthetic fixtures on error or empty catalog.

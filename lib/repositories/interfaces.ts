@@ -47,6 +47,7 @@ export interface EventListFilters {
   toDate?: string;
   venueId?: string;
   artistId?: string;
+  artistIds?: string[];
   city?: string;
   region?: string;
   limit?: number;
@@ -65,6 +66,10 @@ export interface ICatalogRepository {
     provider: string,
     externalId: string,
   ): Promise<Artist | null>;
+  findArtistIdsByExternalIds(
+    provider: string,
+    externalIds: string[],
+  ): Promise<Map<string, string>>;
   findArtistExternalIds(artistId: string): Promise<ArtistExternalId[]>;
   findVenueByNameAndCity(
     normalizedName: string,

@@ -415,7 +415,16 @@ export class MemoryCatalogRepository implements ICatalogRepository {
     if (filters?.region) {
       result = result.filter((e) => e.region === filters.region);
     }
-    if (filters?.artistId) {
+    if (filters?.artistIds && filters.artistIds.length > 0) {
+      const idSet = new Set(filters.artistIds);
+      const matchingEventIds = new Set<string>();
+      for (const ea of this.eventArtists.values()) {
+        if (idSet.has(ea.artistId)) {
+          matchingEventIds.add(ea.eventId);
+        }
+      }
+      result = result.filter((e) => matchingEventIds.has(e.id));
+    } else if (filters?.artistId) {
       // Finding 11: filter by artistId
       const matchingEventIds = new Set<string>();
       for (const ea of this.eventArtists.values()) {
@@ -592,6 +601,20 @@ export class MemoryCatalogRepository implements ICatalogRepository {
       }
     }
     return null;
+  }
+
+  async findArtistIdsByExternalIds(
+    provider: string,
+    externalIds: string[],
+  ): Promise<Map<string, string>> {
+    const result = new Map<string, string>();
+    const extSet = new Set(externalIds);
+    for (const ext of this.artistExternalIds.values()) {
+      if (ext.provider === provider && extSet.has(ext.externalId)) {
+        result.set(ext.externalId, ext.artistId);
+      }
+    }
+    return result;
   }
 
   async findArtistExternalIds(artistId: string): Promise<ArtistExternalId[]> {

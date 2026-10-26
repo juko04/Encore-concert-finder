@@ -443,10 +443,18 @@ Phase 2 will be delivered in 6 focused, independently reviewable PRs:
 - **Files:** `lib/recommendation/factors/`, `tests/unit/recommendation-factors.test.ts`.
 - **Verification:** Comprehensive unit tests covering normal values, edge cases, missing data, and boundary conditions.
 
-### PR 6 — Personalized Ranking, Explanations & Discovery Views
-- **Goal:** Composite ranking engine, human-readable explanation generation, and curated discovery feeds ("This Weekend", "Cheap & Nearby", "Worth Planning For") on `/discover`.
-- **Files:** `lib/recommendation/engine.ts`, `lib/recommendation/explainer.ts`, `app/discover/`, `components/catalog/`.
-- **Verification:** End-to-end unit and E2E tests for ranked event browsing and accessible explanation display.
+### PR 6 (PR #12) — Personalized Discover Experience
+- **Goal:** Production-ready Discover page connecting PR #11's recommendation engine to real user preferences and catalog events.
+- **Architecture & Implementation:**
+  - **Two-Tier Candidate Retrieval (`lib/recommendation/service.ts`):** Tier 1 queries upcoming events for explicit preferred artists (up to 100 events); Tier 2 queries general upcoming catalog events (up to 150 events). Merged and deduplicated by canonical event ID to guarantee favorite artist shows are considered even when outside the standard single-page window without unbounded table scans or N+1 queries.
+  - **Dynamic Cache Isolation:** `export const dynamic = 'force-dynamic'` on `/discover` ensures personalized recommendations are strictly request-scoped and never stored in shared CDN or Next.js ISR caches.
+  - **Authenticated Server Actions (`app/discover/actions.ts`):** `updateRecommendationPresetAction` (validating presets and persisting `artist_first`), `updateTravelRadiusAction` (validating integer [5, 500]), `updateTypicalBudgetAction` (updating `maxNormalTicketPrice` while preserving other thresholds), `getPersonalizedRecommendationsAction`, and `getPublicDiscoverAction`.
+  - **Interactive UI Components (`components/discover/`):**
+    - `PersonalizedEventCard`: Displays localized date/time, price via `formatEventPriceDisplay`, score formatted strictly as `${score}/100` (never a percentage), concise explanation, valid ticket button, and expandable "Why this show?" drawer disclosing 4 factor scores, weights, contributions, and truthful missing coordinate messaging.
+    - `PersonalizedDiscoverContainer`: Client container with 4-preset toggle, travel radius selector, typical budget selector, search input, city filter, and partitioned sections ("Recommended For You" vs "Explore Something New"), with onboarding and truthful empty catalog handling.
+    - `GuestDiscoverContainer`: Public event listing for signed-out guests with "Make These Recommendations Yours" banner linking to `/login` and `/profile/taste`.
+- **Files:** `lib/recommendation/service.ts`, `app/discover/actions.ts`, `app/discover/page.tsx`, `components/discover/PersonalizedEventCard.tsx`, `components/discover/PersonalizedDiscoverContainer.tsx`, `components/discover/GuestDiscoverContainer.tsx`, `tests/unit/recommendation-service.test.ts`, `tests/unit/discover-actions.test.ts`, `tests/unit/discover-components.test.tsx`, `tests/integration/personalized-discover.test.ts`, `tests/e2e/discover.spec.ts`.
+- **Verification:** Unit tests (actions, service, components), PostgreSQL integration suite (isolation, candidate completeness, threshold persistence), Playwright browser smoke & discover E2E tests, clean Next.js production build.
 
 ---
 
