@@ -592,7 +592,7 @@ describe('PersonalizedDiscoverContainer Component', () => {
     ).toBeInTheDocument();
   });
 
-  it('displays stale notice with retry button when settings save succeeds but re-rank fails', async () => {
+  it('displays stale notice with retry button when settings save succeeds but re-rank fails, preserves stale state on dismiss, and clears on successful retry', async () => {
     mockUpdateRecommendationPresetAction.mockResolvedValueOnce({
       success: true,
       data: { preset: 'artist_first' },
@@ -609,14 +609,49 @@ describe('PersonalizedDiscoverContainer Component', () => {
       fireEvent.click(artistBtn);
     });
 
-    // Stale banner appears
+    // Stale banner and error banner appear
     const staleBanner = screen.getByTestId('stale-recommendations-banner');
     expect(staleBanner).toBeInTheDocument();
     expect(staleBanner).toHaveTextContent(
+      'Displayed recommendations and scores may be outdated.',
+    );
+
+    const errorBanner = screen.getByTestId('discover-error-banner');
+    expect(errorBanner).toBeInTheDocument();
+    expect(errorBanner).toHaveTextContent(
       'Unable to load recommendations. Please try again.',
     );
 
-    // Clicking retry button successfully refreshes
+    // Dismissing the error message must NOT remove the stale-data indicator
+    const dismissBtn = screen.getByTestId('dismiss-error-button');
+    await act(async () => {
+      fireEvent.click(dismissBtn);
+    });
+    expect(
+      screen.queryByTestId('discover-error-banner'),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByTestId('stale-recommendations-banner'),
+    ).toBeInTheDocument();
+
+    // Retry fails: stale indicator remains visible
+    mockGetPersonalizedRecommendationsAction.mockResolvedValueOnce({
+      success: false,
+      error: 'Still failing to refresh.',
+    });
+
+    const retryBtn = screen.getByTestId('retry-refresh-button');
+    await act(async () => {
+      fireEvent.click(retryBtn);
+    });
+    expect(
+      screen.getByTestId('stale-recommendations-banner'),
+    ).toBeInTheDocument();
+    expect(screen.getByTestId('discover-error-banner')).toHaveTextContent(
+      'Still failing to refresh.',
+    );
+
+    // Retry succeeds: clears stale state and error banner
     mockGetPersonalizedRecommendationsAction.mockResolvedValueOnce({
       success: true,
       data: {
@@ -625,14 +660,181 @@ describe('PersonalizedDiscoverContainer Component', () => {
       },
     });
 
-    const retryBtn = screen.getByTestId('retry-refresh-button');
     await act(async () => {
-      fireEvent.click(retryBtn);
+      fireEvent.click(screen.getByTestId('retry-refresh-button'));
     });
 
     expect(
       screen.queryByTestId('stale-recommendations-banner'),
     ).not.toBeInTheDocument();
+  });
+
+  it('correctly handles empty state 1: zero candidates in database -> displays empty-catalog banner', () => {
+    const zeroCandidateData: PersonalizedDiscoverResult = {
+      ...mockInitialData,
+      totalCandidateCount: 0,
+      recommendations: [],
+      exploratory: [],
+      suppressed: [],
+      ineligibleCount: 0,
+      isEmptyCatalog: true,
+    };
+
+    render(<PersonalizedDiscoverContainer initialData={zeroCandidateData} />);
+
+    expect(screen.getByTestId('empty-catalog-banner')).toBeInTheDocument();
+    expect(screen.getByText('No upcoming events found')).toBeInTheDocument();
+    expect(
+      screen.queryByTestId('no-eligible-recommendations-banner'),
+    ).not.toBeInTheDocument();
+  });
+
+  it('correctly handles empty state 2: candidates exist but all are suppressed -> displays truthful no-eligible-recommendations banner without revealing disliked concerts', () => {
+    const allSuppressedData: PersonalizedDiscoverResult = {
+      ...mockInitialData,
+      totalCandidateCount: 5,
+      recommendations: [],
+      exploratory: [],
+      suppressed: [
+        { ...mockInitialData.recommendations[0], isSuppressed: true },
+      ],
+      ineligibleCount: 0,
+      isEmptyCatalog: false,
+    };
+
+    render(<PersonalizedDiscoverContainer initialData={allSuppressedData} />);
+
+    // Must NOT claim no upcoming events were found
+    expect(
+      screen.queryByTestId('empty-catalog-banner'),
+    ).not.toBeInTheDocument();
+
+    const banner = screen.getByTestId('no-eligible-recommendations-banner');
+    expect(banner).toBeInTheDocument();
+    expect(banner).toHaveTextContent(
+      'No eligible recommendations with your current preferences',
+    );
+    expect(banner).toHaveTextContent('not interested or disliked');
+
+    // Crucial: do NOT reveal the suppressed concerts in the document
+    expect(
+      screen.queryByText('Chappell Roan at Mission Ballroom'),
+    ).not.toBeInTheDocument();
+  });
+
+  it('correctly handles empty state 3: candidates exist but all are ineligible -> displays no-eligible-results banner', () => {
+    const allIneligibleData: PersonalizedDiscoverResult = {
+      ...mockInitialData,
+      totalCandidateCount: 3,
+      recommendations: [],
+      exploratory: [],
+      suppressed: [],
+      ineligibleCount: 3,
+      isEmptyCatalog: false,
+    };
+
+    render(<PersonalizedDiscoverContainer initialData={allIneligibleData} />);
+
+    expect(
+      screen.queryByTestId('empty-catalog-banner'),
+    ).not.toBeInTheDocument();
+    const banner = screen.getByTestId('no-eligible-results-banner');
+    expect(banner).toBeInTheDocument();
+    expect(banner).toHaveTextContent('No upcoming eligible events');
+  });
+
+  it('correctly handles empty state 4: recommendations exist but search matches none -> displays empty-filtered banner with clear button', () => {
+    render(<PersonalizedDiscoverContainer initialData={mockInitialData} />);
+
+    const searchInput = screen.getByTestId('search-input');
+    fireEvent.change(searchInput, {
+      target: { value: 'NonexistentBandQuery123' },
+    });
+
+    expect(screen.getByTestId('empty-filtered-banner')).toBeInTheDocument();
+    expect(
+      screen.getByText('No events match your search criteria'),
+    ).toBeInTheDocument();
+
+    // Clicking clear filters restores recommendations
+    const clearBtn = screen.getByRole('button', { name: 'Clear Filters' });
+    fireEvent.click(clearBtn);
+
+    expect(
+      screen.queryByTestId('empty-filtered-banner'),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByText('Chappell Roan at Mission Ballroom'),
+    ).toBeInTheDocument();
+  });
+
+  it('correctly handles empty state 5 & 6: refetch dynamically updates empty state and cards reappear', async () => {
+    // 5. Initial state has events -> Refetch changes to empty (e.g. strict budget filter eliminates all)
+    render(<PersonalizedDiscoverContainer initialData={mockInitialData} />);
+    expect(
+      screen.getByText('Chappell Roan at Mission Ballroom'),
+    ).toBeInTheDocument();
+
+    mockUpdateTypicalBudgetAction.mockResolvedValueOnce({
+      success: true,
+      data: { maxNormalTicketPrice: 40 },
+    });
+    mockGetPersonalizedRecommendationsAction.mockResolvedValueOnce({
+      success: true,
+      data: {
+        ...mockInitialData,
+        totalCandidateCount: 2,
+        recommendations: [],
+        exploratory: [],
+        suppressed: [
+          { ...mockInitialData.recommendations[0], isSuppressed: true },
+        ],
+        ineligibleCount: 1,
+      },
+    });
+
+    const budget40Btn = within(screen.getByTestId('budget-selector')).getByRole(
+      'button',
+      { name: '$40' },
+    );
+    await act(async () => {
+      fireEvent.click(budget40Btn);
+    });
+
+    // Cards disappear, no-eligible-recommendations appears dynamically
+    expect(
+      screen.queryByText('Chappell Roan at Mission Ballroom'),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByTestId('no-eligible-recommendations-banner'),
+    ).toBeInTheDocument();
+
+    // 6. Refetch changes back to nonempty -> cards reappear dynamically
+    mockUpdateTypicalBudgetAction.mockResolvedValueOnce({
+      success: true,
+      data: { maxNormalTicketPrice: 80 },
+    });
+    mockGetPersonalizedRecommendationsAction.mockResolvedValueOnce({
+      success: true,
+      data: {
+        ...mockInitialData,
+      },
+    });
+
+    const budget80Btn = within(screen.getByTestId('budget-selector')).getByRole(
+      'button',
+      { name: '$80' },
+    );
+    await act(async () => {
+      fireEvent.click(budget80Btn);
+    });
+
+    expect(
+      screen.queryByTestId('no-eligible-recommendations-banner'),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByText('Chappell Roan at Mission Ballroom'),
+    ).toBeInTheDocument();
   });
 
   it('displays onboarding callout when user has zero saved preferences', () => {

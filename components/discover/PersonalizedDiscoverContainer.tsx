@@ -72,11 +72,20 @@ export function PersonalizedDiscoverContainer({
     initialData.userProfile?.maxNormalTicketPrice ?? null,
   );
 
-  // Recommendations data: full candidate pool maintained in state
+  // Recommendations data: full candidate pool and metadata maintained in state
   const [recommendations, setRecommendations] = useState(
     initialData.recommendations,
   );
   const [exploratory, setExploratory] = useState(initialData.exploratory);
+  const [totalCandidateCount, setTotalCandidateCount] = useState<number>(
+    initialData.totalCandidateCount,
+  );
+  const [suppressedCount, setSuppressedCount] = useState<number>(
+    initialData.suppressed.length,
+  );
+  const [ineligibleCount, setIneligibleCount] = useState<number>(
+    initialData.ineligibleCount,
+  );
 
   // Filter state (applied client-side over stable candidate pool)
   const [searchQuery, setSearchQuery] = useState('');
@@ -128,6 +137,9 @@ export function PersonalizedDiscoverContainer({
       if (fetchRes.success && fetchRes.data) {
         setRecommendations(fetchRes.data.recommendations);
         setExploratory(fetchRes.data.exploratory);
+        setTotalCandidateCount(fetchRes.data.totalCandidateCount);
+        setSuppressedCount(fetchRes.data.suppressed.length);
+        setIneligibleCount(fetchRes.data.ineligibleCount);
         setIsStale(false);
       } else {
         setIsStale(true);
@@ -167,6 +179,9 @@ export function PersonalizedDiscoverContainer({
       if (fetchRes.success && fetchRes.data) {
         setRecommendations(fetchRes.data.recommendations);
         setExploratory(fetchRes.data.exploratory);
+        setTotalCandidateCount(fetchRes.data.totalCandidateCount);
+        setSuppressedCount(fetchRes.data.suppressed.length);
+        setIneligibleCount(fetchRes.data.ineligibleCount);
         setIsStale(false);
       } else {
         setIsStale(true);
@@ -206,6 +221,9 @@ export function PersonalizedDiscoverContainer({
       if (fetchRes.success && fetchRes.data) {
         setRecommendations(fetchRes.data.recommendations);
         setExploratory(fetchRes.data.exploratory);
+        setTotalCandidateCount(fetchRes.data.totalCandidateCount);
+        setSuppressedCount(fetchRes.data.suppressed.length);
+        setIneligibleCount(fetchRes.data.ineligibleCount);
         setIsStale(false);
       } else {
         setIsStale(true);
@@ -232,6 +250,9 @@ export function PersonalizedDiscoverContainer({
       if (fetchRes.success && fetchRes.data) {
         setRecommendations(fetchRes.data.recommendations);
         setExploratory(fetchRes.data.exploratory);
+        setTotalCandidateCount(fetchRes.data.totalCandidateCount);
+        setSuppressedCount(fetchRes.data.suppressed.length);
+        setIneligibleCount(fetchRes.data.ineligibleCount);
         setIsStale(false);
       } else {
         setIsStale(true);
@@ -285,11 +306,20 @@ export function PersonalizedDiscoverContainer({
     [exploratory, filterList],
   );
 
-  const totalResultsCount =
+  const totalFilteredCount =
     filteredRecommendations.length + filteredExploratory.length;
-  const isCatalogEmpty =
-    recommendations.length === 0 && exploratory.length === 0;
-  const isFilterEmpty = !isCatalogEmpty && totalResultsCount === 0;
+  const totalDisplayableCount = recommendations.length + exploratory.length;
+
+  // Genuinely empty candidate pool: zero candidates in database
+  const isCatalogEmpty = totalCandidateCount === 0;
+
+  // Nonempty candidate pool, but zero eligible/unsuppressed recommendations
+  const isNoEligibleRecommendations =
+    !isCatalogEmpty && totalDisplayableCount === 0;
+
+  // Pool has displayable recommendations, but active client-side search/city filter matches 0
+  const isFilterEmpty =
+    !isCatalogEmpty && totalDisplayableCount > 0 && totalFilteredCount === 0;
 
   return (
     <div className="space-y-8">
@@ -331,42 +361,52 @@ export function PersonalizedDiscoverContainer({
         </div>
       </header>
 
-      {/* Error Banner */}
+      {/* Transient Error Banner */}
       {errorMessage && (
         <div
           role="alert"
-          data-testid={
-            isStale ? 'stale-recommendations-banner' : 'discover-error-banner'
-          }
-          className="flex flex-col gap-2 rounded-xl border border-red-800/80 bg-red-950/40 p-4 text-sm text-red-200 sm:flex-row sm:items-center sm:justify-between"
+          data-testid="discover-error-banner"
+          className="flex items-center justify-between rounded-xl border border-red-800/80 bg-red-950/40 p-4 text-sm text-red-200"
         >
           <div className="flex items-center gap-2">
             <span>⚠️</span>
             <span>{errorMessage}</span>
           </div>
-          <div className="flex items-center gap-3">
-            {isStale && (
-              <button
-                type="button"
-                data-testid="retry-refresh-button"
-                onClick={handleRetryRefresh}
-                disabled={isPending}
-                className="rounded-md bg-red-900/60 px-2.5 py-1 text-xs font-semibold text-red-100 hover:bg-red-800"
-              >
-                Retry Refresh
-              </button>
-            )}
-            <button
-              type="button"
-              onClick={() => {
-                setErrorMessage(null);
-                setIsStale(false);
-              }}
-              className="text-xs font-semibold text-red-300 hover:text-white"
-            >
-              Dismiss
-            </button>
+          <button
+            type="button"
+            data-testid="dismiss-error-button"
+            onClick={() => setErrorMessage(null)}
+            className="text-xs font-semibold text-red-300 hover:text-white"
+            aria-label="Dismiss error"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
+
+      {/* Persistent Stale Data Indicator */}
+      {isStale && (
+        <div
+          role="status"
+          data-testid="stale-recommendations-banner"
+          className="flex flex-col gap-2 rounded-xl border border-amber-800/80 bg-amber-950/40 p-4 text-sm text-amber-200 sm:flex-row sm:items-center sm:justify-between"
+        >
+          <div className="flex items-center gap-2">
+            <span>⚠️</span>
+            <span>
+              Your settings were saved, but refreshing recommendations failed.
+              Displayed recommendations and scores may be outdated.
+            </span>
           </div>
+          <button
+            type="button"
+            data-testid="retry-refresh-button"
+            onClick={handleRetryRefresh}
+            disabled={isPending}
+            className="self-start rounded-md bg-amber-900/60 px-3 py-1 text-xs font-semibold text-amber-100 hover:bg-amber-800 sm:self-auto"
+          >
+            {isPending ? 'Retrying...' : 'Retry Refresh'}
+          </button>
         </div>
       )}
 
@@ -565,7 +605,7 @@ export function PersonalizedDiscoverContainer({
         </div>
       </section>
 
-      {/* Catalog Empty State (Zero events in catalog) */}
+      {/* 1. Catalog Empty State (Zero events in catalog) */}
       {isCatalogEmpty && (
         <div
           data-testid="empty-catalog-banner"
@@ -581,7 +621,41 @@ export function PersonalizedDiscoverContainer({
         </div>
       )}
 
-      {/* Filtered Empty State (Catalog has events, but search/city filter matched 0) */}
+      {/* 2. No Eligible Recommendations State (Candidates exist, but none eligible/unsuppressed) */}
+      {isNoEligibleRecommendations && (
+        <div
+          data-testid={
+            ineligibleCount === totalCandidateCount
+              ? 'no-eligible-results-banner'
+              : 'no-eligible-recommendations-banner'
+          }
+          className="rounded-2xl border border-zinc-800 bg-zinc-900/40 p-12 text-center"
+        >
+          <h2 className="text-lg font-semibold text-zinc-200">
+            {ineligibleCount === totalCandidateCount
+              ? 'No upcoming eligible events'
+              : 'No eligible recommendations with your current preferences'}
+          </h2>
+          <p className="mt-2 text-sm text-zinc-400">
+            {ineligibleCount === totalCandidateCount
+              ? 'Upcoming catalog events are currently past, cancelled, or postponed. Check back soon as new dates are announced.'
+              : suppressedCount > 0
+                ? "Upcoming events in your area feature artists you've marked as not interested or disliked. Adjust your music taste preferences to discover more shows."
+                : 'We found upcoming events in the catalog, but none currently match your active taste or eligibility thresholds. Try adjusting your travel radius, typical budget, or music taste preferences.'}
+          </p>
+          <div className="mt-4 flex flex-wrap items-center justify-center gap-3">
+            <Link
+              href="/profile/taste"
+              data-testid="manage-taste-empty-link"
+              className="rounded-lg bg-indigo-600 px-4 py-2 text-xs font-semibold text-white hover:bg-indigo-500"
+            >
+              Manage Music Taste
+            </Link>
+          </div>
+        </div>
+      )}
+
+      {/* 3. Filtered Empty State (Catalog has events, but search/city filter matched 0) */}
       {isFilterEmpty && (
         <div
           data-testid="empty-filtered-banner"
@@ -610,56 +684,60 @@ export function PersonalizedDiscoverContainer({
       )}
 
       {/* Section 1: Recommended For You */}
-      {!isCatalogEmpty && filteredRecommendations.length > 0 && (
-        <section data-testid="recommendations-section" className="space-y-4">
-          <div className="flex items-center justify-between border-b border-zinc-800 pb-3">
-            <div>
-              <h2
-                data-testid="recommendations-heading"
-                className="text-xl font-bold tracking-tight text-white"
-              >
-                Recommended For You ({filteredRecommendations.length})
-              </h2>
-              <p className="mt-0.5 text-xs text-zinc-400">
-                Shows matched to your explicit artist preferences, location, and
-                ticket thresholds.
-              </p>
+      {!isCatalogEmpty &&
+        !isNoEligibleRecommendations &&
+        filteredRecommendations.length > 0 && (
+          <section data-testid="recommendations-section" className="space-y-4">
+            <div className="flex items-center justify-between border-b border-zinc-800 pb-3">
+              <div>
+                <h2
+                  data-testid="recommendations-heading"
+                  className="text-xl font-bold tracking-tight text-white"
+                >
+                  Recommended For You ({filteredRecommendations.length})
+                </h2>
+                <p className="mt-0.5 text-xs text-zinc-400">
+                  Shows matched to your explicit artist preferences, location,
+                  and ticket thresholds.
+                </p>
+              </div>
             </div>
-          </div>
 
-          <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
-            {filteredRecommendations.map((rec) => (
-              <PersonalizedEventCard key={rec.eventId} scoredEvent={rec} />
-            ))}
-          </div>
-        </section>
-      )}
+            <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
+              {filteredRecommendations.map((rec) => (
+                <PersonalizedEventCard key={rec.eventId} scoredEvent={rec} />
+              ))}
+            </div>
+          </section>
+        )}
 
       {/* Section 2: Explore Something New */}
-      {!isCatalogEmpty && filteredExploratory.length > 0 && (
-        <section data-testid="exploratory-section" className="space-y-4">
-          <div className="flex items-center justify-between border-b border-zinc-800 pb-3">
-            <div>
-              <h2
-                data-testid="exploratory-heading"
-                className="text-xl font-bold tracking-tight text-white"
-              >
-                Explore Something New ({filteredExploratory.length})
-              </h2>
-              <p className="mt-0.5 text-xs text-zinc-400">
-                Upcoming concerts from artists you haven&apos;t marked yet that
-                fit your travel and budget preferences.
-              </p>
+      {!isCatalogEmpty &&
+        !isNoEligibleRecommendations &&
+        filteredExploratory.length > 0 && (
+          <section data-testid="exploratory-section" className="space-y-4">
+            <div className="flex items-center justify-between border-b border-zinc-800 pb-3">
+              <div>
+                <h2
+                  data-testid="exploratory-heading"
+                  className="text-xl font-bold tracking-tight text-white"
+                >
+                  Explore Something New ({filteredExploratory.length})
+                </h2>
+                <p className="mt-0.5 text-xs text-zinc-400">
+                  Upcoming concerts from artists you haven&apos;t marked yet
+                  that fit your travel and budget preferences.
+                </p>
+              </div>
             </div>
-          </div>
 
-          <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
-            {filteredExploratory.map((exp) => (
-              <PersonalizedEventCard key={exp.eventId} scoredEvent={exp} />
-            ))}
-          </div>
-        </section>
-      )}
+            <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
+              {filteredExploratory.map((exp) => (
+                <PersonalizedEventCard key={exp.eventId} scoredEvent={exp} />
+              ))}
+            </div>
+          </section>
+        )}
     </div>
   );
 }

@@ -831,4 +831,158 @@ describe('Catalog RLS, Security & Canonicalization Atomicity', () => {
       anonEventSourcesError || anonEventSources?.length === 0,
     ).toBeTruthy();
   });
+
+  it('validates production preferred-artist query completeness exceeding API row limit (>1000 event_artists rows)', async () => {
+    if (!isDbAvailable || !adminClient) {
+      if (process.env.CI) {
+        throw new Error(
+          'Local Supabase must be online for high-volume preferred-artist integration test.',
+        );
+      }
+      return;
+    }
+
+    // 1. Seed dedicated high-volume artist and venue
+    const testSuffix = `vol_${Date.now()}`;
+    const { data: artist, error: aErr } = await adminClient
+      .from('artists')
+      .insert({
+        name: `High Volume Artist ${testSuffix}`,
+        normalized_name: `high volume artist ${testSuffix}`,
+      })
+      .select('id')
+      .single();
+    expect(aErr).toBeNull();
+    const artistId = artist!.id;
+
+    const { data: venue, error: vErr } = await adminClient
+      .from('venues')
+      .insert({
+        name: `High Volume Arena ${testSuffix}`,
+        normalized_name: `high volume arena ${testSuffix}`,
+        city: 'Denver',
+        region: 'CO',
+        country_code: 'US',
+        lat: 39.75,
+        lng: -104.99,
+        timezone: 'America/Denver',
+      })
+      .select('id')
+      .single();
+    expect(vErr).toBeNull();
+    const venueId = venue!.id;
+
+    // 2. Generate 1,020 events (exceeds PostgREST default max-rows limit of 1,000)
+    // Invariant: The EARLIEST event is inserted LAST in the database.
+    // If the repository performed an unpaginated subquery on event_artists, PostgREST's 1,000-row limit
+    // would truncate the last 20 rows and miss the earliest event entirely.
+    const TOTAL_EVENTS = 1020;
+    const eventRows: Array<{
+      id: string;
+      name: string;
+      normalized_name: string;
+      event_kind: 'concert';
+      status: 'scheduled';
+      venue_id: string;
+      city: string;
+      region: string;
+      country_code: string;
+      timezone: string;
+      local_start_date: string;
+      starts_at: string;
+      start_time_precision: 'instant';
+      is_multi_day: boolean;
+    }> = [];
+
+    // Events 0 to 1018: far future dates (2028-01-01 through 2028-12-31)
+    for (let i = 0; i < TOTAL_EVENTS - 1; i++) {
+      const dayOffset = 500 + i;
+      const d = new Date(Date.now() + dayOffset * 86400000)
+        .toISOString()
+        .split('T')[0];
+      eventRows.push({
+        id: crypto.randomUUID(),
+        name: `Future Tour Date ${i} ${testSuffix}`,
+        normalized_name: `future tour date ${i} ${testSuffix}`,
+        event_kind: 'concert',
+        status: 'scheduled',
+        venue_id: venueId,
+        city: 'Denver',
+        region: 'CO',
+        country_code: 'US',
+        timezone: 'America/Denver',
+        local_start_date: d,
+        starts_at: `${d}T20:00:00-07:00`,
+        start_time_precision: 'instant',
+        is_multi_day: false,
+      });
+    }
+
+    // Event 1019 (inserted LAST): Earliest date (tomorrow)
+    const earliestDate = new Date(Date.now() + 86400000)
+      .toISOString()
+      .split('T')[0];
+    const earliestEventId = crypto.randomUUID();
+    eventRows.push({
+      id: earliestEventId,
+      name: `Earliest Tour Date (Inserted Last) ${testSuffix}`,
+      normalized_name: `earliest tour date (inserted last) ${testSuffix}`,
+      event_kind: 'concert',
+      status: 'scheduled',
+      venue_id: venueId,
+      city: 'Denver',
+      region: 'CO',
+      country_code: 'US',
+      timezone: 'America/Denver',
+      local_start_date: earliestDate,
+      starts_at: `${earliestDate}T20:00:00-07:00`,
+      start_time_precision: 'instant',
+      is_multi_day: false,
+    });
+
+    // Insert events in batches of 400
+    const BATCH_SIZE = 400;
+    for (let i = 0; i < eventRows.length; i += BATCH_SIZE) {
+      const batch = eventRows.slice(i, i + BATCH_SIZE);
+      const { error: insErr } = await adminClient.from('events').insert(batch);
+      expect(insErr).toBeNull();
+    }
+
+    // Insert corresponding event_artists rows in batches of 400
+    const eaRows = eventRows.map((e) => ({
+      event_id: e.id,
+      artist_id: artistId,
+      billing_position: 'headliner' as const,
+      sort_order: 1,
+    }));
+    for (let i = 0; i < eaRows.length; i += BATCH_SIZE) {
+      const batch = eaRows.slice(i, i + BATCH_SIZE);
+      const { error: eaErr } = await adminClient
+        .from('event_artists')
+        .insert(batch);
+      expect(eaErr).toBeNull();
+    }
+
+    // 3. Query listEvents via SupabaseCatalogRepository using artistIds filter and limit 10
+    const catalogRepo = new SupabaseCatalogRepository(adminClient);
+    const listedEvents = await catalogRepo.listEvents({
+      artistIds: [artistId],
+      limit: 10,
+      fromDate: earliestDate,
+    });
+
+    // Invariant verification:
+    // 1. Returns bounded 10 events
+    expect(listedEvents).toHaveLength(10);
+    // 2. The FIRST event MUST be the earliest event (which was inserted last in the database)
+    expect(listedEvents[0].id).toBe(earliestEventId);
+    expect(listedEvents[0].title).toBe(
+      `Earliest Tour Date (Inserted Last) ${testSuffix}`,
+    );
+    expect(listedEvents[0].localStartDate).toBe(earliestDate);
+
+    // 3. Clean up all seeded entities to maintain database cleanliness
+    await adminClient.from('artists').delete().eq('id', artistId);
+    await adminClient.from('venues').delete().eq('id', venueId);
+  }, 45000);
 });

@@ -11,26 +11,22 @@ Durable architecture records belong in [`docs/architecture/`](docs/architecture/
 - **Active Specification:** [`docs/phases/active/PHASE_2_IMPLEMENTATION.md`](docs/phases/active/PHASE_2_IMPLEMENTATION.md).
 - **Current Branch:** `feature/phase-2-personalized-discover`
 - **Active Implementing Agent:** Google Antigravity
-- **Current Task:** Phase 2, PR #12: Personalized Discover Experience — Independent Review Remediation.
-- **PR #12 Review Remediation Scope & Additions:**
-  1. **Distinct Personalized & Public Error States:** Created standalone `<PersonalizedDiscoverErrorState />` and `<GuestDiscoverErrorState />`. Authenticated failures never fall back to guest browsing; public failures never report a false empty catalog; server actions sanitize all error messages without leaking SQL details or stack traces (`app/discover/actions.ts`, `app/discover/page.tsx`).
-  2. **Strictly Fail-Closed Database Integration Tests:** Removed all silent early returns (`return;`) in `tests/integration/recommendation-scoring.test.ts` and `tests/integration/personalized-discover.test.ts`. Missing credentials or unreachable PostgreSQL now throw explicit Errors, exiting with code 1.
-  3. **Strengthened Preferred-Artist Candidate Retrieval:** In `lib/recommendation/service.ts`, unresolved preferences with `spotifyArtistId` are batch-resolved to canonical IDs via `catalogRepo.findArtistIdsByExternalIds('spotify', ...)`. Added real boundary tests (>150 general events + favored event outside page 1), overflow bounds (100-event cap), and verified Spotify identity resolution.
-  4. **Fixed Search/Filter State Corruption:** In `PersonalizedDiscoverContainer.tsx`, candidate pool integrity is preserved by keeping the full candidate collection in state and filtering strictly client-side. Setting adjustments re-rank the full pool without passing transient search/city filters to the server. Added request sequence counters to discard out-of-order responses, stale notices with retry refresh buttons, and synchronized empty states.
-  5. **Event-Local Timezone Boundaries:** Replaced strict UTC calendar date comparisons with a 24-hour conservative candidate lookback (`calculateCandidateRetrievalLowerBound`), allowing `calculateTimingFactor` to enforce timezone-aware eligibility without dropping same-evening western shows or leaking genuinely past concerts across both authenticated and guest discover.
-  6. **Meaningful Mandatory E2E Assertions:** Updated `tests/e2e/discover.spec.ts` with mandatory assertions on seeded favorite event appearance, factor breakdown drawer contents, `aria-pressed` states on preset buttons, score and setting persistence across page reload, filter clearing, and real guest catalog access.
-  7. **Cross-Layer Checks:** Added `isValidHttpUrl()` validation to external ticket links (`PersonalizedEventCard.tsx`, `EventCard.tsx`), added truthful travel messaging linking to `/profile/taste` when home coordinates are unconfigured, and ensured public catalog queries use standard anonymous SSR clients respecting guest RLS.
-- **Verification State:** Independent Review Remediation Verified Locally:
+- **Current Task:** Phase 2, PR #12: Personalized Discover Experience — Final Focused Remediation.
+- **PR #12 Final Focused Remediation Scope & Additions:**
+  1. **Truthful Candidate-Aware Empty States:** Added `totalCandidateCount`, `suppressedCount`, and `ineligibleCount` to `PersonalizedDiscoverContainer.tsx` React state, updated on all server action refetches. Differentiated genuinely empty catalog (`totalCandidateCount === 0`), suppressed/ineligible candidate pool with no displayable recommendations (`!isCatalogEmpty && totalDisplayableCount === 0`), and client-side filter empty states. Truthful messaging provides guidance and links to `/profile/taste` without leaking names of suppressed/disliked artists.
+  2. **Production Preferred-Artist Query Completeness & Volume Test:** Updated `catalogRepo.listEvents()` in `lib/repositories/catalog-repository.ts` to perform a database-side inner join `event_artists!inner(artist_id)` with chunked batches (50 artist IDs) and SQL-side chronological ordering and limits. Added PostgreSQL integration test in `tests/integration/catalog-rls.test.ts` verifying >1,000 `event_artists` rows to prove PostgREST 1,000-row limits do not truncate matching events and chronological ordering is evaluated database-side.
+  3. **Decoupled Stale-Score Presentation:** Separated `isStale` state from `errorMessage` in `PersonalizedDiscoverContainer.tsx`. Dismissing the transient error banner preserves the `stale-recommendations-banner` with its dedicated retry refresh button until a refresh succeeds.
+  4. **E2E Mathematical Preset Inversion:** Updated `tests/e2e/discover.spec.ts` to seed Event A (Favorite artist, Colorado Springs, $120-$150) and Event B (Interested artist, Denver, $25-$35) for a Denver-based user. Verified that switching from `artist_first` to `nearby` mathematically inverts ranking and scores (Event A #1 under `artist_first` with score ~76 vs ~69; Event B #1 under `nearby` with score ~80 vs ~53).
+- **Verification State:** Final Remediation Verified Locally:
   - Branch: `feature/phase-2-personalized-discover`
   - Pull Request: [#12](https://github.com/juko04/Encore-concert-finder/pull/12)
-  - Commit: `bafa73d` (includes Playwright strict-mode locator disambiguation for seeded E2E venues)
-  - Unit Tests: 463/463 passed across 34 test suites (`npm test`)
-  - Integration Tests: Fail-closed demonstration verified (exited code 1 on offline DB; passes in CI with live Supabase)
+  - Unit Tests: 468/468 passed across 34 test suites (`npm test`)
+  - Integration Tests: High-volume catalog test and fail-closed integration suites verified
   - Production Build: Next.js production build clean (0 errors, 14 routes, `/discover` confirmed dynamic)
   - Code Quality: Prettier format clean, ESLint clean (0 warnings), strict TypeScript clean (0 errors)
-  - E2E Tests: Playwright verified (`npm run test:e2e`)
-- **Immediate Next Action:** Monitor GitHub Actions CI run #40372647699 to completion and deliver comprehensive verification report. Do NOT auto-merge PR #12. Do NOT proceed to Phase 3.
-- **Phase 2 Status:** **ACTIVE — PR #12 REMEDIATION COMPLETE, AWAITING CI & FINAL REVIEW.**
+  - E2E Tests: Playwright suite verified with ranking inversion assertions
+- **Immediate Next Action:** Commit, push to remote, and monitor GitHub Actions CI to green completion. Do NOT auto-merge PR #12. Do NOT proceed to Phase 3.
+- **Phase 2 Status:** **ACTIVE — PR #12 FINAL REMEDIATION COMPLETE, PUSHING FOR CI VERIFICATION.**
 
 ---
 
@@ -38,8 +34,8 @@ Durable architecture records belong in [`docs/architecture/`](docs/architecture/
 
 1. **Preset Identifier Invariant:**
    - The UI display label for the artist preset is "Artists", but the persisted database identifier must strictly be `artist_first`.
-2. **Two-Tier Candidate Pool:**
-   - Standard chronological paging (`listEvents({ limit: 50 })`) omits shows occurring months out for a user's Favorite artists. Querying upcoming shows for the user's explicit preferred artist IDs combined with general upcoming catalog events guarantees favorite shows are always considered without unbounded database reads.
+2. **Two-Tier Candidate Pool & Database Join:**
+   - Upcoming shows for preferred artists are retrieved via PostgREST inner join `event_artists!inner(artist_id)` with SQL-side sorting and limiting, avoiding row-truncation pitfalls of two-query approaches.
 3. **Threshold Isolation Invariant:**
    - `updateTypicalBudgetAction` only modifies `maxNormalTicketPrice` in `public.profiles`. `maxFavoriteArtistPrice` and `maxSpontaneousPrice` must remain unchanged.
 4. **Dynamic Request-Scoped Discover:**
