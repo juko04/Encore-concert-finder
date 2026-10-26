@@ -49,6 +49,11 @@ function resolveSupabaseCredentials(): LocalCredentials | null {
   return null;
 }
 
+function extractScore(text: string): number {
+  const match = text.match(/\b\d+\b/);
+  return match ? parseInt(match[0], 10) : 0;
+}
+
 test.describe('Discover Page E2E Suite', () => {
   const credentials = resolveSupabaseCredentials();
   let adminClient: SupabaseClient | null = null;
@@ -463,8 +468,8 @@ test.describe('Discover Page E2E Suite', () => {
     const scoreBadgeB = allCards.nth(1).getByTestId('event-score');
     const scoreTextA = await scoreBadgeA.innerText();
     const scoreTextB = await scoreBadgeB.innerText();
-    const numScoreA = parseInt(scoreTextA, 10);
-    const numScoreB = parseInt(scoreTextB, 10);
+    const numScoreA = extractScore(scoreTextA);
+    const numScoreB = extractScore(scoreTextB);
     expect(numScoreA).toBeGreaterThan(numScoreB);
 
     // 6. Factor breakdown drawer on Rank #1 Event A
@@ -504,8 +509,8 @@ test.describe('Discover Page E2E Suite', () => {
       .nth(1)
       .getByTestId('event-score')
       .innerText();
-    const newNumScoreB = parseInt(newScoreTextB, 10);
-    const newNumScoreA = parseInt(newScoreTextA, 10);
+    const newNumScoreB = extractScore(newScoreTextB);
+    const newNumScoreA = extractScore(newScoreTextA);
     expect(newNumScoreB).toBeGreaterThan(newNumScoreA);
 
     // Factor breakdown on Rank #1 Event B under Nearby preset
