@@ -132,12 +132,34 @@ describe('Production Recommendation Service (getPersonalizedDiscoverData)', () =
   const referenceDate = '2026-10-25';
   const referenceInstant = '2026-10-25T12:00:00Z';
 
-  it('retrieves preferred-artist events even when outside the general first-page limit', async () => {
+  it('retrieves preferred-artist events even when outside the general first-page limit (>150 earlier events)', async () => {
     const userA = 'user-a-uuid';
 
-    // Seed Chappell Roan event occurring in late December 2026 (beyond the 150 limit)
+    // Seed 160 earlier general events for neutral artists (dates Nov 01 to Nov 16)
+    for (let i = 0; i < 160; i++) {
+      const day = String(Math.floor(i / 10) + 1).padStart(2, '0');
+      const padIndex = String(i).padStart(3, '0');
+      seedEvent(catalogRepo, {
+        id: `event-general-${padIndex}`,
+        title: `Indie Night ${padIndex}`,
+        localStartDate: `2026-11-${day}`,
+        startsAt: `2026-11-${day}T20:00:00Z`,
+        venueName: 'General Club',
+        city: 'Denver',
+        minPrice: 25,
+        artists: [
+          {
+            id: `artist-neutral-${padIndex}`,
+            name: `Neutral Artist ${padIndex}`,
+            billingPosition: 'headliner',
+          },
+        ],
+      });
+    }
+
+    // Seed favored Chappell Roan event occurring later (Dec 30), well beyond the 150 general page limit
     seedEvent(catalogRepo, {
-      id: 'event-chappell-future',
+      id: 'event-chappell-fav-beyond-150',
       title: 'Chappell Roan Live at Ball Arena',
       localStartDate: '2026-12-30',
       startsAt: '2026-12-30T20:00:00Z',
@@ -181,15 +203,269 @@ describe('Production Recommendation Service (getPersonalizedDiscoverData)', () =
       referenceInstant,
     });
 
-    // Verify Chappell Roan was retrieved and ranked in recommendations
+    // Verify Chappell Roan was retrieved via Tier 1 preferred-artist candidate retrieval
+    // and ranked at the top of recommendations despite being beyond event #150
     expect(result.recommendations.length).toBeGreaterThan(0);
     const topRec = result.recommendations.find(
-      (r) => r.eventId === 'event-chappell-future',
+      (r) => r.eventId === 'event-chappell-fav-beyond-150',
     );
     expect(topRec).toBeDefined();
     expect(topRec?.event.title).toBe('Chappell Roan Live at Ball Arena');
     expect(topRec?.score).toBeGreaterThan(80);
     expect(topRec?.explanation).toContain('Favorite artist (Chappell Roan)');
+
+    // Verify that for a user with NO preferences, this event is NOT retrieved because it exceeds the 150-event general limit
+    const unprefResult = await getPersonalizedDiscoverData({
+      userId: 'user-no-pref',
+      profileRepo,
+      prefRepo,
+      catalogRepo,
+      referenceDate,
+      referenceInstant,
+    });
+    const foundInUnpref = [
+      ...unprefResult.recommendations,
+      ...unprefResult.exploratory,
+    ].find((r) => r.eventId === 'event-chappell-fav-beyond-150');
+    expect(foundInUnpref).toBeUndefined();
+  });
+
+  it('bounds preferred-artist candidate pool overflow to PREFERRED_ARTIST_CANDIDATE_LIMIT (100 events)', async () => {
+    const userA = 'user-overflow';
+
+    await profileRepo.upsertProfile(userA, {
+      recommendationPreset: 'artist_first',
+    });
+
+    catalogRepo.artists.set('artist-fav-overflow', {
+      id: 'artist-fav-overflow',
+      name: 'Prolific Favorite Artist',
+      normalizedName: 'prolific favorite artist',
+      imageUrl: null,
+      createdAt: '2026-10-01T00:00:00Z',
+      updatedAt: '2026-10-01T00:00:00Z',
+    });
+
+    await prefRepo.savePreference({
+      userId: userA,
+      artistId: 'artist-fav-overflow',
+      artistName: 'Prolific Favorite Artist',
+      preferenceLevel: 'favorite',
+    });
+
+    // Seed 150 earlier neutral events to exhaust the Tier 2 general catalog pool
+    for (let i = 0; i < 150; i++) {
+      const padIndex = String(i).padStart(3, '0');
+      seedEvent(catalogRepo, {
+        id: `event-earlier-neutral-${padIndex}`,
+        title: `Earlier Event ${padIndex}`,
+        localStartDate: '2026-10-28',
+        startsAt: '2026-10-28T20:00:00Z',
+        venueName: 'General Club',
+        city: 'Denver',
+        minPrice: 20,
+        artists: [
+          {
+            id: `artist-neutral-${padIndex}`,
+            name: `Neutral Artist ${padIndex}`,
+            billingPosition: 'headliner',
+          },
+        ],
+      });
+    }
+
+    // Seed 110 events for this single favorite artist occurring after the neutral events
+    for (let i = 0; i < 110; i++) {
+      const month = i < 60 ? '11' : '12';
+      const day = String((i % 28) + 1).padStart(2, '0');
+      const padIndex = String(i).padStart(3, '0');
+      seedEvent(catalogRepo, {
+        id: `event-overflow-${padIndex}`,
+        title: `Tour Stop ${padIndex}`,
+        localStartDate: `2026-${month}-${day}`,
+        startsAt: `2026-${month}-${day}T20:00:00Z`,
+        venueName: 'The Fillmore',
+        city: 'Denver',
+        minPrice: 40,
+        artists: [
+          {
+            id: 'artist-fav-overflow',
+            name: 'Prolific Favorite Artist',
+            billingPosition: 'headliner',
+          },
+        ],
+      });
+    }
+
+    const result = await getPersonalizedDiscoverData({
+      userId: userA,
+      profileRepo,
+      prefRepo,
+      catalogRepo,
+      referenceDate,
+      referenceInstant,
+    });
+
+    // Tier 1 preferred-artist candidate query bounds retrieval to exactly 100 events
+    expect(result.recommendations.length).toBe(100);
+
+    // Event #109 (the 110th favorite event) was beyond both Tier 1 (100 cap) and Tier 2 (filled by 150 earlier events)
+    const overflowEvent = [
+      ...result.recommendations,
+      ...result.exploratory,
+    ].find((r) => r.eventId === 'event-overflow-109');
+    expect(overflowEvent).toBeUndefined();
+  });
+
+  it('resolves unlinked Spotify preferences via artist_external_ids mapping', async () => {
+    const userA = 'user-spotify-resolution';
+
+    await profileRepo.upsertProfile(userA, {
+      recommendationPreset: 'balanced',
+    });
+
+    // Save preference with ONLY spotifyArtistId, no canonical artistId
+    const unlinkedPrefRepo = new MemoryUserPreferenceRepository();
+    await unlinkedPrefRepo.savePreference({
+      userId: userA,
+      artistName: 'Phoebe Bridgers',
+      preferenceLevel: 'favorite',
+      spotifyArtistId: 'spotify-phoebe-123',
+    });
+
+    // External ID mapping in catalog maps 'spotify-phoebe-123' -> 'artist-phoebe-canonical'
+    catalogRepo.artistExternalIds.set('ext-phoebe', {
+      id: 'ext-phoebe',
+      artistId: 'artist-phoebe-canonical',
+      provider: 'spotify',
+      externalId: 'spotify-phoebe-123',
+      createdAt: '2026-10-01T00:00:00Z',
+    });
+
+    // Seed canonical event for Phoebe Bridgers
+    seedEvent(catalogRepo, {
+      id: 'event-phoebe-denver',
+      title: 'Phoebe Bridgers Live',
+      localStartDate: '2026-11-12',
+      startsAt: '2026-11-12T20:00:00Z',
+      venueName: 'Red Rocks',
+      city: 'Morrison',
+      minPrice: 70,
+      artists: [
+        {
+          id: 'artist-phoebe-canonical',
+          name: 'Phoebe Bridgers',
+          billingPosition: 'headliner',
+        },
+      ],
+    });
+
+    const result = await getPersonalizedDiscoverData({
+      userId: userA,
+      profileRepo,
+      prefRepo: unlinkedPrefRepo,
+      catalogRepo,
+      referenceDate,
+      referenceInstant,
+    });
+
+    expect(result.recommendations.length).toBeGreaterThan(0);
+    const rec = result.recommendations.find(
+      (r) => r.eventId === 'event-phoebe-denver',
+    );
+    expect(rec).toBeDefined();
+    expect(rec?.factors.artist.score).toBe(100);
+    expect(rec?.explanation).toContain('Favorite artist (Phoebe Bridgers)');
+  });
+
+  it('rejects invalid recommendation preset override with explicit Error', async () => {
+    const userA = 'user-invalid-preset';
+    await profileRepo.upsertProfile(userA, {
+      recommendationPreset: 'balanced',
+    });
+
+    await expect(
+      getPersonalizedDiscoverData({
+        userId: userA,
+        profileRepo,
+        prefRepo,
+        catalogRepo,
+        presetOverride: 'nonexistent_preset' as any,
+        referenceDate,
+        referenceInstant,
+      }),
+    ).rejects.toThrow(/Invalid recommendation preset/);
+  });
+
+  it('correctly handles event-local timezone boundary without dropping same-evening events', async () => {
+    const userA = 'user-tz-test';
+    await profileRepo.upsertProfile(userA, {
+      recommendationPreset: 'balanced',
+    });
+
+    // Scenario: local time in Denver is 2026-10-25 19:30:00 MDT (-06:00).
+    // In UTC, this instant is 2026-10-26 01:30:00Z (the next UTC calendar day!).
+    const instantUtc = '2026-10-26T01:30:00Z';
+    const naiveUtcDate = '2026-10-26';
+
+    // Event tonight at 20:00 MDT (startsAt: 2026-10-26T02:00:00Z)
+    seedEvent(catalogRepo, {
+      id: 'event-tonight-denver',
+      title: 'Tonight in Denver',
+      localStartDate: '2026-10-25',
+      startsAt: '2026-10-26T02:00:00Z',
+      timezone: 'America/Denver',
+      city: 'Denver',
+      venueName: 'Bluebird Theater',
+      minPrice: 30,
+    });
+
+    // Event yesterday at 20:00 MDT (startsAt: 2026-10-25T02:00:00Z) - genuinely past
+    seedEvent(catalogRepo, {
+      id: 'event-yesterday-denver',
+      title: 'Yesterday in Denver',
+      localStartDate: '2026-10-24',
+      startsAt: '2026-10-25T02:00:00Z',
+      timezone: 'America/Denver',
+      city: 'Denver',
+      venueName: 'Bluebird Theater',
+      minPrice: 30,
+    });
+
+    const result = await getPersonalizedDiscoverData({
+      userId: userA,
+      profileRepo,
+      prefRepo,
+      catalogRepo,
+      referenceDate: naiveUtcDate,
+      referenceInstant: instantUtc,
+    });
+
+    // Event tonight must be retained
+    const tonightRec = result.exploratory.find(
+      (r) => r.eventId === 'event-tonight-denver',
+    );
+    expect(tonightRec).toBeDefined();
+
+    // Event yesterday must be filtered out as past
+    const yesterdayRec = [
+      ...result.recommendations,
+      ...result.exploratory,
+    ].find((r) => r.eventId === 'event-yesterday-denver');
+    expect(yesterdayRec).toBeUndefined();
+
+    // Verify public discover data also filters out the genuinely past event
+    const publicResult = await getPublicDiscoverData({
+      catalogRepo,
+      referenceDate: naiveUtcDate,
+      referenceInstant: instantUtc,
+    });
+    expect(
+      publicResult.events.find((e) => e.id === 'event-tonight-denver'),
+    ).toBeDefined();
+    expect(
+      publicResult.events.find((e) => e.id === 'event-yesterday-denver'),
+    ).toBeUndefined();
   });
 
   it('guarantees user preference isolation between User A and User B', async () => {

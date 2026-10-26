@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useMemo, useState, useTransition } from 'react';
+import React, { useMemo, useRef, useState, useTransition } from 'react';
 import Link from 'next/link';
 import type { PersonalizedDiscoverResult } from '@/lib/recommendation/service';
 import type { ScoringPreset } from '@/lib/recommendation/types';
@@ -59,6 +59,7 @@ export function PersonalizedDiscoverContainer({
   showScoringInspector = false,
 }: PersonalizedDiscoverContainerProps) {
   const [isPending, startTransition] = useTransition();
+  const requestIdRef = useRef(0);
 
   // Preferences & configuration state
   const [activePreset, setActivePreset] = useState<ScoringPreset>(
@@ -71,18 +72,19 @@ export function PersonalizedDiscoverContainer({
     initialData.userProfile?.maxNormalTicketPrice ?? null,
   );
 
-  // Recommendations data
+  // Recommendations data: full candidate pool maintained in state
   const [recommendations, setRecommendations] = useState(
     initialData.recommendations,
   );
   const [exploratory, setExploratory] = useState(initialData.exploratory);
 
-  // Filter state
+  // Filter state (applied client-side over stable candidate pool)
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCity, setSelectedCity] = useState('');
 
   // Status state
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [isStale, setIsStale] = useState(false);
 
   // Extract unique cities from all events for city filter dropdown
   const availableCities = useMemo(() => {
@@ -103,28 +105,36 @@ export function PersonalizedDiscoverContainer({
     const previousPreset = activePreset;
     setActivePreset(newPreset);
     setErrorMessage(null);
+    const reqId = ++requestIdRef.current;
 
     startTransition(async () => {
       // 1. Persist the preset update (using strict database identifier 'artist_first')
       const saveRes = await updateRecommendationPresetAction(newPreset);
+      if (reqId !== requestIdRef.current) return;
+
       if (!saveRes.success) {
         setActivePreset(previousPreset);
         setErrorMessage(saveRes.error || 'Failed to update preset.');
         return;
       }
 
-      // 2. Fetch freshly re-ranked recommendations with updated weights
+      // 2. Fetch freshly re-ranked recommendations for the full candidate pool
+      // Invariant: Do not pass transient search/city filters to server so full candidate pool remains intact.
       const fetchRes = await getPersonalizedRecommendationsAction({
         preset: newPreset,
-        city: selectedCity || undefined,
-        search: searchQuery || undefined,
       });
+      if (reqId !== requestIdRef.current) return;
 
       if (fetchRes.success && fetchRes.data) {
         setRecommendations(fetchRes.data.recommendations);
         setExploratory(fetchRes.data.exploratory);
-      } else if (fetchRes.error) {
-        setErrorMessage(fetchRes.error);
+        setIsStale(false);
+      } else {
+        setIsStale(true);
+        setErrorMessage(
+          fetchRes.error ||
+            'Recommendation preset was saved, but refreshing recommendations failed. Showing previous results.',
+        );
       }
     });
   };
@@ -136,26 +146,34 @@ export function PersonalizedDiscoverContainer({
     const previousRadius = radiusMiles;
     setRadiusMiles(newRadius);
     setErrorMessage(null);
+    const reqId = ++requestIdRef.current;
 
     startTransition(async () => {
       const saveRes = await updateTravelRadiusAction(newRadius);
+      if (reqId !== requestIdRef.current) return;
+
       if (!saveRes.success) {
         setRadiusMiles(previousRadius);
         setErrorMessage(saveRes.error || 'Failed to update travel radius.');
         return;
       }
 
+      // Fetch freshly re-ranked recommendations for full candidate pool
       const fetchRes = await getPersonalizedRecommendationsAction({
         preset: activePreset,
-        city: selectedCity || undefined,
-        search: searchQuery || undefined,
       });
+      if (reqId !== requestIdRef.current) return;
 
       if (fetchRes.success && fetchRes.data) {
         setRecommendations(fetchRes.data.recommendations);
         setExploratory(fetchRes.data.exploratory);
-      } else if (fetchRes.error) {
-        setErrorMessage(fetchRes.error);
+        setIsStale(false);
+      } else {
+        setIsStale(true);
+        setErrorMessage(
+          fetchRes.error ||
+            'Travel radius was saved, but refreshing recommendations failed. Showing previous results.',
+        );
       }
     });
   };
@@ -167,31 +185,65 @@ export function PersonalizedDiscoverContainer({
     const previousBudget = budget;
     setBudget(newBudget);
     setErrorMessage(null);
+    const reqId = ++requestIdRef.current;
 
     startTransition(async () => {
       const saveRes = await updateTypicalBudgetAction(newBudget);
+      if (reqId !== requestIdRef.current) return;
+
       if (!saveRes.success) {
         setBudget(previousBudget);
         setErrorMessage(saveRes.error || 'Failed to update typical budget.');
         return;
       }
 
+      // Fetch freshly re-ranked recommendations for full candidate pool
       const fetchRes = await getPersonalizedRecommendationsAction({
         preset: activePreset,
-        city: selectedCity || undefined,
-        search: searchQuery || undefined,
       });
+      if (reqId !== requestIdRef.current) return;
 
       if (fetchRes.success && fetchRes.data) {
         setRecommendations(fetchRes.data.recommendations);
         setExploratory(fetchRes.data.exploratory);
-      } else if (fetchRes.error) {
-        setErrorMessage(fetchRes.error);
+        setIsStale(false);
+      } else {
+        setIsStale(true);
+        setErrorMessage(
+          fetchRes.error ||
+            'Ticket budget was saved, but refreshing recommendations failed. Showing previous results.',
+        );
       }
     });
   };
 
-  // Filter recommendations and exploratory lists client-side
+  // Handler: Retry refreshing recommendations after transient re-rank failure
+  const handleRetryRefresh = () => {
+    if (isPending) return;
+    setErrorMessage(null);
+    const reqId = ++requestIdRef.current;
+
+    startTransition(async () => {
+      const fetchRes = await getPersonalizedRecommendationsAction({
+        preset: activePreset,
+      });
+      if (reqId !== requestIdRef.current) return;
+
+      if (fetchRes.success && fetchRes.data) {
+        setRecommendations(fetchRes.data.recommendations);
+        setExploratory(fetchRes.data.exploratory);
+        setIsStale(false);
+      } else {
+        setIsStale(true);
+        setErrorMessage(
+          fetchRes.error ||
+            'Refreshing recommendations failed. Please try again.',
+        );
+      }
+    });
+  };
+
+  // Filter recommendations and exploratory lists client-side over stable candidate pool
   const filterList = React.useCallback(
     (list: typeof recommendations) => {
       return list.filter((item) => {
@@ -235,6 +287,9 @@ export function PersonalizedDiscoverContainer({
 
   const totalResultsCount =
     filteredRecommendations.length + filteredExploratory.length;
+  const isCatalogEmpty =
+    recommendations.length === 0 && exploratory.length === 0;
+  const isFilterEmpty = !isCatalogEmpty && totalResultsCount === 0;
 
   return (
     <div className="space-y-8">
@@ -280,20 +335,38 @@ export function PersonalizedDiscoverContainer({
       {errorMessage && (
         <div
           role="alert"
-          data-testid="discover-error-banner"
-          className="flex items-center justify-between rounded-xl border border-red-800/80 bg-red-950/40 p-4 text-sm text-red-200"
+          data-testid={
+            isStale ? 'stale-recommendations-banner' : 'discover-error-banner'
+          }
+          className="flex flex-col gap-2 rounded-xl border border-red-800/80 bg-red-950/40 p-4 text-sm text-red-200 sm:flex-row sm:items-center sm:justify-between"
         >
           <div className="flex items-center gap-2">
             <span>⚠️</span>
             <span>{errorMessage}</span>
           </div>
-          <button
-            type="button"
-            onClick={() => setErrorMessage(null)}
-            className="text-xs font-semibold text-red-300 hover:text-white"
-          >
-            Dismiss
-          </button>
+          <div className="flex items-center gap-3">
+            {isStale && (
+              <button
+                type="button"
+                data-testid="retry-refresh-button"
+                onClick={handleRetryRefresh}
+                disabled={isPending}
+                className="rounded-md bg-red-900/60 px-2.5 py-1 text-xs font-semibold text-red-100 hover:bg-red-800"
+              >
+                Retry Refresh
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => {
+                setErrorMessage(null);
+                setIsStale(false);
+              }}
+              className="text-xs font-semibold text-red-300 hover:text-white"
+            >
+              Dismiss
+            </button>
+          </div>
         </div>
       )}
 
@@ -351,6 +424,8 @@ export function PersonalizedDiscoverContainer({
                   key={preset.id}
                   type="button"
                   data-testid={testId}
+                  aria-pressed={isActive}
+                  data-active={isActive ? 'true' : 'false'}
                   onClick={() => handlePresetChange(preset.id)}
                   disabled={isPending}
                   className={`flex flex-col rounded-xl border p-3 text-left transition ${
@@ -398,6 +473,8 @@ export function PersonalizedDiscoverContainer({
                 <button
                   key={r}
                   type="button"
+                  aria-pressed={radiusMiles === r}
+                  data-active={radiusMiles === r ? 'true' : 'false'}
                   onClick={() => handleRadiusChange(r)}
                   disabled={isPending}
                   className={`rounded-lg border px-3 py-1.5 text-xs font-medium transition ${
@@ -410,6 +487,18 @@ export function PersonalizedDiscoverContainer({
                 </button>
               ))}
             </div>
+            {!initialData.isLocationConfigured && (
+              <p className="mt-2 text-[11px] text-zinc-400">
+                Home location not configured. Distance scores use neutral
+                values.{' '}
+                <Link
+                  href="/profile/taste"
+                  className="text-indigo-400 underline hover:text-indigo-300"
+                >
+                  Configure location
+                </Link>
+              </p>
+            )}
           </div>
 
           {/* Budget Selector */}
@@ -428,6 +517,8 @@ export function PersonalizedDiscoverContainer({
                 <button
                   key={b.label}
                   type="button"
+                  aria-pressed={budget === b.value}
+                  data-active={budget === b.value ? 'true' : 'false'}
                   onClick={() => handleBudgetChange(b.value)}
                   disabled={isPending}
                   className={`rounded-lg border px-3 py-1.5 text-xs font-medium transition ${
@@ -474,8 +565,8 @@ export function PersonalizedDiscoverContainer({
         </div>
       </section>
 
-      {/* Catalog Empty State */}
-      {initialData.isEmptyCatalog && (
+      {/* Catalog Empty State (Zero events in catalog) */}
+      {isCatalogEmpty && (
         <div
           data-testid="empty-catalog-banner"
           className="rounded-2xl border border-zinc-800 bg-zinc-900/40 p-12 text-center"
@@ -490,8 +581,8 @@ export function PersonalizedDiscoverContainer({
         </div>
       )}
 
-      {/* Filtered Empty State */}
-      {!initialData.isEmptyCatalog && totalResultsCount === 0 && (
+      {/* Filtered Empty State (Catalog has events, but search/city filter matched 0) */}
+      {isFilterEmpty && (
         <div
           data-testid="empty-filtered-banner"
           className="rounded-2xl border border-zinc-800 bg-zinc-900/40 p-12 text-center"
@@ -519,7 +610,7 @@ export function PersonalizedDiscoverContainer({
       )}
 
       {/* Section 1: Recommended For You */}
-      {!initialData.isEmptyCatalog && filteredRecommendations.length > 0 && (
+      {!isCatalogEmpty && filteredRecommendations.length > 0 && (
         <section data-testid="recommendations-section" className="space-y-4">
           <div className="flex items-center justify-between border-b border-zinc-800 pb-3">
             <div>
@@ -545,7 +636,7 @@ export function PersonalizedDiscoverContainer({
       )}
 
       {/* Section 2: Explore Something New */}
-      {!initialData.isEmptyCatalog && filteredExploratory.length > 0 && (
+      {!isCatalogEmpty && filteredExploratory.length > 0 && (
         <section data-testid="exploratory-section" className="space-y-4">
           <div className="flex items-center justify-between border-b border-zinc-800 pb-3">
             <div>

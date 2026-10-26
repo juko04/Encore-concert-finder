@@ -65,10 +65,9 @@ export async function updateRecommendationPresetAction(
     revalidatePath('/discover');
     return { success: true, data: { preset: normalizedPreset } };
   } catch (err) {
-    const message =
-      err instanceof Error ? err.message : 'Unknown database error';
+    console.error('[updateRecommendationPresetAction error]:', err);
     return {
-      error: `Failed to update recommendation preset: ${message}`,
+      error: 'Unable to update recommendation preset. Please try again.',
     };
   }
 }
@@ -111,10 +110,9 @@ export async function updateTravelRadiusAction(
     revalidatePath('/discover');
     return { success: true, data: { radiusMiles: num } };
   } catch (err) {
-    const message =
-      err instanceof Error ? err.message : 'Unknown database error';
+    console.error('[updateTravelRadiusAction error]:', err);
     return {
-      error: `Failed to update travel radius: ${message}`,
+      error: 'Unable to update travel radius. Please try again.',
     };
   }
 }
@@ -156,10 +154,9 @@ export async function updateTypicalBudgetAction(
     revalidatePath('/discover');
     return { success: true, data: { maxNormalTicketPrice: sanitizedBudget } };
   } catch (err) {
-    const message =
-      err instanceof Error ? err.message : 'Unknown database error';
+    console.error('[updateTypicalBudgetAction error]:', err);
     return {
-      error: `Failed to update typical budget: ${message}`,
+      error: 'Unable to update typical budget. Please try again.',
     };
   }
 }
@@ -181,6 +178,16 @@ export async function getPersonalizedRecommendationsAction(filters?: {
     };
   }
 
+  if (
+    filters?.preset !== undefined &&
+    filters?.preset !== null &&
+    !isValidScoringPreset(filters.preset)
+  ) {
+    return {
+      error: `Invalid recommendation preset: '${String(filters.preset)}'. Valid options are: balanced, artist_first, nearby, value.`,
+    };
+  }
+
   try {
     const data = await getPersonalizedDiscoverData({
       userId: user.id,
@@ -192,10 +199,9 @@ export async function getPersonalizedRecommendationsAction(filters?: {
 
     return { success: true, data };
   } catch (err) {
-    const message =
-      err instanceof Error ? err.message : 'Unknown recommendation error';
+    console.error('[getPersonalizedRecommendationsAction error]:', err);
     return {
-      error: `Failed to load recommendations: ${message}`,
+      error: 'Unable to load recommendations. Please try again.',
     };
   }
 }
@@ -217,10 +223,9 @@ export async function getPublicDiscoverAction(filters?: {
 
     return { success: true, data };
   } catch (err) {
-    const message =
-      err instanceof Error ? err.message : 'Unknown catalog error';
+    console.error('[getPublicDiscoverAction error]:', err);
     return {
-      error: `Failed to load public events: ${message}`,
+      error: 'Unable to load public events. Please try again.',
     };
   }
 }

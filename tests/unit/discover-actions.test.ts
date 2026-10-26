@@ -100,12 +100,21 @@ describe('Discover Server Actions', () => {
       },
     );
 
-    it('handles repository failure gracefully', async () => {
-      mockUpsertProfile.mockRejectedValueOnce(new Error('Connection failed'));
+    it('handles repository failure gracefully without leaking sensitive database errors', async () => {
+      mockUpsertProfile.mockRejectedValueOnce(
+        new Error(
+          'FATAL: connection to server at "127.0.0.1", port 5432 failed: FATAL: password authentication failed for user "postgres"',
+        ),
+      );
 
       const res = await updateRecommendationPresetAction('balanced');
 
-      expect(res.error).toContain('Failed to update recommendation preset');
+      expect(res.error).toBe(
+        'Unable to update recommendation preset. Please try again.',
+      );
+      expect(res.error).not.toContain('postgres');
+      expect(res.error).not.toContain('5432');
+      expect(res.error).not.toContain('FATAL');
       expect(res.success).toBeUndefined();
     });
   });
@@ -215,26 +224,35 @@ describe('Discover Server Actions', () => {
       expect(mockGetPersonalizedDiscoverData).not.toHaveBeenCalled();
     });
 
-    it('calls getPersonalizedDiscoverData with verified userId and options', async () => {
-      mockGetPersonalizedDiscoverData.mockResolvedValueOnce({
-        recommendations: [],
-        exploratory: [],
+    it('rejects invalid preset override with explicit error', async () => {
+      const res = await getPersonalizedRecommendationsAction({
+        preset: 'invalid_preset' as any,
       });
+
+      expect(res.error).toContain(
+        "Invalid recommendation preset: 'invalid_preset'",
+      );
+      expect(res.success).toBeUndefined();
+      expect(mockGetPersonalizedDiscoverData).not.toHaveBeenCalled();
+    });
+
+    it('sanitizes unexpected internal exceptions without leaking SQL or private diagnostics', async () => {
+      mockGetPersonalizedDiscoverData.mockRejectedValueOnce(
+        new Error(
+          'SELECT * FROM events WHERE id = "bad" syntax error at position 42',
+        ),
+      );
 
       const res = await getPersonalizedRecommendationsAction({
-        preset: 'artist_first',
-        city: 'Denver',
-        search: 'Chappell',
+        preset: 'balanced',
       });
 
-      expect(res.success).toBe(true);
-      expect(mockGetPersonalizedDiscoverData).toHaveBeenCalledWith({
-        userId: mockUser.id,
-        presetOverride: 'artist_first',
-        city: 'Denver',
-        region: undefined,
-        searchQuery: 'Chappell',
-      });
+      expect(res.error).toBe(
+        'Unable to load recommendations. Please try again.',
+      );
+      expect(res.error).not.toContain('SELECT');
+      expect(res.error).not.toContain('syntax error');
+      expect(res.success).toBeUndefined();
     });
   });
 
@@ -254,6 +272,19 @@ describe('Discover Server Actions', () => {
         region: undefined,
         searchQuery: undefined,
       });
+    });
+
+    it('sanitizes public discovery errors without leaking internals', async () => {
+      mockGetPublicDiscoverData.mockRejectedValueOnce(
+        new Error('Database socket /tmp/s.PGSQL.5432 closed unexpectedly'),
+      );
+
+      const res = await getPublicDiscoverAction({ city: 'Denver' });
+
+      expect(res.error).toBe('Unable to load public events. Please try again.');
+      expect(res.error).not.toContain('5432');
+      expect(res.error).not.toContain('PGSQL');
+      expect(res.success).toBeUndefined();
     });
   });
 });

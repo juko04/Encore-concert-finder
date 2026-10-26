@@ -603,6 +603,20 @@ export class MemoryCatalogRepository implements ICatalogRepository {
     return null;
   }
 
+  async findArtistIdsByExternalIds(
+    provider: string,
+    externalIds: string[],
+  ): Promise<Map<string, string>> {
+    const result = new Map<string, string>();
+    const extSet = new Set(externalIds);
+    for (const ext of this.artistExternalIds.values()) {
+      if (ext.provider === provider && extSet.has(ext.externalId)) {
+        result.set(ext.externalId, ext.artistId);
+      }
+    }
+    return result;
+  }
+
   async findArtistExternalIds(artistId: string): Promise<ArtistExternalId[]> {
     const results: ArtistExternalId[] = [];
     for (const ext of this.artistExternalIds.values()) {

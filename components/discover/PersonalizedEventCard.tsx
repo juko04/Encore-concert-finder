@@ -23,6 +23,16 @@ function formatDisplayDate(dateStr: string): string {
   }
 }
 
+export function isValidHttpUrl(url?: string | null): boolean {
+  if (!url || typeof url !== 'string') return false;
+  try {
+    const parsed = new URL(url.trim());
+    return parsed.protocol === 'http:' || parsed.protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
+
 export function PersonalizedEventCard({
   scoredEvent,
 }: PersonalizedEventCardProps) {
@@ -191,9 +201,9 @@ export function PersonalizedEventCard({
               {showExplanation ? 'Hide why ▲' : 'Why this show? ▼'}
             </button>
 
-            {event.ticketUrl && !isCancelled && (
+            {isValidHttpUrl(event.ticketUrl) && !isCancelled && (
               <a
-                href={event.ticketUrl}
+                href={event.ticketUrl!}
                 target="_blank"
                 rel="noopener noreferrer"
                 data-testid="ticket-button"

@@ -5,6 +5,7 @@ import { createClient } from '@/lib/supabase/server';
 import type { CanonicalEventSummary } from '@/lib/domain/catalog';
 import type { UserProfile } from '@/lib/domain/profile';
 import { rankEvents } from '@/lib/recommendation/engine';
+import { calculateTimingFactor } from '@/lib/recommendation/factors/timing';
 import {
   DEFAULT_PRESET,
   getPresetWeights,
@@ -35,7 +36,7 @@ export interface PersonalizedDiscoverOptions {
   catalogRepo?: ICatalogRepository;
   presetOverride?: unknown;
   referenceDate?: string;
-  referenceInstant?: string;
+  referenceInstant?: Date | string;
   city?: string;
   region?: string;
   searchQuery?: string;
@@ -63,6 +64,7 @@ export interface PublicDiscoverOptions {
   searchQuery?: string;
   limit?: number;
   referenceDate?: string;
+  referenceInstant?: Date | string;
 }
 
 export interface PublicDiscoverResult {
@@ -73,13 +75,53 @@ export interface PublicDiscoverResult {
 
 /**
  * Bounds for production candidate event retrieval:
- * Tier 1: Up to 100 upcoming events specifically featuring user-preferred artists (Favorite, Like, Interested).
- * Tier 2: Up to 150 general upcoming events in the catalog.
- * This guarantees favorite-artist events are not systematically truncated by an arbitrary first-page limit,
- * while preventing unbounded full-database reads and avoiding N+1 queries.
+ * Tier 1: Up to 100 upcoming events specifically featuring user-preferred artists (Favorite, Like, Interested),
+ *         ordered chronologically by local_start_date.
+ * Tier 2: Up to 150 general upcoming events in the catalog, ordered chronologically by local_start_date.
+ *
+ * Coverage Guarantee:
+ * - Preferred artist concerts are guaranteed to be considered even when occurring months out beyond
+ *   the general catalog first-page boundary.
+ * - If a user has >100 upcoming preferred-artist shows, the earliest 100 are prioritized.
+ * - Prevents unbounded full-database reads and eliminates N+1 queries by batch-querying canonical IDs.
  */
 export const PREFERRED_ARTIST_CANDIDATE_LIMIT = 100;
 export const GENERAL_CATALOG_CANDIDATE_LIMIT = 150;
+
+/**
+ * Calculates a conservative candidate retrieval lower bound date string (YYYY-MM-DD).
+ *
+ * Invariant:
+ * Local event calendar dates must not be strictly filtered using the current UTC calendar date.
+ * For example, at 8:00 PM in America/Denver on 2026-10-25, UTC is already 2026-10-26 02:00:00Z.
+ * A strict UTC date filter (`>= '2026-10-26'`) would drop tonight's Denver show.
+ *
+ * Therefore, candidate retrieval uses a conservative lower bound: 24 hours (1 calendar day)
+ * prior to the reference instant. Downstream scoring strictly enforces venue-timezone-aware
+ * eligibility via calculateTimingFactor().
+ */
+export function calculateCandidateRetrievalLowerBound(
+  referenceDate?: string,
+  referenceInstant?: Date | string,
+): string {
+  let instant: Date;
+  if (referenceInstant) {
+    instant =
+      typeof referenceInstant === 'string'
+        ? new Date(referenceInstant)
+        : referenceInstant;
+  } else if (referenceDate && referenceDate.includes('T')) {
+    instant = new Date(referenceDate);
+  } else if (referenceDate) {
+    const parts = referenceDate.split('-').map(Number);
+    instant = new Date(Date.UTC(parts[0], parts[1] - 1, parts[2], 12, 0, 0));
+  } else {
+    instant = new Date();
+  }
+
+  const conservative = new Date(instant.getTime() - 24 * 60 * 60 * 1000);
+  return conservative.toISOString().split('T')[0];
+}
 
 /**
  * Retrieves personalized Discover recommendations for an authenticated user.
@@ -134,6 +176,10 @@ export async function getPersonalizedDiscoverData(
   if (presetOverride !== undefined && presetOverride !== null) {
     if (isValidScoringPreset(presetOverride)) {
       activePreset = normalizeScoringPreset(presetOverride);
+    } else {
+      throw new Error(
+        `Invalid recommendation preset: '${String(presetOverride)}'. Valid options are: balanced, artist_first, nearby, value.`,
+      );
     }
   } else if (userProfile?.recommendationPreset) {
     activePreset = userProfile.recommendationPreset;
@@ -149,27 +195,56 @@ export async function getPersonalizedDiscoverData(
   );
 
   // 3. Two-Tier Candidate Retrieval Strategy
-  // Determine preferred artist IDs (Favorite, Like, Interested) to ensure favorite shows are never missed
-  const preferredArtistIds = userPreferences
-    .filter(
-      (p) =>
-        p.preferenceLevel === 'favorite' ||
-        p.preferenceLevel === 'like' ||
-        p.preferenceLevel === 'interested',
-    )
-    .map((p) => p.artistId)
-    .filter((id): id is string => Boolean(id));
+  // Determine preferred artist IDs (Favorite, Like, Interested) to ensure favorite shows are never missed.
+  const preferredPrefs = userPreferences.filter(
+    (p) =>
+      p.preferenceLevel === 'favorite' ||
+      p.preferenceLevel === 'like' ||
+      p.preferenceLevel === 'interested',
+  );
 
-  const todayIso = referenceDate || new Date().toISOString().split('T')[0];
+  const preferredArtistIdSet = new Set<string>();
+  const unmappedSpotifyIds: string[] = [];
+
+  for (const p of preferredPrefs) {
+    if (p.artistId) {
+      preferredArtistIdSet.add(p.artistId);
+    } else if (p.spotifyArtistId) {
+      unmappedSpotifyIds.push(p.spotifyArtistId);
+    }
+  }
+
+  // Authoritative external-ID mapping: resolve unlinked Spotify preferred artists to canonical artist IDs
+  if (
+    unmappedSpotifyIds.length > 0 &&
+    typeof catalogRepo.findArtistIdsByExternalIds === 'function'
+  ) {
+    const spotifyMap = await catalogRepo.findArtistIdsByExternalIds(
+      'spotify',
+      unmappedSpotifyIds,
+    );
+    for (const canonicalId of spotifyMap.values()) {
+      preferredArtistIdSet.add(canonicalId);
+    }
+  }
+
+  const preferredArtistIds = Array.from(preferredArtistIdSet);
+
+  // Invariant: Do not use strict UTC calendar date for local_start_date queries.
+  // Use conservative retrieval lower bound (24 hours prior) to include today's shows across western timezones.
+  const queryFromDate = calculateCandidateRetrievalLowerBound(
+    referenceDate,
+    referenceInstant,
+  );
 
   const candidateQueries: Promise<CanonicalEventSummary[]>[] = [];
 
-  // Tier 1: Targeted candidate query for user's preferred artists
+  // Tier 1: Targeted candidate query for user's preferred artists (chronologically ordered)
   if (preferredArtistIds.length > 0) {
     candidateQueries.push(
       catalogRepo.listEvents({
         artistIds: preferredArtistIds,
-        fromDate: todayIso,
+        fromDate: queryFromDate,
         limit: PREFERRED_ARTIST_CANDIDATE_LIMIT,
         city: city || undefined,
         region: region || undefined,
@@ -177,10 +252,10 @@ export async function getPersonalizedDiscoverData(
     );
   }
 
-  // Tier 2: General upcoming catalog candidates (discovery pool)
+  // Tier 2: General upcoming catalog candidates (discovery pool, chronologically ordered)
   candidateQueries.push(
     catalogRepo.listEvents({
-      fromDate: todayIso,
+      fromDate: queryFromDate,
       limit: GENERAL_CATALOG_CANDIDATE_LIMIT,
       city: city || undefined,
       region: region || undefined,
@@ -285,17 +360,36 @@ export async function getPublicDiscoverData(
     searchQuery,
     limit = 50,
     referenceDate,
+    referenceInstant,
   } = options;
 
+  const effectiveClient =
+    client ?? (!injectedCatalogRepo ? await createClient() : undefined);
   const catalogRepo =
-    injectedCatalogRepo ?? new SupabaseCatalogRepository(client);
-  const todayIso = referenceDate || new Date().toISOString().split('T')[0];
+    injectedCatalogRepo ?? new SupabaseCatalogRepository(effectiveClient);
+  const queryFromDate = calculateCandidateRetrievalLowerBound(
+    referenceDate,
+    referenceInstant,
+  );
 
   let events = await catalogRepo.listEvents({
-    fromDate: todayIso,
+    fromDate: queryFromDate,
     limit,
     city: city || undefined,
     region: region || undefined,
+  });
+
+  // Filter genuinely past events in public discover using timezone-aware timing eligibility
+  events = events.filter((ev) => {
+    const timing = calculateTimingFactor({
+      localStartDate: ev.localStartDate,
+      startsAt: ev.startsAt,
+      timezone: ev.timezone,
+      startTimePrecision: ev.startTimePrecision,
+      referenceDate,
+      referenceInstant,
+    });
+    return !timing.isPast;
   });
 
   if (searchQuery && searchQuery.trim().length > 0) {

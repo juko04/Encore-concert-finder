@@ -261,6 +261,19 @@ test.describe('Discover Page E2E Suite', () => {
   test('Guest Flow: unauthenticated visitor views public discover with personalization callout', async ({
     page,
   }) => {
+    if (!credentials || !isDbAvailable) {
+      if (process.env.CI) {
+        throw new Error(
+          `Local Supabase is not available at ${credentials?.url ?? 'unknown'} in CI. Guest browser tests must execute against live local database.`,
+        );
+      }
+      test.skip(
+        true,
+        'Local Supabase is offline. Skipping guest discover E2E browser test locally.',
+      );
+      return;
+    }
+
     await page.goto('/discover');
 
     // Verify main header
@@ -278,14 +291,27 @@ test.describe('Discover Page E2E Suite', () => {
     await expect(signInCta).toBeVisible();
     await expect(signInCta).toHaveAttribute('href', '/login');
 
+    // Confirm the public event itself appears under real guest session
+    await expect(
+      page.getByText('E2E Headliner Live at E2E Ballroom'),
+    ).toBeVisible();
+    await expect(page.getByText('E2E Ballroom')).toBeVisible();
+
     // Verify absence of personal score badge on public cards
     await expect(page.getByTestId('event-score')).toHaveCount(0);
+    await expect(page.getByTestId('why-this-show-button')).toHaveCount(0);
   });
 
   test('Authenticated Flow: user customizes preset, views why drawer, and settings persist across reload', async ({
     page,
   }) => {
-    if (!credentials || !isDbAvailable || !testUserId || !testArtistId) {
+    if (
+      !credentials ||
+      !isDbAvailable ||
+      !testUserId ||
+      !testArtistId ||
+      !testEventId
+    ) {
       if (process.env.CI) {
         throw new Error(
           `Local Supabase is not available at ${credentials?.url ?? 'unknown'} in CI. Authenticated browser tests must execute against live local database.`,
@@ -312,44 +338,89 @@ test.describe('Discover Page E2E Suite', () => {
     // 3. Confirm discover controls toolbar is visible
     await expect(page.getByTestId('discover-controls')).toBeVisible();
 
-    // 4. Check all 4 priority preset buttons exist
-    await expect(page.getByTestId('preset-balanced')).toBeVisible();
-    await expect(page.getByTestId('preset-artist-first')).toBeVisible();
-    await expect(page.getByTestId('preset-nearby')).toBeVisible();
-    await expect(page.getByTestId('preset-value')).toBeVisible();
-
-    // 5. Click "Artists" preset
+    // 4. Confirm default active preset has aria-pressed="true"
+    const balancedBtn = page.getByTestId('preset-balanced');
     const artistPresetBtn = page.getByTestId('preset-artist-first');
-    await artistPresetBtn.click();
+    await expect(balancedBtn).toHaveAttribute('aria-pressed', 'true');
+    await expect(artistPresetBtn).toHaveAttribute('aria-pressed', 'false');
 
-    // 6. Reload the page to verify persistence
+    // 5. Mandatory assertion: Seeded favorite artist event MUST appear in recommendations
+    await expect(
+      page.getByText('E2E Headliner Live at E2E Ballroom'),
+    ).toBeVisible();
+    await expect(page.getByText('E2E Ballroom')).toBeVisible();
+
+    // Capture initial score under Balanced preset
+    const scoreBadge = page.getByTestId('event-score').first();
+    await expect(scoreBadge).toBeVisible();
+    const initialScoreText = await scoreBadge.innerText();
+    expect(initialScoreText).toMatch(/\d+\/100/);
+    expect(initialScoreText).not.toContain('%');
+
+    // 6. Mandatory assertion: "Why this show?" drawer opens with complete factor breakdown
+    const whyBtn = page.getByTestId('why-this-show-button').first();
+    await expect(whyBtn).toBeVisible();
+    await whyBtn.click();
+
+    const factorBreakdown = page.getByTestId('factor-breakdown').first();
+    await expect(factorBreakdown).toBeVisible();
+    await expect(factorBreakdown).toContainText('Artist Interest');
+    await expect(factorBreakdown).toContainText('Travel Practicality');
+    await expect(factorBreakdown).toContainText('Ticket Affordability');
+    await expect(factorBreakdown).toContainText('Timing Suitability');
+
+    // Close drawer
+    await whyBtn.click();
+    await expect(factorBreakdown).not.toBeVisible();
+
+    // 7. Click "Artists" preset and verify active state updates
+    await artistPresetBtn.click();
+    await expect(artistPresetBtn).toHaveAttribute('aria-pressed', 'true');
+    await expect(balancedBtn).toHaveAttribute('aria-pressed', 'false');
+
+    // 8. Update travel radius and typical budget
+    const radiusSelector = page.getByTestId('radius-selector');
+    const radius50Btn = radiusSelector.getByRole('button', { name: '50 mi' });
+    await radius50Btn.click();
+    await expect(radius50Btn).toHaveAttribute('aria-pressed', 'true');
+
+    const budgetSelector = page.getByTestId('budget-selector');
+    const budget75Btn = budgetSelector.getByRole('button', { name: '$75' });
+    await budget75Btn.click();
+    await expect(budget75Btn).toHaveAttribute('aria-pressed', 'true');
+
+    // 9. Reload page to verify persistence across page reload
     await page.reload();
     await expect(page.getByTestId('discover-controls')).toBeVisible();
 
-    // 7. Verify the active preset is still "Artists" (artist_first)
-    const reloadedArtistPresetBtn = page.getByTestId('preset-artist-first');
-    await expect(reloadedArtistPresetBtn).toBeVisible();
-    await expect(reloadedArtistPresetBtn).toContainText('Artists');
+    const reloadedArtistBtn = page.getByTestId('preset-artist-first');
+    await expect(reloadedArtistBtn).toHaveAttribute('aria-pressed', 'true');
 
-    // 8. If personalized cards are rendered, check the "Why this show?" drawer
-    const whyButtons = page.getByTestId('why-this-show-button');
-    const whyCount = await whyButtons.count();
-    if (whyCount > 0) {
-      const firstWhyBtn = whyButtons.first();
-      await firstWhyBtn.click();
+    const reloadedRadius50Btn = page
+      .getByTestId('radius-selector')
+      .getByRole('button', { name: '50 mi' });
+    await expect(reloadedRadius50Btn).toHaveAttribute('aria-pressed', 'true');
 
-      const factorBreakdown = page.getByTestId('factor-breakdown').first();
-      await expect(factorBreakdown).toBeVisible();
-      await expect(factorBreakdown).toContainText('Artist Interest');
-      await expect(factorBreakdown).toContainText('Travel Practicality');
-      await expect(factorBreakdown).toContainText('Ticket Affordability');
-      await expect(factorBreakdown).toContainText('Timing Suitability');
+    const reloadedBudget75Btn = page
+      .getByTestId('budget-selector')
+      .getByRole('button', { name: '$75' });
+    await expect(reloadedBudget75Btn).toHaveAttribute('aria-pressed', 'true');
 
-      // Verify score is formatted as X/100, not a percentage
-      const scoreBadge = page.getByTestId('event-score').first();
-      const scoreText = await scoreBadge.innerText();
-      expect(scoreText).toMatch(/\d+\/100/);
-      expect(scoreText).not.toContain('%');
-    }
+    // 10. Test search filter and clearing search after settings change
+    const searchInput = page.getByTestId('search-input');
+    await searchInput.fill('E2E Headliner');
+    await expect(
+      page.getByText('E2E Headliner Live at E2E Ballroom'),
+    ).toBeVisible();
+
+    // Search for nonexistent string: shows empty-filtered-banner
+    await searchInput.fill('NonexistentQuery999');
+    await expect(page.getByTestId('empty-filtered-banner')).toBeVisible();
+
+    // Clear search filter: seeded event is restored
+    await searchInput.fill('');
+    await expect(
+      page.getByText('E2E Headliner Live at E2E Ballroom'),
+    ).toBeVisible();
   });
 });

@@ -5,6 +5,8 @@ import { render, screen, fireEvent, within, act } from '@testing-library/react';
 import { PersonalizedEventCard } from '@/components/discover/PersonalizedEventCard';
 import { PersonalizedDiscoverContainer } from '@/components/discover/PersonalizedDiscoverContainer';
 import { GuestDiscoverContainer } from '@/components/discover/GuestDiscoverContainer';
+import { PersonalizedDiscoverErrorState } from '@/components/discover/PersonalizedDiscoverErrorState';
+import { GuestDiscoverErrorState } from '@/components/discover/GuestDiscoverErrorState';
 import type { ScoredEvent } from '@/lib/recommendation/types';
 import type {
   PersonalizedDiscoverResult,
@@ -138,6 +140,19 @@ describe('PersonalizedEventCard Component', () => {
       'href',
       'https://tickets.example.com/phoebe',
     );
+  });
+
+  it('suppresses ticket button when external URL is not an http/https URL', () => {
+    const invalidUrlEvent: ScoredEvent = {
+      ...mockScoredEvent,
+      event: {
+        ...mockScoredEvent.event,
+        ticketUrl: 'javascript:alert(1)',
+      },
+    };
+
+    render(<PersonalizedEventCard scoredEvent={invalidUrlEvent} />);
+    expect(screen.queryByTestId('ticket-button')).not.toBeInTheDocument();
   });
 
   it('expands and collapses "Why this show?" factor breakdown drawer', () => {
@@ -403,16 +418,19 @@ describe('PersonalizedDiscoverContainer Component', () => {
     });
   });
 
-  it('renders all four preset buttons and passes exact identifier artist_first for Artists', async () => {
+  it('renders all four preset buttons with accessible aria-pressed state and passes exact identifier artist_first for Artists', async () => {
     render(<PersonalizedDiscoverContainer initialData={mockInitialData} />);
 
-    expect(screen.getByTestId('preset-balanced')).toBeInTheDocument();
-    expect(screen.getByTestId('preset-artist-first')).toBeInTheDocument();
-    expect(screen.getByTestId('preset-nearby')).toBeInTheDocument();
-    expect(screen.getByTestId('preset-value')).toBeInTheDocument();
-
-    // Click Artists preset button
+    const balancedBtn = screen.getByTestId('preset-balanced');
     const artistBtn = screen.getByTestId('preset-artist-first');
+    const nearbyBtn = screen.getByTestId('preset-nearby');
+    const valueBtn = screen.getByTestId('preset-value');
+
+    expect(balancedBtn).toHaveAttribute('aria-pressed', 'true');
+    expect(artistBtn).toHaveAttribute('aria-pressed', 'false');
+    expect(nearbyBtn).toHaveAttribute('aria-pressed', 'false');
+    expect(valueBtn).toHaveAttribute('aria-pressed', 'false');
+
     expect(artistBtn).toHaveTextContent('Artists');
 
     await act(async () => {
@@ -468,6 +486,152 @@ describe('PersonalizedDiscoverContainer Component', () => {
     ).toBeInTheDocument();
     expect(
       screen.queryByText('Indie Band at Bluebird Theater'),
+    ).not.toBeInTheDocument();
+  });
+
+  it('preserves candidate collection integrity across search, city filters, and settings updates without dropping events', async () => {
+    const multiCityData: PersonalizedDiscoverResult = {
+      ...mockInitialData,
+      recommendations: [
+        mockInitialData.recommendations[0], // Chappell Roan in Denver
+        {
+          ...mockInitialData.recommendations[0],
+          eventId: 'rec-boulder-1',
+          event: {
+            ...mockInitialData.recommendations[0].event,
+            id: 'rec-boulder-1',
+            title: 'Big Thief at Boulder Theater',
+            city: 'Boulder',
+            artists: [
+              {
+                id: 'artist-big-thief',
+                name: 'Big Thief',
+                billingPosition: 'headliner',
+              },
+            ],
+          },
+        },
+      ],
+      exploratory: [],
+    };
+
+    mockGetPersonalizedRecommendationsAction.mockResolvedValue({
+      success: true,
+      data: multiCityData,
+    });
+
+    render(<PersonalizedDiscoverContainer initialData={multiCityData} />);
+
+    // Initial state: both Denver and Boulder events visible
+    expect(
+      screen.getByText('Chappell Roan at Mission Ballroom'),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText('Big Thief at Boulder Theater'),
+    ).toBeInTheDocument();
+
+    // Step 1: Filter by search 'Chappell'
+    const searchInput = screen.getByTestId('search-input');
+    fireEvent.change(searchInput, { target: { value: 'Chappell' } });
+    expect(
+      screen.getByText('Chappell Roan at Mission Ballroom'),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText('Big Thief at Boulder Theater'),
+    ).not.toBeInTheDocument();
+
+    // Step 2: Switch preset to 'nearby' while search filter is active
+    // Critical: getPersonalizedRecommendationsAction MUST NOT be called with search: 'Chappell'
+    const nearbyBtn = screen.getByTestId('preset-nearby');
+    await act(async () => {
+      fireEvent.click(nearbyBtn);
+    });
+    expect(mockGetPersonalizedRecommendationsAction).toHaveBeenCalledWith({
+      preset: 'nearby',
+    });
+
+    // Step 3: Clear search filter
+    fireEvent.change(searchInput, { target: { value: '' } });
+    // Both Denver and Boulder events must still be available in memory!
+    expect(
+      screen.getByText('Chappell Roan at Mission Ballroom'),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText('Big Thief at Boulder Theater'),
+    ).toBeInTheDocument();
+
+    // Step 4: Select city 'Denver'
+    const citySelector = screen.getByTestId('city-filter');
+    fireEvent.change(citySelector, { target: { value: 'Denver' } });
+    expect(
+      screen.getByText('Chappell Roan at Mission Ballroom'),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText('Big Thief at Boulder Theater'),
+    ).not.toBeInTheDocument();
+
+    // Step 5: Change budget while Denver filter is active
+    // Critical: server call MUST NOT pass city: 'Denver'
+    const budgetSelector = screen.getByTestId('budget-selector');
+    const budget80Btn = within(budgetSelector).getByText('$80');
+    await act(async () => {
+      fireEvent.click(budget80Btn);
+    });
+    expect(mockGetPersonalizedRecommendationsAction).toHaveBeenCalledWith({
+      preset: 'nearby',
+    });
+
+    // Step 6: Select 'All Cities'
+    fireEvent.change(citySelector, { target: { value: '' } });
+    // Boulder event must be restored immediately because candidate pool remained intact!
+    expect(
+      screen.getByText('Chappell Roan at Mission Ballroom'),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText('Big Thief at Boulder Theater'),
+    ).toBeInTheDocument();
+  });
+
+  it('displays stale notice with retry button when settings save succeeds but re-rank fails', async () => {
+    mockUpdateRecommendationPresetAction.mockResolvedValueOnce({
+      success: true,
+      data: { preset: 'artist_first' },
+    });
+    mockGetPersonalizedRecommendationsAction.mockResolvedValueOnce({
+      success: false,
+      error: 'Unable to load recommendations. Please try again.',
+    });
+
+    render(<PersonalizedDiscoverContainer initialData={mockInitialData} />);
+
+    const artistBtn = screen.getByTestId('preset-artist-first');
+    await act(async () => {
+      fireEvent.click(artistBtn);
+    });
+
+    // Stale banner appears
+    const staleBanner = screen.getByTestId('stale-recommendations-banner');
+    expect(staleBanner).toBeInTheDocument();
+    expect(staleBanner).toHaveTextContent(
+      'Unable to load recommendations. Please try again.',
+    );
+
+    // Clicking retry button successfully refreshes
+    mockGetPersonalizedRecommendationsAction.mockResolvedValueOnce({
+      success: true,
+      data: {
+        ...mockInitialData,
+        activePreset: 'artist_first',
+      },
+    });
+
+    const retryBtn = screen.getByTestId('retry-refresh-button');
+    await act(async () => {
+      fireEvent.click(retryBtn);
+    });
+
+    expect(
+      screen.queryByTestId('stale-recommendations-banner'),
     ).not.toBeInTheDocument();
   });
 
@@ -555,5 +719,40 @@ describe('GuestDiscoverContainer Component', () => {
     expect(
       screen.queryByTestId('why-this-show-button'),
     ).not.toBeInTheDocument();
+  });
+});
+
+describe('PersonalizedDiscoverErrorState Component', () => {
+  it('renders authenticated error state with retry button and taste profile link', () => {
+    render(<PersonalizedDiscoverErrorState />);
+
+    const errorContainer = screen.getByTestId('authenticated-error-state');
+    expect(errorContainer).toBeInTheDocument();
+    expect(
+      screen.getByText('Unable to Load Recommendations'),
+    ).toBeInTheDocument();
+
+    const tasteLink = screen.getByTestId('discover-taste-link');
+    expect(tasteLink).toHaveAttribute('href', '/profile/taste');
+
+    const retryBtn = screen.getByTestId('retry-button');
+    expect(retryBtn).toBeInTheDocument();
+    expect(retryBtn).toHaveTextContent('Try Again');
+  });
+});
+
+describe('GuestDiscoverErrorState Component', () => {
+  it('renders guest error state with retry button without misleading empty catalog claim', () => {
+    render(<GuestDiscoverErrorState />);
+
+    const errorContainer = screen.getByTestId('guest-error-state');
+    expect(errorContainer).toBeInTheDocument();
+    expect(
+      screen.getByText('Unable to Load Live Music Catalog'),
+    ).toBeInTheDocument();
+
+    const retryBtn = screen.getByTestId('retry-button');
+    expect(retryBtn).toBeInTheDocument();
+    expect(retryBtn).toHaveTextContent('Try Again');
   });
 });

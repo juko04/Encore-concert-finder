@@ -732,6 +732,34 @@ export class SupabaseCatalogRepository implements ICatalogRepository {
     return mapArtistRow(data.artists as unknown as ArtistRow);
   }
 
+  async findArtistIdsByExternalIds(
+    provider: string,
+    externalIds: string[],
+  ): Promise<Map<string, string>> {
+    const result = new Map<string, string>();
+    if (!externalIds || externalIds.length === 0) return result;
+
+    const { data, error } = await this.client
+      .from('artist_external_ids')
+      .select('artist_id, external_id')
+      .eq('provider', provider)
+      .in('external_id', externalIds);
+
+    if (error) {
+      throw new Error(
+        `Failed to find artist IDs by external IDs: ${error.message}`,
+      );
+    }
+
+    for (const row of (data as Array<{
+      artist_id: string;
+      external_id: string;
+    }>) || []) {
+      result.set(row.external_id, row.artist_id);
+    }
+    return result;
+  }
+
   async findArtistExternalIds(artistId: string): Promise<ArtistExternalId[]> {
     const { data, error } = await this.client
       .from('artist_external_ids')

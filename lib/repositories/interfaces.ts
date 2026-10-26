@@ -66,6 +66,10 @@ export interface ICatalogRepository {
     provider: string,
     externalId: string,
   ): Promise<Artist | null>;
+  findArtistIdsByExternalIds(
+    provider: string,
+    externalIds: string[],
+  ): Promise<Map<string, string>>;
   findArtistExternalIds(artistId: string): Promise<ArtistExternalId[]>;
   findVenueByNameAndCity(
     normalizedName: string,

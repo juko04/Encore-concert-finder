@@ -4,6 +4,7 @@ import type {
   CanonicalEventSummary,
 } from '@/lib/domain/catalog';
 import { formatCurrencyAmount } from '@/lib/domain/value-objects';
+import { isValidHttpUrl } from '@/components/discover/PersonalizedEventCard';
 
 export interface EventCardProps {
   event: CanonicalEventSummary | CanonicalEventDetail;
@@ -226,9 +227,9 @@ export function EventCard({ event }: EventCardProps) {
           <div className="font-semibold text-emerald-400">{renderPrice()}</div>
         </div>
 
-        {ticketUrl && !isCancelled && (
+        {isValidHttpUrl(ticketUrl) && !isCancelled && (
           <a
-            href={ticketUrl}
+            href={ticketUrl!}
             target="_blank"
             rel="noopener noreferrer"
             className="rounded-lg bg-zinc-100 px-3 py-1.5 text-xs font-medium text-zinc-900 transition hover:bg-white"

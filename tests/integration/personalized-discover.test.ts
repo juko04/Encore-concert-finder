@@ -73,12 +73,9 @@ describe('PostgreSQL Integration: Personalized Discover Experience', () => {
 
   beforeAll(async () => {
     if (!credentials) {
-      if (process.env.CI) {
-        throw new Error(
-          '[personalized-discover.test] Required Supabase integration test credentials could not be resolved in CI.',
-        );
-      }
-      return;
+      throw new Error(
+        '[personalized-discover.test] Required Supabase integration test credentials could not be resolved. Ensure local Supabase is running with `npm run db:start` or valid test environment variables are set.',
+      );
     }
 
     assertSafeDatabaseTarget(
@@ -96,10 +93,9 @@ describe('PostgreSQL Integration: Personalized Discover Experience', () => {
       .select('count', { count: 'exact', head: true });
 
     if (pingErr) {
-      if (process.env.CI) {
-        throw new Error(`Local database ping failed in CI: ${pingErr.message}`);
-      }
-      return;
+      throw new Error(
+        `[personalized-discover.test] Local Supabase database unreachable at ${credentials.url}: ${pingErr.message}. Integration tests require a running database and applied migrations.`,
+      );
     }
 
     isDbAvailable = true;
@@ -130,7 +126,7 @@ describe('PostgreSQL Integration: Personalized Discover Experience', () => {
     }
     userBId = authB.user.id;
 
-    // Create user scoped clients
+    // Create user scoped clients using anonKey so adminClient retains service_role privileges
     clientA = createClient(credentials.url, credentials.anonKey, {
       auth: { autoRefreshToken: false, persistSession: false },
     });
@@ -281,15 +277,14 @@ describe('PostgreSQL Integration: Personalized Discover Experience', () => {
   });
 
   it('Scenario A: User A receives personalized recommendations while User B taste remains isolated', async () => {
-    if (
-      !isDbAvailable ||
-      !clientA ||
-      !clientB ||
-      !userAId ||
-      !userBId ||
-      !testArtistId
-    ) {
-      return;
+    expect(isDbAvailable).toBe(true);
+    expect(clientA).toBeDefined();
+    expect(clientB).toBeDefined();
+    expect(userAId).toBeDefined();
+    expect(userBId).toBeDefined();
+    expect(testArtistId).toBeDefined();
+    if (!clientA || !clientB || !userAId || !userBId || !testArtistId) {
+      throw new Error('Test prerequisites not satisfied');
     }
 
     const prefRepoA = new SupabaseUserPreferenceRepository(clientA);
@@ -355,14 +350,15 @@ describe('PostgreSQL Integration: Personalized Discover Experience', () => {
   });
 
   it('Scenario B: Public Discover retrieves upcoming canonical events without personal scoring', async () => {
-    if (!isDbAvailable || !adminClient) {
-      return;
+    expect(isDbAvailable).toBe(true);
+    expect(adminClient).toBeDefined();
+    if (!adminClient) {
+      throw new Error('Admin client not initialized');
     }
 
     const publicData = await getPublicDiscoverData({
       client: adminClient,
       city: 'Denver',
-      referenceDate: '2026-11-01',
     });
 
     expect(publicData.events.length).toBeGreaterThan(0);
@@ -372,8 +368,11 @@ describe('PostgreSQL Integration: Personalized Discover Experience', () => {
   });
 
   it('Scenario C: Profile updates preserve other budget thresholds', async () => {
-    if (!isDbAvailable || !clientA || !userAId) {
-      return;
+    expect(isDbAvailable).toBe(true);
+    expect(clientA).toBeDefined();
+    expect(userAId).toBeDefined();
+    if (!clientA || !userAId) {
+      throw new Error('User A client not initialized');
     }
 
     const profileRepoA = new SupabaseProfileRepository(clientA);
