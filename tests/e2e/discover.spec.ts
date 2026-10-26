@@ -295,7 +295,7 @@ test.describe('Discover Page E2E Suite', () => {
     await expect(
       page.getByText('E2E Headliner Live at E2E Ballroom'),
     ).toBeVisible();
-    await expect(page.getByText('E2E Ballroom')).toBeVisible();
+    await expect(page.getByText(`E2E Ballroom ${timestamp}`)).toBeVisible();
 
     // Verify absence of personal score badge on public cards
     await expect(page.getByTestId('event-score')).toHaveCount(0);
@@ -348,7 +348,7 @@ test.describe('Discover Page E2E Suite', () => {
     await expect(
       page.getByText('E2E Headliner Live at E2E Ballroom'),
     ).toBeVisible();
-    await expect(page.getByText('E2E Ballroom')).toBeVisible();
+    await expect(page.getByText(`E2E Ballroom ${timestamp}`)).toBeVisible();
 
     // Capture initial score under Balanced preset
     const scoreBadge = page.getByTestId('event-score').first();
