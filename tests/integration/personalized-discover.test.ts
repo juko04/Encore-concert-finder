@@ -131,37 +131,27 @@ describe('PostgreSQL Integration: Personalized Discover Experience', () => {
     userBId = authB.user.id;
 
     // Create user scoped clients
-    const { data: signA, error: signErrA } =
-      await adminClient.auth.signInWithPassword({
-        email: emailA,
-        password: 'Password123!',
-      });
-    if (signErrA || !signA.session) {
-      throw new Error(`Failed to sign in User A: ${signErrA?.message}`);
-    }
-
     clientA = createClient(credentials.url, credentials.anonKey, {
       auth: { autoRefreshToken: false, persistSession: false },
-      global: {
-        headers: { Authorization: `Bearer ${signA.session.access_token}` },
-      },
     });
-
-    const { data: signB, error: signErrB } =
-      await adminClient.auth.signInWithPassword({
-        email: emailB,
-        password: 'Password123!',
-      });
-    if (signErrB || !signB.session) {
-      throw new Error(`Failed to sign in User B: ${signErrB?.message}`);
+    const { error: signErrA } = await clientA.auth.signInWithPassword({
+      email: emailA,
+      password: 'Password123!',
+    });
+    if (signErrA) {
+      throw new Error(`Failed to sign in User A: ${signErrA.message}`);
     }
 
     clientB = createClient(credentials.url, credentials.anonKey, {
       auth: { autoRefreshToken: false, persistSession: false },
-      global: {
-        headers: { Authorization: `Bearer ${signB.session.access_token}` },
-      },
     });
+    const { error: signErrB } = await clientB.auth.signInWithPassword({
+      email: emailB,
+      password: 'Password123!',
+    });
+    if (signErrB) {
+      throw new Error(`Failed to sign in User B: ${signErrB.message}`);
+    }
 
     // Seed canonical test artist, venue, and event
     const { data: artistRow, error: artistErr } = await adminClient
@@ -372,6 +362,7 @@ describe('PostgreSQL Integration: Personalized Discover Experience', () => {
     const publicData = await getPublicDiscoverData({
       client: adminClient,
       city: 'Denver',
+      referenceDate: '2026-11-01',
     });
 
     expect(publicData.events.length).toBeGreaterThan(0);

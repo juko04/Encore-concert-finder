@@ -62,6 +62,7 @@ export interface PublicDiscoverOptions {
   region?: string;
   searchQuery?: string;
   limit?: number;
+  referenceDate?: string;
 }
 
 export interface PublicDiscoverResult {
@@ -283,11 +284,12 @@ export async function getPublicDiscoverData(
     region,
     searchQuery,
     limit = 50,
+    referenceDate,
   } = options;
 
   const catalogRepo =
     injectedCatalogRepo ?? new SupabaseCatalogRepository(client);
-  const todayIso = new Date().toISOString().split('T')[0];
+  const todayIso = referenceDate || new Date().toISOString().split('T')[0];
 
   let events = await catalogRepo.listEvents({
     fromDate: todayIso,
