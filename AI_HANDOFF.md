@@ -23,12 +23,13 @@ Durable architecture records belong in [`docs/architecture/`](docs/architecture/
 - **Verification State:** Independent Review Remediation Verified Locally:
   - Branch: `feature/phase-2-personalized-discover`
   - Pull Request: [#12](https://github.com/juko04/Encore-concert-finder/pull/12)
+  - Commit: `bafa73d` (includes Playwright strict-mode locator disambiguation for seeded E2E venues)
   - Unit Tests: 463/463 passed across 34 test suites (`npm test`)
   - Integration Tests: Fail-closed demonstration verified (exited code 1 on offline DB; passes in CI with live Supabase)
   - Production Build: Next.js production build clean (0 errors, 14 routes, `/discover` confirmed dynamic)
   - Code Quality: Prettier format clean, ESLint clean (0 warnings), strict TypeScript clean (0 errors)
   - E2E Tests: Playwright verified (`npm run test:e2e`)
-- **Immediate Next Action:** Push remediation commits to `origin/feature/phase-2-personalized-discover`, verify green GitHub Actions CI, and provide comprehensive verification report. Do NOT auto-merge PR #12. Do NOT proceed to Phase 3.
+- **Immediate Next Action:** Monitor GitHub Actions CI run #40372647699 to completion and deliver comprehensive verification report. Do NOT auto-merge PR #12. Do NOT proceed to Phase 3.
 - **Phase 2 Status:** **ACTIVE — PR #12 REMEDIATION COMPLETE, AWAITING CI & FINAL REVIEW.**
 
 ---

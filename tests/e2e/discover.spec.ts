@@ -385,9 +385,9 @@ test.describe('Discover Page E2E Suite', () => {
     await expect(radius50Btn).toHaveAttribute('aria-pressed', 'true');
 
     const budgetSelector = page.getByTestId('budget-selector');
-    const budget75Btn = budgetSelector.getByRole('button', { name: '$75' });
-    await budget75Btn.click();
-    await expect(budget75Btn).toHaveAttribute('aria-pressed', 'true');
+    const budget80Btn = budgetSelector.getByRole('button', { name: '$80' });
+    await budget80Btn.click();
+    await expect(budget80Btn).toHaveAttribute('aria-pressed', 'true');
 
     // 9. Reload page to verify persistence across page reload
     await page.reload();
@@ -401,10 +401,10 @@ test.describe('Discover Page E2E Suite', () => {
       .getByRole('button', { name: '50 mi' });
     await expect(reloadedRadius50Btn).toHaveAttribute('aria-pressed', 'true');
 
-    const reloadedBudget75Btn = page
+    const reloadedBudget80Btn = page
       .getByTestId('budget-selector')
-      .getByRole('button', { name: '$75' });
-    await expect(reloadedBudget75Btn).toHaveAttribute('aria-pressed', 'true');
+      .getByRole('button', { name: '$80' });
+    await expect(reloadedBudget80Btn).toHaveAttribute('aria-pressed', 'true');
 
     // 10. Test search filter and clearing search after settings change
     const searchInput = page.getByTestId('search-input');
