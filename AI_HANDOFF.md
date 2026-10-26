@@ -17,16 +17,18 @@ Durable architecture records belong in [`docs/architecture/`](docs/architecture/
   2. **Production Preferred-Artist Query Completeness & Volume Test:** Updated `catalogRepo.listEvents()` in `lib/repositories/catalog-repository.ts` to perform a database-side inner join `event_artists!inner(artist_id)` with chunked batches (50 artist IDs) and SQL-side chronological ordering and limits. Added PostgreSQL integration test in `tests/integration/catalog-rls.test.ts` verifying >1,000 `event_artists` rows to prove PostgREST 1,000-row limits do not truncate matching events and chronological ordering is evaluated database-side.
   3. **Decoupled Stale-Score Presentation:** Separated `isStale` state from `errorMessage` in `PersonalizedDiscoverContainer.tsx`. Dismissing the transient error banner preserves the `stale-recommendations-banner` with its dedicated retry refresh button until a refresh succeeds.
   4. **E2E Mathematical Preset Inversion:** Updated `tests/e2e/discover.spec.ts` to seed Event A (Favorite artist, Colorado Springs, $120-$150) and Event B (Interested artist, Denver, $25-$35) for a Denver-based user. Verified that switching from `artist_first` to `nearby` mathematically inverts ranking and scores (Event A #1 under `artist_first` with score ~76 vs ~69; Event B #1 under `nearby` with score ~80 vs ~53).
-- **Verification State:** Final Remediation Verified Locally:
+- **Verification State:** Final Remediation Fully Verified with Green CI:
   - Branch: `feature/phase-2-personalized-discover`
   - Pull Request: [#12](https://github.com/juko04/Encore-concert-finder/pull/12)
+  - Latest Commit: `78d8535` (`test(discover): extract integer scores accurately from DOM badges in E2E spec`)
+  - GitHub Actions CI Run: [#40404082196](https://github.com/juko04/Encore-concert-finder/actions/runs/40404082196) — **PASSED (13m22s)**
   - Unit Tests: 468/468 passed across 34 test suites (`npm test`)
-  - Integration Tests: High-volume catalog test and fail-closed integration suites verified
+  - Integration Tests: High-volume catalog test (>1,000 rows) and fail-closed RLS suites verified green
   - Production Build: Next.js production build clean (0 errors, 14 routes, `/discover` confirmed dynamic)
   - Code Quality: Prettier format clean, ESLint clean (0 warnings), strict TypeScript clean (0 errors)
-  - E2E Tests: Playwright suite verified with ranking inversion assertions
-- **Immediate Next Action:** Commit, push to remote, and monitor GitHub Actions CI to green completion. Do NOT auto-merge PR #12. Do NOT proceed to Phase 3.
-- **Phase 2 Status:** **ACTIVE — PR #12 FINAL REMEDIATION COMPLETE, PUSHING FOR CI VERIFICATION.**
+  - E2E Tests: Playwright suite passed (11 tests in CI) with ranking inversion and factor drawer assertions
+- **Immediate Next Action:** PR #12 is ready for final user review and merge approval. Do NOT auto-merge PR #12. Do NOT proceed to Phase 3.
+- **Phase 2 Status:** **ACTIVE — PR #12 FINAL REMEDIATION COMPLETE, CI GREEN.**
 
 ---
 
