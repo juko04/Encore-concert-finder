@@ -848,9 +848,9 @@ describe('Catalog RLS, Security & Canonicalization Atomicity', () => {
 
     const cleanupFixtures = async () => {
       assertSafeDatabaseTarget(credentials!.url);
-      const BATCH_SIZE = 400;
+      const BATCH_SIZE = 50;
 
-      // 1. Delete event_artists in safe batches
+      // 1. Delete event_artists associations in safe batches (size 50 to avoid URI too long in PostgREST)
       for (let i = 0; i < createdEventIds.length; i += BATCH_SIZE) {
         const batch = createdEventIds.slice(i, i + BATCH_SIZE);
         const { error } = await adminClient!
@@ -858,7 +858,7 @@ describe('Catalog RLS, Security & Canonicalization Atomicity', () => {
           .delete()
           .in('event_id', batch);
         if (error) {
-          console.warn(
+          throw new Error(
             `[Cleanup] Error deleting event_artists batch: ${error.message}`,
           );
         }
@@ -866,13 +866,18 @@ describe('Catalog RLS, Security & Canonicalization Atomicity', () => {
 
       // Also clean up by artist_id in case partial fixture creation inserted rows
       if (createdArtistIds.length > 0) {
-        await adminClient!
+        const { error } = await adminClient!
           .from('event_artists')
           .delete()
           .in('artist_id', createdArtistIds);
+        if (error) {
+          throw new Error(
+            `[Cleanup] Error deleting event_artists by artist_id: ${error.message}`,
+          );
+        }
       }
 
-      // 2. Delete events in safe batches
+      // 2. Delete events in safe batches (size 50 to avoid URI too long in PostgREST)
       for (let i = 0; i < createdEventIds.length; i += BATCH_SIZE) {
         const batch = createdEventIds.slice(i, i + BATCH_SIZE);
         const { error } = await adminClient!
@@ -880,8 +885,21 @@ describe('Catalog RLS, Security & Canonicalization Atomicity', () => {
           .delete()
           .in('id', batch);
         if (error) {
-          console.warn(
+          throw new Error(
             `[Cleanup] Error deleting events batch: ${error.message}`,
+          );
+        }
+      }
+
+      // Also delete by venue_id if venue was created
+      if (createdVenueIds.length > 0) {
+        const { error } = await adminClient!
+          .from('events')
+          .delete()
+          .in('venue_id', createdVenueIds);
+        if (error) {
+          throw new Error(
+            `[Cleanup] Error deleting events by venue_id: ${error.message}`,
           );
         }
       }
@@ -893,7 +911,7 @@ describe('Catalog RLS, Security & Canonicalization Atomicity', () => {
           .delete()
           .in('id', createdArtistIds);
         if (error) {
-          console.warn(`[Cleanup] Error deleting artists: ${error.message}`);
+          throw new Error(`[Cleanup] Error deleting artists: ${error.message}`);
         }
       }
 
@@ -903,7 +921,7 @@ describe('Catalog RLS, Security & Canonicalization Atomicity', () => {
           .delete()
           .in('id', createdVenueIds);
         if (error) {
-          console.warn(`[Cleanup] Error deleting venues: ${error.message}`);
+          throw new Error(`[Cleanup] Error deleting venues: ${error.message}`);
         }
       }
     };
@@ -1062,8 +1080,15 @@ describe('Catalog RLS, Security & Canonicalization Atomicity', () => {
         const { count: remainingEvents } = await adminClient
           .from('events')
           .select('id', { count: 'exact', head: true })
-          .in('id', createdEventIds.slice(0, 100));
+          .in('id', createdEventIds.slice(0, 50));
         expect(remainingEvents ?? 0).toBe(0);
+      }
+      if (createdArtistIds.length > 0) {
+        const { count: remainingEventArtists } = await adminClient
+          .from('event_artists')
+          .select('id', { count: 'exact', head: true })
+          .in('artist_id', createdArtistIds);
+        expect(remainingEventArtists ?? 0).toBe(0);
       }
       if (createdArtistIds.length > 0) {
         const { count: remainingArtists } = await adminClient
