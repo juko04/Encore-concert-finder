@@ -577,11 +577,277 @@ describe('Production Recommendation Service (getPersonalizedDiscoverData)', () =
     const result = await getPublicDiscoverData({
       catalogRepo,
       limit: 10,
+      referenceDate,
+      referenceInstant,
     });
 
     expect(result.isEmptyCatalog).toBe(false);
     expect(result.events).toHaveLength(1);
     expect(result.events[0].id).toBe('event-public-1');
     expect(result.events[0].title).toBe('Denver Jazz Festival');
+  });
+
+  describe('Candidate Lookback & Timezone Boundary Regressions', () => {
+    it('Regression A: considers eligible future concert when preceded by >150 recently past general events', async () => {
+      const user = 'user-regression-a';
+      await profileRepo.upsertProfile(user, {
+        recommendationPreset: 'balanced',
+      });
+
+      const testRefDate = '2026-10-26';
+      const testRefInstant = '2026-10-26T12:00:00Z';
+
+      // Seed 160 recently past events in the lookback window (2026-10-25)
+      for (let i = 0; i < 160; i++) {
+        seedEvent(catalogRepo, {
+          id: `past-general-${i}`,
+          title: `Past General Show ${i}`,
+          localStartDate: '2026-10-25',
+          startsAt: '2026-10-25T14:00:00Z',
+          venueName: 'Past Club',
+        });
+      }
+
+      // Seed 1 future general event at index 161 (2026-10-27)
+      seedEvent(catalogRepo, {
+        id: 'event-future-general-survivor',
+        title: 'Khruangbin at Red Rocks',
+        localStartDate: '2026-10-27',
+        startsAt: '2026-10-27T20:00:00Z',
+        venueName: 'Red Rocks Amphitheatre',
+      });
+
+      const result = await getPersonalizedDiscoverData({
+        userId: user,
+        profileRepo,
+        prefRepo,
+        catalogRepo,
+        referenceDate: testRefDate,
+        referenceInstant: testRefInstant,
+      });
+
+      // Bounded paging gathered past events in lookback window without squeezing out the future show
+      expect(result.isEmptyCatalog).toBe(false);
+      expect(result.totalCandidateCount).toBe(161);
+      expect(result.ineligibleCount).toBe(160);
+      expect(result.exploratory).toHaveLength(1);
+      expect(result.exploratory[0].eventId).toBe(
+        'event-future-general-survivor',
+      );
+      expect(result.exploratory[0].event.title).toBe('Khruangbin at Red Rocks');
+
+      // Also verify getPublicDiscoverData pages past the 160 events to find the future show
+      const publicResult = await getPublicDiscoverData({
+        catalogRepo,
+        limit: 10,
+        referenceDate: testRefDate,
+        referenceInstant: testRefInstant,
+      });
+      expect(publicResult.isEmptyCatalog).toBe(false);
+      expect(publicResult.events).toHaveLength(1);
+      expect(publicResult.events[0].id).toBe('event-future-general-survivor');
+    });
+
+    it('Regression B: considers future favorite-artist concert when preceded by >100 past preferred-artist events', async () => {
+      const user = 'user-regression-b';
+      const favArtistId = 'artist-phoebe-regr-b';
+
+      catalogRepo.artists.set(favArtistId, {
+        id: favArtistId,
+        name: 'Phoebe Bridgers',
+        normalizedName: 'phoebe bridgers',
+        imageUrl: null,
+        createdAt: '2026-10-01T00:00:00Z',
+        updatedAt: '2026-10-01T00:00:00Z',
+      });
+
+      await profileRepo.upsertProfile(user, {
+        recommendationPreset: 'artist_first',
+      });
+      await prefRepo.savePreference({
+        userId: user,
+        artistId: favArtistId,
+        artistName: 'Phoebe Bridgers',
+        preferenceLevel: 'favorite',
+      });
+
+      const testRefDate = '2026-10-26';
+      const testRefInstant = '2026-10-26T12:00:00Z';
+
+      // Seed 110 past shows for Phoebe Bridgers in the lookback window (2026-10-25)
+      for (let i = 0; i < 110; i++) {
+        seedEvent(catalogRepo, {
+          id: `past-phoebe-${i}`,
+          title: `Phoebe Bridgers Past Show ${i}`,
+          localStartDate: '2026-10-25',
+          startsAt: '2026-10-25T14:00:00Z',
+          artists: [
+            {
+              id: favArtistId,
+              name: 'Phoebe Bridgers',
+              billingPosition: 'headliner',
+            },
+          ],
+        });
+      }
+
+      // Seed 1 upcoming future concert for Phoebe Bridgers
+      seedEvent(catalogRepo, {
+        id: 'event-phoebe-future-survivor',
+        title: 'Phoebe Bridgers at Red Rocks',
+        localStartDate: '2026-11-05',
+        startsAt: '2026-11-05T20:00:00Z',
+        artists: [
+          {
+            id: favArtistId,
+            name: 'Phoebe Bridgers',
+            billingPosition: 'headliner',
+          },
+        ],
+      });
+
+      const result = await getPersonalizedDiscoverData({
+        userId: user,
+        profileRepo,
+        prefRepo,
+        catalogRepo,
+        referenceDate: testRefDate,
+        referenceInstant: testRefInstant,
+      });
+
+      // Paged past 110 preferred past events; future favorite show is ranked #1
+      // Score in artist_first preset (65% artist + 15% distance*0.5 + 10% price*0.5 + 10% timing*0.5) is 82.5
+      expect(result.isEmptyCatalog).toBe(false);
+      expect(result.totalCandidateCount).toBe(111);
+      expect(result.ineligibleCount).toBe(110);
+      expect(result.recommendations).toHaveLength(1);
+      expect(result.recommendations[0].eventId).toBe(
+        'event-phoebe-future-survivor',
+      );
+      expect(result.recommendations[0].score).toBe(82.5);
+      expect(result.recommendations[0].factors.artist.score).toBe(100);
+      expect(result.recommendations[0].explanation).toContain(
+        'Favorite artist',
+      );
+    });
+
+    it('Regression C: preserves eligibility for Denver concert occurring tonight while UTC has advanced to tomorrow', async () => {
+      const user = 'user-regression-c';
+      await profileRepo.upsertProfile(user, {
+        recommendationPreset: 'balanced',
+      });
+
+      // 8:00 PM MDT on 2026-10-25 = 2026-10-26T02:00:00Z (UTC has advanced to tomorrow)
+      const refInstant = '2026-10-26T02:00:00Z';
+
+      // Tonight's Denver instant-precision show at 9:00 PM MDT (2026-10-26T03:00:00Z)
+      seedEvent(catalogRepo, {
+        id: 'event-tonight-denver-instant',
+        title: 'Denver Tonight Instant Show',
+        localStartDate: '2026-10-25',
+        timezone: 'America/Denver',
+        startsAt: '2026-10-26T03:00:00Z',
+        startTimePrecision: 'instant',
+      });
+
+      // Tonight's Denver date-only show on 2026-10-25
+      seedEvent(catalogRepo, {
+        id: 'event-tonight-denver-dateonly',
+        title: 'Denver Tonight Date Only Show',
+        localStartDate: '2026-10-25',
+        timezone: 'America/Denver',
+        startsAt: null,
+        startTimePrecision: 'date_only',
+      });
+
+      // Yesterday's Denver show on 2026-10-24 (genuinely past)
+      seedEvent(catalogRepo, {
+        id: 'event-yesterday-denver-past',
+        title: 'Denver Yesterday Past Show',
+        localStartDate: '2026-10-24',
+        timezone: 'America/Denver',
+        startsAt: '2026-10-25T02:00:00Z',
+        startTimePrecision: 'instant',
+      });
+
+      const result = await getPersonalizedDiscoverData({
+        userId: user,
+        profileRepo,
+        prefRepo,
+        catalogRepo,
+        referenceInstant: refInstant,
+      });
+
+      const returnedEventIds = [
+        ...result.recommendations,
+        ...result.exploratory,
+      ].map((r) => r.eventId);
+      expect(returnedEventIds).toContain('event-tonight-denver-instant');
+      expect(returnedEventIds).toContain('event-tonight-denver-dateonly');
+      expect(returnedEventIds).not.toContain('event-yesterday-denver-past');
+
+      // Public discover also preserves same-evening western show
+      const publicResult = await getPublicDiscoverData({
+        catalogRepo,
+        referenceInstant: refInstant,
+      });
+      const publicIds = publicResult.events.map((e) => e.id);
+      expect(publicIds).toContain('event-tonight-denver-instant');
+      expect(publicIds).toContain('event-tonight-denver-dateonly');
+      expect(publicIds).not.toContain('event-yesterday-denver-past');
+    });
+
+    it('Regression D: distinguishes genuine empty catalog vs candidates existing but all ineligible', async () => {
+      const user = 'user-regression-d';
+      await profileRepo.upsertProfile(user, {
+        recommendationPreset: 'balanced',
+      });
+
+      // Scenario D1: Truly empty catalog (0 events)
+      const emptyResult = await getPersonalizedDiscoverData({
+        userId: user,
+        profileRepo,
+        prefRepo,
+        catalogRepo,
+        referenceDate: '2026-10-26',
+        referenceInstant: '2026-10-26T12:00:00Z',
+      });
+
+      expect(emptyResult.isEmptyCatalog).toBe(true);
+      expect(emptyResult.totalCandidateCount).toBe(0);
+      expect(emptyResult.ineligibleCount).toBe(0);
+      expect(emptyResult.recommendations).toHaveLength(0);
+      expect(emptyResult.exploratory).toHaveLength(0);
+
+      // Scenario D2: Candidates exist in catalog lookback window, but all are ineligible/past
+      seedEvent(catalogRepo, {
+        id: 'event-past-only-1',
+        title: 'Past Only Show 1',
+        localStartDate: '2026-10-25',
+        startsAt: '2026-10-25T14:00:00Z',
+      });
+      seedEvent(catalogRepo, {
+        id: 'event-past-only-2',
+        title: 'Past Only Show 2',
+        localStartDate: '2026-10-25',
+        startsAt: '2026-10-25T16:00:00Z',
+      });
+
+      const ineligibleResult = await getPersonalizedDiscoverData({
+        userId: user,
+        profileRepo,
+        prefRepo,
+        catalogRepo,
+        referenceDate: '2026-10-26',
+        referenceInstant: '2026-10-26T12:00:00Z',
+      });
+
+      // Truthful: catalog is NOT empty (2 candidates existed in lookback), but 0 displayable shows
+      expect(ineligibleResult.isEmptyCatalog).toBe(false);
+      expect(ineligibleResult.totalCandidateCount).toBe(2);
+      expect(ineligibleResult.ineligibleCount).toBe(2);
+      expect(ineligibleResult.recommendations).toHaveLength(0);
+      expect(ineligibleResult.exploratory).toHaveLength(0);
+    });
   });
 });

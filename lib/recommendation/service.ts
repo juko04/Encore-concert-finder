@@ -21,6 +21,7 @@ import type {
 } from '@/lib/recommendation/types';
 import { SupabaseCatalogRepository } from '@/lib/repositories/catalog-repository';
 import type {
+  EventListFilters,
   ICatalogRepository,
   IProfileRepository,
   IUserPreferenceRepository,
@@ -121,6 +122,84 @@ export function calculateCandidateRetrievalLowerBound(
 
   const conservative = new Date(instant.getTime() - 24 * 60 * 60 * 1000);
   return conservative.toISOString().split('T')[0];
+}
+
+/**
+ * Bounds candidate paging to avoid unbounded table scans while ensuring
+ * recently-past events in the conservative lookback window do not squeeze out upcoming eligible shows.
+ */
+export const MAX_CANDIDATE_SCAN_PAGES = 5;
+
+/**
+ * Retrieves candidates while paging past recently-past events within the conservative lookback window.
+ *
+ * Invariants:
+ * 1. Begins query from `queryFromDate` (24h lookback to protect same-day shows in western timezones).
+ * 2. Pages through candidate events in bounded chunks until `targetEligibleLimit` eligible events are gathered
+ *    or the database returns no more records.
+ * 3. Ineligible/past events within the lookback window are preserved in the returned candidate collection so that
+ *    total candidate counts and ineligibility diagnostic statistics remain truthful and candidate-aware.
+ * 4. Limits total pages scanned to MAX_CANDIDATE_SCAN_PAGES (5) to guarantee bounded retrieval
+ *    and prevent unbounded table scans.
+ */
+export async function retrieveCandidatesWithLookback(
+  catalogRepo: ICatalogRepository,
+  filters: EventListFilters,
+  targetEligibleLimit: number,
+  referenceDate?: string,
+  referenceInstant?: Date | string,
+): Promise<CanonicalEventSummary[]> {
+  const pageSize = Math.max(targetEligibleLimit, 100);
+  const collectedCandidates: CanonicalEventSummary[] = [];
+  const candidateIds = new Set<string>();
+  let eligibleCount = 0;
+
+  for (let page = 0; page < MAX_CANDIDATE_SCAN_PAGES; page++) {
+    const batch = await catalogRepo.listEvents({
+      ...filters,
+      offset: page * pageSize,
+      limit: pageSize,
+    });
+
+    if (batch.length === 0) {
+      break;
+    }
+
+    for (const ev of batch) {
+      if (!candidateIds.has(ev.id)) {
+        candidateIds.add(ev.id);
+
+        const timing = calculateTimingFactor({
+          localStartDate: ev.localStartDate,
+          startsAt: ev.startsAt,
+          timezone: ev.timezone,
+          startTimePrecision: ev.startTimePrecision,
+          referenceDate,
+          referenceInstant,
+        });
+
+        if (!timing.isPast) {
+          if (eligibleCount < targetEligibleLimit) {
+            eligibleCount++;
+            collectedCandidates.push(ev);
+          }
+        } else {
+          // Preserve past events within lookback window so candidate diagnostics remain truthful
+          collectedCandidates.push(ev);
+        }
+      }
+
+      if (eligibleCount >= targetEligibleLimit) {
+        break;
+      }
+    }
+
+    if (eligibleCount >= targetEligibleLimit || batch.length < pageSize) {
+      break;
+    }
+  }
+
+  return collectedCandidates;
 }
 
 /**
@@ -242,24 +321,34 @@ export async function getPersonalizedDiscoverData(
   // Tier 1: Targeted candidate query for user's preferred artists (chronologically ordered)
   if (preferredArtistIds.length > 0) {
     candidateQueries.push(
-      catalogRepo.listEvents({
-        artistIds: preferredArtistIds,
-        fromDate: queryFromDate,
-        limit: PREFERRED_ARTIST_CANDIDATE_LIMIT,
-        city: city || undefined,
-        region: region || undefined,
-      }),
+      retrieveCandidatesWithLookback(
+        catalogRepo,
+        {
+          artistIds: preferredArtistIds,
+          fromDate: queryFromDate,
+          city: city || undefined,
+          region: region || undefined,
+        },
+        PREFERRED_ARTIST_CANDIDATE_LIMIT,
+        referenceDate,
+        referenceInstant,
+      ),
     );
   }
 
   // Tier 2: General upcoming catalog candidates (discovery pool, chronologically ordered)
   candidateQueries.push(
-    catalogRepo.listEvents({
-      fromDate: queryFromDate,
-      limit: GENERAL_CATALOG_CANDIDATE_LIMIT,
-      city: city || undefined,
-      region: region || undefined,
-    }),
+    retrieveCandidatesWithLookback(
+      catalogRepo,
+      {
+        fromDate: queryFromDate,
+        city: city || undefined,
+        region: region || undefined,
+      },
+      GENERAL_CATALOG_CANDIDATE_LIMIT,
+      referenceDate,
+      referenceInstant,
+    ),
   );
 
   const queryResults = await Promise.all(candidateQueries);
@@ -274,6 +363,7 @@ export async function getPersonalizedDiscoverData(
     }
   }
 
+  const candidateCountBeforeSearch = candidateMap.size;
   let candidates = Array.from(candidateMap.values());
 
   // Optional text search filter (artist name or event title)
@@ -294,13 +384,13 @@ export async function getPersonalizedDiscoverData(
       exploratory: [],
       suppressed: [],
       ineligibleCount: 0,
-      totalCandidateCount: 0,
+      totalCandidateCount: candidateCountBeforeSearch,
       userProfile,
       activePreset,
       activeWeights,
       hasPreferences,
       isLocationConfigured,
-      isEmptyCatalog: true,
+      isEmptyCatalog: candidateCountBeforeSearch === 0,
     };
   }
 
@@ -335,7 +425,7 @@ export async function getPersonalizedDiscoverData(
     exploratory: rankResult.exploratory,
     suppressed: rankResult.suppressed,
     ineligibleCount: rankResult.ineligibleCount,
-    totalCandidateCount: candidates.length,
+    totalCandidateCount: candidateCountBeforeSearch,
     userProfile,
     activePreset,
     activeWeights,
@@ -372,15 +462,20 @@ export async function getPublicDiscoverData(
     referenceInstant,
   );
 
-  let events = await catalogRepo.listEvents({
-    fromDate: queryFromDate,
+  const candidates = await retrieveCandidatesWithLookback(
+    catalogRepo,
+    {
+      fromDate: queryFromDate,
+      city: city || undefined,
+      region: region || undefined,
+    },
     limit,
-    city: city || undefined,
-    region: region || undefined,
-  });
+    referenceDate,
+    referenceInstant,
+  );
 
   // Filter genuinely past events in public discover using timezone-aware timing eligibility
-  events = events.filter((ev) => {
+  let events = candidates.filter((ev) => {
     const timing = calculateTimingFactor({
       localStartDate: ev.localStartDate,
       startsAt: ev.startsAt,
@@ -403,9 +498,11 @@ export async function getPublicDiscoverData(
     });
   }
 
+  const candidateCountBeforeSearch = candidates.length;
+
   return {
     events,
-    isEmptyCatalog: events.length === 0,
+    isEmptyCatalog: candidateCountBeforeSearch === 0,
     totalCount: events.length,
   };
 }

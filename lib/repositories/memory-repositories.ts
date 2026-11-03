@@ -435,7 +435,11 @@ export class MemoryCatalogRepository implements ICatalogRepository {
       result = result.filter((e) => matchingEventIds.has(e.id));
     }
 
-    result.sort((a, b) => a.localStartDate.localeCompare(b.localStartDate));
+    result.sort(
+      (a, b) =>
+        a.localStartDate.localeCompare(b.localStartDate) ||
+        a.id.localeCompare(b.id),
+    );
 
     const offset = filters?.offset ?? 0;
     const limit = filters?.limit ?? 50;

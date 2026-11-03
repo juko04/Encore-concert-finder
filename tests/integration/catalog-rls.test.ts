@@ -3,6 +3,7 @@ import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { execSync } from 'child_process';
 import crypto from 'node:crypto';
 import { SupabaseCatalogRepository } from '@/lib/repositories/catalog-repository';
+import { assertSafeDatabaseTarget } from '@/lib/supabase/destination-guard';
 
 interface LocalCredentials {
   url: string;
@@ -834,76 +835,169 @@ describe('Catalog RLS, Security & Canonicalization Atomicity', () => {
 
   it('validates production preferred-artist query completeness exceeding API row limit (>1000 event_artists rows)', async () => {
     if (!isDbAvailable || !adminClient) {
-      if (process.env.CI) {
-        throw new Error(
-          'Local Supabase must be online for high-volume preferred-artist integration test.',
-        );
-      }
-      return;
+      throw new Error(
+        'Local Supabase database is offline or unavailable. High-volume preferred-artist integration test requires a running database.',
+      );
     }
+    assertSafeDatabaseTarget(credentials!.url);
 
-    // 1. Seed dedicated high-volume artist and venue
     const testSuffix = `vol_${Date.now()}`;
-    const { data: artist, error: aErr } = await adminClient
-      .from('artists')
-      .insert({
-        name: `High Volume Artist ${testSuffix}`,
-        normalized_name: `high volume artist ${testSuffix}`,
-      })
-      .select('id')
-      .single();
-    expect(aErr).toBeNull();
-    const artistId = artist!.id;
+    const createdArtistIds: string[] = [];
+    const createdVenueIds: string[] = [];
+    const createdEventIds: string[] = [];
 
-    const { data: venue, error: vErr } = await adminClient
-      .from('venues')
-      .insert({
-        name: `High Volume Arena ${testSuffix}`,
-        normalized_name: `high volume arena ${testSuffix}`,
-        city: 'Denver',
-        region: 'CO',
-        country_code: 'US',
-        lat: 39.75,
-        lng: -104.99,
-        timezone: 'America/Denver',
-      })
-      .select('id')
-      .single();
-    expect(vErr).toBeNull();
-    const venueId = venue!.id;
+    const cleanupFixtures = async () => {
+      assertSafeDatabaseTarget(credentials!.url);
+      const BATCH_SIZE = 400;
 
-    // 2. Generate 1,020 events (exceeds PostgREST default max-rows limit of 1,000)
-    // Invariant: The EARLIEST event is inserted LAST in the database.
-    // If the repository performed an unpaginated subquery on event_artists, PostgREST's 1,000-row limit
-    // would truncate the last 20 rows and miss the earliest event entirely.
-    const TOTAL_EVENTS = 1020;
-    const eventRows: Array<{
-      id: string;
-      name: string;
-      normalized_name: string;
-      event_kind: 'concert';
-      status: 'scheduled';
-      venue_id: string;
-      city: string;
-      region: string;
-      country_code: string;
-      timezone: string;
-      local_start_date: string;
-      starts_at: string;
-      start_time_precision: 'instant';
-      is_multi_day: boolean;
-    }> = [];
+      // 1. Delete event_artists in safe batches
+      for (let i = 0; i < createdEventIds.length; i += BATCH_SIZE) {
+        const batch = createdEventIds.slice(i, i + BATCH_SIZE);
+        const { error } = await adminClient!
+          .from('event_artists')
+          .delete()
+          .in('event_id', batch);
+        if (error) {
+          console.warn(
+            `[Cleanup] Error deleting event_artists batch: ${error.message}`,
+          );
+        }
+      }
 
-    // Events 0 to 1018: far future dates (2028-01-01 through 2028-12-31)
-    for (let i = 0; i < TOTAL_EVENTS - 1; i++) {
-      const dayOffset = 500 + i;
-      const d = new Date(Date.now() + dayOffset * 86400000)
+      // Also clean up by artist_id in case partial fixture creation inserted rows
+      if (createdArtistIds.length > 0) {
+        await adminClient!
+          .from('event_artists')
+          .delete()
+          .in('artist_id', createdArtistIds);
+      }
+
+      // 2. Delete events in safe batches
+      for (let i = 0; i < createdEventIds.length; i += BATCH_SIZE) {
+        const batch = createdEventIds.slice(i, i + BATCH_SIZE);
+        const { error } = await adminClient!
+          .from('events')
+          .delete()
+          .in('id', batch);
+        if (error) {
+          console.warn(
+            `[Cleanup] Error deleting events batch: ${error.message}`,
+          );
+        }
+      }
+
+      // 3. Delete artists and venues after dependent records are removed
+      if (createdArtistIds.length > 0) {
+        const { error } = await adminClient!
+          .from('artists')
+          .delete()
+          .in('id', createdArtistIds);
+        if (error) {
+          console.warn(`[Cleanup] Error deleting artists: ${error.message}`);
+        }
+      }
+
+      if (createdVenueIds.length > 0) {
+        const { error } = await adminClient!
+          .from('venues')
+          .delete()
+          .in('id', createdVenueIds);
+        if (error) {
+          console.warn(`[Cleanup] Error deleting venues: ${error.message}`);
+        }
+      }
+    };
+
+    try {
+      // 1. Seed dedicated high-volume artist and venue
+      const { data: artist, error: aErr } = await adminClient
+        .from('artists')
+        .insert({
+          name: `High Volume Artist ${testSuffix}`,
+          normalized_name: `high volume artist ${testSuffix}`,
+        })
+        .select('id')
+        .single();
+      expect(aErr).toBeNull();
+      const artistId = artist!.id;
+      createdArtistIds.push(artistId);
+
+      const { data: venue, error: vErr } = await adminClient
+        .from('venues')
+        .insert({
+          name: `High Volume Arena ${testSuffix}`,
+          normalized_name: `high volume arena ${testSuffix}`,
+          city: 'Denver',
+          region: 'CO',
+          country_code: 'US',
+          lat: 39.75,
+          lng: -104.99,
+          timezone: 'America/Denver',
+        })
+        .select('id')
+        .single();
+      expect(vErr).toBeNull();
+      const venueId = venue!.id;
+      createdVenueIds.push(venueId);
+
+      // 2. Generate 1,020 events (exceeds PostgREST default max-rows limit of 1,000)
+      // Invariant: The EARLIEST event is inserted LAST in the database.
+      // If the repository performed an unpaginated subquery on event_artists, PostgREST's 1,000-row limit
+      // would truncate the last 20 rows and miss the earliest event entirely.
+      const TOTAL_EVENTS = 1020;
+      const eventRows: Array<{
+        id: string;
+        name: string;
+        normalized_name: string;
+        event_kind: 'concert';
+        status: 'scheduled';
+        venue_id: string;
+        city: string;
+        region: string;
+        country_code: string;
+        timezone: string;
+        local_start_date: string;
+        starts_at: string;
+        start_time_precision: 'instant';
+        is_multi_day: boolean;
+      }> = [];
+
+      // Events 0 to 1018: far future dates (2028-01-01 through 2028-12-31)
+      for (let i = 0; i < TOTAL_EVENTS - 1; i++) {
+        const dayOffset = 500 + i;
+        const d = new Date(Date.now() + dayOffset * 86400000)
+          .toISOString()
+          .split('T')[0];
+        const evId = crypto.randomUUID();
+        createdEventIds.push(evId);
+        eventRows.push({
+          id: evId,
+          name: `Future Tour Date ${i} ${testSuffix}`,
+          normalized_name: `future tour date ${i} ${testSuffix}`,
+          event_kind: 'concert',
+          status: 'scheduled',
+          venue_id: venueId,
+          city: 'Denver',
+          region: 'CO',
+          country_code: 'US',
+          timezone: 'America/Denver',
+          local_start_date: d,
+          starts_at: `${d}T20:00:00-07:00`,
+          start_time_precision: 'instant',
+          is_multi_day: false,
+        });
+      }
+
+      // Event 1019 (inserted LAST): Earliest date (tomorrow)
+      const earliestDate = new Date(Date.now() + 86400000)
         .toISOString()
         .split('T')[0];
+      const earliestEventId = crypto.randomUUID();
+      createdEventIds.push(earliestEventId);
       eventRows.push({
-        id: crypto.randomUUID(),
-        name: `Future Tour Date ${i} ${testSuffix}`,
-        normalized_name: `future tour date ${i} ${testSuffix}`,
+        id: earliestEventId,
+        name: `Earliest Tour Date (Inserted Last) ${testSuffix}`,
+        normalized_name: `earliest tour date (inserted last) ${testSuffix}`,
         event_kind: 'concert',
         status: 'scheduled',
         venue_id: venueId,
@@ -911,78 +1005,202 @@ describe('Catalog RLS, Security & Canonicalization Atomicity', () => {
         region: 'CO',
         country_code: 'US',
         timezone: 'America/Denver',
-        local_start_date: d,
-        starts_at: `${d}T20:00:00-07:00`,
+        local_start_date: earliestDate,
+        starts_at: `${earliestDate}T20:00:00-07:00`,
         start_time_precision: 'instant',
         is_multi_day: false,
       });
+
+      // Insert events in batches of 400
+      const BATCH_SIZE = 400;
+      for (let i = 0; i < eventRows.length; i += BATCH_SIZE) {
+        const batch = eventRows.slice(i, i + BATCH_SIZE);
+        const { error: insErr } = await adminClient
+          .from('events')
+          .insert(batch);
+        expect(insErr).toBeNull();
+      }
+
+      // Insert corresponding event_artists rows in batches of 400
+      const eaRows = eventRows.map((e) => ({
+        event_id: e.id,
+        artist_id: artistId,
+        billing_position: 'headliner' as const,
+        sort_order: 1,
+      }));
+      for (let i = 0; i < eaRows.length; i += BATCH_SIZE) {
+        const batch = eaRows.slice(i, i + BATCH_SIZE);
+        const { error: eaErr } = await adminClient
+          .from('event_artists')
+          .insert(batch);
+        expect(eaErr).toBeNull();
+      }
+
+      // 3. Query listEvents via SupabaseCatalogRepository using artistIds filter and limit 10
+      const catalogRepo = new SupabaseCatalogRepository(adminClient);
+      const listedEvents = await catalogRepo.listEvents({
+        artistIds: [artistId],
+        limit: 10,
+        fromDate: earliestDate,
+      });
+
+      // Invariant verification:
+      // 1. Returns bounded 10 events
+      expect(listedEvents).toHaveLength(10);
+      // 2. The FIRST event MUST be the earliest event (which was inserted last in the database)
+      expect(listedEvents[0].id).toBe(earliestEventId);
+      expect(listedEvents[0].title).toBe(
+        `Earliest Tour Date (Inserted Last) ${testSuffix}`,
+      );
+      expect(listedEvents[0].localStartDate).toBe(earliestDate);
+    } finally {
+      // 4. Reliable reverse-dependency cleanup executed inside finally
+      await cleanupFixtures();
+
+      // Demonstrate that a successful run leaves zero rows associated with unique fixture IDs
+      if (createdEventIds.length > 0) {
+        const { count: remainingEvents } = await adminClient
+          .from('events')
+          .select('id', { count: 'exact', head: true })
+          .in('id', createdEventIds.slice(0, 100));
+        expect(remainingEvents ?? 0).toBe(0);
+      }
+      if (createdArtistIds.length > 0) {
+        const { count: remainingArtists } = await adminClient
+          .from('artists')
+          .select('id', { count: 'exact', head: true })
+          .in('id', createdArtistIds);
+        expect(remainingArtists ?? 0).toBe(0);
+      }
+      if (createdVenueIds.length > 0) {
+        const { count: remainingVenues } = await adminClient
+          .from('venues')
+          .select('id', { count: 'exact', head: true })
+          .in('id', createdVenueIds);
+        expect(remainingVenues ?? 0).toBe(0);
+      }
     }
+  }, 60000);
 
-    // Event 1019 (inserted LAST): Earliest date (tomorrow)
-    const earliestDate = new Date(Date.now() + 86400000)
-      .toISOString()
-      .split('T')[0];
-    const earliestEventId = crypto.randomUUID();
-    eventRows.push({
-      id: earliestEventId,
-      name: `Earliest Tour Date (Inserted Last) ${testSuffix}`,
-      normalized_name: `earliest tour date (inserted last) ${testSuffix}`,
-      event_kind: 'concert',
-      status: 'scheduled',
-      venue_id: venueId,
-      city: 'Denver',
-      region: 'CO',
-      country_code: 'US',
-      timezone: 'America/Denver',
-      local_start_date: earliestDate,
-      starts_at: `${earliestDate}T20:00:00-07:00`,
-      start_time_precision: 'instant',
-      is_multi_day: false,
-    });
-
-    // Insert events in batches of 400
-    const BATCH_SIZE = 400;
-    for (let i = 0; i < eventRows.length; i += BATCH_SIZE) {
-      const batch = eventRows.slice(i, i + BATCH_SIZE);
-      const { error: insErr } = await adminClient.from('events').insert(batch);
-      expect(insErr).toBeNull();
+  it('guarantees fixture cleanup executes and leaves zero orphaned rows even after deliberate failure', async () => {
+    if (!isDbAvailable || !adminClient) {
+      throw new Error(
+        'Local Supabase database is offline or unavailable. Cleanup resilience test requires a running database.',
+      );
     }
+    assertSafeDatabaseTarget(credentials!.url);
 
-    // Insert corresponding event_artists rows in batches of 400
-    const eaRows = eventRows.map((e) => ({
-      event_id: e.id,
-      artist_id: artistId,
-      billing_position: 'headliner' as const,
-      sort_order: 1,
-    }));
-    for (let i = 0; i < eaRows.length; i += BATCH_SIZE) {
-      const batch = eaRows.slice(i, i + BATCH_SIZE);
-      const { error: eaErr } = await adminClient
-        .from('event_artists')
-        .insert(batch);
+    const testSuffix = `delib_fail_${Date.now()}`;
+    const createdArtistIds: string[] = [];
+    const createdVenueIds: string[] = [];
+    const createdEventIds: string[] = [];
+
+    let deliberateErrorCaught = false;
+
+    try {
+      const { data: artist, error: aErr } = await adminClient
+        .from('artists')
+        .insert({
+          name: `Deliberate Fail Artist ${testSuffix}`,
+          normalized_name: `deliberate fail artist ${testSuffix}`,
+        })
+        .select('id')
+        .single();
+      expect(aErr).toBeNull();
+      createdArtistIds.push(artist!.id);
+
+      const { data: venue, error: vErr } = await adminClient
+        .from('venues')
+        .insert({
+          name: `Deliberate Fail Venue ${testSuffix}`,
+          normalized_name: `deliberate fail venue ${testSuffix}`,
+          city: 'Denver',
+          region: 'CO',
+          country_code: 'US',
+          lat: 39.75,
+          lng: -104.99,
+          timezone: 'America/Denver',
+        })
+        .select('id')
+        .single();
+      expect(vErr).toBeNull();
+      createdVenueIds.push(venue!.id);
+
+      const eventId = crypto.randomUUID();
+      createdEventIds.push(eventId);
+      const { error: eErr } = await adminClient.from('events').insert({
+        id: eventId,
+        name: `Deliberate Fail Event ${testSuffix}`,
+        normalized_name: `deliberate fail event ${testSuffix}`,
+        event_kind: 'concert',
+        status: 'scheduled',
+        venue_id: venue!.id,
+        city: 'Denver',
+        region: 'CO',
+        country_code: 'US',
+        timezone: 'America/Denver',
+        local_start_date: '2026-11-20',
+        starts_at: '2026-11-20T20:00:00-07:00',
+        start_time_precision: 'instant',
+        is_multi_day: false,
+      });
+      expect(eErr).toBeNull();
+
+      const { error: eaErr } = await adminClient.from('event_artists').insert({
+        event_id: eventId,
+        artist_id: artist!.id,
+        billing_position: 'headliner',
+        sort_order: 1,
+      });
       expect(eaErr).toBeNull();
+
+      // Deliberately trigger an assertion failure to test cleanup resilience
+      throw new Error('Deliberate assertion failure for cleanup test');
+    } catch (err: unknown) {
+      if (
+        err instanceof Error &&
+        err.message === 'Deliberate assertion failure for cleanup test'
+      ) {
+        deliberateErrorCaught = true;
+      } else {
+        throw err;
+      }
+    } finally {
+      // Execute cleanup
+      if (createdEventIds.length > 0) {
+        await adminClient
+          .from('event_artists')
+          .delete()
+          .in('event_id', createdEventIds);
+        await adminClient.from('events').delete().in('id', createdEventIds);
+      }
+      if (createdArtistIds.length > 0) {
+        await adminClient.from('artists').delete().in('id', createdArtistIds);
+      }
+      if (createdVenueIds.length > 0) {
+        await adminClient.from('venues').delete().in('id', createdVenueIds);
+      }
     }
 
-    // 3. Query listEvents via SupabaseCatalogRepository using artistIds filter and limit 10
-    const catalogRepo = new SupabaseCatalogRepository(adminClient);
-    const listedEvents = await catalogRepo.listEvents({
-      artistIds: [artistId],
-      limit: 10,
-      fromDate: earliestDate,
-    });
+    expect(deliberateErrorCaught).toBe(true);
 
-    // Invariant verification:
-    // 1. Returns bounded 10 events
-    expect(listedEvents).toHaveLength(10);
-    // 2. The FIRST event MUST be the earliest event (which was inserted last in the database)
-    expect(listedEvents[0].id).toBe(earliestEventId);
-    expect(listedEvents[0].title).toBe(
-      `Earliest Tour Date (Inserted Last) ${testSuffix}`,
-    );
-    expect(listedEvents[0].localStartDate).toBe(earliestDate);
+    // Verify zero orphaned rows remain
+    const { count: remEvents } = await adminClient
+      .from('events')
+      .select('id', { count: 'exact', head: true })
+      .in('id', createdEventIds);
+    expect(remEvents ?? 0).toBe(0);
 
-    // 3. Clean up all seeded entities to maintain database cleanliness
-    await adminClient.from('artists').delete().eq('id', artistId);
-    await adminClient.from('venues').delete().eq('id', venueId);
-  }, 45000);
+    const { count: remArtists } = await adminClient
+      .from('artists')
+      .select('id', { count: 'exact', head: true })
+      .in('id', createdArtistIds);
+    expect(remArtists ?? 0).toBe(0);
+
+    const { count: remVenues } = await adminClient
+      .from('venues')
+      .select('id', { count: 'exact', head: true })
+      .in('id', createdVenueIds);
+    expect(remVenues ?? 0).toBe(0);
+  });
 });

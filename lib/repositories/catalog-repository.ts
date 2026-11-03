@@ -426,10 +426,19 @@ export class SupabaseCatalogRepository implements ICatalogRepository {
       for (let i = 0; i < filters.artistIds.length; i += CHUNK_SIZE) {
         chunks.push(filters.artistIds.slice(i, i + CHUNK_SIZE));
       }
+
+      const globalOffset = filters.offset ?? 0;
+      const globalLimit = filters.limit;
+      // Fetch up to (globalOffset + globalLimit) from each chunk so globally sorted top records are available
+      const chunkFetchLimit =
+        globalLimit !== undefined ? globalOffset + globalLimit : undefined;
+
       const chunkPromises = chunks.map((chunk) =>
         this.listEvents({
           ...filters,
           artistIds: chunk,
+          offset: undefined,
+          limit: chunkFetchLimit,
         }),
       );
       const chunkResults = await Promise.all(chunkPromises);
@@ -442,12 +451,13 @@ export class SupabaseCatalogRepository implements ICatalogRepository {
         }
       }
       const allMerged = Array.from(mergedMap.values());
-      allMerged.sort((a, b) =>
-        a.localStartDate.localeCompare(b.localStartDate),
+      allMerged.sort(
+        (a, b) =>
+          a.localStartDate.localeCompare(b.localStartDate) ||
+          a.id.localeCompare(b.id),
       );
-      const offset = filters.offset ?? 0;
-      const limit = filters.limit ?? allMerged.length;
-      return allMerged.slice(offset, offset + limit);
+      const limit = globalLimit !== undefined ? globalLimit : allMerged.length;
+      return allMerged.slice(globalOffset, globalOffset + limit);
     }
 
     let selectString = '*, venues(*)';
@@ -470,7 +480,9 @@ export class SupabaseCatalogRepository implements ICatalogRepository {
       query = query.eq('event_artists.artist_id', filters.artistId);
     }
 
-    query = query.order('local_start_date', { ascending: true });
+    query = query
+      .order('local_start_date', { ascending: true })
+      .order('id', { ascending: true });
 
     if (filters?.fromDate) {
       query = query.gte('local_start_date', filters.fromDate);
@@ -488,14 +500,11 @@ export class SupabaseCatalogRepository implements ICatalogRepository {
       query = query.eq('region', filters.region);
     }
 
-    if (filters?.limit) {
+    if (filters?.offset !== undefined && filters.offset > 0) {
+      const limit = filters.limit ?? 20;
+      query = query.range(filters.offset, filters.offset + limit - 1);
+    } else if (filters?.limit) {
       query = query.limit(filters.limit);
-    }
-    if (filters?.offset) {
-      query = query.range(
-        filters.offset,
-        filters.offset + (filters.limit ?? 20) - 1,
-      );
     }
 
     const { data: eventsData, error } = await query;
