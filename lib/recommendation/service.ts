@@ -492,8 +492,12 @@ export async function getPublicDiscoverData(
     referenceInstant,
   );
 
-  // Filter genuinely past events in public discover using timezone-aware timing eligibility
+  // Filter displayable scheduled concerts in public discover using timezone-aware timing eligibility
+  // and status check (exclude past, cancelled, and postponed events).
   let events = candidates.filter((ev) => {
+    if (ev.status !== 'scheduled') {
+      return false;
+    }
     const timing = calculateTimingFactor({
       localStartDate: ev.localStartDate,
       startsAt: ev.startsAt,
@@ -515,6 +519,9 @@ export async function getPublicDiscoverData(
       return false;
     });
   }
+
+  // Return at most the requested number of displayable scheduled events
+  events = events.slice(0, limit);
 
   const candidateCountBeforeSearch = candidates.length;
 

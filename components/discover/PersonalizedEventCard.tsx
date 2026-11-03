@@ -2,6 +2,9 @@ import React, { useState } from 'react';
 import type { ScoredEvent } from '@/lib/recommendation/types';
 import { formatEventPriceDisplay } from '@/components/recommendation/ScoringInspector';
 import { formatSourceBadgeName } from '@/components/catalog/EventCard';
+import { isValidHttpUrl } from '@/lib/utils/url';
+
+export { isValidHttpUrl };
 
 export interface PersonalizedEventCardProps {
   scoredEvent: ScoredEvent;
@@ -20,16 +23,6 @@ function formatDisplayDate(dateStr: string): string {
     });
   } catch {
     return dateStr;
-  }
-}
-
-export function isValidHttpUrl(url?: string | null): boolean {
-  if (!url || typeof url !== 'string') return false;
-  try {
-    const parsed = new URL(url.trim());
-    return parsed.protocol === 'http:' || parsed.protocol === 'https:';
-  } catch {
-    return false;
   }
 }
 

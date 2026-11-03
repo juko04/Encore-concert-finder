@@ -4,7 +4,7 @@ import type {
   CanonicalEventSummary,
 } from '@/lib/domain/catalog';
 import { formatCurrencyAmount } from '@/lib/domain/value-objects';
-import { isValidHttpUrl } from '@/components/discover/PersonalizedEventCard';
+import { isValidHttpUrl } from '@/lib/utils/url';
 
 export interface EventCardProps {
   event: CanonicalEventSummary | CanonicalEventDetail;

@@ -901,7 +901,7 @@ describe('Production Recommendation Service (getPersonalizedDiscoverData)', () =
       );
       expect(result.exploratory[0].event.title).toBe('Khruangbin at Red Rocks');
 
-      // Public discover also retrieves the valid event
+      // Public discover also retrieves the valid event without cancelled event flooding
       const publicResult = await getPublicDiscoverData({
         catalogRepo,
         limit: 10,
@@ -909,11 +909,11 @@ describe('Production Recommendation Service (getPersonalizedDiscoverData)', () =
         referenceInstant: testRefInstant,
       });
       expect(publicResult.isEmptyCatalog).toBe(false);
-      expect(
-        publicResult.events.some(
-          (e) => e.id === 'event-future-scheduled-survivor',
-        ),
-      ).toBe(true);
+      expect(publicResult.events).toHaveLength(1);
+      expect(publicResult.events[0].id).toBe('event-future-scheduled-survivor');
+      expect(publicResult.events.some((e) => e.status === 'cancelled')).toBe(
+        false,
+      );
     });
 
     it('Regression 1B: considers future favorite-artist concert when preceded by >100 future-dated postponed preferred-artist events', async () => {
@@ -1119,6 +1119,309 @@ describe('Production Recommendation Service (getPersonalizedDiscoverData)', () =
       expect(result.ineligibleCount).toBe(0);
       expect(result.recommendations).toHaveLength(0);
       expect(result.exploratory).toHaveLength(0);
+
+      // Public discover also truthfully reports no upcoming scheduled events
+      const publicResult = await getPublicDiscoverData({
+        catalogRepo,
+        referenceDate: testRefDate,
+        referenceInstant: testRefInstant,
+      });
+      expect(publicResult.isEmptyCatalog).toBe(false);
+      expect(publicResult.events).toHaveLength(0);
+      expect(publicResult.totalCount).toBe(0);
+    });
+  });
+
+  describe('Public Discover Event Filtering and Result Limits', () => {
+    let catalogRepo: MemoryCatalogRepository;
+
+    beforeEach(() => {
+      catalogRepo = new MemoryCatalogRepository();
+    });
+
+    it('returns the scheduled event without being flooded by 160 future cancelled events', async () => {
+      const refDate = '2026-10-26';
+      const refInstant = '2026-10-26T12:00:00Z';
+
+      // 160 future cancelled events
+      for (let i = 0; i < 160; i++) {
+        seedEvent(catalogRepo, {
+          id: `cancelled-flood-${i}`,
+          title: `Cancelled Flood ${i}`,
+          localStartDate: '2026-11-01',
+          startsAt: '2026-11-01T20:00:00Z',
+          timezone: 'America/Denver',
+          status: 'cancelled',
+        });
+      }
+
+      // 1 valid scheduled event
+      seedEvent(catalogRepo, {
+        id: 'valid-scheduled-lone',
+        title: 'Leon Bridges Live',
+        localStartDate: '2026-11-15',
+        startsAt: '2026-11-15T20:00:00Z',
+        timezone: 'America/Denver',
+        status: 'scheduled',
+      });
+
+      const result = await getPublicDiscoverData({
+        catalogRepo,
+        referenceDate: refDate,
+        referenceInstant: refInstant,
+      });
+
+      expect(result.isEmptyCatalog).toBe(false);
+      expect(result.events).toHaveLength(1);
+      expect(result.events[0].id).toBe('valid-scheduled-lone');
+      expect(result.events[0].title).toBe('Leon Bridges Live');
+      expect(result.events.some((e) => e.status === 'cancelled')).toBe(false);
+      expect(result.totalCount).toBe(1);
+    });
+
+    it('returns no upcoming scheduled concerts when catalog contains only cancelled or postponed events', async () => {
+      const refDate = '2026-10-26';
+      const refInstant = '2026-10-26T12:00:00Z';
+
+      for (let i = 0; i < 5; i++) {
+        seedEvent(catalogRepo, {
+          id: `only-canc-${i}`,
+          title: `Cancelled Show ${i}`,
+          localStartDate: '2026-11-05',
+          startsAt: '2026-11-05T20:00:00Z',
+          timezone: 'America/Denver',
+          status: 'cancelled',
+        });
+      }
+
+      for (let i = 0; i < 5; i++) {
+        seedEvent(catalogRepo, {
+          id: `only-post-${i}`,
+          title: `Postponed Show ${i}`,
+          localStartDate: '2026-11-06',
+          startsAt: '2026-11-06T20:00:00Z',
+          timezone: 'America/Denver',
+          status: 'postponed',
+        });
+      }
+
+      const result = await getPublicDiscoverData({
+        catalogRepo,
+        referenceDate: refDate,
+        referenceInstant: refInstant,
+      });
+
+      // Truthful: candidates existed in catalog so isEmptyCatalog is false, but 0 scheduled events displayable
+      expect(result.isEmptyCatalog).toBe(false);
+      expect(result.events).toHaveLength(0);
+      expect(result.totalCount).toBe(0);
+    });
+
+    it('returns at most 50 events when more than 50 valid scheduled events exist', async () => {
+      const refDate = '2026-10-26';
+      const refInstant = '2026-10-26T12:00:00Z';
+
+      // Seed 60 valid scheduled events
+      for (let i = 0; i < 60; i++) {
+        seedEvent(catalogRepo, {
+          id: `scheduled-bulk-${i}`,
+          title: `Scheduled Concert ${i}`,
+          localStartDate: '2026-11-20',
+          startsAt: '2026-11-20T20:00:00Z',
+          timezone: 'America/Denver',
+          status: 'scheduled',
+        });
+      }
+
+      // Default call without explicit limit should cap at default limit (50)
+      const result = await getPublicDiscoverData({
+        catalogRepo,
+        referenceDate: refDate,
+        referenceInstant: refInstant,
+      });
+
+      expect(result.isEmptyCatalog).toBe(false);
+      expect(result.events).toHaveLength(50);
+      expect(result.totalCount).toBe(50);
+      expect(result.events.every((e) => e.status === 'scheduled')).toBe(true);
+    });
+
+    it('returns only eligible scheduled events when catalog has mixed past, cancelled, postponed, and scheduled events', async () => {
+      const refDate = '2026-10-26';
+      const refInstant = '2026-10-26T12:00:00Z';
+
+      // 10 past events
+      for (let i = 0; i < 10; i++) {
+        seedEvent(catalogRepo, {
+          id: `past-mix-${i}`,
+          title: `Past Show ${i}`,
+          localStartDate: '2026-10-15',
+          startsAt: '2026-10-15T20:00:00Z',
+          timezone: 'America/Denver',
+          status: 'scheduled',
+        });
+      }
+
+      // 10 cancelled future events
+      for (let i = 0; i < 10; i++) {
+        seedEvent(catalogRepo, {
+          id: `canc-mix-${i}`,
+          title: `Cancelled Show ${i}`,
+          localStartDate: '2026-11-10',
+          startsAt: '2026-11-10T20:00:00Z',
+          timezone: 'America/Denver',
+          status: 'cancelled',
+        });
+      }
+
+      // 10 postponed future events
+      for (let i = 0; i < 10; i++) {
+        seedEvent(catalogRepo, {
+          id: `post-mix-${i}`,
+          title: `Postponed Show ${i}`,
+          localStartDate: '2026-11-12',
+          startsAt: '2026-11-12T20:00:00Z',
+          timezone: 'America/Denver',
+          status: 'postponed',
+        });
+      }
+
+      // 5 valid scheduled future events
+      for (let i = 0; i < 5; i++) {
+        seedEvent(catalogRepo, {
+          id: `sched-mix-${i}`,
+          title: `Valid Show ${i}`,
+          localStartDate: '2026-11-15',
+          startsAt: '2026-11-15T20:00:00Z',
+          timezone: 'America/Denver',
+          status: 'scheduled',
+        });
+      }
+
+      const result = await getPublicDiscoverData({
+        catalogRepo,
+        referenceDate: refDate,
+        referenceInstant: refInstant,
+      });
+
+      expect(result.isEmptyCatalog).toBe(false);
+      expect(result.events).toHaveLength(5);
+      expect(result.totalCount).toBe(5);
+      expect(result.events.every((e) => e.status === 'scheduled')).toBe(true);
+      expect(result.events.map((e) => e.id)).toEqual([
+        'sched-mix-0',
+        'sched-mix-1',
+        'sched-mix-2',
+        'sched-mix-3',
+        'sched-mix-4',
+      ]);
+    });
+
+    it('keeps same-evening Denver concert eligible after UTC advances to tomorrow', async () => {
+      // 8:00 PM MDT on 2026-10-25 is 2026-10-26T02:00:00Z in UTC
+      const refInstant = '2026-10-26T02:00:00Z';
+
+      // Concert starts at 9:00 PM MDT on 2026-10-25 (2026-10-26T03:00:00Z)
+      seedEvent(catalogRepo, {
+        id: 'denver-tonight-show',
+        title: 'Nathaniel Rateliff at Mission Ballroom',
+        localStartDate: '2026-10-25',
+        startsAt: '2026-10-26T03:00:00Z',
+        timezone: 'America/Denver',
+        startTimePrecision: 'instant',
+        status: 'scheduled',
+      });
+
+      // Yesterday show in Denver (past)
+      seedEvent(catalogRepo, {
+        id: 'denver-yesterday-show',
+        title: 'Yesterday Show',
+        localStartDate: '2026-10-24',
+        startsAt: '2026-10-25T03:00:00Z',
+        timezone: 'America/Denver',
+        startTimePrecision: 'instant',
+        status: 'scheduled',
+      });
+
+      const result = await getPublicDiscoverData({
+        catalogRepo,
+        referenceInstant: refInstant,
+      });
+
+      expect(result.isEmptyCatalog).toBe(false);
+      expect(result.events).toHaveLength(1);
+      expect(result.events[0].id).toBe('denver-tonight-show');
+    });
+
+    it('applies search filtering and preserves accurate metadata when search finds no matches', async () => {
+      const refDate = '2026-10-26';
+      const refInstant = '2026-10-26T12:00:00Z';
+
+      seedEvent(catalogRepo, {
+        id: 'show-khruangbin',
+        title: 'Khruangbin Live',
+        venueName: 'Red Rocks Amphitheatre',
+        localStartDate: '2026-11-10',
+        startsAt: '2026-11-10T20:00:00Z',
+        timezone: 'America/Denver',
+        status: 'scheduled',
+        artists: [
+          {
+            id: 'art-khruangbin',
+            name: 'Khruangbin',
+            billingPosition: 'headliner',
+          },
+        ],
+      });
+
+      seedEvent(catalogRepo, {
+        id: 'show-phoebe',
+        title: 'Phoebe Bridgers Solo',
+        venueName: 'Mission Ballroom',
+        localStartDate: '2026-11-12',
+        startsAt: '2026-11-12T20:00:00Z',
+        timezone: 'America/Denver',
+        status: 'scheduled',
+        artists: [
+          {
+            id: 'art-phoebe',
+            name: 'Phoebe Bridgers',
+            billingPosition: 'headliner',
+          },
+        ],
+      });
+
+      // Search matching title
+      const searchTitleResult = await getPublicDiscoverData({
+        catalogRepo,
+        searchQuery: 'khruangbin',
+        referenceDate: refDate,
+        referenceInstant: refInstant,
+      });
+      expect(searchTitleResult.events).toHaveLength(1);
+      expect(searchTitleResult.events[0].id).toBe('show-khruangbin');
+
+      // Search matching venue
+      const searchVenueResult = await getPublicDiscoverData({
+        catalogRepo,
+        searchQuery: 'Mission Ballroom',
+        referenceDate: refDate,
+        referenceInstant: refInstant,
+      });
+      expect(searchVenueResult.events).toHaveLength(1);
+      expect(searchVenueResult.events[0].id).toBe('show-phoebe');
+
+      // Search matching nothing
+      const noMatchResult = await getPublicDiscoverData({
+        catalogRepo,
+        searchQuery: 'Nonexistent Band XYZ',
+        referenceDate: refDate,
+        referenceInstant: refInstant,
+      });
+      // Catalog itself is NOT empty (2 events exist)
+      expect(noMatchResult.isEmptyCatalog).toBe(false);
+      expect(noMatchResult.events).toHaveLength(0);
+      expect(noMatchResult.totalCount).toBe(0);
     });
   });
 });

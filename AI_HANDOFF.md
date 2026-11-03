@@ -11,21 +11,22 @@ Durable architecture records belong in [`docs/architecture/`](docs/architecture/
 - **Active Specification:** [`docs/phases/active/PHASE_2_IMPLEMENTATION.md`](docs/phases/active/PHASE_2_IMPLEMENTATION.md).
 - **Current Branch:** `feature/phase-2-personalized-discover`
 - **Active Implementing Agent:** Google Antigravity
-- **Current Task:** Phase 2, PR #12: Personalized Discover Experience — Final Focused Remediation.
+- **Current Task:** Phase 2, PR #12: Personalized Discover Experience — Final Guest Discover Correction.
 - **PR #12 Final Focused Remediation Scope & Additions:**
-  1. **Candidate Slot Isolation for Non-Scheduled Events (`lib/recommendation/service.ts`):** Only genuinely eligible scheduled events (`!timing.isPast && ev.status === 'scheduled'`) consume the 100 preferred / 150 general candidate limits. Cancelled and postponed events are preserved in `collectedCandidates` so `rankEvents()` suppression and ineligibility diagnostics remain truthful, but they do not prevent subsequent valid concerts from being retrieved. Documented intentional bounded scan policy (`MAX_CANDIDATE_SCAN_PAGES = 5`, up to 500-750 scanned events) and coverage limitations. Added deterministic regression tests 1A, 1B, 1C, and 1D in `tests/unit/recommendation-service.test.ts`.
-  2. **Strictly Fail-Closed PostgreSQL Fixture Cleanup (`tests/integration/catalog-rls.test.ts`):** Preserved `try/finally` cleanup with `assertSafeDatabaseTarget`. Explicitly verified zero remaining records across ALL 1,020 seeded event IDs and associated `event_artists` records using bounded query batches of 50. Checked `error === null` and `count === 0` on every verification query (never treating null/failed queries as zero). Added companion test verifying that incomplete cleanup operations are strictly detected and fail verification.
-  3. **Truthful Guest Empty-State Messaging (`components/discover/GuestDiscoverContainer.tsx` & `components/catalog/EventCard.tsx`):** Distinguished genuinely empty catalogs (`isEmptyCatalog: true`, rendering `empty-catalog-banner`) from past-only/ineligible catalogs (`!isEmptyCatalog && events.length === 0`, rendering `no-upcoming-events-banner` with "No upcoming concerts currently scheduled"), preventing false "No events match your search criteria" claims when no filters are active. Enhanced cancelled/postponed event presentation with distinct status badges, title strikethrough, and unavailable ticket indicators.
+  1. **Public Discover Event Filtering & Limits (`lib/recommendation/service.ts`):** `getPublicDiscoverData()` distinguishes displayable scheduled concerts from cancelled, postponed, and past candidates by checking `ev.status === 'scheduled'` and `!timing.isPast`. Bounded result limit ensures public browsing feed returns at most the requested limit (default 50). Preserves truthful `isEmptyCatalog` metadata (distinguishing empty catalogs from catalogs with only unavailable events) and timezone-aware Denver evening event retrieval. Added comprehensive regression tests in `tests/unit/recommendation-service.test.ts`.
+  2. **Circular Component Dependency Elimination (`lib/utils/url.ts`):** Extracted `isValidHttpUrl` to standalone utility module `lib/utils/url.ts`, eliminating the circular component dependency between `EventCard.tsx` and `PersonalizedEventCard.tsx`. Preserved re-export in `PersonalizedEventCard.tsx` for backwards compatibility. Added unit test suite in `tests/unit/url-utils.test.ts`.
+  3. **Candidate Slot Isolation for Non-Scheduled Events (`lib/recommendation/service.ts`):** Only genuinely eligible scheduled events consume candidate limits while preserving non-scheduled events for truthful diagnostics.
+  4. **Strictly Fail-Closed PostgreSQL Fixture Cleanup (`tests/integration/catalog-rls.test.ts`):** Fail-closed verification across all 1,020 IDs with batch size 50.
 - **Verification State:** Final Remediation Fully Verified Locally (Pre-Push):
   - Branch: `feature/phase-2-personalized-discover`
   - Pull Request: [#12](https://github.com/juko04/Encore-concert-finder/pull/12)
-  - Unit Tests: 482/482 passed across 35 test suites (`npm test`)
+  - Unit Tests: 491/491 passed across 36 test suites (`npm test`)
   - Integration Tests: High-volume catalog cleanup and fail-closed RLS suites verified
   - Production Build: Next.js production build clean (0 errors, 14 routes, `/discover` confirmed dynamic)
   - Code Quality: Prettier format clean (`format:check`), ESLint clean (0 warnings), strict TypeScript clean (0 errors)
   - E2E Tests: Playwright smoke suite passed (7 passed, 4 skipped) with `BypassSandbox: true`
 - **Immediate Next Action:** Push latest remediation commit to `feature/phase-2-personalized-discover`, verify GitHub Actions CI run, update diff artifact, and present final report. Do NOT auto-merge PR #12. Do NOT proceed to Phase 3.
-- **Phase 2 Status:** **ACTIVE — PR #12 FINAL REMEDIATION COMPLETE, CI GREEN.**
+- **Phase 2 Status:** **ACTIVE — PR #12 FINAL GUEST DISCOVER CORRECTION COMPLETE.**
 
 ---
 
