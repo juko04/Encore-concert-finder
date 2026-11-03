@@ -863,7 +863,10 @@ export class SupabaseCatalogRepository implements ICatalogRepository {
       query = query.ilike('country_code', countryCode.trim());
     }
 
-    const { data, error } = await query.maybeSingle();
+    const { data, error } = await query
+      .order('created_at', { ascending: true })
+      .limit(1)
+      .maybeSingle();
     if (error) {
       throw new Error(`Failed to find venue: ${error.message}`);
     }
