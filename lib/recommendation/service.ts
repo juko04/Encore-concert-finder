@@ -126,19 +126,30 @@ export function calculateCandidateRetrievalLowerBound(
 
 /**
  * Bounds candidate paging to avoid unbounded table scans while ensuring
- * recently-past events in the conservative lookback window do not squeeze out upcoming eligible shows.
+ * recently-past, cancelled, or postponed events in the catalog do not squeeze out upcoming eligible shows.
+ *
+ * Intentional Design Tradeoff & Coverage Limitation:
+ * Bounded scanning is capped at MAX_CANDIDATE_SCAN_PAGES (5 pages).
+ * With pageSize = Math.max(targetEligibleLimit, 100):
+ * - For general candidates (target: 150), up to 750 events are evaluated across 5 pages.
+ * - For preferred-artist candidates (target: 100), up to 500 events are evaluated across 5 pages.
+ * If an active market or artist has more than 500-750 consecutive past, cancelled, or postponed events
+ * before the next valid scheduled concert, candidate retrieval safely halts at the scan cap
+ * to protect database performance and prevent unbounded table scans.
  */
 export const MAX_CANDIDATE_SCAN_PAGES = 5;
 
 /**
- * Retrieves candidates while paging past recently-past events within the conservative lookback window.
+ * Retrieves candidates while paging past recently-past, cancelled, and postponed events.
  *
  * Invariants:
  * 1. Begins query from `queryFromDate` (24h lookback to protect same-day shows in western timezones).
- * 2. Pages through candidate events in bounded chunks until `targetEligibleLimit` eligible events are gathered
- *    or the database returns no more records.
- * 3. Ineligible/past events within the lookback window are preserved in the returned candidate collection so that
- *    total candidate counts and ineligibility diagnostic statistics remain truthful and candidate-aware.
+ * 2. Only genuinely eligible scheduled events (`!timing.isPast && ev.status === 'scheduled'`) count
+ *    toward the `targetEligibleLimit` (100 preferred, 150 general). Cancelled, postponed, and past
+ *    events do not prevent subsequent valid concerts from being retrieved.
+ * 3. Ineligible, past, cancelled, and postponed events within the scan window are preserved in the returned
+ *    candidate collection so that `totalCandidateCount`, `suppressed`, and `ineligibleCount` diagnostics
+ *    remain truthful and candidate-aware.
  * 4. Limits total pages scanned to MAX_CANDIDATE_SCAN_PAGES (5) to guarantee bounded retrieval
  *    and prevent unbounded table scans.
  */
@@ -178,13 +189,20 @@ export async function retrieveCandidatesWithLookback(
           referenceInstant,
         });
 
-        if (!timing.isPast) {
+        // Only genuinely eligible scheduled events consume candidate capacity limits.
+        // Cancelled and postponed events are suppressed by rankEvents() and must not
+        // prevent subsequent valid concerts from being retrieved.
+        const isGenuinelyEligible = !timing.isPast && ev.status === 'scheduled';
+
+        if (isGenuinelyEligible) {
           if (eligibleCount < targetEligibleLimit) {
             eligibleCount++;
             collectedCandidates.push(ev);
           }
         } else {
-          // Preserve past events within lookback window so candidate diagnostics remain truthful
+          // Preserve past, cancelled, and postponed events within the scan window
+          // so candidate diagnostics, totalCandidateCount, suppressedCount, and
+          // ineligibleCount remain completely truthful and candidate-aware.
           collectedCandidates.push(ev);
         }
       }

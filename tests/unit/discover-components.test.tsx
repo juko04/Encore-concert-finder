@@ -922,6 +922,108 @@ describe('GuestDiscoverContainer Component', () => {
       screen.queryByTestId('why-this-show-button'),
     ).not.toBeInTheDocument();
   });
+
+  it('renders no-upcoming-events banner when catalog contains only past/ineligible events without claiming search criteria excluded events', () => {
+    const pastOnlyData: PublicDiscoverResult = {
+      totalCount: 0,
+      events: [],
+      isEmptyCatalog: false, // Catalog candidates existed in lookback, but none are upcoming
+    };
+
+    render(<GuestDiscoverContainer initialData={pastOnlyData} />);
+
+    // Truthful banner for no upcoming concerts
+    const noUpcomingBanner = screen.getByTestId('no-upcoming-events-banner');
+    expect(noUpcomingBanner).toBeInTheDocument();
+    expect(noUpcomingBanner).toHaveTextContent(
+      'No upcoming concerts currently scheduled',
+    );
+
+    // MUST NOT claim search criteria excluded events
+    expect(
+      screen.queryByTestId('empty-filtered-banner'),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByText('No events match your search criteria'),
+    ).not.toBeInTheDocument();
+
+    // MUST NOT claim catalog is completely empty
+    expect(
+      screen.queryByTestId('empty-catalog-banner'),
+    ).not.toBeInTheDocument();
+  });
+
+  it('renders empty-catalog banner when catalog is genuinely empty', () => {
+    const emptyCatalogData: PublicDiscoverResult = {
+      totalCount: 0,
+      events: [],
+      isEmptyCatalog: true, // Genuinely zero events in catalog
+    };
+
+    render(<GuestDiscoverContainer initialData={emptyCatalogData} />);
+
+    expect(screen.getByTestId('empty-catalog-banner')).toBeInTheDocument();
+    expect(screen.getByText('No upcoming events found')).toBeInTheDocument();
+    expect(
+      screen.queryByTestId('no-upcoming-events-banner'),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByTestId('empty-filtered-banner'),
+    ).not.toBeInTheDocument();
+  });
+
+  it('renders empty-filtered banner with clear-filters button ONLY when events exist but search matches nothing', () => {
+    render(<GuestDiscoverContainer initialData={mockPublicData} />);
+
+    // Initially, the event is visible
+    expect(screen.getByText('Lord Huron Live')).toBeInTheDocument();
+
+    // Type a search query that matches nothing
+    const searchInput = screen.getByTestId('search-input');
+    fireEvent.change(searchInput, {
+      target: { value: 'Nonexistent Band Name' },
+    });
+
+    // Now empty-filtered banner appears
+    const filterBanner = screen.getByTestId('empty-filtered-banner');
+    expect(filterBanner).toBeInTheDocument();
+    expect(
+      screen.getByText('No events match your search criteria'),
+    ).toBeInTheDocument();
+
+    // Clear filters button restores the event
+    const clearBtn = screen.getByRole('button', { name: 'Clear Filters' });
+    fireEvent.click(clearBtn);
+
+    expect(screen.getByText('Lord Huron Live')).toBeInTheDocument();
+    expect(
+      screen.queryByTestId('empty-filtered-banner'),
+    ).not.toBeInTheDocument();
+  });
+
+  it('renders cancelled status badge and suppresses ticket link when event is cancelled', () => {
+    const cancelledData: PublicDiscoverResult = {
+      totalCount: 1,
+      events: [
+        {
+          ...mockPublicData.events[0],
+          id: 'cancelled-evt-1',
+          title: 'Cancelled Tour Date',
+          status: 'cancelled',
+        },
+      ],
+      isEmptyCatalog: false,
+    };
+
+    render(<GuestDiscoverContainer initialData={cancelledData} />);
+
+    expect(screen.getByText('Cancelled Tour Date')).toBeInTheDocument();
+    expect(screen.getByTestId('event-status-cancelled')).toBeInTheDocument();
+    expect(screen.getByTestId('ticket-status-cancelled')).toBeInTheDocument();
+    expect(
+      screen.queryByRole('link', { name: 'Get Tickets' }),
+    ).not.toBeInTheDocument();
+  });
 });
 
 describe('PersonalizedDiscoverErrorState Component', () => {

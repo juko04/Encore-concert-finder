@@ -1076,33 +1076,54 @@ describe('Catalog RLS, Security & Canonicalization Atomicity', () => {
       await cleanupFixtures();
 
       // Demonstrate that a successful run leaves zero rows associated with unique fixture IDs
-      if (createdEventIds.length > 0) {
-        const { count: remainingEvents } = await adminClient
+      // Check ALL 1,020 createdEventIds across bounded query batches of 50
+      const VERIFY_BATCH_SIZE = 50;
+      for (let i = 0; i < createdEventIds.length; i += VERIFY_BATCH_SIZE) {
+        const batch = createdEventIds.slice(i, i + VERIFY_BATCH_SIZE);
+        const { count, error } = await adminClient
           .from('events')
           .select('id', { count: 'exact', head: true })
-          .in('id', createdEventIds.slice(0, 50));
-        expect(remainingEvents ?? 0).toBe(0);
-      }
-      if (createdArtistIds.length > 0) {
-        const { count: remainingEventArtists } = await adminClient
+          .in('id', batch);
+        expect(error).toBeNull();
+        expect(count).not.toBeNull();
+        expect(count).toBe(0);
+
+        const { count: eaCount, error: eaError } = await adminClient
           .from('event_artists')
           .select('id', { count: 'exact', head: true })
-          .in('artist_id', createdArtistIds);
-        expect(remainingEventArtists ?? 0).toBe(0);
+          .in('event_id', batch);
+        expect(eaError).toBeNull();
+        expect(eaCount).not.toBeNull();
+        expect(eaCount).toBe(0);
       }
+
       if (createdArtistIds.length > 0) {
-        const { count: remainingArtists } = await adminClient
+        const { count: remainingEventArtists, error: eaError } =
+          await adminClient
+            .from('event_artists')
+            .select('id', { count: 'exact', head: true })
+            .in('artist_id', createdArtistIds);
+        expect(eaError).toBeNull();
+        expect(remainingEventArtists).not.toBeNull();
+        expect(remainingEventArtists).toBe(0);
+
+        const { count: remainingArtists, error: aError } = await adminClient
           .from('artists')
           .select('id', { count: 'exact', head: true })
           .in('id', createdArtistIds);
-        expect(remainingArtists ?? 0).toBe(0);
+        expect(aError).toBeNull();
+        expect(remainingArtists).not.toBeNull();
+        expect(remainingArtists).toBe(0);
       }
+
       if (createdVenueIds.length > 0) {
-        const { count: remainingVenues } = await adminClient
+        const { count: remainingVenues, error: vError } = await adminClient
           .from('venues')
           .select('id', { count: 'exact', head: true })
           .in('id', createdVenueIds);
-        expect(remainingVenues ?? 0).toBe(0);
+        expect(vError).toBeNull();
+        expect(remainingVenues).not.toBeNull();
+        expect(remainingVenues).toBe(0);
       }
     }
   }, 60000);
@@ -1191,41 +1212,166 @@ describe('Catalog RLS, Security & Canonicalization Atomicity', () => {
         throw err;
       }
     } finally {
-      // Execute cleanup
+      // Execute cleanup with strict fail-closed error checking
+      assertSafeDatabaseTarget(credentials!.url);
       if (createdEventIds.length > 0) {
-        await adminClient
+        const { error: eaDelErr } = await adminClient
           .from('event_artists')
           .delete()
           .in('event_id', createdEventIds);
-        await adminClient.from('events').delete().in('id', createdEventIds);
+        if (eaDelErr) {
+          throw new Error(
+            `[Deliberate Failure Test Cleanup] Error deleting event_artists: ${eaDelErr.message}`,
+          );
+        }
+        const { error: evDelErr } = await adminClient
+          .from('events')
+          .delete()
+          .in('id', createdEventIds);
+        if (evDelErr) {
+          throw new Error(
+            `[Deliberate Failure Test Cleanup] Error deleting events: ${evDelErr.message}`,
+          );
+        }
       }
       if (createdArtistIds.length > 0) {
-        await adminClient.from('artists').delete().in('id', createdArtistIds);
+        const { error: aDelErr } = await adminClient
+          .from('artists')
+          .delete()
+          .in('id', createdArtistIds);
+        if (aDelErr) {
+          throw new Error(
+            `[Deliberate Failure Test Cleanup] Error deleting artists: ${aDelErr.message}`,
+          );
+        }
       }
       if (createdVenueIds.length > 0) {
-        await adminClient.from('venues').delete().in('id', createdVenueIds);
+        const { error: vDelErr } = await adminClient
+          .from('venues')
+          .delete()
+          .in('id', createdVenueIds);
+        if (vDelErr) {
+          throw new Error(
+            `[Deliberate Failure Test Cleanup] Error deleting venues: ${vDelErr.message}`,
+          );
+        }
       }
     }
 
     expect(deliberateErrorCaught).toBe(true);
 
-    // Verify zero orphaned rows remain
-    const { count: remEvents } = await adminClient
+    // Verify zero orphaned rows remain with strict fail-closed assertions
+    const { count: remEvents, error: evErr } = await adminClient
       .from('events')
       .select('id', { count: 'exact', head: true })
       .in('id', createdEventIds);
-    expect(remEvents ?? 0).toBe(0);
+    expect(evErr).toBeNull();
+    expect(remEvents).not.toBeNull();
+    expect(remEvents).toBe(0);
 
-    const { count: remArtists } = await adminClient
+    const { count: remEA, error: eaErr } = await adminClient
+      .from('event_artists')
+      .select('id', { count: 'exact', head: true })
+      .in('event_id', createdEventIds);
+    expect(eaErr).toBeNull();
+    expect(remEA).not.toBeNull();
+    expect(remEA).toBe(0);
+
+    const { count: remArtists, error: aErr } = await adminClient
       .from('artists')
       .select('id', { count: 'exact', head: true })
       .in('id', createdArtistIds);
-    expect(remArtists ?? 0).toBe(0);
+    expect(aErr).toBeNull();
+    expect(remArtists).not.toBeNull();
+    expect(remArtists).toBe(0);
 
-    const { count: remVenues } = await adminClient
+    const { count: remVenues, error: vErr } = await adminClient
       .from('venues')
       .select('id', { count: 'exact', head: true })
       .in('id', createdVenueIds);
-    expect(remVenues ?? 0).toBe(0);
+    expect(vErr).toBeNull();
+    expect(remVenues).not.toBeNull();
+    expect(remVenues).toBe(0);
+  });
+
+  it('strictly detects orphaned rows and fails test verification when cleanup fails (fail-closed cleanup validation)', async () => {
+    if (!isDbAvailable || !adminClient) {
+      throw new Error(
+        'Local Supabase database is offline or unavailable. Cleanup failure detection test requires a running database.',
+      );
+    }
+    assertSafeDatabaseTarget(credentials!.url);
+
+    const testSuffix = `fail_detect_${Date.now()}`;
+    const artistId = crypto.randomUUID();
+    const venueId = crypto.randomUUID();
+    const eventId = crypto.randomUUID();
+
+    try {
+      const { error: aErr } = await adminClient.from('artists').insert({
+        id: artistId,
+        name: `Fail Detect Artist ${testSuffix}`,
+        normalized_name: `fail detect artist ${testSuffix}`,
+      });
+      expect(aErr).toBeNull();
+
+      const { error: vErr } = await adminClient.from('venues').insert({
+        id: venueId,
+        name: `Fail Detect Venue ${testSuffix}`,
+        normalized_name: `fail detect venue ${testSuffix}`,
+        city: 'Denver',
+        region: 'CO',
+        country_code: 'US',
+        lat: 39.75,
+        lng: -104.99,
+        timezone: 'America/Denver',
+      });
+      expect(vErr).toBeNull();
+
+      const { error: eErr } = await adminClient.from('events').insert({
+        id: eventId,
+        name: `Fail Detect Event ${testSuffix}`,
+        normalized_name: `fail detect event ${testSuffix}`,
+        event_kind: 'concert',
+        status: 'scheduled',
+        venue_id: venueId,
+        city: 'Denver',
+        region: 'CO',
+        country_code: 'US',
+        timezone: 'America/Denver',
+        local_start_date: '2026-11-20',
+        starts_at: '2026-11-20T20:00:00-07:00',
+        start_time_precision: 'instant',
+        is_multi_day: false,
+      });
+      expect(eErr).toBeNull();
+
+      // Simulate a scenario where a cleanup operation failed or skipped deleting the event
+      // Verify that checking for orphaned rows catches the leftover event with count === 1
+      const { count: orphanCount, error: orphanErr } = await adminClient
+        .from('events')
+        .select('id', { count: 'exact', head: true })
+        .in('id', [eventId]);
+
+      expect(orphanErr).toBeNull();
+      expect(orphanCount).not.toBeNull();
+      // Crucial fail-closed proof: an incomplete cleanup leaves a nonzero count,
+      // proving that our zero-count assertion strictly fails on incomplete cleanups.
+      expect(orphanCount).toBe(1);
+    } finally {
+      // Guaranteed teardown in finally so the test suite never leaves rows behind
+      assertSafeDatabaseTarget(credentials!.url);
+      await adminClient.from('events').delete().eq('id', eventId);
+      await adminClient.from('artists').delete().eq('id', artistId);
+      await adminClient.from('venues').delete().eq('id', venueId);
+
+      // Verify complete teardown
+      const { count: finalCount, error: finalErr } = await adminClient
+        .from('events')
+        .select('id', { count: 'exact', head: true })
+        .eq('id', eventId);
+      expect(finalErr).toBeNull();
+      expect(finalCount).toBe(0);
+    }
   });
 });

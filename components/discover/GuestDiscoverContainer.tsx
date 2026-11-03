@@ -152,7 +152,7 @@ export function GuestDiscoverContainer({
         </div>
       </section>
 
-      {/* Empty State */}
+      {/* Empty States */}
       {initialData.isEmptyCatalog ? (
         <div
           data-testid="empty-catalog-banner"
@@ -164,6 +164,19 @@ export function GuestDiscoverContainer({
           <p className="mt-2 text-sm text-zinc-400">
             Events will appear here as source adapters ingest upcoming shows
             into the catalog.
+          </p>
+        </div>
+      ) : initialData.events.length === 0 ? (
+        <div
+          data-testid="no-upcoming-events-banner"
+          className="rounded-2xl border border-zinc-800 bg-zinc-900/40 p-12 text-center"
+        >
+          <h2 className="text-lg font-semibold text-zinc-200">
+            No upcoming concerts currently scheduled
+          </h2>
+          <p className="mt-2 text-sm text-zinc-400">
+            There are no upcoming live concerts currently scheduled in the
+            catalog. Check back soon as new tour dates and shows are announced.
           </p>
         </div>
       ) : filteredEvents.length === 0 ? (

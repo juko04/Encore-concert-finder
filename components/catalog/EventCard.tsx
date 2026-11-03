@@ -162,7 +162,13 @@ export function EventCard({ event }: EventCardProps) {
   return (
     <article
       data-testid="event-card"
-      className="flex flex-col justify-between rounded-xl border border-zinc-800 bg-zinc-900/60 p-5 shadow-sm transition hover:border-zinc-700 hover:bg-zinc-900"
+      className={`flex flex-col justify-between rounded-xl border p-5 shadow-sm transition ${
+        isCancelled
+          ? 'border-red-900/40 bg-zinc-950/80 opacity-80'
+          : isPostponed
+            ? 'border-amber-900/40 bg-zinc-900/70'
+            : 'border-zinc-800 bg-zinc-900/60 hover:border-zinc-700 hover:bg-zinc-900'
+      }`}
     >
       <div>
         {/* Status / Category Bar */}
@@ -171,19 +177,29 @@ export function EventCard({ event }: EventCardProps) {
             {event.localStartDate}
           </span>
           {isCancelled && (
-            <span className="rounded bg-red-950/80 px-2 py-0.5 text-xs font-medium text-red-300">
+            <span
+              data-testid="event-status-cancelled"
+              className="rounded-full border border-red-800/80 bg-red-950/80 px-2.5 py-0.5 text-xs font-semibold text-red-300"
+            >
               Cancelled
             </span>
           )}
           {isPostponed && (
-            <span className="rounded bg-amber-950/80 px-2 py-0.5 text-xs font-medium text-amber-300">
+            <span
+              data-testid="event-status-postponed"
+              className="rounded-full border border-amber-800/80 bg-amber-950/80 px-2.5 py-0.5 text-xs font-semibold text-amber-300"
+            >
               Postponed
             </span>
           )}
         </div>
 
         {/* Title */}
-        <h3 className="line-clamp-1 text-lg font-semibold text-zinc-100">
+        <h3
+          className={`line-clamp-1 text-lg font-semibold ${
+            isCancelled ? 'text-zinc-400 line-through' : 'text-zinc-100'
+          }`}
+        >
           {title}
         </h3>
 
@@ -227,7 +243,21 @@ export function EventCard({ event }: EventCardProps) {
           <div className="font-semibold text-emerald-400">{renderPrice()}</div>
         </div>
 
-        {isValidHttpUrl(ticketUrl) && !isCancelled && (
+        {isCancelled ? (
+          <span
+            data-testid="ticket-status-cancelled"
+            className="rounded-lg border border-red-900/60 bg-red-950/30 px-3 py-1.5 text-xs font-medium text-red-400"
+          >
+            Tickets Unavailable
+          </span>
+        ) : isPostponed ? (
+          <span
+            data-testid="ticket-status-postponed"
+            className="rounded-lg border border-amber-900/60 bg-amber-950/30 px-3 py-1.5 text-xs font-medium text-amber-400"
+          >
+            Tickets On Hold
+          </span>
+        ) : isValidHttpUrl(ticketUrl) ? (
           <a
             href={ticketUrl!}
             target="_blank"
@@ -236,7 +266,7 @@ export function EventCard({ event }: EventCardProps) {
           >
             Get Tickets
           </a>
-        )}
+        ) : null}
       </div>
 
       {/* Attribution */}

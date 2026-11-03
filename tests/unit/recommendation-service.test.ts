@@ -849,5 +849,276 @@ describe('Production Recommendation Service (getPersonalizedDiscoverData)', () =
       expect(ineligibleResult.recommendations).toHaveLength(0);
       expect(ineligibleResult.exploratory).toHaveLength(0);
     });
+
+    it('Regression 1A: considers eligible future concert when preceded by >150 future-dated cancelled general events', async () => {
+      const user = 'user-regression-1a';
+      await profileRepo.upsertProfile(user, {
+        recommendationPreset: 'balanced',
+      });
+
+      const testRefDate = '2026-10-26';
+      const testRefInstant = '2026-10-26T12:00:00Z';
+
+      // Seed 160 future-dated cancelled events (2026-11-10)
+      for (let i = 0; i < 160; i++) {
+        seedEvent(catalogRepo, {
+          id: `cancelled-general-${i}`,
+          title: `Cancelled Tour Stop ${i}`,
+          localStartDate: '2026-11-10',
+          startsAt: '2026-11-10T20:00:00Z',
+          status: 'cancelled',
+          venueName: 'Cancelled Hall',
+        });
+      }
+
+      // Seed 1 valid future scheduled event at index 161 (2026-11-20)
+      seedEvent(catalogRepo, {
+        id: 'event-future-scheduled-survivor',
+        title: 'Khruangbin at Red Rocks',
+        localStartDate: '2026-11-20',
+        startsAt: '2026-11-20T20:00:00Z',
+        status: 'scheduled',
+        venueName: 'Red Rocks Amphitheatre',
+      });
+
+      const result = await getPersonalizedDiscoverData({
+        userId: user,
+        profileRepo,
+        prefRepo,
+        catalogRepo,
+        referenceDate: testRefDate,
+        referenceInstant: testRefInstant,
+      });
+
+      // Cancelled events did NOT consume eligible candidate capacity; valid show was retrieved
+      expect(result.isEmptyCatalog).toBe(false);
+      expect(result.totalCandidateCount).toBe(161);
+      expect(result.suppressed).toHaveLength(160);
+      expect(result.ineligibleCount).toBe(0);
+      expect(result.exploratory).toHaveLength(1);
+      expect(result.exploratory[0].eventId).toBe(
+        'event-future-scheduled-survivor',
+      );
+      expect(result.exploratory[0].event.title).toBe('Khruangbin at Red Rocks');
+
+      // Public discover also retrieves the valid event
+      const publicResult = await getPublicDiscoverData({
+        catalogRepo,
+        limit: 10,
+        referenceDate: testRefDate,
+        referenceInstant: testRefInstant,
+      });
+      expect(publicResult.isEmptyCatalog).toBe(false);
+      expect(
+        publicResult.events.some(
+          (e) => e.id === 'event-future-scheduled-survivor',
+        ),
+      ).toBe(true);
+    });
+
+    it('Regression 1B: considers future favorite-artist concert when preceded by >100 future-dated postponed preferred-artist events', async () => {
+      const user = 'user-regression-1b';
+      const favArtistId = 'artist-phoebe-regr-1b';
+
+      catalogRepo.artists.set(favArtistId, {
+        id: favArtistId,
+        name: 'Phoebe Bridgers',
+        normalizedName: 'phoebe bridgers',
+        imageUrl: null,
+        createdAt: '2026-10-01T00:00:00Z',
+        updatedAt: '2026-10-01T00:00:00Z',
+      });
+
+      await profileRepo.upsertProfile(user, {
+        recommendationPreset: 'artist_first',
+      });
+      await prefRepo.savePreference({
+        userId: user,
+        artistId: favArtistId,
+        artistName: 'Phoebe Bridgers',
+        preferenceLevel: 'favorite',
+      });
+
+      const testRefDate = '2026-10-26';
+      const testRefInstant = '2026-10-26T12:00:00Z';
+
+      // Seed 110 future postponed shows for Phoebe Bridgers
+      for (let i = 0; i < 110; i++) {
+        seedEvent(catalogRepo, {
+          id: `postponed-phoebe-${i}`,
+          title: `Phoebe Bridgers Postponed Show ${i}`,
+          localStartDate: '2026-11-05',
+          startsAt: '2026-11-05T20:00:00Z',
+          status: 'postponed',
+          artists: [
+            {
+              id: favArtistId,
+              name: 'Phoebe Bridgers',
+              billingPosition: 'headliner',
+            },
+          ],
+        });
+      }
+
+      // Seed 1 valid future scheduled concert for Phoebe Bridgers
+      seedEvent(catalogRepo, {
+        id: 'event-phoebe-scheduled-survivor',
+        title: 'Phoebe Bridgers at Red Rocks',
+        localStartDate: '2026-11-20',
+        startsAt: '2026-11-20T20:00:00Z',
+        status: 'scheduled',
+        artists: [
+          {
+            id: favArtistId,
+            name: 'Phoebe Bridgers',
+            billingPosition: 'headliner',
+          },
+        ],
+      });
+
+      const result = await getPersonalizedDiscoverData({
+        userId: user,
+        profileRepo,
+        prefRepo,
+        catalogRepo,
+        referenceDate: testRefDate,
+        referenceInstant: testRefInstant,
+      });
+
+      // Postponed events did not consume eligible capacity; valid scheduled show is ranked #1
+      expect(result.isEmptyCatalog).toBe(false);
+      expect(result.totalCandidateCount).toBe(111);
+      expect(result.suppressed).toHaveLength(110);
+      expect(result.recommendations).toHaveLength(1);
+      expect(result.recommendations[0].eventId).toBe(
+        'event-phoebe-scheduled-survivor',
+      );
+      expect(result.recommendations[0].score).toBe(82.5);
+      expect(result.recommendations[0].factors.artist.score).toBe(100);
+      expect(result.recommendations[0].explanation).toContain(
+        'Favorite artist',
+      );
+    });
+
+    it('Regression 1C: mixed past, cancelled, postponed, and scheduled events only consume eligible capacity for valid scheduled shows', async () => {
+      const user = 'user-regression-1c';
+      await profileRepo.upsertProfile(user, {
+        recommendationPreset: 'balanced',
+      });
+
+      const testRefDate = '2026-10-26';
+      const testRefInstant = '2026-10-26T12:00:00Z';
+
+      // 50 past events
+      for (let i = 0; i < 50; i++) {
+        seedEvent(catalogRepo, {
+          id: `past-mix-${i}`,
+          title: `Past Show ${i}`,
+          localStartDate: '2026-10-25',
+          startsAt: '2026-10-25T14:00:00Z',
+          status: 'scheduled',
+        });
+      }
+
+      // 60 future cancelled events
+      for (let i = 0; i < 60; i++) {
+        seedEvent(catalogRepo, {
+          id: `cancelled-mix-${i}`,
+          title: `Cancelled Show ${i}`,
+          localStartDate: '2026-11-10',
+          startsAt: '2026-11-10T20:00:00Z',
+          status: 'cancelled',
+        });
+      }
+
+      // 60 future postponed events
+      for (let i = 0; i < 60; i++) {
+        seedEvent(catalogRepo, {
+          id: `postponed-mix-${i}`,
+          title: `Postponed Show ${i}`,
+          localStartDate: '2026-11-12',
+          startsAt: '2026-11-12T20:00:00Z',
+          status: 'postponed',
+        });
+      }
+
+      // 5 valid scheduled upcoming events
+      for (let i = 0; i < 5; i++) {
+        seedEvent(catalogRepo, {
+          id: `scheduled-mix-${i}`,
+          title: `Scheduled Show ${i}`,
+          localStartDate: '2026-11-20',
+          startsAt: '2026-11-20T20:00:00Z',
+          status: 'scheduled',
+        });
+      }
+
+      const result = await getPersonalizedDiscoverData({
+        userId: user,
+        profileRepo,
+        prefRepo,
+        catalogRepo,
+        referenceDate: testRefDate,
+        referenceInstant: testRefInstant,
+      });
+
+      // Total candidates = 50 + 60 + 60 + 5 = 175
+      expect(result.isEmptyCatalog).toBe(false);
+      expect(result.totalCandidateCount).toBe(175);
+      expect(result.ineligibleCount).toBe(50);
+      expect(result.suppressed).toHaveLength(120); // 60 cancelled + 60 postponed
+      const totalDisplayable =
+        result.recommendations.length + result.exploratory.length;
+      expect(totalDisplayable).toBe(5);
+    });
+
+    it('Regression 1D: suppressed and ineligible event counts remain truthful when all retrieved events are cancelled or postponed', async () => {
+      const user = 'user-regression-1d';
+      await profileRepo.upsertProfile(user, {
+        recommendationPreset: 'balanced',
+      });
+
+      const testRefDate = '2026-10-26';
+      const testRefInstant = '2026-10-26T12:00:00Z';
+
+      // 10 future cancelled events
+      for (let i = 0; i < 10; i++) {
+        seedEvent(catalogRepo, {
+          id: `cancelled-only-${i}`,
+          title: `Cancelled Only ${i}`,
+          localStartDate: '2026-11-10',
+          startsAt: '2026-11-10T20:00:00Z',
+          status: 'cancelled',
+        });
+      }
+
+      // 5 future postponed events
+      for (let i = 0; i < 5; i++) {
+        seedEvent(catalogRepo, {
+          id: `postponed-only-${i}`,
+          title: `Postponed Only ${i}`,
+          localStartDate: '2026-11-12',
+          startsAt: '2026-11-12T20:00:00Z',
+          status: 'postponed',
+        });
+      }
+
+      const result = await getPersonalizedDiscoverData({
+        userId: user,
+        profileRepo,
+        prefRepo,
+        catalogRepo,
+        referenceDate: testRefDate,
+        referenceInstant: testRefInstant,
+      });
+
+      // Truthful diagnostics: Catalog is NOT empty (15 candidates existed), but all are suppressed
+      expect(result.isEmptyCatalog).toBe(false);
+      expect(result.totalCandidateCount).toBe(15);
+      expect(result.suppressed).toHaveLength(15);
+      expect(result.ineligibleCount).toBe(0);
+      expect(result.recommendations).toHaveLength(0);
+      expect(result.exploratory).toHaveLength(0);
+    });
   });
 });
