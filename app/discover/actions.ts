@@ -26,6 +26,7 @@ import {
   type PublicDiscoverResult,
 } from '@/lib/recommendation/service';
 import type { ScoringPreset } from '@/lib/recommendation/types';
+import { SupabaseCatalogRepository } from '@/lib/repositories/catalog-repository';
 import { SupabaseProfileRepository } from '@/lib/repositories/profile-repository';
 
 export interface ActionResponse<T = unknown> {
@@ -163,10 +164,11 @@ export async function updateTypicalBudgetAction(
 
 /**
  * Retrieves personalized recommendations for the authenticated user,
- * with optional transient filter overrides (preset, city, search).
+ * with optional transient filter overrides (preset, mode, city, search).
  */
 export async function getPersonalizedRecommendationsAction(filters?: {
   preset?: unknown;
+  mode?: unknown;
   city?: string;
   region?: string;
   search?: string;
@@ -192,6 +194,7 @@ export async function getPersonalizedRecommendationsAction(filters?: {
     const data = await getPersonalizedDiscoverData({
       userId: user.id,
       presetOverride: filters?.preset,
+      mode: filters?.mode,
       city: filters?.city,
       region: filters?.region,
       searchQuery: filters?.search,
@@ -210,12 +213,14 @@ export async function getPersonalizedRecommendationsAction(filters?: {
  * Retrieves public event listings for unauthenticated visitors.
  */
 export async function getPublicDiscoverAction(filters?: {
+  mode?: unknown;
   city?: string;
   region?: string;
   search?: string;
 }): Promise<ActionResponse<PublicDiscoverResult>> {
   try {
     const data = await getPublicDiscoverData({
+      mode: filters?.mode,
       city: filters?.city,
       region: filters?.region,
       searchQuery: filters?.search,
@@ -226,6 +231,24 @@ export async function getPublicDiscoverAction(filters?: {
     console.error('[getPublicDiscoverAction error]:', err);
     return {
       error: 'Unable to load public events. Please try again.',
+    };
+  }
+}
+
+/**
+ * Retrieves the list of unique cities with scheduled events in the catalog.
+ */
+export async function getCatalogCitiesAction(): Promise<
+  ActionResponse<string[]>
+> {
+  try {
+    const catalogRepo = new SupabaseCatalogRepository();
+    const cities = await catalogRepo.listCities();
+    return { success: true, data: cities };
+  } catch (err) {
+    console.error('[getCatalogCitiesAction error]:', err);
+    return {
+      error: 'Unable to load cities.',
     };
   }
 }

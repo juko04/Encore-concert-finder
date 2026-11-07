@@ -131,7 +131,7 @@ test.describe('Discover Page E2E Suite', () => {
       id: testUserId,
       home_lat_approx: 39.75,
       home_lng_approx: -104.99,
-      default_radius_miles: 50,
+      default_radius_miles: 25,
       max_normal_ticket_price: 60,
       recommendation_preset: 'artist_first',
     });
@@ -400,6 +400,12 @@ test.describe('Discover Page E2E Suite', () => {
       page.getByText(`E2E Concert B: Local in Denver ${timestamp}`),
     ).toBeVisible();
 
+    // Confirm discovery mode tabs are present for guest browsing
+    await expect(page.getByTestId('mode-tab-all')).toBeVisible();
+    await expect(page.getByTestId('mode-tab-this_weekend')).toBeVisible();
+    await expect(page.getByTestId('mode-tab-cheap_and_nearby')).toBeVisible();
+    await expect(page.getByTestId('mode-tab-worth_planning_for')).toBeVisible();
+
     // Verify absence of personal score badges on public cards
     await expect(page.getByTestId('event-score')).toHaveCount(0);
     await expect(page.getByTestId('why-this-show-button')).toHaveCount(0);
@@ -443,6 +449,17 @@ test.describe('Discover Page E2E Suite', () => {
     // 3. Confirm discover controls toolbar is visible
     await expect(page.getByTestId('discover-controls')).toBeVisible();
 
+    // 3b. Confirm discovery mode tabs are visible with 'all' active by default
+    const allModeTab = page.getByTestId('mode-tab-all');
+    const weekendModeTab = page.getByTestId('mode-tab-this_weekend');
+    const cheapNearbyTab = page.getByTestId('mode-tab-cheap_and_nearby');
+    const worthPlanningTab = page.getByTestId('mode-tab-worth_planning_for');
+    await expect(allModeTab).toBeVisible();
+    await expect(allModeTab).toHaveAttribute('aria-selected', 'true');
+    await expect(weekendModeTab).toBeVisible();
+    await expect(cheapNearbyTab).toBeVisible();
+    await expect(worthPlanningTab).toBeVisible();
+
     // 4. Confirm initial active preset is 'artist_first' as configured in user profile
     const artistPresetBtn = page.getByTestId('preset-artist-first');
     const nearbyPresetBtn = page.getByTestId('preset-nearby');
@@ -452,7 +469,8 @@ test.describe('Discover Page E2E Suite', () => {
     // 5. Mathematical Proof of Preset Impact — Step 1: Under Artist-First Preset
     // Event A (Favorite artist: 100 * 0.65 = 65) mathematically outscores
     // Event B (Interested artist: 55 * 0.65 = 35.75) despite Event B being closer and cheaper.
-    const allCards = page.getByTestId('personalized-event-card');
+    const recGrid = page.getByTestId('recommendations-grid');
+    const allCards = recGrid.getByTestId('personalized-event-card');
     await expect(allCards).toHaveCount(2);
 
     // Event A MUST be ranked #1
@@ -522,7 +540,7 @@ test.describe('Discover Page E2E Suite', () => {
     await whyBtnB.click();
     await expect(factorBreakdownB).not.toBeVisible();
 
-    // 8. Update travel radius and typical budget
+    // 8. Update travel radius and typical budget (mutate radius from initial 25 mi to 50 mi)
     const radiusSelector = page.getByTestId('radius-selector');
     const radius50Btn = radiusSelector.getByRole('button', { name: '50 mi' });
     await radius50Btn.click();
@@ -540,8 +558,12 @@ test.describe('Discover Page E2E Suite', () => {
     const reloadedNearbyBtn = page.getByTestId('preset-nearby');
     await expect(reloadedNearbyBtn).toHaveAttribute('aria-pressed', 'true');
 
+    // Re-query recommendations grid after page reload
+    const reloadedGrid = page.getByTestId('recommendations-grid');
+    const reloadedCards = reloadedGrid.getByTestId('personalized-event-card');
+
     // Event B remains #1 after reload
-    await expect(allCards.nth(0)).toContainText(
+    await expect(reloadedCards.nth(0)).toContainText(
       `E2E Concert B: Local in Denver ${timestamp}`,
     );
 
@@ -571,10 +593,10 @@ test.describe('Discover Page E2E Suite', () => {
 
     // Clear search filter: both events restored with Event B remaining #1
     await searchInput.fill('');
-    await expect(allCards.nth(0)).toContainText(
+    await expect(reloadedCards.nth(0)).toContainText(
       `E2E Concert B: Local in Denver ${timestamp}`,
     );
-    await expect(allCards.nth(1)).toContainText(
+    await expect(reloadedCards.nth(1)).toContainText(
       `E2E Concert A: Favorite in Springs ${timestamp}`,
     );
   });

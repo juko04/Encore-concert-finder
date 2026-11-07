@@ -18,6 +18,8 @@ const mockUpdateRecommendationPresetAction = vi.fn();
 const mockUpdateTravelRadiusAction = vi.fn();
 const mockUpdateTypicalBudgetAction = vi.fn();
 const mockGetPersonalizedRecommendationsAction = vi.fn();
+const mockGetPublicDiscoverAction = vi.fn();
+const mockGetCatalogCitiesAction = vi.fn();
 
 vi.mock('@/app/discover/actions', () => ({
   updateRecommendationPresetAction: (...args: unknown[]) =>
@@ -28,6 +30,10 @@ vi.mock('@/app/discover/actions', () => ({
     mockUpdateTypicalBudgetAction(...args),
   getPersonalizedRecommendationsAction: (...args: unknown[]) =>
     mockGetPersonalizedRecommendationsAction(...args),
+  getPublicDiscoverAction: (...args: unknown[]) =>
+    mockGetPublicDiscoverAction(...args),
+  getCatalogCitiesAction: (...args: unknown[]) =>
+    mockGetCatalogCitiesAction(...args),
 }));
 
 describe('PersonalizedEventCard Component', () => {
@@ -228,7 +234,9 @@ describe('PersonalizedDiscoverContainer Component', () => {
     },
     activePreset: 'balanced',
     activeWeights: { artist: 50, distance: 20, price: 20, timing: 10 },
+    activeMode: 'all',
     hasPreferences: true,
+    isSpotifyConnected: false,
     isLocationConfigured: true,
     recommendations: [
       {
@@ -415,6 +423,10 @@ describe('PersonalizedDiscoverContainer Component', () => {
     mockGetPersonalizedRecommendationsAction.mockResolvedValue({
       success: true,
       data: mockInitialData,
+    });
+    mockGetCatalogCitiesAction.mockResolvedValue({
+      success: true,
+      data: ['Denver', 'Morrison'],
     });
   });
 
@@ -700,6 +712,7 @@ describe('PersonalizedDiscoverContainer Component', () => {
       ],
       ineligibleCount: 0,
       isEmptyCatalog: false,
+      activeMode: 'all',
     };
 
     render(<PersonalizedDiscoverContainer initialData={allSuppressedData} />);
@@ -731,6 +744,7 @@ describe('PersonalizedDiscoverContainer Component', () => {
       suppressed: [],
       ineligibleCount: 3,
       isEmptyCatalog: false,
+      activeMode: 'all',
     };
 
     render(<PersonalizedDiscoverContainer initialData={allIneligibleData} />);
@@ -895,7 +909,19 @@ describe('GuestDiscoverContainer Component', () => {
       },
     ],
     isEmptyCatalog: false,
+    activeMode: 'all',
   };
+
+  beforeEach(() => {
+    mockGetPublicDiscoverAction.mockResolvedValue({
+      success: true,
+      data: mockPublicData,
+    });
+    mockGetCatalogCitiesAction.mockResolvedValue({
+      success: true,
+      data: ['Greenwood Village'],
+    });
+  });
 
   it('renders guest personalization banner with link to sign in', () => {
     render(<GuestDiscoverContainer initialData={mockPublicData} />);
@@ -927,7 +953,8 @@ describe('GuestDiscoverContainer Component', () => {
     const pastOnlyData: PublicDiscoverResult = {
       totalCount: 0,
       events: [],
-      isEmptyCatalog: false, // Catalog candidates existed in lookback, but none are upcoming
+      isEmptyCatalog: false,
+      activeMode: 'all', // Catalog candidates existed in lookback, but none are upcoming
     };
 
     render(<GuestDiscoverContainer initialData={pastOnlyData} />);
@@ -958,6 +985,7 @@ describe('GuestDiscoverContainer Component', () => {
       totalCount: 0,
       events: [],
       isEmptyCatalog: true, // Genuinely zero events in catalog
+      activeMode: 'all',
     };
 
     render(<GuestDiscoverContainer initialData={emptyCatalogData} />);
@@ -1013,6 +1041,7 @@ describe('GuestDiscoverContainer Component', () => {
         },
       ],
       isEmptyCatalog: false,
+      activeMode: 'all',
     };
 
     render(<GuestDiscoverContainer initialData={cancelledData} />);

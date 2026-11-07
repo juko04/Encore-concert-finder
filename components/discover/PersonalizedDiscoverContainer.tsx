@@ -1,15 +1,26 @@
 'use client';
 
-import React, { useMemo, useRef, useState, useTransition } from 'react';
+import React, {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useTransition,
+} from 'react';
 import Link from 'next/link';
 import type { PersonalizedDiscoverResult } from '@/lib/recommendation/service';
-import type { ScoringPreset } from '@/lib/recommendation/types';
+import type { DiscoveryMode, ScoringPreset } from '@/lib/recommendation/types';
+import {
+  DISCOVERY_MODES,
+  DISCOVERY_MODE_CONFIGS,
+} from '@/lib/recommendation/modes';
 import { PersonalizedEventCard } from './PersonalizedEventCard';
 import {
   updateRecommendationPresetAction,
   updateTravelRadiusAction,
   updateTypicalBudgetAction,
   getPersonalizedRecommendationsAction,
+  getCatalogCitiesAction,
 } from '@/app/discover/actions';
 
 export interface PersonalizedDiscoverContainerProps {
@@ -65,6 +76,9 @@ export function PersonalizedDiscoverContainer({
   const [activePreset, setActivePreset] = useState<ScoringPreset>(
     initialData.activePreset,
   );
+  const [activeMode, setActiveMode] = useState<DiscoveryMode>(
+    initialData.activeMode ?? 'all',
+  );
   const [radiusMiles, setRadiusMiles] = useState<number>(
     initialData.userProfile?.defaultRadiusMiles ?? 25,
   );
@@ -87,16 +101,27 @@ export function PersonalizedDiscoverContainer({
     initialData.ineligibleCount,
   );
 
-  // Filter state (applied client-side over stable candidate pool)
+  // Filter state
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCity, setSelectedCity] = useState('');
+  const [catalogCities, setCatalogCities] = useState<string[]>([]);
 
   // Status state
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isStale, setIsStale] = useState(false);
 
-  // Extract unique cities from all events for city filter dropdown
+  // Load unique catalog cities from server for the city filter dropdown
+  useEffect(() => {
+    getCatalogCitiesAction().then((res) => {
+      if (res.success && res.data && res.data.length > 0) {
+        setCatalogCities(res.data);
+      }
+    });
+  }, []);
+
+  // Compute available cities from either server list or loaded events
   const availableCities = useMemo(() => {
+    if (catalogCities.length > 0) return catalogCities;
     const citySet = new Set<string>();
     for (const rec of recommendations) {
       if (rec.event.city?.trim()) citySet.add(rec.event.city.trim());
@@ -105,33 +130,29 @@ export function PersonalizedDiscoverContainer({
       if (exp.event.city?.trim()) citySet.add(exp.event.city.trim());
     }
     return Array.from(citySet).sort();
-  }, [recommendations, exploratory]);
+  }, [catalogCities, recommendations, exploratory]);
 
-  // Handler: Change preset
-  const handlePresetChange = (newPreset: ScoringPreset) => {
-    if (newPreset === activePreset || isPending) return;
+  // Central refresh helper
+  const refreshRecommendations = (overrides?: {
+    preset?: ScoringPreset;
+    mode?: DiscoveryMode;
+  }) => {
+    const targetPreset = overrides?.preset ?? activePreset;
+    const targetMode = overrides?.mode ?? activeMode;
 
-    const previousPreset = activePreset;
-    setActivePreset(newPreset);
-    setErrorMessage(null);
     const reqId = ++requestIdRef.current;
 
     startTransition(async () => {
-      // 1. Persist the preset update (using strict database identifier 'artist_first')
-      const saveRes = await updateRecommendationPresetAction(newPreset);
-      if (reqId !== requestIdRef.current) return;
-
-      if (!saveRes.success) {
-        setActivePreset(previousPreset);
-        setErrorMessage(saveRes.error || 'Failed to update preset.');
-        return;
+      // Invariant: Do not pass transient search/city filters to server so full candidate pool remains intact.
+      const payload: { preset?: ScoringPreset; mode?: DiscoveryMode } = {
+        preset: targetPreset,
+      };
+      if (targetMode && targetMode !== 'all') {
+        payload.mode = targetMode;
       }
 
-      // 2. Fetch freshly re-ranked recommendations for the full candidate pool
-      // Invariant: Do not pass transient search/city filters to server so full candidate pool remains intact.
-      const fetchRes = await getPersonalizedRecommendationsAction({
-        preset: newPreset,
-      });
+      const fetchRes = await getPersonalizedRecommendationsAction(payload);
+
       if (reqId !== requestIdRef.current) return;
 
       if (fetchRes.success && fetchRes.data) {
@@ -145,9 +166,40 @@ export function PersonalizedDiscoverContainer({
         setIsStale(true);
         setErrorMessage(
           fetchRes.error ||
-            'Recommendation preset was saved, but refreshing recommendations failed. Showing previous results.',
+            'Unable to refresh recommendations. Showing previous results.',
         );
       }
+    });
+  };
+
+  // Handler: Change discovery mode tab
+  const handleModeChange = (newMode: DiscoveryMode) => {
+    if (newMode === activeMode || isPending) return;
+    setActiveMode(newMode);
+    setErrorMessage(null);
+    refreshRecommendations({ mode: newMode });
+  };
+
+  // Handler: Change preset
+  const handlePresetChange = (newPreset: ScoringPreset) => {
+    if (newPreset === activePreset || isPending) return;
+
+    const previousPreset = activePreset;
+    setActivePreset(newPreset);
+    setErrorMessage(null);
+    const reqId = ++requestIdRef.current;
+
+    startTransition(async () => {
+      const saveRes = await updateRecommendationPresetAction(newPreset);
+      if (reqId !== requestIdRef.current) return;
+
+      if (!saveRes.success) {
+        setActivePreset(previousPreset);
+        setErrorMessage(saveRes.error || 'Failed to update preset.');
+        return;
+      }
+
+      refreshRecommendations({ preset: newPreset });
     });
   };
 
@@ -170,26 +222,7 @@ export function PersonalizedDiscoverContainer({
         return;
       }
 
-      // Fetch freshly re-ranked recommendations for full candidate pool
-      const fetchRes = await getPersonalizedRecommendationsAction({
-        preset: activePreset,
-      });
-      if (reqId !== requestIdRef.current) return;
-
-      if (fetchRes.success && fetchRes.data) {
-        setRecommendations(fetchRes.data.recommendations);
-        setExploratory(fetchRes.data.exploratory);
-        setTotalCandidateCount(fetchRes.data.totalCandidateCount);
-        setSuppressedCount(fetchRes.data.suppressed.length);
-        setIneligibleCount(fetchRes.data.ineligibleCount);
-        setIsStale(false);
-      } else {
-        setIsStale(true);
-        setErrorMessage(
-          fetchRes.error ||
-            'Travel radius was saved, but refreshing recommendations failed. Showing previous results.',
-        );
-      }
+      refreshRecommendations();
     });
   };
 
@@ -212,63 +245,31 @@ export function PersonalizedDiscoverContainer({
         return;
       }
 
-      // Fetch freshly re-ranked recommendations for full candidate pool
-      const fetchRes = await getPersonalizedRecommendationsAction({
-        preset: activePreset,
-      });
-      if (reqId !== requestIdRef.current) return;
-
-      if (fetchRes.success && fetchRes.data) {
-        setRecommendations(fetchRes.data.recommendations);
-        setExploratory(fetchRes.data.exploratory);
-        setTotalCandidateCount(fetchRes.data.totalCandidateCount);
-        setSuppressedCount(fetchRes.data.suppressed.length);
-        setIneligibleCount(fetchRes.data.ineligibleCount);
-        setIsStale(false);
-      } else {
-        setIsStale(true);
-        setErrorMessage(
-          fetchRes.error ||
-            'Ticket budget was saved, but refreshing recommendations failed. Showing previous results.',
-        );
-      }
+      refreshRecommendations();
     });
   };
 
-  // Handler: Retry refreshing recommendations after transient re-rank failure
+  // Handler: Search input change
+  const handleSearchChange = (value: string) => {
+    setSearchQuery(value);
+  };
+
+  // Handler: City dropdown change
+  const handleCityChange = (city: string) => {
+    setSelectedCity(city);
+  };
+
+  // Handler: Retry refreshing recommendations after transient failure
   const handleRetryRefresh = () => {
     if (isPending) return;
     setErrorMessage(null);
-    const reqId = ++requestIdRef.current;
-
-    startTransition(async () => {
-      const fetchRes = await getPersonalizedRecommendationsAction({
-        preset: activePreset,
-      });
-      if (reqId !== requestIdRef.current) return;
-
-      if (fetchRes.success && fetchRes.data) {
-        setRecommendations(fetchRes.data.recommendations);
-        setExploratory(fetchRes.data.exploratory);
-        setTotalCandidateCount(fetchRes.data.totalCandidateCount);
-        setSuppressedCount(fetchRes.data.suppressed.length);
-        setIneligibleCount(fetchRes.data.ineligibleCount);
-        setIsStale(false);
-      } else {
-        setIsStale(true);
-        setErrorMessage(
-          fetchRes.error ||
-            'Refreshing recommendations failed. Please try again.',
-        );
-      }
-    });
+    refreshRecommendations();
   };
 
-  // Filter recommendations and exploratory lists client-side over stable candidate pool
+  // Filter recommendations and exploratory lists for instant client-side feedback
   const filterList = React.useCallback(
     (list: typeof recommendations) => {
       return list.filter((item) => {
-        // City filter
         if (
           selectedCity &&
           item.event.city?.toLowerCase() !== selectedCity.toLowerCase()
@@ -276,7 +277,6 @@ export function PersonalizedDiscoverContainer({
           return false;
         }
 
-        // Search query filter (title, artist, venue)
         if (searchQuery.trim().length > 0) {
           const q = searchQuery.trim().toLowerCase();
           const matchesTitle = item.event.title.toLowerCase().includes(q);
@@ -317,7 +317,7 @@ export function PersonalizedDiscoverContainer({
   const isNoEligibleRecommendations =
     !isCatalogEmpty && totalDisplayableCount === 0;
 
-  // Pool has displayable recommendations, but active client-side search/city filter matches 0
+  // Pool has displayable recommendations, but active search/city filter matches 0
   const isFilterEmpty =
     !isCatalogEmpty && totalDisplayableCount > 0 && totalFilteredCount === 0;
 
@@ -410,7 +410,48 @@ export function PersonalizedDiscoverContainer({
         </div>
       )}
 
-      {/* Onboarding Callout for Users with No Saved Taste Preferences */}
+      {/* Discovery Mode Switcher Tabs */}
+      <section aria-label="Discovery Modes" className="space-y-3">
+        <div
+          role="tablist"
+          aria-label="Discovery Modes"
+          className="flex flex-wrap items-center gap-2"
+        >
+          {DISCOVERY_MODES.map((mode) => {
+            const isActive = activeMode === mode.id;
+            return (
+              <button
+                key={mode.id}
+                role="tab"
+                type="button"
+                data-testid={`mode-tab-${mode.id}`}
+                aria-selected={isActive}
+                data-active={isActive ? 'true' : 'false'}
+                onClick={() => handleModeChange(mode.id)}
+                disabled={isPending}
+                className={`inline-flex items-center gap-2 rounded-xl border px-4 py-2.5 text-xs font-semibold transition ${
+                  isActive
+                    ? 'border-indigo-500 bg-indigo-950/70 text-white shadow-sm'
+                    : 'border-zinc-800 bg-zinc-900/60 text-zinc-300 hover:border-zinc-700 hover:bg-zinc-800 hover:text-white'
+                }`}
+              >
+                <span>{mode.badge}</span>
+                <span>{mode.label}</span>
+              </button>
+            );
+          })}
+        </div>
+        <div className="flex items-center justify-between text-xs text-zinc-400">
+          <p>
+            <span className="font-semibold text-zinc-300">
+              {DISCOVERY_MODE_CONFIGS[activeMode].tagline}:
+            </span>{' '}
+            {DISCOVERY_MODE_CONFIGS[activeMode].description}
+          </p>
+        </div>
+      </section>
+
+      {/* Onboarding Callout for Users with Incomplete Taste / Spotify Preferences */}
       {!initialData.hasPreferences && (
         <section
           data-testid="onboarding-banner"
@@ -422,16 +463,54 @@ export function PersonalizedDiscoverContainer({
                 🎵 Personalize Your Live Music Feed
               </h2>
               <p className="mt-1 text-xs text-zinc-300 sm:text-sm">
-                You haven&apos;t added any favorite artists or connected Spotify
-                yet. Add artists you love to unlock personalized scores and
-                highlight must-see shows!
+                {initialData.isSpotifyConnected
+                  ? 'Your Spotify account is connected! Add artists you love in Music Taste to unlock personalized scores and highlight must-see shows.'
+                  : "You haven't added any favorite artists or connected Spotify yet. Add artists you love to unlock personalized scores and highlight must-see shows!"}
               </p>
+            </div>
+            <div className="flex flex-wrap items-center gap-3">
+              <Link
+                href="/profile/taste"
+                className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-indigo-600 px-4 py-2 text-xs font-semibold text-white transition hover:bg-indigo-500"
+              >
+                Set Up Music Taste →
+              </Link>
+              {!initialData.isSpotifyConnected && (
+                <Link
+                  href="/profile/taste"
+                  className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-zinc-700 bg-zinc-900/80 px-4 py-2 text-xs font-semibold text-zinc-200 transition hover:border-emerald-500 hover:text-white"
+                >
+                  <span>🎧</span> Connect Spotify
+                </Link>
+              )}
+            </div>
+          </div>
+        </section>
+      )}
+
+      {initialData.hasPreferences && !initialData.isSpotifyConnected && (
+        <section
+          data-testid="spotify-connect-callout"
+          className="rounded-2xl border border-zinc-800 bg-zinc-900/50 p-4"
+        >
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex items-center gap-3">
+              <span className="text-2xl">🎧</span>
+              <div>
+                <h3 className="text-sm font-semibold text-zinc-200">
+                  Connect Spotify for Automatic Artist Sync
+                </h3>
+                <p className="text-xs text-zinc-400">
+                  Sync your top artists and listening history directly to Encore
+                  for automated tour tracking.
+                </p>
+              </div>
             </div>
             <Link
               href="/profile/taste"
-              className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-indigo-600 px-4 py-2 text-xs font-semibold text-white transition hover:bg-indigo-500"
+              className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-emerald-700/60 bg-emerald-950/40 px-3.5 py-1.5 text-xs font-semibold text-emerald-300 transition hover:bg-emerald-900/60 hover:text-white"
             >
-              Set Up Music Taste →
+              Connect Spotify →
             </Link>
           </div>
         </section>
@@ -457,7 +536,6 @@ export function PersonalizedDiscoverContainer({
           <div className="mt-2.5 grid grid-cols-2 gap-2 sm:grid-cols-4">
             {PRESET_CONFIG.map((preset) => {
               const isActive = activePreset === preset.id;
-              // Map to data-testid: preset-balanced, preset-artist-first, preset-nearby, preset-value
               const testId = `preset-${preset.id.replace('_', '-')}`;
               return (
                 <button
@@ -498,14 +576,16 @@ export function PersonalizedDiscoverContainer({
         {/* Travel Radius and Typical Budget Selectors */}
         <div className="grid grid-cols-1 gap-4 border-t border-zinc-800/80 pt-4 sm:grid-cols-2">
           {/* Radius Selector */}
-          <div>
-            <label
-              htmlFor="radius-select"
+          <fieldset>
+            <legend
+              id="radius-legend"
               className="block text-xs font-semibold uppercase tracking-wider text-zinc-400"
             >
               Travel Radius
-            </label>
+            </legend>
             <div
+              role="group"
+              aria-labelledby="radius-legend"
               className="mt-2 flex flex-wrap items-center gap-1.5"
               data-testid="radius-selector"
             >
@@ -539,17 +619,19 @@ export function PersonalizedDiscoverContainer({
                 </Link>
               </p>
             )}
-          </div>
+          </fieldset>
 
           {/* Budget Selector */}
-          <div>
-            <label
-              htmlFor="budget-select"
+          <fieldset>
+            <legend
+              id="budget-legend"
               className="block text-xs font-semibold uppercase tracking-wider text-zinc-400"
             >
               Typical Budget
-            </label>
+            </legend>
             <div
+              role="group"
+              aria-labelledby="budget-legend"
               className="mt-2 flex flex-wrap items-center gap-1.5"
               data-testid="budget-selector"
             >
@@ -571,7 +653,7 @@ export function PersonalizedDiscoverContainer({
                 </button>
               ))}
             </div>
-          </div>
+          </fieldset>
         </div>
 
         {/* Text Search & City Filter Bar */}
@@ -581,7 +663,7 @@ export function PersonalizedDiscoverContainer({
               type="text"
               data-testid="search-input"
               value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
+              onChange={(e) => handleSearchChange(e.target.value)}
               placeholder="Filter by artist name, venue, or title..."
               className="focus:outline-hidden w-full rounded-lg border border-zinc-700 bg-zinc-950/80 px-3.5 py-2 text-xs text-zinc-100 placeholder-zinc-500 focus:border-indigo-500"
             />
@@ -591,7 +673,7 @@ export function PersonalizedDiscoverContainer({
             <select
               data-testid="city-filter"
               value={selectedCity}
-              onChange={(e) => setSelectedCity(e.target.value)}
+              onChange={(e) => handleCityChange(e.target.value)}
               className="focus:outline-hidden w-full rounded-lg border border-zinc-700 bg-zinc-950/80 px-3 py-2 text-xs text-zinc-100 focus:border-indigo-500"
             >
               <option value="">All Cities</option>
@@ -634,28 +716,40 @@ export function PersonalizedDiscoverContainer({
           <h2 className="text-lg font-semibold text-zinc-200">
             {ineligibleCount === totalCandidateCount
               ? 'No upcoming eligible events'
-              : 'No eligible recommendations with your current preferences'}
+              : activeMode !== 'all'
+                ? DISCOVERY_MODE_CONFIGS[activeMode].emptyStateHeading
+                : 'No eligible recommendations with your current preferences'}
           </h2>
           <p className="mt-2 text-sm text-zinc-400">
             {ineligibleCount === totalCandidateCount
               ? 'Upcoming catalog events are currently past, cancelled, or postponed. Check back soon as new dates are announced.'
               : suppressedCount > 0
                 ? "Upcoming events in your area feature artists you've marked as not interested or disliked. Adjust your music taste preferences to discover more shows."
-                : 'We found upcoming events in the catalog, but none currently match your active taste or eligibility thresholds. Try adjusting your travel radius, typical budget, or music taste preferences.'}
+                : activeMode !== 'all'
+                  ? DISCOVERY_MODE_CONFIGS[activeMode].emptyStateDescription
+                  : 'We found upcoming events in the catalog, but none currently match your active taste or eligibility thresholds. Try adjusting your travel radius, typical budget, or music taste preferences.'}
           </p>
           <div className="mt-4 flex flex-wrap items-center justify-center gap-3">
+            {activeMode !== 'all' && (
+              <button
+                type="button"
+                onClick={() => handleModeChange('all')}
+                className="rounded-lg bg-indigo-600 px-4 py-2 text-xs font-semibold text-white transition hover:bg-indigo-500"
+              >
+                Switch to All Shows
+              </button>
+            )}
             <Link
               href="/profile/taste"
-              data-testid="manage-taste-empty-link"
-              className="rounded-lg bg-indigo-600 px-4 py-2 text-xs font-semibold text-white hover:bg-indigo-500"
+              className="rounded-lg bg-zinc-800 px-4 py-2 text-xs font-semibold text-zinc-200 transition hover:bg-zinc-700"
             >
-              Manage Music Taste
+              Adjust Music Taste →
             </Link>
           </div>
         </div>
       )}
 
-      {/* 3. Filtered Empty State (Catalog has events, but search/city filter matched 0) */}
+      {/* 3. Search/City Filter Empty State (Events exist in mode, but active search/filter matches 0) */}
       {isFilterEmpty && (
         <div
           data-testid="empty-filtered-banner"
@@ -665,79 +759,96 @@ export function PersonalizedDiscoverContainer({
             No events match your search criteria
           </h2>
           <p className="mt-2 text-sm text-zinc-400">
-            Try adjusting your travel radius, clearing the search query, or
-            selecting All Cities.
+            Try adjusting your search keywords, clearing filters, or switching
+            cities.
           </p>
-          {(searchQuery || selectedCity) && (
-            <button
-              type="button"
-              onClick={() => {
-                setSearchQuery('');
-                setSelectedCity('');
-              }}
-              className="mt-4 rounded-lg bg-zinc-800 px-4 py-2 text-xs font-semibold text-zinc-200 hover:bg-zinc-700 hover:text-white"
-            >
-              Clear Filters
-            </button>
-          )}
+          <button
+            type="button"
+            onClick={() => {
+              setSearchQuery('');
+              setSelectedCity('');
+              refreshRecommendations();
+            }}
+            className="mt-4 rounded-lg bg-zinc-800 px-4 py-2 text-xs font-semibold text-zinc-200 hover:bg-zinc-700 hover:text-white"
+          >
+            Clear Filters
+          </button>
         </div>
       )}
 
-      {/* Section 1: Recommended For You */}
-      {!isCatalogEmpty &&
-        !isNoEligibleRecommendations &&
-        filteredRecommendations.length > 0 && (
-          <section data-testid="recommendations-section" className="space-y-4">
-            <div className="flex items-center justify-between border-b border-zinc-800 pb-3">
-              <div>
-                <h2
-                  data-testid="recommendations-heading"
-                  className="text-xl font-bold tracking-tight text-white"
-                >
-                  Recommended For You ({filteredRecommendations.length})
-                </h2>
-                <p className="mt-0.5 text-xs text-zinc-400">
-                  Shows matched to your explicit artist preferences, location,
-                  and ticket thresholds.
-                </p>
-              </div>
+      {/* Primary Recommendations Section */}
+      {filteredRecommendations.length > 0 && (
+        <section data-testid="primary-recommendations-section">
+          <div className="mb-4 flex items-center justify-between">
+            <div>
+              <h2 className="text-xl font-bold tracking-tight text-white">
+                Recommended For You
+              </h2>
+              <p className="text-xs text-zinc-400">
+                Ranked by your{' '}
+                {PRESET_CONFIG.find(
+                  (p) => p.id === activePreset,
+                )?.label.toLowerCase()}{' '}
+                priority
+                {activeMode !== 'all' &&
+                  ` · ${DISCOVERY_MODE_CONFIGS[activeMode].label}`}
+              </p>
             </div>
+            <span className="rounded-full bg-zinc-800 px-2.5 py-0.5 text-xs font-medium text-zinc-300">
+              {filteredRecommendations.length} show
+              {filteredRecommendations.length === 1 ? '' : 's'}
+            </span>
+          </div>
 
-            <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
-              {filteredRecommendations.map((rec) => (
-                <PersonalizedEventCard key={rec.eventId} scoredEvent={rec} />
-              ))}
-            </div>
-          </section>
-        )}
+          <div
+            data-testid="recommendations-grid"
+            className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3"
+          >
+            {filteredRecommendations.map((scored) => (
+              <PersonalizedEventCard
+                key={scored.eventId}
+                scoredEvent={scored}
+              />
+            ))}
+          </div>
+        </section>
+      )}
 
-      {/* Section 2: Explore Something New */}
-      {!isCatalogEmpty &&
-        !isNoEligibleRecommendations &&
-        filteredExploratory.length > 0 && (
-          <section data-testid="exploratory-section" className="space-y-4">
-            <div className="flex items-center justify-between border-b border-zinc-800 pb-3">
-              <div>
-                <h2
-                  data-testid="exploratory-heading"
-                  className="text-xl font-bold tracking-tight text-white"
-                >
-                  Explore Something New ({filteredExploratory.length})
-                </h2>
-                <p className="mt-0.5 text-xs text-zinc-400">
-                  Upcoming concerts from artists you haven&apos;t marked yet
-                  that fit your travel and budget preferences.
-                </p>
-              </div>
+      {/* Exploratory Section */}
+      {filteredExploratory.length > 0 && (
+        <section
+          data-testid="exploratory-recommendations-section"
+          className="border-t border-zinc-800/80 pt-8"
+        >
+          <div className="mb-4 flex items-center justify-between">
+            <div>
+              <h2 className="text-xl font-bold tracking-tight text-white">
+                Discover Something New
+              </h2>
+              <p className="text-xs text-zinc-400">
+                Artists you haven&apos;t rated yet that fit your travel radius
+                and ticket budget.
+              </p>
             </div>
+            <span className="rounded-full bg-zinc-800 px-2.5 py-0.5 text-xs font-medium text-zinc-300">
+              {filteredExploratory.length} show
+              {filteredExploratory.length === 1 ? '' : 's'}
+            </span>
+          </div>
 
-            <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
-              {filteredExploratory.map((exp) => (
-                <PersonalizedEventCard key={exp.eventId} scoredEvent={exp} />
-              ))}
-            </div>
-          </section>
-        )}
+          <div
+            data-testid="exploratory-grid"
+            className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3"
+          >
+            {filteredExploratory.map((scored) => (
+              <PersonalizedEventCard
+                key={scored.eventId}
+                scoredEvent={scored}
+              />
+            ))}
+          </div>
+        </section>
+      )}
     </div>
   );
 }

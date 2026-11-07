@@ -2,10 +2,12 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import {
   getPersonalizedDiscoverData,
   getPublicDiscoverData,
+  retrieveCandidatesWithLookback,
 } from '@/lib/recommendation/service';
 import {
   MemoryCatalogRepository,
   MemoryProfileRepository,
+  MemorySpotifyConnectionRepository,
   MemoryUserPreferenceRepository,
 } from '@/lib/repositories/memory-repositories';
 
@@ -1422,6 +1424,286 @@ describe('Production Recommendation Service (getPersonalizedDiscoverData)', () =
       expect(noMatchResult.isEmptyCatalog).toBe(false);
       expect(noMatchResult.events).toHaveLength(0);
       expect(noMatchResult.totalCount).toBe(0);
+    });
+  });
+
+  describe('PR #12 Architectural Remediation Requirements', () => {
+    let catalogRepo: MemoryCatalogRepository;
+    let profileRepo: MemoryProfileRepository;
+    let prefRepo: MemoryUserPreferenceRepository;
+    let spotifyRepo: MemorySpotifyConnectionRepository;
+
+    beforeEach(() => {
+      catalogRepo = new MemoryCatalogRepository();
+      profileRepo = new MemoryProfileRepository();
+      prefRepo = new MemoryUserPreferenceRepository();
+      spotifyRepo = new MemorySpotifyConnectionRepository();
+    });
+
+    it('guarantees favorite artist shows are not starved by 100 earlier interested artist shows (Issue 3)', async () => {
+      const userId = 'user-starvation-test';
+      await profileRepo.upsertProfile(userId, {
+        recommendationPreset: 'artist_first',
+        defaultRadiusMiles: 100,
+      });
+
+      // User has 1 Favorite artist and 1 Interested artist
+      await prefRepo.savePreference({
+        userId,
+        artistId: 'artist-fav',
+        artistName: 'Favorite Star',
+        preferenceLevel: 'favorite',
+      });
+      await prefRepo.savePreference({
+        userId,
+        artistId: 'artist-interested',
+        artistName: 'Interested Opener',
+        preferenceLevel: 'interested',
+      });
+
+      // Seed 105 shows for the Interested artist occurring sooner (2026-11-01)
+      for (let i = 0; i < 105; i++) {
+        seedEvent(catalogRepo, {
+          id: `show-interested-${i}`,
+          title: `Interested Opener Show ${i}`,
+          localStartDate: '2026-11-01',
+          startsAt: '2026-11-01T20:00:00Z',
+          timezone: 'America/Denver',
+          status: 'scheduled',
+          artists: [
+            {
+              id: 'artist-interested',
+              name: 'Interested Opener',
+              billingPosition: 'headliner',
+            },
+          ],
+        });
+      }
+
+      // Seed 1 show for the Favorite artist occurring later (2026-12-01)
+      seedEvent(catalogRepo, {
+        id: 'show-favorite-star',
+        title: 'Favorite Star Arena Show',
+        localStartDate: '2026-12-01',
+        startsAt: '2026-12-01T20:00:00Z',
+        timezone: 'America/Denver',
+        status: 'scheduled',
+        artists: [
+          {
+            id: 'artist-fav',
+            name: 'Favorite Star',
+            billingPosition: 'headliner',
+          },
+        ],
+      });
+
+      const res = await getPersonalizedDiscoverData({
+        userId,
+        catalogRepo,
+        profileRepo,
+        prefRepo,
+        spotifyRepo,
+        referenceDate: '2026-10-25',
+      });
+
+      // The Favorite artist show MUST be retrieved and scored as the #1 recommendation
+      const favRec = res.recommendations.find(
+        (r) => r.eventId === 'show-favorite-star',
+      );
+      expect(favRec).toBeDefined();
+      expect(favRec?.matchedArtist?.isFavorite).toBe(true);
+      expect(res.recommendations[0].eventId).toBe('show-favorite-star');
+    });
+
+    it('supports discovery modes: this_weekend, cheap_and_nearby, worth_planning_for (Issue 1)', async () => {
+      const userId = 'user-modes-test';
+      await profileRepo.upsertProfile(userId, {
+        homeLatApprox: 39.7392,
+        homeLngApprox: -104.9903,
+        defaultRadiusMiles: 25,
+        maxNormalTicketPrice: 50,
+      });
+
+      await prefRepo.savePreference({
+        userId,
+        artistId: 'artist-fav',
+        artistName: 'Favorite Band',
+        preferenceLevel: 'favorite',
+      });
+
+      // Event 1: Friday night show (this weekend, cheap & nearby)
+      // Reference instant is Friday 2026-11-06T12:00:00Z
+      seedEvent(catalogRepo, {
+        id: 'show-weekend-cheap',
+        title: 'Local Indie Night',
+        localStartDate: '2026-11-06',
+        startsAt: '2026-11-06T20:00:00Z',
+        timezone: 'America/Denver',
+        status: 'scheduled',
+        lat: 39.74,
+        lng: -104.99,
+        minPrice: 20,
+      });
+
+      // Event 2: Expensive show far away next month (worth planning for favorite artist)
+      seedEvent(catalogRepo, {
+        id: 'show-future-expensive',
+        title: 'Favorite Band Festival',
+        localStartDate: '2026-12-15',
+        startsAt: '2026-12-15T20:00:00Z',
+        timezone: 'America/Denver',
+        status: 'scheduled',
+        lat: 40.5,
+        lng: -105.0,
+        minPrice: 150,
+        artists: [
+          {
+            id: 'artist-fav',
+            name: 'Favorite Band',
+            billingPosition: 'headliner',
+          },
+        ],
+      });
+
+      // Test "this_weekend" mode
+      const weekendRes = await getPersonalizedDiscoverData({
+        userId,
+        catalogRepo,
+        profileRepo,
+        prefRepo,
+        spotifyRepo,
+        mode: 'this_weekend',
+        referenceDate: '2026-11-06',
+        referenceInstant: '2026-11-06T12:00:00Z',
+      });
+      expect(weekendRes.activeMode).toBe('this_weekend');
+      const weekendIds = [
+        ...weekendRes.recommendations.map((r) => r.eventId),
+        ...weekendRes.exploratory.map((r) => r.eventId),
+      ];
+      expect(weekendIds).toContain('show-weekend-cheap');
+      expect(weekendIds).not.toContain('show-future-expensive');
+
+      // Test "cheap_and_nearby" mode
+      const cheapRes = await getPersonalizedDiscoverData({
+        userId,
+        catalogRepo,
+        profileRepo,
+        prefRepo,
+        spotifyRepo,
+        mode: 'cheap_and_nearby',
+        referenceDate: '2026-11-01',
+      });
+      expect(cheapRes.activeMode).toBe('cheap_and_nearby');
+      const cheapIds = [
+        ...cheapRes.recommendations.map((r) => r.eventId),
+        ...cheapRes.exploratory.map((r) => r.eventId),
+      ];
+      expect(cheapIds).toContain('show-weekend-cheap');
+      expect(cheapIds).not.toContain('show-future-expensive');
+
+      // Test "worth_planning_for" mode
+      const planningRes = await getPersonalizedDiscoverData({
+        userId,
+        catalogRepo,
+        profileRepo,
+        prefRepo,
+        spotifyRepo,
+        mode: 'worth_planning_for',
+        referenceDate: '2026-11-01',
+      });
+      expect(planningRes.activeMode).toBe('worth_planning_for');
+      const planningIds = [
+        ...planningRes.recommendations.map((r) => r.eventId),
+        ...planningRes.exploratory.map((r) => r.eventId),
+      ];
+      expect(planningIds).toContain('show-future-expensive');
+      expect(planningIds).not.toContain('show-weekend-cheap');
+    });
+
+    it('separates Spotify connection status from manual taste preferences (Issue 7)', async () => {
+      const userId = 'user-spotify-sep-test';
+      await profileRepo.upsertProfile(userId, {});
+
+      // Case A: User has active Spotify connection, but 0 manual preferences
+      await spotifyRepo.saveConnection({
+        userId,
+        spotifyAccountId: 'spot-123',
+        accessToken: 'token',
+        refreshToken: 'refresh',
+        tokenExpiresAt: new Date('2026-12-01T00:00:00Z'),
+        reauthorizationDeadline: new Date('2027-01-01T00:00:00Z'),
+        scopes: ['user-top-read'],
+      });
+
+      const resA = await getPersonalizedDiscoverData({
+        userId,
+        catalogRepo,
+        profileRepo,
+        prefRepo,
+        spotifyRepo,
+      });
+      expect(resA.hasPreferences).toBe(false);
+      expect(resA.isSpotifyConnected).toBe(true);
+
+      // Case B: User has manual preferences, but no Spotify connection
+      const userIdB = 'user-spotify-sep-test-b';
+      await profileRepo.upsertProfile(userIdB, {});
+      await prefRepo.savePreference({
+        userId: userIdB,
+        artistId: 'artist-1',
+        artistName: 'Artist One',
+        preferenceLevel: 'like',
+      });
+
+      const resB = await getPersonalizedDiscoverData({
+        userId: userIdB,
+        catalogRepo,
+        profileRepo,
+        prefRepo,
+        spotifyRepo,
+      });
+      expect(resB.hasPreferences).toBe(true);
+      expect(resB.isSpotifyConnected).toBe(false);
+    });
+
+    it('pushes status scheduled down into database queries eliminating scan limit false negatives (Issue 4)', async () => {
+      // Seed 600 cancelled events followed by 5 scheduled events
+      for (let i = 0; i < 600; i++) {
+        seedEvent(catalogRepo, {
+          id: `cancelled-evt-${i}`,
+          title: `Cancelled Event ${i}`,
+          localStartDate: '2026-11-01',
+          startsAt: '2026-11-01T20:00:00Z',
+          timezone: 'America/Denver',
+          status: 'cancelled',
+        });
+      }
+
+      seedEvent(catalogRepo, {
+        id: 'valid-scheduled-show',
+        title: 'Valid Scheduled Show',
+        localStartDate: '2026-11-15',
+        startsAt: '2026-11-15T20:00:00Z',
+        timezone: 'America/Denver',
+        status: 'scheduled',
+      });
+
+      const candidates = await retrieveCandidatesWithLookback(
+        catalogRepo,
+        {
+          fromDate: '2026-10-25',
+          status: 'scheduled',
+        },
+        10,
+        '2026-10-25',
+      );
+
+      // Because status: 'scheduled' is pushed to the repository query,
+      // the 600 cancelled events are filtered at the DB layer, allowing valid-scheduled-show to be retrieved
+      expect(candidates.some((e) => e.id === 'valid-scheduled-show')).toBe(
+        true,
+      );
     });
   });
 });

@@ -7,12 +7,19 @@ import type { UserProfile } from '@/lib/domain/profile';
 import { rankEvents } from '@/lib/recommendation/engine';
 import { calculateTimingFactor } from '@/lib/recommendation/factors/timing';
 import {
+  calculateWeekendWindow,
+  getModeScoringWeights,
+  isEventEligibleForMode,
+  normalizeDiscoveryMode,
+} from '@/lib/recommendation/modes';
+import {
   DEFAULT_PRESET,
   getPresetWeights,
   isValidScoringPreset,
   normalizeScoringPreset,
 } from '@/lib/recommendation/presets';
 import type {
+  DiscoveryMode,
   RecommendationResult,
   ScoredEvent,
   ScoringContext,
@@ -24,9 +31,11 @@ import type {
   EventListFilters,
   ICatalogRepository,
   IProfileRepository,
+  ISpotifyConnectionRepository,
   IUserPreferenceRepository,
 } from '@/lib/repositories/interfaces';
 import { SupabaseProfileRepository } from '@/lib/repositories/profile-repository';
+import { SupabaseSpotifyConnectionRepository } from '@/lib/repositories/spotify-connection-repository';
 import { SupabaseUserPreferenceRepository } from '@/lib/repositories/user-preference-repository';
 
 export interface PersonalizedDiscoverOptions {
@@ -35,7 +44,10 @@ export interface PersonalizedDiscoverOptions {
   profileRepo?: IProfileRepository;
   prefRepo?: IUserPreferenceRepository;
   catalogRepo?: ICatalogRepository;
+  spotifyRepo?: ISpotifyConnectionRepository;
   presetOverride?: unknown;
+  mode?: unknown;
+  discoveryMode?: unknown;
   referenceDate?: string;
   referenceInstant?: Date | string;
   city?: string;
@@ -52,7 +64,9 @@ export interface PersonalizedDiscoverResult {
   userProfile: UserProfile | null;
   activePreset: ScoringPreset;
   activeWeights: ScoringWeights;
+  activeMode: DiscoveryMode;
   hasPreferences: boolean;
+  isSpotifyConnected: boolean;
   isLocationConfigured: boolean;
   isEmptyCatalog: boolean;
 }
@@ -63,6 +77,8 @@ export interface PublicDiscoverOptions {
   city?: string;
   region?: string;
   searchQuery?: string;
+  mode?: unknown;
+  discoveryMode?: unknown;
   limit?: number;
   referenceDate?: string;
   referenceInstant?: Date | string;
@@ -72,22 +88,31 @@ export interface PublicDiscoverResult {
   events: CanonicalEventSummary[];
   isEmptyCatalog: boolean;
   totalCount: number;
+  activeMode: DiscoveryMode;
 }
 
 /**
- * Bounds for production candidate event retrieval:
- * Tier 1: Up to 100 upcoming events specifically featuring user-preferred artists (Favorite, Like, Interested),
- *         ordered chronologically by local_start_date.
- * Tier 2: Up to 150 general upcoming events in the catalog, ordered chronologically by local_start_date.
+ * Dedicated bounds for candidate event retrieval:
+ *
+ * Tier 1 (Anti-Starvation Multi-Tier Quotas):
+ * - Tier 1A: Up to 100 upcoming events specifically featuring user's Favorite artists.
+ * - Tier 1B: Up to 75 upcoming events featuring Liked artists.
+ * - Tier 1C: Up to 50 upcoming events featuring Interested artists.
+ * Tier 2: Up to 150 general upcoming events in the catalog.
  *
  * Coverage Guarantee:
- * - Preferred artist concerts are guaranteed to be considered even when occurring months out beyond
- *   the general catalog first-page boundary.
- * - If a user has >100 upcoming preferred-artist shows, the earliest 100 are prioritized.
+ * - Dedicated quota partitioning guarantees that favorite artist shows are NEVER starved or
+ *   crowded out by numerous lower-tier (Interested/Liked) shows.
+ * - Pushes status: 'scheduled' to SQL to eliminate scan-limit false negatives caused by cancelled shows.
  * - Prevents unbounded full-database reads and eliminates N+1 queries by batch-querying canonical IDs.
  */
-export const PREFERRED_ARTIST_CANDIDATE_LIMIT = 100;
+export const FAVORITE_ARTIST_CANDIDATE_LIMIT = 100;
+export const LIKE_ARTIST_CANDIDATE_LIMIT = 75;
+export const INTERESTED_ARTIST_CANDIDATE_LIMIT = 50;
 export const GENERAL_CATALOG_CANDIDATE_LIMIT = 150;
+
+// Backwards compatibility alias
+export const PREFERRED_ARTIST_CANDIDATE_LIMIT = FAVORITE_ARTIST_CANDIDATE_LIMIT;
 
 /**
  * Calculates a conservative candidate retrieval lower bound date string (YYYY-MM-DD).
@@ -144,13 +169,13 @@ export const MAX_CANDIDATE_SCAN_PAGES = 5;
  *
  * Invariants:
  * 1. Begins query from `queryFromDate` (24h lookback to protect same-day shows in western timezones).
- * 2. Only genuinely eligible scheduled events (`!timing.isPast && ev.status === 'scheduled'`) count
- *    toward the `targetEligibleLimit` (100 preferred, 150 general). Cancelled, postponed, and past
- *    events do not prevent subsequent valid concerts from being retrieved.
- * 3. Ineligible, past, cancelled, and postponed events within the scan window are preserved in the returned
+ * 2. Pushes `status: filters.status ?? 'scheduled'` into database queries to eliminate scan-limit false negatives.
+ * 3. Only genuinely eligible scheduled events (`!timing.isPast && ev.status === 'scheduled'`) count
+ *    toward the `targetEligibleLimit`. Cancelled, postponed, and past events do not prevent subsequent valid concerts.
+ * 4. Ineligible, past, cancelled, and postponed events within the scan window are preserved in the returned
  *    candidate collection so that `totalCandidateCount`, `suppressed`, and `ineligibleCount` diagnostics
  *    remain truthful and candidate-aware.
- * 4. Limits total pages scanned to MAX_CANDIDATE_SCAN_PAGES (5) to guarantee bounded retrieval
+ * 5. Limits total pages scanned to MAX_CANDIDATE_SCAN_PAGES (5) to guarantee bounded retrieval
  *    and prevent unbounded table scans.
  */
 export async function retrieveCandidatesWithLookback(
@@ -189,9 +214,6 @@ export async function retrieveCandidatesWithLookback(
           referenceInstant,
         });
 
-        // Only genuinely eligible scheduled events consume candidate capacity limits.
-        // Cancelled and postponed events are suppressed by rankEvents() and must not
-        // prevent subsequent valid concerts from being retrieved.
         const isGenuinelyEligible = !timing.isPast && ev.status === 'scheduled';
 
         if (isGenuinelyEligible) {
@@ -221,12 +243,51 @@ export async function retrieveCandidatesWithLookback(
 }
 
 /**
+ * Helper to resolve artist IDs from preferences, resolving unmapped Spotify external IDs authoritatively.
+ */
+async function resolveArtistIdsForPreferences(
+  prefs: Array<{
+    artistId?: string | null;
+    spotifyArtistId?: string | null;
+  }>,
+  catalogRepo: ICatalogRepository,
+): Promise<string[]> {
+  const artistIdSet = new Set<string>();
+  const unmappedSpotifyIds: string[] = [];
+
+  for (const p of prefs) {
+    if (p.artistId) {
+      artistIdSet.add(p.artistId);
+    } else if (p.spotifyArtistId) {
+      unmappedSpotifyIds.push(p.spotifyArtistId);
+    }
+  }
+
+  if (
+    unmappedSpotifyIds.length > 0 &&
+    typeof catalogRepo.findArtistIdsByExternalIds === 'function'
+  ) {
+    const spotifyMap = await catalogRepo.findArtistIdsByExternalIds(
+      'spotify',
+      unmappedSpotifyIds,
+    );
+    for (const canonicalId of spotifyMap.values()) {
+      artistIdSet.add(canonicalId);
+    }
+  }
+
+  return Array.from(artistIdSet);
+}
+
+/**
  * Retrieves personalized Discover recommendations for an authenticated user.
  * Invariants:
  * 1. Scoped strictly to the verified authenticated user ID (never trusts unverified client input).
- * 2. Fetches user profile, explicit artist preferences, and two-tier candidate events via batch queries.
- * 3. Uses PR #11 pure deterministic scoring engine (rankEvents) — zero client formula duplication.
- * 4. Never falls back to synthetic fixtures on error or empty results.
+ * 2. Fetches user profile, explicit artist preferences, and multi-tier candidate events via batch queries.
+ * 3. Uses PR #11 pure deterministic scoring engine (rankEvents) with mode-specific weights.
+ * 4. Dedicates independent candidate quotas for Favorite, Like, and Interested tiers (anti-starvation).
+ * 5. Pushes search, city, and status filters down to database queries.
+ * 6. Never falls back to synthetic fixtures on error or empty results.
  */
 export async function getPersonalizedDiscoverData(
   options: PersonalizedDiscoverOptions,
@@ -237,7 +298,10 @@ export async function getPersonalizedDiscoverData(
     profileRepo: injectedProfileRepo,
     prefRepo: injectedPrefRepo,
     catalogRepo: injectedCatalogRepo,
+    spotifyRepo: injectedSpotifyRepo,
     presetOverride,
+    mode,
+    discoveryMode,
     referenceDate,
     referenceInstant,
     city,
@@ -261,14 +325,24 @@ export async function getPersonalizedDiscoverData(
     injectedPrefRepo ?? new SupabaseUserPreferenceRepository(effectiveClient!);
   const catalogRepo =
     injectedCatalogRepo ?? new SupabaseCatalogRepository(effectiveClient);
+  const spotifyRepo =
+    injectedSpotifyRepo ??
+    (effectiveClient
+      ? new SupabaseSpotifyConnectionRepository(effectiveClient)
+      : undefined);
 
-  // 1. Fetch user profile and explicit artist preferences in parallel
-  const [userProfile, userPreferences] = await Promise.all([
+  // 1. Fetch user profile, explicit artist preferences, and Spotify connection in parallel
+  const [userProfile, userPreferences, spotifyConnection] = await Promise.all([
     profileRepo.getProfile(userId),
     prefRepo.getPreferences(userId),
+    spotifyRepo
+      ? spotifyRepo.getConnection(userId).catch(() => null)
+      : Promise.resolve(null),
   ]);
 
-  // 2. Resolve active scoring preset
+  const isSpotifyConnected = spotifyConnection?.status === 'connected';
+
+  // 2. Resolve active scoring preset and discovery mode
   let activePreset: ScoringPreset = DEFAULT_PRESET;
   if (presetOverride !== undefined && presetOverride !== null) {
     if (isValidScoringPreset(presetOverride)) {
@@ -282,7 +356,12 @@ export async function getPersonalizedDiscoverData(
     activePreset = userProfile.recommendationPreset;
   }
 
+  const activeMode: DiscoveryMode = normalizeDiscoveryMode(
+    mode ?? discoveryMode,
+  );
   const activeWeights = getPresetWeights(activePreset);
+  const modeWeights = getModeScoringWeights(activeMode, activeWeights);
+
   const hasPreferences = userPreferences.length > 0;
   const isLocationConfigured = Boolean(
     userProfile?.homeLatApprox !== null &&
@@ -291,78 +370,95 @@ export async function getPersonalizedDiscoverData(
     userProfile?.homeLngApprox !== undefined,
   );
 
-  // 3. Two-Tier Candidate Retrieval Strategy
-  // Determine preferred artist IDs (Favorite, Like, Interested) to ensure favorite shows are never missed.
-  const preferredPrefs = userPreferences.filter(
-    (p) =>
-      p.preferenceLevel === 'favorite' ||
-      p.preferenceLevel === 'like' ||
-      p.preferenceLevel === 'interested',
+  // 3. Multi-Tier Anti-Starvation Retrieval Strategy
+  // Partition preferences by tier so Favorite artists receive their own dedicated retrieval budget
+  const favoritePrefs = userPreferences.filter(
+    (p) => p.preferenceLevel === 'favorite',
+  );
+  const likePrefs = userPreferences.filter((p) => p.preferenceLevel === 'like');
+  const interestedPrefs = userPreferences.filter(
+    (p) => p.preferenceLevel === 'interested',
   );
 
-  const preferredArtistIdSet = new Set<string>();
-  const unmappedSpotifyIds: string[] = [];
+  const [favoriteArtistIds, likeArtistIds, interestedArtistIds] =
+    await Promise.all([
+      resolveArtistIdsForPreferences(favoritePrefs, catalogRepo),
+      resolveArtistIdsForPreferences(likePrefs, catalogRepo),
+      resolveArtistIdsForPreferences(interestedPrefs, catalogRepo),
+    ]);
 
-  for (const p of preferredPrefs) {
-    if (p.artistId) {
-      preferredArtistIdSet.add(p.artistId);
-    } else if (p.spotifyArtistId) {
-      unmappedSpotifyIds.push(p.spotifyArtistId);
-    }
-  }
-
-  // Authoritative external-ID mapping: resolve unlinked Spotify preferred artists to canonical artist IDs
-  if (
-    unmappedSpotifyIds.length > 0 &&
-    typeof catalogRepo.findArtistIdsByExternalIds === 'function'
-  ) {
-    const spotifyMap = await catalogRepo.findArtistIdsByExternalIds(
-      'spotify',
-      unmappedSpotifyIds,
-    );
-    for (const canonicalId of spotifyMap.values()) {
-      preferredArtistIdSet.add(canonicalId);
-    }
-  }
-
-  const preferredArtistIds = Array.from(preferredArtistIdSet);
-
-  // Invariant: Do not use strict UTC calendar date for local_start_date queries.
-  // Use conservative retrieval lower bound (24 hours prior) to include today's shows across western timezones.
-  const queryFromDate = calculateCandidateRetrievalLowerBound(
+  // Determine date bounds
+  let queryFromDate = calculateCandidateRetrievalLowerBound(
     referenceDate,
     referenceInstant,
   );
+  let queryToDate: string | undefined;
+
+  if (activeMode === 'this_weekend') {
+    const weekendWindow = calculateWeekendWindow(
+      referenceDate,
+      referenceInstant,
+    );
+    // Use the earlier of the conservative lower bound and weekend start date
+    if (weekendWindow.startDate < queryFromDate) {
+      queryFromDate = weekendWindow.startDate;
+    }
+    queryToDate = weekendWindow.endDate;
+  }
+
+  const commonFilters: EventListFilters = {
+    fromDate: queryFromDate,
+    toDate: queryToDate,
+    city: city || undefined,
+    region: region || undefined,
+  };
 
   const candidateQueries: Promise<CanonicalEventSummary[]>[] = [];
 
-  // Tier 1: Targeted candidate query for user's preferred artists (chronologically ordered)
-  if (preferredArtistIds.length > 0) {
+  // Tier 1A: Favorite artists with dedicated budget (anti-starvation guarantee)
+  if (favoriteArtistIds.length > 0) {
     candidateQueries.push(
       retrieveCandidatesWithLookback(
         catalogRepo,
-        {
-          artistIds: preferredArtistIds,
-          fromDate: queryFromDate,
-          city: city || undefined,
-          region: region || undefined,
-        },
-        PREFERRED_ARTIST_CANDIDATE_LIMIT,
+        { ...commonFilters, artistIds: favoriteArtistIds },
+        FAVORITE_ARTIST_CANDIDATE_LIMIT,
         referenceDate,
         referenceInstant,
       ),
     );
   }
 
-  // Tier 2: General upcoming catalog candidates (discovery pool, chronologically ordered)
+  // Tier 1B: Liked artists with dedicated budget
+  if (likeArtistIds.length > 0) {
+    candidateQueries.push(
+      retrieveCandidatesWithLookback(
+        catalogRepo,
+        { ...commonFilters, artistIds: likeArtistIds },
+        LIKE_ARTIST_CANDIDATE_LIMIT,
+        referenceDate,
+        referenceInstant,
+      ),
+    );
+  }
+
+  // Tier 1C: Interested artists with dedicated budget
+  if (interestedArtistIds.length > 0) {
+    candidateQueries.push(
+      retrieveCandidatesWithLookback(
+        catalogRepo,
+        { ...commonFilters, artistIds: interestedArtistIds },
+        INTERESTED_ARTIST_CANDIDATE_LIMIT,
+        referenceDate,
+        referenceInstant,
+      ),
+    );
+  }
+
+  // Tier 2: General upcoming catalog candidates (discovery pool)
   candidateQueries.push(
     retrieveCandidatesWithLookback(
       catalogRepo,
-      {
-        fromDate: queryFromDate,
-        city: city || undefined,
-        region: region || undefined,
-      },
+      commonFilters,
       GENERAL_CATALOG_CANDIDATE_LIMIT,
       referenceDate,
       referenceInstant,
@@ -381,10 +477,22 @@ export async function getPersonalizedDiscoverData(
     }
   }
 
-  const candidateCountBeforeSearch = candidateMap.size;
+  const candidateCountBeforeFiltering = candidateMap.size;
   let candidates = Array.from(candidateMap.values());
 
-  // Optional text search filter (artist name or event title)
+  // Mode eligibility filtering
+  if (activeMode !== 'all') {
+    candidates = candidates.filter((ev) =>
+      isEventEligibleForMode(ev, activeMode, {
+        userProfile,
+        artistPreferences: userPreferences,
+        referenceDate,
+        referenceInstant,
+      }),
+    );
+  }
+
+  // Additional in-memory search safety check (in case SQL search was broad or memory repo is used)
   if (searchQuery && searchQuery.trim().length > 0) {
     const q = searchQuery.trim().toLowerCase();
     candidates = candidates.filter((event) => {
@@ -402,17 +510,19 @@ export async function getPersonalizedDiscoverData(
       exploratory: [],
       suppressed: [],
       ineligibleCount: 0,
-      totalCandidateCount: candidateCountBeforeSearch,
+      totalCandidateCount: candidateCountBeforeFiltering,
       userProfile,
       activePreset,
-      activeWeights,
+      activeWeights: modeWeights,
+      activeMode,
       hasPreferences,
+      isSpotifyConnected,
       isLocationConfigured,
-      isEmptyCatalog: candidateCountBeforeSearch === 0,
+      isEmptyCatalog: candidateCountBeforeFiltering === 0,
     };
   }
 
-  // 4. Score and rank candidates using pure deterministic PR #11 engine
+  // 4. Score and rank candidates using pure deterministic PR #11 engine with mode-specific weights
   const scoringContext: ScoringContext = {
     userProfile: userProfile || {
       id: userId,
@@ -431,6 +541,7 @@ export async function getPersonalizedDiscoverData(
     referenceDate,
     referenceInstant,
     presetOverride: activePreset,
+    weightsOverride: modeWeights,
   };
 
   const rankResult: RecommendationResult = rankEvents(
@@ -443,11 +554,13 @@ export async function getPersonalizedDiscoverData(
     exploratory: rankResult.exploratory,
     suppressed: rankResult.suppressed,
     ineligibleCount: rankResult.ineligibleCount,
-    totalCandidateCount: candidateCountBeforeSearch,
+    totalCandidateCount: candidateCountBeforeFiltering,
     userProfile,
     activePreset,
-    activeWeights,
+    activeWeights: modeWeights,
+    activeMode,
     hasPreferences,
+    isSpotifyConnected,
     isLocationConfigured,
     isEmptyCatalog: false,
   };
@@ -466,6 +579,8 @@ export async function getPublicDiscoverData(
     city,
     region,
     searchQuery,
+    mode,
+    discoveryMode,
     limit = 50,
     referenceDate,
     referenceInstant,
@@ -475,25 +590,42 @@ export async function getPublicDiscoverData(
     client ?? (!injectedCatalogRepo ? await createClient() : undefined);
   const catalogRepo =
     injectedCatalogRepo ?? new SupabaseCatalogRepository(effectiveClient);
-  const queryFromDate = calculateCandidateRetrievalLowerBound(
+
+  const activeMode: DiscoveryMode = normalizeDiscoveryMode(
+    mode ?? discoveryMode,
+  );
+
+  let queryFromDate = calculateCandidateRetrievalLowerBound(
     referenceDate,
     referenceInstant,
   );
+  let queryToDate: string | undefined;
+
+  if (activeMode === 'this_weekend') {
+    const weekendWindow = calculateWeekendWindow(
+      referenceDate,
+      referenceInstant,
+    );
+    if (weekendWindow.startDate < queryFromDate) {
+      queryFromDate = weekendWindow.startDate;
+    }
+    queryToDate = weekendWindow.endDate;
+  }
 
   const candidates = await retrieveCandidatesWithLookback(
     catalogRepo,
     {
       fromDate: queryFromDate,
+      toDate: queryToDate,
       city: city || undefined,
       region: region || undefined,
     },
-    limit,
+    limit * 2, // scan enough to satisfy mode eligibility filtering
     referenceDate,
     referenceInstant,
   );
 
-  // Filter displayable scheduled concerts in public discover using timezone-aware timing eligibility
-  // and status check (exclude past, cancelled, and postponed events).
+  // Filter displayable scheduled concerts using timezone-aware timing eligibility and mode filters
   let events = candidates.filter((ev) => {
     if (ev.status !== 'scheduled') {
       return false;
@@ -509,6 +641,15 @@ export async function getPublicDiscoverData(
     return !timing.isPast;
   });
 
+  if (activeMode !== 'all') {
+    events = events.filter((ev) =>
+      isEventEligibleForMode(ev, activeMode, {
+        referenceDate,
+        referenceInstant,
+      }),
+    );
+  }
+
   if (searchQuery && searchQuery.trim().length > 0) {
     const q = searchQuery.trim().toLowerCase();
     events = events.filter((event) => {
@@ -521,13 +662,13 @@ export async function getPublicDiscoverData(
   }
 
   // Return at most the requested number of displayable scheduled events
-  events = events.slice(0, limit);
-
+  const returnedEvents = events.slice(0, limit);
   const candidateCountBeforeSearch = candidates.length;
 
   return {
-    events,
+    events: returnedEvents,
     isEmptyCatalog: candidateCountBeforeSearch === 0,
-    totalCount: events.length,
+    totalCount: returnedEvents.length,
+    activeMode,
   };
 }

@@ -1,9 +1,24 @@
 'use client';
 
-import React, { useMemo, useState } from 'react';
+import React, {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useTransition,
+} from 'react';
 import Link from 'next/link';
 import type { PublicDiscoverResult } from '@/lib/recommendation/service';
+import type { DiscoveryMode } from '@/lib/recommendation/types';
+import {
+  DISCOVERY_MODES,
+  DISCOVERY_MODE_CONFIGS,
+} from '@/lib/recommendation/modes';
 import { EventCard } from '@/components/catalog/EventCard';
+import {
+  getCatalogCitiesAction,
+  getPublicDiscoverAction,
+} from '@/app/discover/actions';
 
 export interface GuestDiscoverContainerProps {
   initialData: PublicDiscoverResult;
@@ -14,21 +29,97 @@ export function GuestDiscoverContainer({
   initialData,
   showScoringInspector = false,
 }: GuestDiscoverContainerProps) {
+  const [isPending, startTransition] = useTransition();
+  const requestIdRef = useRef(0);
+
+  const [activeMode, setActiveMode] = useState<DiscoveryMode>(
+    initialData.activeMode ?? 'all',
+  );
+  const [events, setEvents] = useState(initialData.events);
+  const [isEmptyCatalog, setIsEmptyCatalog] = useState(
+    initialData.isEmptyCatalog,
+  );
+  const [, setTotalCount] = useState(initialData.totalCount);
+
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCity, setSelectedCity] = useState('');
+  const [catalogCities, setCatalogCities] = useState<string[]>([]);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  // Extract unique cities from events
+  // Fetch catalog cities on mount
+  useEffect(() => {
+    getCatalogCitiesAction().then((res) => {
+      if (res.success && res.data && res.data.length > 0) {
+        setCatalogCities(res.data);
+      }
+    });
+  }, []);
+
+  // Extract unique cities from events or server list
   const availableCities = useMemo(() => {
+    if (catalogCities.length > 0) return catalogCities;
     const citySet = new Set<string>();
-    for (const evt of initialData.events) {
+    for (const evt of events) {
       if (evt.city?.trim()) citySet.add(evt.city.trim());
     }
     return Array.from(citySet).sort();
-  }, [initialData.events]);
+  }, [catalogCities, events]);
 
-  // Client-side filtering
+  // Central refresh helper for public discover
+  const refreshPublicEvents = (overrides?: {
+    mode?: DiscoveryMode;
+    search?: string;
+    city?: string;
+  }) => {
+    const targetMode = overrides?.mode ?? activeMode;
+    const targetSearch =
+      overrides?.search !== undefined ? overrides.search : searchQuery;
+    const targetCity =
+      overrides?.city !== undefined ? overrides.city : selectedCity;
+
+    const reqId = ++requestIdRef.current;
+
+    startTransition(async () => {
+      const res = await getPublicDiscoverAction({
+        mode: targetMode,
+        search: targetSearch || undefined,
+        city: targetCity || undefined,
+      });
+
+      if (reqId !== requestIdRef.current) return;
+
+      if (res.success && res.data) {
+        setEvents(res.data.events);
+        setIsEmptyCatalog(res.data.isEmptyCatalog);
+        setTotalCount(res.data.totalCount);
+      } else {
+        setErrorMessage(
+          res.error || 'Failed to refresh events. Showing previous results.',
+        );
+      }
+    });
+  };
+
+  const handleModeChange = (newMode: DiscoveryMode) => {
+    if (newMode === activeMode || isPending) return;
+    setActiveMode(newMode);
+    setErrorMessage(null);
+    refreshPublicEvents({ mode: newMode });
+  };
+
+  const handleSearchChange = (value: string) => {
+    setSearchQuery(value);
+    refreshPublicEvents({ search: value });
+  };
+
+  const handleCityChange = (city: string) => {
+    setSelectedCity(city);
+    refreshPublicEvents({ city });
+  };
+
+  // Client-side filtering over loaded events for instant feedback
   const filteredEvents = useMemo(() => {
-    return initialData.events.filter((evt) => {
+    return events.filter((evt) => {
       if (
         selectedCity &&
         evt.city?.toLowerCase() !== selectedCity.toLowerCase()
@@ -47,7 +138,7 @@ export function GuestDiscoverContainer({
       }
       return true;
     });
-  }, [initialData.events, selectedCity, searchQuery]);
+  }, [events, selectedCity, searchQuery]);
 
   return (
     <div className="space-y-8">
@@ -89,6 +180,69 @@ export function GuestDiscoverContainer({
         </div>
       </header>
 
+      {/* Transient Error Banner */}
+      {errorMessage && (
+        <div
+          role="alert"
+          data-testid="guest-error-banner"
+          className="flex items-center justify-between rounded-xl border border-red-800/80 bg-red-950/40 p-4 text-sm text-red-200"
+        >
+          <div className="flex items-center gap-2">
+            <span>⚠️</span>
+            <span>{errorMessage}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setErrorMessage(null)}
+            className="text-xs font-semibold text-red-300 hover:text-white"
+            aria-label="Dismiss error"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
+
+      {/* Discovery Mode Switcher Tabs */}
+      <section aria-label="Discovery Modes" className="space-y-3">
+        <div
+          role="tablist"
+          aria-label="Discovery Modes"
+          className="flex flex-wrap items-center gap-2"
+        >
+          {DISCOVERY_MODES.map((mode) => {
+            const isActive = activeMode === mode.id;
+            return (
+              <button
+                key={mode.id}
+                role="tab"
+                type="button"
+                data-testid={`mode-tab-${mode.id}`}
+                aria-selected={isActive}
+                data-active={isActive ? 'true' : 'false'}
+                onClick={() => handleModeChange(mode.id)}
+                disabled={isPending}
+                className={`inline-flex items-center gap-2 rounded-xl border px-4 py-2.5 text-xs font-semibold transition ${
+                  isActive
+                    ? 'border-indigo-500 bg-indigo-950/70 text-white shadow-sm'
+                    : 'border-zinc-800 bg-zinc-900/60 text-zinc-300 hover:border-zinc-700 hover:bg-zinc-800 hover:text-white'
+                }`}
+              >
+                <span>{mode.badge}</span>
+                <span>{mode.label}</span>
+              </button>
+            );
+          })}
+        </div>
+        <div className="flex items-center justify-between text-xs text-zinc-400">
+          <p>
+            <span className="font-semibold text-zinc-300">
+              {DISCOVERY_MODE_CONFIGS[activeMode].tagline}:
+            </span>{' '}
+            {DISCOVERY_MODE_CONFIGS[activeMode].description}
+          </p>
+        </div>
+      </section>
+
       {/* "Make These Recommendations Yours" Callout Banner */}
       <section
         data-testid="guest-personalization-banner"
@@ -128,7 +282,7 @@ export function GuestDiscoverContainer({
               type="text"
               data-testid="search-input"
               value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
+              onChange={(e) => handleSearchChange(e.target.value)}
               placeholder="Filter by artist name, venue, or title..."
               className="focus:outline-hidden w-full rounded-lg border border-zinc-700 bg-zinc-950/80 px-3.5 py-2 text-xs text-zinc-100 placeholder-zinc-500 focus:border-indigo-500"
             />
@@ -138,7 +292,7 @@ export function GuestDiscoverContainer({
             <select
               data-testid="city-filter"
               value={selectedCity}
-              onChange={(e) => setSelectedCity(e.target.value)}
+              onChange={(e) => handleCityChange(e.target.value)}
               className="focus:outline-hidden w-full rounded-lg border border-zinc-700 bg-zinc-950/80 px-3 py-2 text-xs text-zinc-100 focus:border-indigo-500"
             >
               <option value="">All Cities</option>
@@ -153,7 +307,7 @@ export function GuestDiscoverContainer({
       </section>
 
       {/* Empty States */}
-      {initialData.isEmptyCatalog ? (
+      {isEmptyCatalog ? (
         <div
           data-testid="empty-catalog-banner"
           className="rounded-2xl border border-zinc-800 bg-zinc-900/40 p-12 text-center"
@@ -166,18 +320,30 @@ export function GuestDiscoverContainer({
             into the catalog.
           </p>
         </div>
-      ) : initialData.events.length === 0 ? (
+      ) : events.length === 0 ? (
         <div
           data-testid="no-upcoming-events-banner"
           className="rounded-2xl border border-zinc-800 bg-zinc-900/40 p-12 text-center"
         >
           <h2 className="text-lg font-semibold text-zinc-200">
-            No upcoming concerts currently scheduled
+            {activeMode !== 'all'
+              ? DISCOVERY_MODE_CONFIGS[activeMode].emptyStateHeading
+              : 'No upcoming concerts currently scheduled'}
           </h2>
           <p className="mt-2 text-sm text-zinc-400">
-            There are no upcoming live concerts currently scheduled in the
-            catalog. Check back soon as new tour dates and shows are announced.
+            {activeMode !== 'all'
+              ? DISCOVERY_MODE_CONFIGS[activeMode].emptyStateDescription
+              : 'There are no upcoming live concerts currently scheduled in the catalog. Check back soon as new tour dates and shows are announced.'}
           </p>
+          {activeMode !== 'all' && (
+            <button
+              type="button"
+              onClick={() => handleModeChange('all')}
+              className="mt-4 rounded-lg bg-indigo-600 px-4 py-2 text-xs font-semibold text-white transition hover:bg-indigo-500"
+            >
+              Switch to All Shows
+            </button>
+          )}
         </div>
       ) : filteredEvents.length === 0 ? (
         <div
@@ -196,6 +362,7 @@ export function GuestDiscoverContainer({
               onClick={() => {
                 setSearchQuery('');
                 setSelectedCity('');
+                refreshPublicEvents({ search: '', city: '' });
               }}
               className="mt-4 rounded-lg bg-zinc-800 px-4 py-2 text-xs font-semibold text-zinc-200 hover:bg-zinc-700 hover:text-white"
             >

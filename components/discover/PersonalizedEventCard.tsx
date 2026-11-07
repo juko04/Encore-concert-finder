@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import type { ScoredEvent } from '@/lib/recommendation/types';
-import { formatEventPriceDisplay } from '@/components/recommendation/ScoringInspector';
+import { formatEventPriceDisplay } from '@/lib/utils/price-formatting';
 import { formatSourceBadgeName } from '@/components/catalog/EventCard';
 import { isValidHttpUrl } from '@/lib/utils/url';
 
