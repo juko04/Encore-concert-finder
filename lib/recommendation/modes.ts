@@ -84,62 +84,162 @@ export function normalizeDiscoveryMode(mode?: unknown): DiscoveryMode {
   return 'all';
 }
 
+export interface ZonedTimeParts {
+  year: number;
+  month: number;
+  day: number;
+  hour: number;
+  minute: number;
+  second: number;
+  weekday: number; // 0 = Sunday, 1 = Monday, ..., 6 = Saturday
+  dateString: string; // YYYY-MM-DD
+}
+
+/**
+ * Extracts date and time components in an explicit IANA timezone.
+ * Uses Intl.DateTimeFormat to prevent UTC skew and correctly handle DST transitions.
+ */
+export function getZonedTimeParts(
+  date: Date,
+  timeZone = 'America/Denver',
+): ZonedTimeParts {
+  const safeTz = timeZone || 'America/Denver';
+  const dtf = new Intl.DateTimeFormat('en-US', {
+    timeZone: safeTz,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+    weekday: 'short',
+  });
+  const parts = dtf.formatToParts(date);
+  const map: Record<string, string> = {};
+  for (const p of parts) {
+    map[p.type] = p.value;
+  }
+  const weekdayMap: Record<string, number> = {
+    Sun: 0,
+    Mon: 1,
+    Tue: 2,
+    Wed: 3,
+    Thu: 4,
+    Fri: 5,
+    Sat: 6,
+  };
+  return {
+    year: Number(map.year),
+    month: Number(map.month),
+    day: Number(map.day),
+    hour: Number(map.hour) % 24,
+    minute: Number(map.minute),
+    second: Number(map.second),
+    weekday: weekdayMap[map.weekday] ?? 0,
+    dateString: `${map.year}-${map.month}-${map.day}`,
+  };
+}
+
+function addDaysToZonedDate(
+  year: number,
+  month: number,
+  day: number,
+  days: number,
+): string {
+  const d = new Date(Date.UTC(year, month - 1, day + days));
+  return d.toISOString().split('T')[0];
+}
+
+export interface WeekendWindowOptions {
+  referenceDate?: string;
+  referenceInstant?: Date | string;
+  timeZone?: string;
+}
+
 /**
  * Calculates the calendar date window for "This Weekend" given a reference date or instant.
  *
- * Friday, Saturday, and Sunday constitute the weekend.
- * If today is Mon-Thu, the window is the upcoming Friday through Sunday.
- * If today is Friday, today through Sunday.
- * If today is Saturday, today through Sunday.
- * If today is Sunday, today (Sunday).
+ * Invariants:
+ * 1. Computes local time and weekday using the target IANA timezone (no naive UTC slicing).
+ * 2. Friday evening (>= 17:00 local time) through Sunday 23:59:59.999 constitutes the weekend.
+ * 3. If today is Mon-Thu in local time, window is the upcoming Friday through Sunday.
+ * 4. If today is Friday in local time, window is today through Sunday.
+ * 5. If today is Saturday in local time, window includes the active weekend (Friday through Sunday).
+ * 6. If today is Sunday in local time, window includes the active weekend (Friday through Sunday).
+ * 7. Accommodates daylight-saving transitions (spring forward, fall back) cleanly via IANA calculations.
  */
 export function calculateWeekendWindow(
-  referenceDate?: string,
-  referenceInstant?: Date | string,
+  optionsOrReferenceDate?: WeekendWindowOptions | string,
+  legacyInstant?: Date | string,
 ): { startDate: string; endDate: string } {
-  let now: Date;
+  let referenceDate: string | undefined;
+  let referenceInstant: Date | string | undefined;
+  let timeZone = 'America/Denver';
+
+  if (
+    typeof optionsOrReferenceDate === 'object' &&
+    optionsOrReferenceDate !== null
+  ) {
+    referenceDate = optionsOrReferenceDate.referenceDate;
+    referenceInstant = optionsOrReferenceDate.referenceInstant;
+    if (optionsOrReferenceDate.timeZone) {
+      timeZone = optionsOrReferenceDate.timeZone;
+    }
+  } else {
+    referenceDate = optionsOrReferenceDate;
+    referenceInstant = legacyInstant;
+  }
+
+  let zoned: ZonedTimeParts;
+
   if (referenceInstant) {
-    now =
+    const d =
       typeof referenceInstant === 'string'
         ? new Date(referenceInstant)
         : referenceInstant;
+    zoned = getZonedTimeParts(d, timeZone);
   } else if (referenceDate) {
     const parts = referenceDate.split('-').map(Number);
-    now = new Date(Date.UTC(parts[0], parts[1] - 1, parts[2], 12, 0, 0));
+    // Construct local noon date for the given calendar date to avoid midnight boundary shifts
+    const d = new Date(Date.UTC(parts[0], parts[1] - 1, parts[2], 18, 0, 0));
+    zoned = getZonedTimeParts(d, timeZone);
+    // Explicitly enforce the provided reference date components
+    zoned.year = parts[0];
+    zoned.month = parts[1];
+    zoned.day = parts[2];
+    zoned.dateString = referenceDate;
   } else {
-    now = new Date();
+    zoned = getZonedTimeParts(new Date(), timeZone);
   }
 
   // Day of week: 0 = Sunday, 1 = Monday, ..., 5 = Friday, 6 = Saturday
-  const day = now.getUTCDay();
+  const { weekday, year, month, day } = zoned;
 
-  let daysUntilStart: number;
-  let daysUntilEnd: number;
+  let daysToFriday: number;
+  let daysToSunday: number;
 
-  if (day === 0) {
-    // Sunday: window is today
-    daysUntilStart = 0;
-    daysUntilEnd = 0;
-  } else if (day === 5) {
+  if (weekday === 0) {
+    // Sunday: active weekend spans from Friday (-2) to today (0)
+    daysToFriday = -2;
+    daysToSunday = 0;
+  } else if (weekday === 6) {
+    // Saturday: active weekend spans from Friday (-1) to tomorrow (+1)
+    daysToFriday = -1;
+    daysToSunday = 1;
+  } else if (weekday === 5) {
     // Friday: today through Sunday (+2)
-    daysUntilStart = 0;
-    daysUntilEnd = 2;
-  } else if (day === 6) {
-    // Saturday: today through Sunday (+1)
-    daysUntilStart = 0;
-    daysUntilEnd = 1;
+    daysToFriday = 0;
+    daysToSunday = 2;
   } else {
-    // Monday (1) to Thursday (4): upcoming Friday (5 - day) to Sunday (7 - day)
-    daysUntilStart = 5 - day;
-    daysUntilEnd = 7 - day;
+    // Monday (1) to Thursday (4): upcoming Friday (5 - weekday) to Sunday (7 - weekday)
+    daysToFriday = 5 - weekday;
+    daysToSunday = 7 - weekday;
   }
 
-  const start = new Date(now.getTime() + daysUntilStart * 24 * 60 * 60 * 1000);
-  const end = new Date(now.getTime() + daysUntilEnd * 24 * 60 * 60 * 1000);
-
   return {
-    startDate: start.toISOString().split('T')[0],
-    endDate: end.toISOString().split('T')[0],
+    startDate: addDaysToZonedDate(year, month, day, daysToFriday),
+    endDate: addDaysToZonedDate(year, month, day, daysToSunday),
   };
 }
 
@@ -148,10 +248,20 @@ export interface ModeEligibilityContext {
   artistPreferences?: UserArtistPreference[];
   referenceDate?: string;
   referenceInstant?: Date | string;
+  timeZone?: string;
+  city?: string;
 }
 
 /**
  * Evaluates whether a candidate event qualifies for a specific discovery mode.
+ *
+ * Invariants:
+ * 1. This Weekend: Evaluated in event-local timezone. Friday shows must start at or after 17:00 local time.
+ * 2. Cheap & Nearby: Applies $35 price ceiling and 35-mile travel radius by default.
+ *    Unknown ticket price or unknown distance NEVER passes as proven qualifying.
+ * 3. Worth Planning For: Enforces a minimum 14-day advance planning horizon from reference date.
+ *    For authenticated users, prioritizes favorite/liked artists, festivals, or major concerts ($60+).
+ *    For guests, permits upcoming festivals or major concerts ($60+) 14+ days in advance.
  */
 export function isEventEligibleForMode(
   event: CanonicalEventSummary,
@@ -161,35 +271,60 @@ export function isEventEligibleForMode(
   if (mode === 'all') return true;
 
   if (mode === 'this_weekend') {
-    const window = calculateWeekendWindow(
-      context.referenceDate,
-      context.referenceInstant,
-    );
-    return (
-      event.localStartDate >= window.startDate &&
-      event.localStartDate <= window.endDate
-    );
+    const eventTz = event.timezone || context.timeZone || 'America/Denver';
+    const window = calculateWeekendWindow({
+      referenceDate: context.referenceDate,
+      referenceInstant: context.referenceInstant,
+      timeZone: eventTz,
+    });
+
+    if (
+      event.localStartDate < window.startDate ||
+      event.localStartDate > window.endDate
+    ) {
+      return false;
+    }
+
+    // Friday 5 PM (17:00) local cutoff:
+    // If show is on Friday, verify it starts at or after 17:00 in event-local timezone.
+    if (event.localStartDate === window.startDate) {
+      if (event.startsAt && event.startTimePrecision !== 'date_only') {
+        const parts = getZonedTimeParts(new Date(event.startsAt), eventTz);
+        if (parts.hour < 17) {
+          return false;
+        }
+      }
+    }
+
+    return true;
   }
 
   if (mode === 'cheap_and_nearby') {
-    // Budget check: maxNormalTicketPrice (default $60 for user, $40 for guest)
-    const budgetCeiling = context.userProfile?.maxNormalTicketPrice ?? 60;
+    // Budget check: maxNormalTicketPrice (default $35 per Phase 2 spec)
+    const budgetCeiling = context.userProfile?.maxNormalTicketPrice ?? 35;
+
+    // Price must be confirmed free or confirmed <= budgetCeiling.
+    // Unknown ticket price (null/undefined) CANNOT pass as proven affordable.
+    const isFree = event.eventKind === 'free_event';
+    const hasKnownPrice =
+      event.minPrice !== null && event.minPrice !== undefined;
     const isAffordable =
-      event.eventKind === 'free_event' ||
-      event.minPrice === null ||
-      event.minPrice === undefined ||
-      event.minPrice <= budgetCeiling;
+      isFree || (hasKnownPrice && event.minPrice! <= budgetCeiling);
 
     if (!isAffordable) return false;
 
-    // Distance check: within default travel radius (default 30 miles)
+    // Distance check: within preferred travel radius (default 35 miles per Phase 2 spec)
+    const radius = context.userProfile?.defaultRadiusMiles ?? 35;
+
     if (
       context.userProfile?.homeLatApprox != null &&
-      context.userProfile?.homeLngApprox != null &&
-      event.lat != null &&
-      event.lng != null
+      context.userProfile?.homeLngApprox != null
     ) {
-      const radius = context.userProfile.defaultRadiusMiles ?? 30;
+      // User has configured home coordinates:
+      // Unknown event distance (missing event lat/lng) CANNOT pass as proven nearby.
+      if (event.lat == null || event.lng == null) {
+        return false;
+      }
       const dist = calculateHaversineDistanceMiles(
         context.userProfile.homeLatApprox,
         context.userProfile.homeLngApprox,
@@ -197,30 +332,79 @@ export function isEventEligibleForMode(
         event.lng,
       );
       if (dist > radius) return false;
+    } else if (context.city) {
+      // User/guest has selected an active city filter: match city
+      if (event.city?.toLowerCase() !== context.city.toLowerCase()) {
+        return false;
+      }
+    } else {
+      // Guest or unanchored user with no location or city specified:
+      // Event must have valid city and coordinates
+      if (!event.city) return false;
     }
 
     return true;
   }
 
   if (mode === 'worth_planning_for') {
-    // Prioritizes favorite/liked artists, festivals, or multi-day shows
-    const hasFavoriteOrLikedArtist = event.artists?.some((a) => {
-      if (!context.artistPreferences) return false;
-      const pref = context.artistPreferences.find(
-        (p) =>
-          (a.id && p.artistId === a.id) ||
-          p.normalizedArtistName === a.name.trim().toLowerCase(),
-      );
-      return (
-        pref?.preferenceLevel === 'favorite' || pref?.preferenceLevel === 'like'
-      );
-    });
+    // Enforce 14-day minimum advance planning horizon from reference date
+    let refDateString = context.referenceDate;
+    if (!refDateString) {
+      const refInst = context.referenceInstant
+        ? typeof context.referenceInstant === 'string'
+          ? new Date(context.referenceInstant)
+          : context.referenceInstant
+        : new Date();
+      refDateString = getZonedTimeParts(
+        refInst,
+        event.timezone || 'America/Denver',
+      ).dateString;
+    }
+
+    const refDateMs = new Date(`${refDateString}T00:00:00Z`).getTime();
+    const eventDateMs = new Date(`${event.localStartDate}T00:00:00Z`).getTime();
+    const daysInAdvance = Math.round(
+      (eventDateMs - refDateMs) / (24 * 60 * 60 * 1000),
+    );
+
+    if (daysInAdvance < 14) {
+      return false;
+    }
 
     const isFestivalOrSpecial =
       event.eventKind === 'festival' ||
       Boolean(event.eventKind?.includes('festival'));
 
-    return Boolean(hasFavoriteOrLikedArtist || isFestivalOrSpecial);
+    const isMajorConcert =
+      (event.minPrice !== null &&
+        event.minPrice !== undefined &&
+        event.minPrice >= 60) ||
+      (event.maxPrice !== null &&
+        event.maxPrice !== undefined &&
+        event.maxPrice >= 75);
+
+    // Authenticated user with explicit artist preferences:
+    if (context.artistPreferences && context.artistPreferences.length > 0) {
+      const hasFavoriteOrLikedArtist = event.artists?.some((a) => {
+        const pref = context.artistPreferences!.find(
+          (p) =>
+            (a.id && p.artistId === a.id) ||
+            p.normalizedArtistName === a.name.trim().toLowerCase(),
+        );
+        return (
+          pref?.preferenceLevel === 'favorite' ||
+          pref?.preferenceLevel === 'like'
+        );
+      });
+
+      return Boolean(
+        hasFavoriteOrLikedArtist || isFestivalOrSpecial || isMajorConcert,
+      );
+    }
+
+    // Guest or user without explicit preferences:
+    // Allow major concerts ($60+) and festivals occurring 14+ days in advance
+    return Boolean(isFestivalOrSpecial || isMajorConcert);
   }
 
   return true;

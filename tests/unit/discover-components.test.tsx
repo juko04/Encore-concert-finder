@@ -553,13 +553,14 @@ describe('PersonalizedDiscoverContainer Component', () => {
     ).not.toBeInTheDocument();
 
     // Step 2: Switch preset to 'nearby' while search filter is active
-    // Critical: getPersonalizedRecommendationsAction MUST NOT be called with search: 'Chappell'
+    // FIX 1: getPersonalizedRecommendationsAction preserves active search filter
     const nearbyBtn = screen.getByTestId('preset-nearby');
     await act(async () => {
       fireEvent.click(nearbyBtn);
     });
     expect(mockGetPersonalizedRecommendationsAction).toHaveBeenCalledWith({
       preset: 'nearby',
+      search: 'Chappell',
     });
 
     // Step 3: Clear search filter
@@ -583,7 +584,7 @@ describe('PersonalizedDiscoverContainer Component', () => {
     ).not.toBeInTheDocument();
 
     // Step 5: Change budget while Denver filter is active
-    // Critical: server call MUST NOT pass city: 'Denver'
+    // FIX 1: getPersonalizedRecommendationsAction preserves active city filter
     const budgetSelector = screen.getByTestId('budget-selector');
     const budget80Btn = within(budgetSelector).getByText('$80');
     await act(async () => {
@@ -591,6 +592,7 @@ describe('PersonalizedDiscoverContainer Component', () => {
     });
     expect(mockGetPersonalizedRecommendationsAction).toHaveBeenCalledWith({
       preset: 'nearby',
+      city: 'Denver',
     });
 
     // Step 6: Select 'All Cities'
@@ -1020,7 +1022,7 @@ describe('GuestDiscoverContainer Component', () => {
     ).toBeInTheDocument();
 
     // Clear filters button restores the event
-    const clearBtn = screen.getByRole('button', { name: 'Clear Filters' });
+    const clearBtn = screen.getByRole('button', { name: /clear filters/i });
     fireEvent.click(clearBtn);
 
     expect(screen.getByText('Lord Huron Live')).toBeInTheDocument();

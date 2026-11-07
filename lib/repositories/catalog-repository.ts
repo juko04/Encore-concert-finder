@@ -500,21 +500,21 @@ export class SupabaseCatalogRepository implements ICatalogRepository {
         .from('venues')
         .select('id')
         .ilike('name', `%${escaped}%`)
-        .limit(30);
+        .limit(100);
       const matchedVenueIds = (venuesData || []).map((v) => v.id);
       if (matchedVenueIds.length > 0) {
         orClauses.push(`venue_id.in.(${matchedVenueIds.join(',')})`);
       }
 
-      // Query matching artists
-      const matchedArtists = await this.searchArtists(trimmedSearch, 30);
+      // Query matching artists without arbitrary low truncation (Issue 7)
+      const matchedArtists = await this.searchArtists(trimmedSearch, 100);
       if (matchedArtists.length > 0) {
         const matchedArtistIds = matchedArtists.map((a) => a.id);
         const { data: eaData } = await this.client
           .from('event_artists')
           .select('event_id')
           .in('artist_id', matchedArtistIds)
-          .limit(100);
+          .limit(1000);
         const matchedEventIds = (eaData || []).map((ea) => ea.event_id);
         if (matchedEventIds.length > 0) {
           orClauses.push(`id.in.(${matchedEventIds.join(',')})`);
@@ -730,25 +730,43 @@ export class SupabaseCatalogRepository implements ICatalogRepository {
   }
 
   async listCities(): Promise<string[]> {
-    const { data, error } = await this.client
-      .from('events')
-      .select('city, venues(city)')
-      .eq('status', 'scheduled');
-
-    if (error) {
-      throw new Error(`Failed to list cities: ${error.message}`);
-    }
-
     const citySet = new Set<string>();
-    for (const r of (data as unknown as Array<{
-      city?: string | null;
-      venues?: { city?: string | null } | null;
-    }>) || []) {
-      const c = r.venues?.city ?? r.city;
-      if (c && c.trim().length > 0) {
-        citySet.add(c.trim());
+    const pageSize = 1000;
+    let offset = 0;
+
+    // Paginate through scheduled events in batches to avoid PostgREST 1000-row limit truncation (Issue 6)
+    while (true) {
+      const { data, error } = await this.client
+        .from('events')
+        .select('city, venues(city)')
+        .eq('status', 'scheduled')
+        .range(offset, offset + pageSize - 1);
+
+      if (error) {
+        throw new Error(`Failed to list cities: ${error.message}`);
       }
+
+      if (!data || data.length === 0) {
+        break;
+      }
+
+      for (const r of (data as unknown as Array<{
+        city?: string | null;
+        venues?: { city?: string | null } | null;
+      }>) || []) {
+        const c = r.venues?.city ?? r.city;
+        if (c && c.trim().length > 0) {
+          citySet.add(c.trim());
+        }
+      }
+
+      if (data.length < pageSize) {
+        break;
+      }
+
+      offset += pageSize;
     }
+
     return Array.from(citySet).sort();
   }
 
@@ -772,7 +790,7 @@ export class SupabaseCatalogRepository implements ICatalogRepository {
       return [];
     }
 
-    const safeLimit = Math.min(Math.max(1, limit), 25);
+    const safeLimit = Math.min(Math.max(1, limit), 100);
     const escaped = escapeLikePattern(trimmed);
 
     const { data, error } = await this.client

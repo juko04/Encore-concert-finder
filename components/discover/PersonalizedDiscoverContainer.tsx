@@ -132,23 +132,41 @@ export function PersonalizedDiscoverContainer({
     return Array.from(citySet).sort();
   }, [catalogCities, recommendations, exploratory]);
 
+  const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
   // Central refresh helper
   const refreshRecommendations = (overrides?: {
     preset?: ScoringPreset;
     mode?: DiscoveryMode;
+    search?: string;
+    city?: string;
   }) => {
     const targetPreset = overrides?.preset ?? activePreset;
     const targetMode = overrides?.mode ?? activeMode;
+    const targetSearch =
+      overrides?.search !== undefined ? overrides.search : searchQuery;
+    const targetCity =
+      overrides?.city !== undefined ? overrides.city : selectedCity;
 
     const reqId = ++requestIdRef.current;
 
     startTransition(async () => {
-      // Invariant: Do not pass transient search/city filters to server so full candidate pool remains intact.
-      const payload: { preset?: ScoringPreset; mode?: DiscoveryMode } = {
+      const payload: {
+        preset?: ScoringPreset;
+        mode?: DiscoveryMode;
+        search?: string;
+        city?: string;
+      } = {
         preset: targetPreset,
       };
       if (targetMode && targetMode !== 'all') {
         payload.mode = targetMode;
+      }
+      if (targetSearch && targetSearch.trim().length > 0) {
+        payload.search = targetSearch.trim();
+      }
+      if (targetCity && targetCity.trim().length > 0) {
+        payload.city = targetCity.trim();
       }
 
       const fetchRes = await getPersonalizedRecommendationsAction(payload);
@@ -249,14 +267,31 @@ export function PersonalizedDiscoverContainer({
     });
   };
 
-  // Handler: Search input change
+  // Handler: Search input change with debouncing to query full catalog
   const handleSearchChange = (value: string) => {
     setSearchQuery(value);
+    if (searchTimeoutRef.current) {
+      clearTimeout(searchTimeoutRef.current);
+    }
+    searchTimeoutRef.current = setTimeout(() => {
+      refreshRecommendations({ search: value });
+    }, 300);
   };
 
   // Handler: City dropdown change
   const handleCityChange = (city: string) => {
     setSelectedCity(city);
+    refreshRecommendations({ city });
+  };
+
+  // Handler: Clear search and city filters
+  const handleClearFilters = () => {
+    setSearchQuery('');
+    setSelectedCity('');
+    if (searchTimeoutRef.current) {
+      clearTimeout(searchTimeoutRef.current);
+    }
+    refreshRecommendations({ search: '', city: '' });
   };
 
   // Handler: Retry refreshing recommendations after transient failure
@@ -310,16 +345,18 @@ export function PersonalizedDiscoverContainer({
     filteredRecommendations.length + filteredExploratory.length;
   const totalDisplayableCount = recommendations.length + exploratory.length;
 
-  // Genuinely empty candidate pool: zero candidates in database
-  const isCatalogEmpty = totalCandidateCount === 0;
+  const isFilterActive =
+    Boolean(searchQuery.trim()) || Boolean(selectedCity.trim());
+
+  // Genuinely empty candidate pool: zero candidates in database and no active search/city filter
+  const isCatalogEmpty = totalCandidateCount === 0 && !isFilterActive;
 
   // Nonempty candidate pool, but zero eligible/unsuppressed recommendations
   const isNoEligibleRecommendations =
-    !isCatalogEmpty && totalDisplayableCount === 0;
+    !isCatalogEmpty && !isFilterActive && totalDisplayableCount === 0;
 
-  // Pool has displayable recommendations, but active search/city filter matches 0
-  const isFilterEmpty =
-    !isCatalogEmpty && totalDisplayableCount > 0 && totalFilteredCount === 0;
+  // Active search/city filter matches 0
+  const isFilterEmpty = isFilterActive && totalFilteredCount === 0;
 
   return (
     <div className="space-y-8">
@@ -764,11 +801,8 @@ export function PersonalizedDiscoverContainer({
           </p>
           <button
             type="button"
-            onClick={() => {
-              setSearchQuery('');
-              setSelectedCity('');
-              refreshRecommendations();
-            }}
+            onClick={handleClearFilters}
+            data-testid="clear-filters-btn"
             className="mt-4 rounded-lg bg-zinc-800 px-4 py-2 text-xs font-semibold text-zinc-200 hover:bg-zinc-700 hover:text-white"
           >
             Clear Filters

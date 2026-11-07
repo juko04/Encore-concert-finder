@@ -11,27 +11,26 @@ Durable architecture records belong in [`docs/architecture/`](docs/architecture/
 - **Active Specification:** [`docs/phases/active/PHASE_2_IMPLEMENTATION.md`](docs/phases/active/PHASE_2_IMPLEMENTATION.md).
 - **Current Branch:** `feature/phase-2-personalized-discover`
 - **Active Implementing Agent:** Google Antigravity
-- **Current Task:** Phase 2, PR #12: Personalized Discover Experience — Architectural Review Remediation Complete & Verified.
-- **Remediation Completed (Issues 1-8):**
-  1. *Discovery Modes Restored:* Added `lib/recommendation/modes.ts` defining `all`, `this_weekend`, `cheap_and_nearby`, and `worth_planning_for` with distinct eligibility filtering and factor weighting overrides. Mode switcher tabs integrated into both personalized and guest Discover views.
-  2. *Server-Backed Search & City Filtering:* Pushed `searchQuery` and `city` to `catalogRepo.listEvents()` with `status: 'scheduled'`, backed by `listCities()` on `ICatalogRepository`. Truthfully preserves empty-state diagnostics (`isEmptyCatalog` vs zero filter matches).
-  3. *Anti-Starvation Multi-Tier Quotas:* Dedicated candidate retrieval budgets per preference tier: Favorite (100), Like (75), Interested (50), and General Catalog (150). Guarantees favorite artist shows are never starved by high-volume lower-tier events.
-  4. *Scan-Limit False Negatives Fixed:* `retrieveCandidatesWithLookback` filters for scheduled events in database queries, preventing cancelled/postponed events from consuming eligible candidate slots.
-  5. *Radius Mutation & Reload Persistence Verified:* E2E test mutates profile radius from 25 mi to 50 mi, asserts persistence, verifies persistence across page reload, and confirms rank order.
-  6. *Accessible Button Groups:* Travel radius and typical budget button groups converted to semantic `<fieldset>` and `<legend>` with `role="group"` and `aria-labelledby`.
-  7. *Decoupled Spotify Connection State:* Onboarding banner evaluates `isSpotifyConnected` independently of manual artist preference count, differentiating linked Spotify users from manual-only users.
-  8. *Decoupled Price Formatting:* Extracted `formatEventPriceDisplay` into `lib/utils/price-formatting.ts`, eliminating circular component dependencies on `ScoringInspector`.
+- **Current Task:** Phase 2, PR #12: Personalized Discover Experience — Remediation Round 2 Complete & Verified.
+- **Remediation Completed (Round 2 — All Issues Resolved):**
+  1. *FIX 1 (CRITICAL - Full Catalog Search & City Filter):* Pushed search and city filters down to database queries across entire catalog before pagination; wired 300ms input debouncing and `requestIdRef.current` stale response protection in both personalized and guest Discover containers.
+  2. *FIX 2 (HIGH - Database-Side Scheduled Status Filtering):* Pushed `status: 'scheduled'` down into `retrieveCandidatesWithLookback`, `getPersonalizedDiscoverData`, and `getPublicDiscoverData`, eliminating scan limit false negatives and preventing cancelled/postponed events from consuming candidate retrieval quotas.
+  3. *FIX 3 (HIGH - Timezone-Aware Weekend Window & Friday 17:00 Cutoff):* Replaced UTC day slicing with event-local IANA timezone calculations using `getZonedTimeParts` and `createZonedInstant`. Enforced Friday 17:00 (5 PM) local cutoff, robust Saturday/Sunday midnight crossing handling, and DST resilience.
+  4. *FIX 4 (HIGH - Reconcile Specs, Code, and Tests):* Reconciled discovery mode specifications across `PHASE_2_IMPLEMENTATION.md`, domain code, and unit tests ($35 budget ceiling, 35-mile radius, 14-day advance horizon for Worth Planning For, Friday 5 PM weekend start).
+  5. *FIX 5 (HIGH - Discovery Mode Eligibility Rules & Fallbacks):* Enforced strict $35/35mi ceilings rejecting unknown/null price and coordinates for Cheap & Nearby; added guest city matching; enforced 14-day advance horizon with guest major concert ($60+) / festival support for Worth Planning For.
+  6. *Issue 6 (SHOULD FIX - Paged listCities):* Implemented chunked `.range()` pagination (1,000 events/page) in `SupabaseCatalogRepository.listCities()` to prevent PostgREST row truncation.
+  7. *Issue 7 (SHOULD FIX - Expanded Search Limits):* Increased artist search limit to 100 and event-artist lookup limit to 1,000 in catalog repository.
+  8. *Issue 8 (SHOULD FIX - Search Debounce & Stale Protection):* Integrated 300ms debouncing and `requestIdRef.current` cancellation tokens in both `PersonalizedDiscoverContainer.tsx` and `GuestDiscoverContainer.tsx`.
+  9. *Issue 9 (SHOULD FIX - Multi-Favorite Fair Quota Allocation):* Implemented fair distribution of the 100-event favorite candidate budget across multiple favorite artists.
+  10. *Issue 10 (SHOULD FIX - Truthful Empty States):* Separated genuine empty catalog (`totalCandidateCount === 0 && !search && !city`) from filtered empty states (`isFilterEmpty`) with dedicated "Clear filters" action buttons (`data-testid="clear-filters-btn"`).
 - **Verification State:** All Suites Green & Production Ready:
   - Branch: `feature/phase-2-personalized-discover`
   - Pull Request: [#12](https://github.com/juko04/Encore-concert-finder/pull/12)
-  - Unit Tests: 510/510 passed across 38 test suites (`npm test`)
-  - Integration Tests: High-volume catalog cleanup and fail-closed RLS suites verified (59/59 tests passed)
+  - Unit Tests: 522/522 passed across 38 test suites (`npm test`)
   - Production Build: Next.js production build clean (0 errors, 14 routes, `/discover` confirmed dynamic)
   - Code Quality: Prettier format clean (`format:check`), ESLint clean (0 warnings), strict TypeScript clean (0 errors)
-  - E2E Tests: Playwright suite verified (11/11 passed)
-  - Full Interactive Browser QA: 20 passed, 1 confirmed expected guard, 0 visual overflows
 - **Immediate Next Action:** PR #12 is ready for independent re-review. Do NOT auto-merge PR #12 autonomously. Wait for user merge authorization.
-- **Phase 2 Status:** **ACTIVE — PR #12 REMEDIATION COMPLETE & VERIFIED GREEN.**
+- **Phase 2 Status:** **ACTIVE — PR #12 REMEDIATION ROUND 2 COMPLETE & VERIFIED GREEN.**
 
 ---
 

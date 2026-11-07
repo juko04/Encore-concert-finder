@@ -193,6 +193,7 @@ export async function retrieveCandidatesWithLookback(
   for (let page = 0; page < MAX_CANDIDATE_SCAN_PAGES; page++) {
     const batch = await catalogRepo.listEvents({
       ...filters,
+      status: filters.status ?? 'scheduled',
       offset: page * pageSize,
       limit: pageSize,
     });
@@ -395,10 +396,10 @@ export async function getPersonalizedDiscoverData(
   let queryToDate: string | undefined;
 
   if (activeMode === 'this_weekend') {
-    const weekendWindow = calculateWeekendWindow(
+    const weekendWindow = calculateWeekendWindow({
       referenceDate,
       referenceInstant,
-    );
+    });
     // Use the earlier of the conservative lower bound and weekend start date
     if (weekendWindow.startDate < queryFromDate) {
       queryFromDate = weekendWindow.startDate;
@@ -411,12 +412,16 @@ export async function getPersonalizedDiscoverData(
     toDate: queryToDate,
     city: city || undefined,
     region: region || undefined,
+    status: 'scheduled',
+    searchQuery: searchQuery?.trim() || undefined,
   };
 
   const candidateQueries: Promise<CanonicalEventSummary[]>[] = [];
 
-  // Tier 1A: Favorite artists with dedicated budget (anti-starvation guarantee)
-  if (favoriteArtistIds.length > 0) {
+  // Tier 1A: Favorite artists with dedicated budget & fair coverage policy (Issue 9)
+  // Ensures multiple favorite artists each receive guaranteed candidate slots so high-volume artists
+  // do not starve upcoming shows of other Must-see favorites.
+  if (favoriteArtistIds.length === 1) {
     candidateQueries.push(
       retrieveCandidatesWithLookback(
         catalogRepo,
@@ -426,6 +431,22 @@ export async function getPersonalizedDiscoverData(
         referenceInstant,
       ),
     );
+  } else if (favoriteArtistIds.length > 1) {
+    const perArtistLimit = Math.max(
+      15,
+      Math.floor(FAVORITE_ARTIST_CANDIDATE_LIMIT / favoriteArtistIds.length),
+    );
+    for (const favArtistId of favoriteArtistIds) {
+      candidateQueries.push(
+        retrieveCandidatesWithLookback(
+          catalogRepo,
+          { ...commonFilters, artistIds: [favArtistId] },
+          perArtistLimit,
+          referenceDate,
+          referenceInstant,
+        ),
+      );
+    }
   }
 
   // Tier 1B: Liked artists with dedicated budget
@@ -488,6 +509,7 @@ export async function getPersonalizedDiscoverData(
         artistPreferences: userPreferences,
         referenceDate,
         referenceInstant,
+        city: city || undefined,
       }),
     );
   }
@@ -518,7 +540,8 @@ export async function getPersonalizedDiscoverData(
       hasPreferences,
       isSpotifyConnected,
       isLocationConfigured,
-      isEmptyCatalog: candidateCountBeforeFiltering === 0,
+      isEmptyCatalog:
+        candidateCountBeforeFiltering === 0 && !searchQuery && !city,
     };
   }
 
@@ -602,10 +625,10 @@ export async function getPublicDiscoverData(
   let queryToDate: string | undefined;
 
   if (activeMode === 'this_weekend') {
-    const weekendWindow = calculateWeekendWindow(
+    const weekendWindow = calculateWeekendWindow({
       referenceDate,
       referenceInstant,
-    );
+    });
     if (weekendWindow.startDate < queryFromDate) {
       queryFromDate = weekendWindow.startDate;
     }
@@ -619,6 +642,8 @@ export async function getPublicDiscoverData(
       toDate: queryToDate,
       city: city || undefined,
       region: region || undefined,
+      status: 'scheduled',
+      searchQuery: searchQuery?.trim() || undefined,
     },
     limit * 2, // scan enough to satisfy mode eligibility filtering
     referenceDate,
@@ -646,6 +671,7 @@ export async function getPublicDiscoverData(
       isEventEligibleForMode(ev, activeMode, {
         referenceDate,
         referenceInstant,
+        city: city || undefined,
       }),
     );
   }
@@ -667,7 +693,7 @@ export async function getPublicDiscoverData(
 
   return {
     events: returnedEvents,
-    isEmptyCatalog: candidateCountBeforeSearch === 0,
+    isEmptyCatalog: candidateCountBeforeSearch === 0 && !searchQuery && !city,
     totalCount: returnedEvents.length,
     activeMode,
   };

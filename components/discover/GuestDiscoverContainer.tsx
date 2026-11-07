@@ -66,6 +66,8 @@ export function GuestDiscoverContainer({
   }, [catalogCities, events]);
 
   // Central refresh helper for public discover
+  const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
   const refreshPublicEvents = (overrides?: {
     mode?: DiscoveryMode;
     search?: string;
@@ -109,12 +111,26 @@ export function GuestDiscoverContainer({
 
   const handleSearchChange = (value: string) => {
     setSearchQuery(value);
-    refreshPublicEvents({ search: value });
+    if (searchTimeoutRef.current) {
+      clearTimeout(searchTimeoutRef.current);
+    }
+    searchTimeoutRef.current = setTimeout(() => {
+      refreshPublicEvents({ search: value });
+    }, 300);
   };
 
   const handleCityChange = (city: string) => {
     setSelectedCity(city);
     refreshPublicEvents({ city });
+  };
+
+  const handleClearFilters = () => {
+    setSearchQuery('');
+    setSelectedCity('');
+    if (searchTimeoutRef.current) {
+      clearTimeout(searchTimeoutRef.current);
+    }
+    refreshPublicEvents({ search: '', city: '' });
   };
 
   // Client-side filtering over loaded events for instant feedback
@@ -320,6 +336,28 @@ export function GuestDiscoverContainer({
             into the catalog.
           </p>
         </div>
+      ) : searchQuery.trim().length > 0 || selectedCity.trim().length > 0 ? (
+        filteredEvents.length === 0 ? (
+          <div
+            data-testid="empty-filtered-banner"
+            className="rounded-2xl border border-zinc-800 bg-zinc-900/40 p-12 text-center"
+          >
+            <h2 className="text-lg font-semibold text-zinc-200">
+              No events match your search criteria
+            </h2>
+            <p className="mt-2 text-sm text-zinc-400">
+              Try adjusting your search query or city filter.
+            </p>
+            <button
+              type="button"
+              onClick={handleClearFilters}
+              data-testid="clear-filters-btn"
+              className="mt-4 rounded-lg bg-indigo-600 px-4 py-2 text-xs font-semibold text-white transition hover:bg-indigo-500"
+            >
+              Clear filters
+            </button>
+          </div>
+        ) : null
       ) : events.length === 0 ? (
         <div
           data-testid="no-upcoming-events-banner"

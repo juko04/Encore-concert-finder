@@ -894,8 +894,8 @@ describe('Production Recommendation Service (getPersonalizedDiscoverData)', () =
 
       // Cancelled events did NOT consume eligible candidate capacity; valid show was retrieved
       expect(result.isEmptyCatalog).toBe(false);
-      expect(result.totalCandidateCount).toBe(161);
-      expect(result.suppressed).toHaveLength(160);
+      expect(result.totalCandidateCount).toBe(1);
+      expect(result.suppressed).toHaveLength(0);
       expect(result.ineligibleCount).toBe(0);
       expect(result.exploratory).toHaveLength(1);
       expect(result.exploratory[0].eventId).toBe(
@@ -989,8 +989,8 @@ describe('Production Recommendation Service (getPersonalizedDiscoverData)', () =
 
       // Postponed events did not consume eligible capacity; valid scheduled show is ranked #1
       expect(result.isEmptyCatalog).toBe(false);
-      expect(result.totalCandidateCount).toBe(111);
-      expect(result.suppressed).toHaveLength(110);
+      expect(result.totalCandidateCount).toBe(1);
+      expect(result.suppressed).toHaveLength(0);
       expect(result.recommendations).toHaveLength(1);
       expect(result.recommendations[0].eventId).toBe(
         'event-phoebe-scheduled-survivor',
@@ -1064,11 +1064,11 @@ describe('Production Recommendation Service (getPersonalizedDiscoverData)', () =
         referenceInstant: testRefInstant,
       });
 
-      // Total candidates = 50 + 60 + 60 + 5 = 175
+      // Total candidates = 50 past + 5 scheduled = 55 (cancelled/postponed filtered at DB level)
       expect(result.isEmptyCatalog).toBe(false);
-      expect(result.totalCandidateCount).toBe(175);
+      expect(result.totalCandidateCount).toBe(55);
       expect(result.ineligibleCount).toBe(50);
-      expect(result.suppressed).toHaveLength(120); // 60 cancelled + 60 postponed
+      expect(result.suppressed).toHaveLength(0); // 60 cancelled + 60 postponed excluded at database level
       const totalDisplayable =
         result.recommendations.length + result.exploratory.length;
       expect(totalDisplayable).toBe(5);
@@ -1114,10 +1114,10 @@ describe('Production Recommendation Service (getPersonalizedDiscoverData)', () =
         referenceInstant: testRefInstant,
       });
 
-      // Truthful diagnostics: Catalog is NOT empty (15 candidates existed), but all are suppressed
-      expect(result.isEmptyCatalog).toBe(false);
-      expect(result.totalCandidateCount).toBe(15);
-      expect(result.suppressed).toHaveLength(15);
+      // Truthful diagnostics: Catalog contains 0 scheduled candidates, so isEmptyCatalog is true
+      expect(result.isEmptyCatalog).toBe(true);
+      expect(result.totalCandidateCount).toBe(0);
+      expect(result.suppressed).toHaveLength(0);
       expect(result.ineligibleCount).toBe(0);
       expect(result.recommendations).toHaveLength(0);
       expect(result.exploratory).toHaveLength(0);
@@ -1128,7 +1128,7 @@ describe('Production Recommendation Service (getPersonalizedDiscoverData)', () =
         referenceDate: testRefDate,
         referenceInstant: testRefInstant,
       });
-      expect(publicResult.isEmptyCatalog).toBe(false);
+      expect(publicResult.isEmptyCatalog).toBe(true);
       expect(publicResult.events).toHaveLength(0);
       expect(publicResult.totalCount).toBe(0);
     });
@@ -1213,8 +1213,8 @@ describe('Production Recommendation Service (getPersonalizedDiscoverData)', () =
         referenceInstant: refInstant,
       });
 
-      // Truthful: candidates existed in catalog so isEmptyCatalog is false, but 0 scheduled events displayable
-      expect(result.isEmptyCatalog).toBe(false);
+      // Truthful: catalog contains 0 scheduled events, so isEmptyCatalog is true
+      expect(result.isEmptyCatalog).toBe(true);
       expect(result.events).toHaveLength(0);
       expect(result.totalCount).toBe(0);
     });
@@ -1533,11 +1533,12 @@ describe('Production Recommendation Service (getPersonalizedDiscoverData)', () =
 
       // Event 1: Friday night show (this weekend, cheap & nearby)
       // Reference instant is Friday 2026-11-06T12:00:00Z
+      // In America/Denver (MST UTC-7), 8 PM Friday local is 2026-11-07T03:00:00Z (after 17:00 Friday cutoff)
       seedEvent(catalogRepo, {
         id: 'show-weekend-cheap',
         title: 'Local Indie Night',
         localStartDate: '2026-11-06',
-        startsAt: '2026-11-06T20:00:00Z',
+        startsAt: '2026-11-07T03:00:00Z',
         timezone: 'America/Denver',
         status: 'scheduled',
         lat: 39.74,
@@ -1667,7 +1668,10 @@ describe('Production Recommendation Service (getPersonalizedDiscoverData)', () =
       expect(resB.isSpotifyConnected).toBe(false);
     });
 
-    it('pushes status scheduled down into database queries eliminating scan limit false negatives (Issue 4)', async () => {
+    it('pushes status scheduled down into database queries eliminating scan limit false negatives in production entry points (FIX 2)', async () => {
+      const userId = 'user-scheduled-scan-test';
+      await profileRepo.upsertProfile(userId, {});
+
       // Seed 600 cancelled events followed by 5 scheduled events
       for (let i = 0; i < 600; i++) {
         seedEvent(catalogRepo, {
@@ -1680,30 +1684,305 @@ describe('Production Recommendation Service (getPersonalizedDiscoverData)', () =
         });
       }
 
+      for (let i = 0; i < 5; i++) {
+        seedEvent(catalogRepo, {
+          id: `valid-scheduled-show-${i}`,
+          title: `Valid Scheduled Show ${i}`,
+          localStartDate: '2026-11-15',
+          startsAt: '2026-11-15T20:00:00Z',
+          timezone: 'America/Denver',
+          status: 'scheduled',
+        });
+      }
+
+      // Test A: Public discovery production entry point
+      const publicRes = await getPublicDiscoverData({
+        catalogRepo,
+        limit: 10,
+        referenceDate: '2026-10-25',
+      });
+      expect(publicRes.events.length).toBeGreaterThanOrEqual(1);
+      expect(
+        publicRes.events.some((e) => e.id === 'valid-scheduled-show-0'),
+      ).toBe(true);
+
+      // Test B: Authenticated discovery production entry point
+      const personalizedRes = await getPersonalizedDiscoverData({
+        userId,
+        catalogRepo,
+        profileRepo,
+        prefRepo,
+        spotifyRepo,
+        referenceDate: '2026-10-25',
+      });
+      const allPersonalizedIds = [
+        ...personalizedRes.recommendations.map((r) => r.eventId),
+        ...personalizedRes.exploratory.map((r) => r.eventId),
+      ];
+      expect(allPersonalizedIds).toContain('valid-scheduled-show-0');
+    });
+
+    it('queries full eligible catalog for search and city filters without scan limit false negatives (FIX 1)', async () => {
+      const userId = 'user-full-catalog-search-test';
+      await profileRepo.upsertProfile(userId, {});
+
+      // Seed 250 eligible scheduled concerts
+      for (let i = 0; i < 220; i++) {
+        seedEvent(catalogRepo, {
+          id: `general-show-${i}`,
+          title: `General Show ${i}`,
+          city: i % 2 === 0 ? 'Denver' : 'Boulder',
+          localStartDate: '2026-11-01',
+          startsAt: '2026-11-01T20:00:00Z',
+          timezone: 'America/Denver',
+          status: 'scheduled',
+          artists: [
+            {
+              id: `art-${i}`,
+              name: `Artist ${i}`,
+              billingPosition: 'headliner',
+            },
+          ],
+        });
+      }
+
+      // Event at position 225: Target artist in Fort Collins beyond the initial candidate retrieval limit
       seedEvent(catalogRepo, {
-        id: 'valid-scheduled-show',
-        title: 'Valid Scheduled Show',
-        localStartDate: '2026-11-15',
-        startsAt: '2026-11-15T20:00:00Z',
+        id: 'special-target-event',
+        title: 'Midnight Echoes Special Tour',
+        city: 'Fort Collins',
+        localStartDate: '2026-12-05',
+        startsAt: '2026-12-05T20:00:00Z',
         timezone: 'America/Denver',
         status: 'scheduled',
+        artists: [
+          {
+            id: 'artist-target',
+            name: 'Target Band',
+            billingPosition: 'headliner',
+          },
+        ],
       });
 
-      const candidates = await retrieveCandidatesWithLookback(
+      // 1. Guest search by artist
+      const guestArtistSearch = await getPublicDiscoverData({
         catalogRepo,
-        {
-          fromDate: '2026-10-25',
-          status: 'scheduled',
-        },
-        10,
-        '2026-10-25',
-      );
+        searchQuery: 'Target Band',
+        referenceDate: '2026-10-25',
+      });
+      expect(
+        guestArtistSearch.events.some((e) => e.id === 'special-target-event'),
+      ).toBe(true);
 
-      // Because status: 'scheduled' is pushed to the repository query,
-      // the 600 cancelled events are filtered at the DB layer, allowing valid-scheduled-show to be retrieved
-      expect(candidates.some((e) => e.id === 'valid-scheduled-show')).toBe(
-        true,
-      );
+      // 2. Guest search by event title
+      const guestTitleSearch = await getPublicDiscoverData({
+        catalogRepo,
+        searchQuery: 'Midnight Echoes',
+        referenceDate: '2026-10-25',
+      });
+      expect(
+        guestTitleSearch.events.some((e) => e.id === 'special-target-event'),
+      ).toBe(true);
+
+      // 3. Guest filter by city
+      const guestCityFilter = await getPublicDiscoverData({
+        catalogRepo,
+        city: 'Fort Collins',
+        referenceDate: '2026-10-25',
+      });
+      expect(
+        guestCityFilter.events.some((e) => e.id === 'special-target-event'),
+      ).toBe(true);
+
+      // 4. Guest combined search and city filter
+      const guestCombined = await getPublicDiscoverData({
+        catalogRepo,
+        searchQuery: 'Target Band',
+        city: 'Fort Collins',
+        referenceDate: '2026-10-25',
+      });
+      expect(
+        guestCombined.events.some((e) => e.id === 'special-target-event'),
+      ).toBe(true);
+
+      // 5. Authenticated personalized discovery with search beyond initial window
+      const authSearch = await getPersonalizedDiscoverData({
+        userId,
+        catalogRepo,
+        profileRepo,
+        prefRepo,
+        spotifyRepo,
+        searchQuery: 'Target Band',
+        referenceDate: '2026-10-25',
+      });
+      const authIds = [
+        ...authSearch.recommendations.map((r) => r.eventId),
+        ...authSearch.exploratory.map((r) => r.eventId),
+      ];
+      expect(authIds).toContain('special-target-event');
+
+      // 6. Authenticated personalized discovery with combined search & city
+      const authCombined = await getPersonalizedDiscoverData({
+        userId,
+        catalogRepo,
+        profileRepo,
+        prefRepo,
+        spotifyRepo,
+        searchQuery: 'Target Band',
+        city: 'Fort Collins',
+        referenceDate: '2026-10-25',
+      });
+      const authCombinedIds = [
+        ...authCombined.recommendations.map((r) => r.eventId),
+        ...authCombined.exploratory.map((r) => r.eventId),
+      ];
+      expect(authCombinedIds).toContain('special-target-event');
+    });
+
+    it('enforces fair candidate quota allocation among multiple favorite artists (Issue 9)', async () => {
+      const userId = 'user-multi-favorites-test';
+      await profileRepo.upsertProfile(userId, {
+        recommendationPreset: 'artist_first',
+      });
+
+      // User has 3 Favorite artists: A, B, and C
+      await prefRepo.savePreference({
+        userId,
+        artistId: 'fav-artist-a',
+        artistName: 'Favorite A',
+        preferenceLevel: 'favorite',
+      });
+      await prefRepo.savePreference({
+        userId,
+        artistId: 'fav-artist-b',
+        artistName: 'Favorite B',
+        preferenceLevel: 'favorite',
+      });
+      await prefRepo.savePreference({
+        userId,
+        artistId: 'fav-artist-c',
+        artistName: 'Favorite C',
+        preferenceLevel: 'favorite',
+      });
+
+      // Favorite A has 100 shows early in November
+      for (let i = 0; i < 100; i++) {
+        seedEvent(catalogRepo, {
+          id: `fav-a-show-${i}`,
+          title: `Favorite A Tour Date ${i}`,
+          localStartDate: '2026-11-01',
+          startsAt: '2026-11-01T20:00:00Z',
+          timezone: 'America/Denver',
+          status: 'scheduled',
+          artists: [
+            {
+              id: 'fav-artist-a',
+              name: 'Favorite A',
+              billingPosition: 'headliner',
+            },
+          ],
+        });
+      }
+
+      // Favorite B has 2 shows scheduled later in December
+      seedEvent(catalogRepo, {
+        id: 'fav-b-show-dec',
+        title: 'Favorite B Winter Show',
+        localStartDate: '2026-12-15',
+        startsAt: '2026-12-15T20:00:00Z',
+        timezone: 'America/Denver',
+        status: 'scheduled',
+        artists: [
+          {
+            id: 'fav-artist-b',
+            name: 'Favorite B',
+            billingPosition: 'headliner',
+          },
+        ],
+      });
+
+      // Favorite C has 1 show scheduled in January
+      seedEvent(catalogRepo, {
+        id: 'fav-c-show-jan',
+        title: 'Favorite C New Year Show',
+        localStartDate: '2027-01-10',
+        startsAt: '2027-01-10T20:00:00Z',
+        timezone: 'America/Denver',
+        status: 'scheduled',
+        artists: [
+          {
+            id: 'fav-artist-c',
+            name: 'Favorite C',
+            billingPosition: 'headliner',
+          },
+        ],
+      });
+
+      const res = await getPersonalizedDiscoverData({
+        userId,
+        catalogRepo,
+        profileRepo,
+        prefRepo,
+        spotifyRepo,
+        referenceDate: '2026-10-25',
+      });
+
+      const allRecIds = [
+        ...res.recommendations.map((r) => r.eventId),
+        ...res.exploratory.map((r) => r.eventId),
+      ];
+
+      // With fair allocation, Favorite B and Favorite C's later shows MUST NOT be starved by Favorite A's 100 earlier shows
+      expect(allRecIds).toContain('fav-b-show-dec');
+      expect(allRecIds).toContain('fav-c-show-jan');
+    });
+
+    it('accurately distinguishes empty catalog from filter-empty results (Issue 10)', async () => {
+      const userId = 'user-empty-accuracy-test';
+      await profileRepo.upsertProfile(userId, {});
+
+      // 1. Empty catalog: 0 events in repository
+      const emptyRes = await getPublicDiscoverData({
+        catalogRepo,
+        referenceDate: '2026-10-25',
+      });
+      expect(emptyRes.isEmptyCatalog).toBe(true);
+      expect(emptyRes.events).toHaveLength(0);
+
+      // Seed 5 events
+      for (let i = 0; i < 5; i++) {
+        seedEvent(catalogRepo, {
+          id: `evt-${i}`,
+          title: `Concert ${i}`,
+          city: 'Denver',
+          localStartDate: '2026-11-01',
+          startsAt: '2026-11-01T20:00:00Z',
+          timezone: 'America/Denver',
+          status: 'scheduled',
+        });
+      }
+
+      // 2. Nonempty catalog with no-match search query: isEmptyCatalog MUST be false
+      const filterEmptyRes = await getPublicDiscoverData({
+        catalogRepo,
+        searchQuery: 'NonExistentBand12345',
+        referenceDate: '2026-10-25',
+      });
+      expect(filterEmptyRes.isEmptyCatalog).toBe(false);
+      expect(filterEmptyRes.events).toHaveLength(0);
+
+      // 3. Personalized discovery with no-match search query: isEmptyCatalog MUST be false
+      const authFilterEmptyRes = await getPersonalizedDiscoverData({
+        userId,
+        catalogRepo,
+        profileRepo,
+        prefRepo,
+        spotifyRepo,
+        searchQuery: 'NonExistentBand12345',
+        referenceDate: '2026-10-25',
+      });
+      expect(authFilterEmptyRes.isEmptyCatalog).toBe(false);
+      expect(authFilterEmptyRes.recommendations).toHaveLength(0);
     });
   });
 });
