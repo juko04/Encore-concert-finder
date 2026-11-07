@@ -52,3 +52,5 @@ Durable architecture records belong in [`docs/architecture/`](docs/architecture/
    - Production Discover must never fall back to synthetic fixtures on error or empty catalog.
 7. **Future Scope Boundaries (Post-PR #12):**
    - Save/Dismiss Event Actions, Recommendation Feedback Loops, Multi-Day Festival Planning, and Price Alerts remain deferred to subsequent milestones.
+8. **E2E / Website Test Optimization Rule:**
+   - Browser/website tests (`npm run test:e2e` and full interactive browser QA) do not need to run every time, especially when changes are purely backend, repository, domain scoring, data model, or documentation, with no UI or interaction modifications.
