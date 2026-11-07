@@ -3,6 +3,7 @@ import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { execSync } from 'child_process';
 import crypto from 'node:crypto';
 import { SupabaseCatalogRepository } from '@/lib/repositories/catalog-repository';
+import { assertSafeDatabaseTarget } from '@/lib/supabase/destination-guard';
 
 interface LocalCredentials {
   url: string;
@@ -830,5 +831,547 @@ describe('Catalog RLS, Security & Canonicalization Atomicity', () => {
     expect(
       anonEventSourcesError || anonEventSources?.length === 0,
     ).toBeTruthy();
+  });
+
+  it('validates production preferred-artist query completeness exceeding API row limit (>1000 event_artists rows)', async () => {
+    if (!isDbAvailable || !adminClient) {
+      throw new Error(
+        'Local Supabase database is offline or unavailable. High-volume preferred-artist integration test requires a running database.',
+      );
+    }
+    assertSafeDatabaseTarget(credentials!.url);
+
+    const testSuffix = `vol_${Date.now()}`;
+    const createdArtistIds: string[] = [];
+    const createdVenueIds: string[] = [];
+    const createdEventIds: string[] = [];
+
+    const cleanupFixtures = async () => {
+      assertSafeDatabaseTarget(credentials!.url);
+      const BATCH_SIZE = 50;
+
+      // 1. Delete event_artists associations in safe batches (size 50 to avoid URI too long in PostgREST)
+      for (let i = 0; i < createdEventIds.length; i += BATCH_SIZE) {
+        const batch = createdEventIds.slice(i, i + BATCH_SIZE);
+        const { error } = await adminClient!
+          .from('event_artists')
+          .delete()
+          .in('event_id', batch);
+        if (error) {
+          throw new Error(
+            `[Cleanup] Error deleting event_artists batch: ${error.message}`,
+          );
+        }
+      }
+
+      // Also clean up by artist_id in case partial fixture creation inserted rows
+      if (createdArtistIds.length > 0) {
+        const { error } = await adminClient!
+          .from('event_artists')
+          .delete()
+          .in('artist_id', createdArtistIds);
+        if (error) {
+          throw new Error(
+            `[Cleanup] Error deleting event_artists by artist_id: ${error.message}`,
+          );
+        }
+      }
+
+      // 2. Delete events in safe batches (size 50 to avoid URI too long in PostgREST)
+      for (let i = 0; i < createdEventIds.length; i += BATCH_SIZE) {
+        const batch = createdEventIds.slice(i, i + BATCH_SIZE);
+        const { error } = await adminClient!
+          .from('events')
+          .delete()
+          .in('id', batch);
+        if (error) {
+          throw new Error(
+            `[Cleanup] Error deleting events batch: ${error.message}`,
+          );
+        }
+      }
+
+      // Also delete by venue_id if venue was created
+      if (createdVenueIds.length > 0) {
+        const { error } = await adminClient!
+          .from('events')
+          .delete()
+          .in('venue_id', createdVenueIds);
+        if (error) {
+          throw new Error(
+            `[Cleanup] Error deleting events by venue_id: ${error.message}`,
+          );
+        }
+      }
+
+      // 3. Delete artists and venues after dependent records are removed
+      if (createdArtistIds.length > 0) {
+        const { error } = await adminClient!
+          .from('artists')
+          .delete()
+          .in('id', createdArtistIds);
+        if (error) {
+          throw new Error(`[Cleanup] Error deleting artists: ${error.message}`);
+        }
+      }
+
+      if (createdVenueIds.length > 0) {
+        const { error } = await adminClient!
+          .from('venues')
+          .delete()
+          .in('id', createdVenueIds);
+        if (error) {
+          throw new Error(`[Cleanup] Error deleting venues: ${error.message}`);
+        }
+      }
+    };
+
+    try {
+      // 1. Seed dedicated high-volume artist and venue
+      const { data: artist, error: aErr } = await adminClient
+        .from('artists')
+        .insert({
+          name: `High Volume Artist ${testSuffix}`,
+          normalized_name: `high volume artist ${testSuffix}`,
+        })
+        .select('id')
+        .single();
+      expect(aErr).toBeNull();
+      const artistId = artist!.id;
+      createdArtistIds.push(artistId);
+
+      const { data: venue, error: vErr } = await adminClient
+        .from('venues')
+        .insert({
+          name: `High Volume Arena ${testSuffix}`,
+          normalized_name: `high volume arena ${testSuffix}`,
+          city: 'Denver',
+          region: 'CO',
+          country_code: 'US',
+          lat: 39.75,
+          lng: -104.99,
+          timezone: 'America/Denver',
+        })
+        .select('id')
+        .single();
+      expect(vErr).toBeNull();
+      const venueId = venue!.id;
+      createdVenueIds.push(venueId);
+
+      // 2. Generate 1,020 events (exceeds PostgREST default max-rows limit of 1,000)
+      // Invariant: The EARLIEST event is inserted LAST in the database.
+      // If the repository performed an unpaginated subquery on event_artists, PostgREST's 1,000-row limit
+      // would truncate the last 20 rows and miss the earliest event entirely.
+      const TOTAL_EVENTS = 1020;
+      const eventRows: Array<{
+        id: string;
+        name: string;
+        normalized_name: string;
+        event_kind: 'concert';
+        status: 'scheduled';
+        venue_id: string;
+        city: string;
+        region: string;
+        country_code: string;
+        timezone: string;
+        local_start_date: string;
+        starts_at: string;
+        start_time_precision: 'instant';
+        is_multi_day: boolean;
+      }> = [];
+
+      // Events 0 to 1018: far future dates (2028-01-01 through 2028-12-31)
+      for (let i = 0; i < TOTAL_EVENTS - 1; i++) {
+        const dayOffset = 500 + i;
+        const d = new Date(Date.now() + dayOffset * 86400000)
+          .toISOString()
+          .split('T')[0];
+        const evId = crypto.randomUUID();
+        createdEventIds.push(evId);
+        eventRows.push({
+          id: evId,
+          name: `Future Tour Date ${i} ${testSuffix}`,
+          normalized_name: `future tour date ${i} ${testSuffix}`,
+          event_kind: 'concert',
+          status: 'scheduled',
+          venue_id: venueId,
+          city: 'Denver',
+          region: 'CO',
+          country_code: 'US',
+          timezone: 'America/Denver',
+          local_start_date: d,
+          starts_at: `${d}T20:00:00-07:00`,
+          start_time_precision: 'instant',
+          is_multi_day: false,
+        });
+      }
+
+      // Event 1019 (inserted LAST): Earliest date (tomorrow)
+      const earliestDate = new Date(Date.now() + 86400000)
+        .toISOString()
+        .split('T')[0];
+      const earliestEventId = crypto.randomUUID();
+      createdEventIds.push(earliestEventId);
+      eventRows.push({
+        id: earliestEventId,
+        name: `Earliest Tour Date (Inserted Last) ${testSuffix}`,
+        normalized_name: `earliest tour date (inserted last) ${testSuffix}`,
+        event_kind: 'concert',
+        status: 'scheduled',
+        venue_id: venueId,
+        city: 'Denver',
+        region: 'CO',
+        country_code: 'US',
+        timezone: 'America/Denver',
+        local_start_date: earliestDate,
+        starts_at: `${earliestDate}T20:00:00-07:00`,
+        start_time_precision: 'instant',
+        is_multi_day: false,
+      });
+
+      // Insert events in batches of 400
+      const BATCH_SIZE = 400;
+      for (let i = 0; i < eventRows.length; i += BATCH_SIZE) {
+        const batch = eventRows.slice(i, i + BATCH_SIZE);
+        const { error: insErr } = await adminClient
+          .from('events')
+          .insert(batch);
+        expect(insErr).toBeNull();
+      }
+
+      // Insert corresponding event_artists rows in batches of 400
+      const eaRows = eventRows.map((e) => ({
+        event_id: e.id,
+        artist_id: artistId,
+        billing_position: 'headliner' as const,
+        sort_order: 1,
+      }));
+      for (let i = 0; i < eaRows.length; i += BATCH_SIZE) {
+        const batch = eaRows.slice(i, i + BATCH_SIZE);
+        const { error: eaErr } = await adminClient
+          .from('event_artists')
+          .insert(batch);
+        expect(eaErr).toBeNull();
+      }
+
+      // 3. Query listEvents via SupabaseCatalogRepository using artistIds filter and limit 10
+      const catalogRepo = new SupabaseCatalogRepository(adminClient);
+      const listedEvents = await catalogRepo.listEvents({
+        artistIds: [artistId],
+        limit: 10,
+        fromDate: earliestDate,
+      });
+
+      // Invariant verification:
+      // 1. Returns bounded 10 events
+      expect(listedEvents).toHaveLength(10);
+      // 2. The FIRST event MUST be the earliest event (which was inserted last in the database)
+      expect(listedEvents[0].id).toBe(earliestEventId);
+      expect(listedEvents[0].title).toBe(
+        `Earliest Tour Date (Inserted Last) ${testSuffix}`,
+      );
+      expect(listedEvents[0].localStartDate).toBe(earliestDate);
+    } finally {
+      // 4. Reliable reverse-dependency cleanup executed inside finally
+      await cleanupFixtures();
+
+      // Demonstrate that a successful run leaves zero rows associated with unique fixture IDs
+      // Check ALL 1,020 createdEventIds across bounded query batches of 50
+      const VERIFY_BATCH_SIZE = 50;
+      for (let i = 0; i < createdEventIds.length; i += VERIFY_BATCH_SIZE) {
+        const batch = createdEventIds.slice(i, i + VERIFY_BATCH_SIZE);
+        const { count, error } = await adminClient
+          .from('events')
+          .select('id', { count: 'exact', head: true })
+          .in('id', batch);
+        expect(error).toBeNull();
+        expect(count).not.toBeNull();
+        expect(count).toBe(0);
+
+        const { count: eaCount, error: eaError } = await adminClient
+          .from('event_artists')
+          .select('id', { count: 'exact', head: true })
+          .in('event_id', batch);
+        expect(eaError).toBeNull();
+        expect(eaCount).not.toBeNull();
+        expect(eaCount).toBe(0);
+      }
+
+      if (createdArtistIds.length > 0) {
+        const { count: remainingEventArtists, error: eaError } =
+          await adminClient
+            .from('event_artists')
+            .select('id', { count: 'exact', head: true })
+            .in('artist_id', createdArtistIds);
+        expect(eaError).toBeNull();
+        expect(remainingEventArtists).not.toBeNull();
+        expect(remainingEventArtists).toBe(0);
+
+        const { count: remainingArtists, error: aError } = await adminClient
+          .from('artists')
+          .select('id', { count: 'exact', head: true })
+          .in('id', createdArtistIds);
+        expect(aError).toBeNull();
+        expect(remainingArtists).not.toBeNull();
+        expect(remainingArtists).toBe(0);
+      }
+
+      if (createdVenueIds.length > 0) {
+        const { count: remainingVenues, error: vError } = await adminClient
+          .from('venues')
+          .select('id', { count: 'exact', head: true })
+          .in('id', createdVenueIds);
+        expect(vError).toBeNull();
+        expect(remainingVenues).not.toBeNull();
+        expect(remainingVenues).toBe(0);
+      }
+    }
+  }, 60000);
+
+  it('guarantees fixture cleanup executes and leaves zero orphaned rows even after deliberate failure', async () => {
+    if (!isDbAvailable || !adminClient) {
+      throw new Error(
+        'Local Supabase database is offline or unavailable. Cleanup resilience test requires a running database.',
+      );
+    }
+    assertSafeDatabaseTarget(credentials!.url);
+
+    const testSuffix = `delib_fail_${Date.now()}`;
+    const createdArtistIds: string[] = [];
+    const createdVenueIds: string[] = [];
+    const createdEventIds: string[] = [];
+
+    let deliberateErrorCaught = false;
+
+    try {
+      const { data: artist, error: aErr } = await adminClient
+        .from('artists')
+        .insert({
+          name: `Deliberate Fail Artist ${testSuffix}`,
+          normalized_name: `deliberate fail artist ${testSuffix}`,
+        })
+        .select('id')
+        .single();
+      expect(aErr).toBeNull();
+      createdArtistIds.push(artist!.id);
+
+      const { data: venue, error: vErr } = await adminClient
+        .from('venues')
+        .insert({
+          name: `Deliberate Fail Venue ${testSuffix}`,
+          normalized_name: `deliberate fail venue ${testSuffix}`,
+          city: 'Denver',
+          region: 'CO',
+          country_code: 'US',
+          lat: 39.75,
+          lng: -104.99,
+          timezone: 'America/Denver',
+        })
+        .select('id')
+        .single();
+      expect(vErr).toBeNull();
+      createdVenueIds.push(venue!.id);
+
+      const eventId = crypto.randomUUID();
+      createdEventIds.push(eventId);
+      const { error: eErr } = await adminClient.from('events').insert({
+        id: eventId,
+        name: `Deliberate Fail Event ${testSuffix}`,
+        normalized_name: `deliberate fail event ${testSuffix}`,
+        event_kind: 'concert',
+        status: 'scheduled',
+        venue_id: venue!.id,
+        city: 'Denver',
+        region: 'CO',
+        country_code: 'US',
+        timezone: 'America/Denver',
+        local_start_date: '2026-11-20',
+        starts_at: '2026-11-20T20:00:00-07:00',
+        start_time_precision: 'instant',
+        is_multi_day: false,
+      });
+      expect(eErr).toBeNull();
+
+      const { error: eaErr } = await adminClient.from('event_artists').insert({
+        event_id: eventId,
+        artist_id: artist!.id,
+        billing_position: 'headliner',
+        sort_order: 1,
+      });
+      expect(eaErr).toBeNull();
+
+      // Deliberately trigger an assertion failure to test cleanup resilience
+      throw new Error('Deliberate assertion failure for cleanup test');
+    } catch (err: unknown) {
+      if (
+        err instanceof Error &&
+        err.message === 'Deliberate assertion failure for cleanup test'
+      ) {
+        deliberateErrorCaught = true;
+      } else {
+        throw err;
+      }
+    } finally {
+      // Execute cleanup with strict fail-closed error checking
+      assertSafeDatabaseTarget(credentials!.url);
+      if (createdEventIds.length > 0) {
+        const { error: eaDelErr } = await adminClient
+          .from('event_artists')
+          .delete()
+          .in('event_id', createdEventIds);
+        if (eaDelErr) {
+          throw new Error(
+            `[Deliberate Failure Test Cleanup] Error deleting event_artists: ${eaDelErr.message}`,
+          );
+        }
+        const { error: evDelErr } = await adminClient
+          .from('events')
+          .delete()
+          .in('id', createdEventIds);
+        if (evDelErr) {
+          throw new Error(
+            `[Deliberate Failure Test Cleanup] Error deleting events: ${evDelErr.message}`,
+          );
+        }
+      }
+      if (createdArtistIds.length > 0) {
+        const { error: aDelErr } = await adminClient
+          .from('artists')
+          .delete()
+          .in('id', createdArtistIds);
+        if (aDelErr) {
+          throw new Error(
+            `[Deliberate Failure Test Cleanup] Error deleting artists: ${aDelErr.message}`,
+          );
+        }
+      }
+      if (createdVenueIds.length > 0) {
+        const { error: vDelErr } = await adminClient
+          .from('venues')
+          .delete()
+          .in('id', createdVenueIds);
+        if (vDelErr) {
+          throw new Error(
+            `[Deliberate Failure Test Cleanup] Error deleting venues: ${vDelErr.message}`,
+          );
+        }
+      }
+    }
+
+    expect(deliberateErrorCaught).toBe(true);
+
+    // Verify zero orphaned rows remain with strict fail-closed assertions
+    const { count: remEvents, error: evErr } = await adminClient
+      .from('events')
+      .select('id', { count: 'exact', head: true })
+      .in('id', createdEventIds);
+    expect(evErr).toBeNull();
+    expect(remEvents).not.toBeNull();
+    expect(remEvents).toBe(0);
+
+    const { count: remEA, error: eaErr } = await adminClient
+      .from('event_artists')
+      .select('id', { count: 'exact', head: true })
+      .in('event_id', createdEventIds);
+    expect(eaErr).toBeNull();
+    expect(remEA).not.toBeNull();
+    expect(remEA).toBe(0);
+
+    const { count: remArtists, error: aErr } = await adminClient
+      .from('artists')
+      .select('id', { count: 'exact', head: true })
+      .in('id', createdArtistIds);
+    expect(aErr).toBeNull();
+    expect(remArtists).not.toBeNull();
+    expect(remArtists).toBe(0);
+
+    const { count: remVenues, error: vErr } = await adminClient
+      .from('venues')
+      .select('id', { count: 'exact', head: true })
+      .in('id', createdVenueIds);
+    expect(vErr).toBeNull();
+    expect(remVenues).not.toBeNull();
+    expect(remVenues).toBe(0);
+  });
+
+  it('strictly detects orphaned rows and fails test verification when cleanup fails (fail-closed cleanup validation)', async () => {
+    if (!isDbAvailable || !adminClient) {
+      throw new Error(
+        'Local Supabase database is offline or unavailable. Cleanup failure detection test requires a running database.',
+      );
+    }
+    assertSafeDatabaseTarget(credentials!.url);
+
+    const testSuffix = `fail_detect_${Date.now()}`;
+    const artistId = crypto.randomUUID();
+    const venueId = crypto.randomUUID();
+    const eventId = crypto.randomUUID();
+
+    try {
+      const { error: aErr } = await adminClient.from('artists').insert({
+        id: artistId,
+        name: `Fail Detect Artist ${testSuffix}`,
+        normalized_name: `fail detect artist ${testSuffix}`,
+      });
+      expect(aErr).toBeNull();
+
+      const { error: vErr } = await adminClient.from('venues').insert({
+        id: venueId,
+        name: `Fail Detect Venue ${testSuffix}`,
+        normalized_name: `fail detect venue ${testSuffix}`,
+        city: 'Denver',
+        region: 'CO',
+        country_code: 'US',
+        lat: 39.75,
+        lng: -104.99,
+        timezone: 'America/Denver',
+      });
+      expect(vErr).toBeNull();
+
+      const { error: eErr } = await adminClient.from('events').insert({
+        id: eventId,
+        name: `Fail Detect Event ${testSuffix}`,
+        normalized_name: `fail detect event ${testSuffix}`,
+        event_kind: 'concert',
+        status: 'scheduled',
+        venue_id: venueId,
+        city: 'Denver',
+        region: 'CO',
+        country_code: 'US',
+        timezone: 'America/Denver',
+        local_start_date: '2026-11-20',
+        starts_at: '2026-11-20T20:00:00-07:00',
+        start_time_precision: 'instant',
+        is_multi_day: false,
+      });
+      expect(eErr).toBeNull();
+
+      // Simulate a scenario where a cleanup operation failed or skipped deleting the event
+      // Verify that checking for orphaned rows catches the leftover event with count === 1
+      const { count: orphanCount, error: orphanErr } = await adminClient
+        .from('events')
+        .select('id', { count: 'exact', head: true })
+        .in('id', [eventId]);
+
+      expect(orphanErr).toBeNull();
+      expect(orphanCount).not.toBeNull();
+      // Crucial fail-closed proof: an incomplete cleanup leaves a nonzero count,
+      // proving that our zero-count assertion strictly fails on incomplete cleanups.
+      expect(orphanCount).toBe(1);
+    } finally {
+      // Guaranteed teardown in finally so the test suite never leaves rows behind
+      assertSafeDatabaseTarget(credentials!.url);
+      await adminClient.from('events').delete().eq('id', eventId);
+      await adminClient.from('artists').delete().eq('id', artistId);
+      await adminClient.from('venues').delete().eq('id', venueId);
+
+      // Verify complete teardown
+      const { count: finalCount, error: finalErr } = await adminClient
+        .from('events')
+        .select('id', { count: 'exact', head: true })
+        .eq('id', eventId);
+      expect(finalErr).toBeNull();
+      expect(finalCount).toBe(0);
+    }
   });
 });

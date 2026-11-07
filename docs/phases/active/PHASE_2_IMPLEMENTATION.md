@@ -443,10 +443,62 @@ Phase 2 will be delivered in 6 focused, independently reviewable PRs:
 - **Files:** `lib/recommendation/factors/`, `tests/unit/recommendation-factors.test.ts`.
 - **Verification:** Comprehensive unit tests covering normal values, edge cases, missing data, and boundary conditions.
 
-### PR 6 — Personalized Ranking, Explanations & Discovery Views
-- **Goal:** Composite ranking engine, human-readable explanation generation, and curated discovery feeds ("This Weekend", "Cheap & Nearby", "Worth Planning For") on `/discover`.
-- **Files:** `lib/recommendation/engine.ts`, `lib/recommendation/explainer.ts`, `app/discover/`, `components/catalog/`.
-- **Verification:** End-to-end unit and E2E tests for ranked event browsing and accessible explanation display.
+### PR 6 (PR #12) — Personalized Discover Experience
+- **Goal:** Production-ready Discover page connecting PR #11's recommendation engine to real user preferences and catalog events.
+- **Status:** Complete, Remediated, and Verified Green (Pull Request #12 open for final approval and merge).
+- **Architecture & Implementation:**
+  - **Two-Tier Candidate Retrieval (`lib/recommendation/service.ts` & `lib/repositories/catalog-repository.ts`):**
+    - **Tier 1 (Explicit User-Preferred Artists):** Executes a targeted database-side inner-join query (`events.select('*, venues(*), event_artists!inner(artist_id)')`) in chunked batches (50 artist IDs) ordered chronologically database-side (`local_start_date ASC`), retrieving up to 100 upcoming events featuring artists the user marked as `favorite`, `like`, or `interested`. This guarantees favorite shows occurring months in advance are never omitted due to single-page chronological truncation or PostgREST 1,000-row limits.
+    - **Tier 2 (General Catalog Ingestion):** Queries upcoming shows across the general catalog (up to 150 events).
+    - Candidates are merged and deduplicated by canonical `event.id` before being ranked by `rankEvents()`.
+  - **Authoritative External ID Resolution:** Unresolved preferences containing `spotifyArtistId` are batch-resolved to canonical artist IDs via `catalogRepo.findArtistIdsByExternalIds('spotify', ...)`.
+  - **Event-Local Timezone Boundaries:** Applies a 24-hour conservative candidate lookback (`calculateCandidateRetrievalLowerBound`) so `calculateTimingFactor` enforces timezone-aware eligibility without prematurely dropping same-evening shows or leaking genuinely past concerts.
+  - **Dynamic Cache Isolation:** `export const dynamic = 'force-dynamic'` on `/discover` ensures personalized recommendations are strictly request-scoped and never stored in shared CDN or Next.js ISR caches.
+  - **Authenticated Server Actions (`app/discover/actions.ts`):**
+    - `updateRecommendationPresetAction`: Validates presets with `isValidScoringPreset()` and persists `artist_first` for the Artists preset.
+    - `updateTravelRadiusAction`: Validates integer within [5, 500] miles and updates profile.
+    - `updateTypicalBudgetAction`: Validates budget <= $1,000 (or null), updating strictly `maxNormalTicketPrice` while isolating `maxFavoriteArtistPrice` and `maxSpontaneousPrice`.
+    - `getPersonalizedRecommendationsAction` & `getPublicDiscoverAction`: Provides server-side candidate re-ranking.
+    - Controlled error boundaries sanitize all client-facing exception messages without leaking SQL details or stack traces, logging diagnostics securely server-side.
+  - **Client State Integrity & Candidate-Aware Empty States (`components/discover/PersonalizedDiscoverContainer.tsx`):**
+    - Candidate collection integrity is preserved in client state across search and city filter adjustments without re-querying the database or corrupting candidate pools.
+    - Result metadata tracks `totalCandidateCount`, `suppressedCount`, and `ineligibleCount` across all refetches.
+    - Differentiates three distinct empty states:
+      1. *Genuinely Empty Catalog:* `totalCandidateCount === 0` renders `<div data-testid="empty-catalog-banner">`.
+      2. *Candidate Pool Ineligible/Suppressed:* `totalCandidateCount > 0 && totalDisplayableCount === 0` renders `<div data-testid="no-eligible-recommendations-banner">` with guidance linking to `/profile/taste` without leaking disliked artist names.
+      3. *Client-Side Filter Emptiness:* `totalFilteredCount === 0` renders `<div data-testid="empty-filtered-banner">` with clear-filters action.
+    - Decoupled `isStale` state from `errorMessage`: dismissing transient error alerts preserves the persistent `<div data-testid="stale-recommendations-banner">` with its dedicated retry button until a refresh succeeds.
+  - **Interactive UI Components (`components/discover/`):**
+    - `PersonalizedEventCard`: Localized date/time, price via `formatEventPriceDisplay`, match score formatted strictly as `Match: ${score}/100` (strictly NOT a percentage), concise explanation, valid ticket button (with URL validation, suppressed if cancelled), and expandable "Why this show?" drawer disclosing 4 factor scores, weights, contributions, and truthful missing coordinate messaging.
+    - `PersonalizedDiscoverErrorState` & `GuestDiscoverErrorState`: Standalone error boundaries with actionable retry paths, ensuring authenticated failures never masquerade as guest sign-in prompts and public failures never masquerade as empty catalogs.
+    - `GuestDiscoverContainer`: Public event listing for signed-out guests with "Make These Recommendations Yours" banner linking to `/login` and `/profile/taste`.
+    - **Discovery Mode Lenses (`lib/recommendation/modes.ts`):** Restored the three original user discovery modes ("This Weekend", "Cheap & Nearby", "Worth Planning For") alongside "All Recommendations". Discovery modes act as situational lenses with distinct eligibility criteria and factor weighting overrides:
+      - *This Weekend:* Filters concerts occurring between Friday 17:00 and Sunday 23:59:59.999 in event-local timezone for the upcoming weekend. Overrides weights to `{ artist: 0.35, price: 0.15, distance: 0.20, timing: 0.30 }`.
+      - *Cheap & Nearby:* Filters concerts within user preferred radius (or 35 mi) with ticket price at or below typical budget (or $35). Overrides weights to `{ artist: 0.20, price: 0.40, distance: 0.30, timing: 0.10 }`.
+      - *Worth Planning For:* Filters concerts at least 14 days in advance featuring high-affinity artists (Favorite or Like, score >= 75) or major events (price >= $60 or distance > 50 mi). Overrides weights to `{ artist: 0.60, price: 0.15, distance: 0.10, timing: 0.15 }`.
+      - Rendered with interactive mode switcher tabs (`data-testid="mode-tab-${mode.id}"`) in both personalized and guest views.
+    - **Anti-Starvation Multi-Tier Quotas (`lib/recommendation/service.ts`):** Partitioned preferred-artist candidate queries into distinct tier quotas: Favorite (up to 100 candidates), Like (up to 75 candidates), and Interested (up to 50 candidates), plus General Catalog (up to 150 candidates). This prevents lower-affinity artists from crowding out must-see favorite acts scheduled further out.
+    - **Full Server-Backed Search & City Filtering:** Replaced partial client-side array filtering with server-backed database queries across the full scheduled catalog (`searchQuery`, `city`), backed by `listCities()` on `ICatalogRepository`. Truthfully preserves `isEmptyCatalog` diagnostics.
+    - **Accessible Settings Groups:** Semantic `<fieldset>` and `<legend>` markup with `role="group"` and `aria-labelledby` for Travel Radius and Typical Budget button groups.
+    - **Separated Spotify Connection & Preference State:** Evaluates `isSpotifyConnected` independently of explicit taste preference count, tailoring onboarding banners for users who linked Spotify vs manual-only users.
+    - **Decoupled Utilities:** Extracted `formatEventPriceDisplay` into `lib/utils/price-formatting.ts`, eliminating circular component dependencies on `ScoringInspector`.
+- **Review Remediation History:**
+  - *Remediation Round 1:* Distinct authenticated vs guest error states, sanitized server action error returns, restored fail-closed integration tests (`throw new Error` when DB offline), authoritative Spotify external ID batch mapping, candidate pool integrity across client filters, conservative candidate retrieval lower bound, mandatory Playwright E2E assertions for seeded events, factor breakdown drawer, `aria-pressed` states, settings persistence across reload, filter clearing, and ticket URL validation.
+  - *Remediation Round 2:* Candidate-aware empty states in `PersonalizedDiscoverContainer.tsx`, database-side inner join query completeness for preferred artists (`catalog-repository.ts`) with >1,000 row PostgreSQL integration test (`catalog-rls.test.ts`), decoupled stale-score warning from transient error banners, and E2E mathematical preset ranking inversion proof in `discover.spec.ts`.
+  - *Remediation Round 3:* Reliable high-volume fixture cleanup with batched reverse-dependency deletion and deliberate failure resilience in `tests/integration/catalog-rls.test.ts`; bounded multi-page candidate lookback past past/ineligible shows without candidate pool truncation in `lib/recommendation/service.ts`; and corrected chunked artist pagination in `lib/repositories/catalog-repository.ts` with dedicated unit test suite in `tests/unit/catalog-repository.test.ts`.
+  - *Remediation Round 4:* Prevented cancelled/postponed events from consuming eligible candidate slots in `lib/recommendation/service.ts` while preserving truthful diagnostic counts; enforced strictly fail-closed PostgreSQL fixture cleanup across all 1,020 seeded IDs in `tests/integration/catalog-rls.test.ts`; corrected guest empty-state messaging in `components/discover/GuestDiscoverContainer.tsx` to distinguish past-only catalogs from active filter exclusions; and added clear status treatment for cancelled/postponed shows in `components/catalog/EventCard.tsx`.
+  - *Remediation Round 5:* Filtered cancelled and postponed events out of public Discover browsing in `lib/recommendation/service.ts` (`ev.status === 'scheduled'`), capped public results at requested limits (`events.slice(0, limit)`), preserved accurate empty-catalog metadata, broke the circular component dependency between `EventCard.tsx` and `PersonalizedEventCard.tsx` by moving `isValidHttpUrl` into `lib/utils/url.ts`, and added 9 regression tests in `tests/unit/recommendation-service.test.ts` and `tests/unit/url-utils.test.ts`.
+  - *Remediation Round 6 (Architectural & Product Review):* Restored 3 Discovery Modes (*This Weekend, Cheap & Nearby, Worth Planning For*) with factor weighting overrides (`lib/recommendation/modes.ts`); implemented server-backed full-catalog search and city filtering (`listCities()`); partitioned candidate retrieval with dedicated anti-starvation quotas per preference tier (100 favorite, 75 like, 50 interested, 150 general); eliminated scan-limit false negatives by querying scheduled events; fixed E2E radius mutation and reload persistence test; added accessible fieldset/legend semantics to button groups; decoupled Spotify connection status from manual preference count; and extracted price formatting to `lib/utils/price-formatting.ts`.
+- **Files Modified/Added:** `lib/utils/url.ts`, `lib/utils/price-formatting.ts`, `lib/recommendation/modes.ts`, `lib/recommendation/service.ts`, `lib/recommendation/engine.ts`, `lib/recommendation/types.ts`, `lib/repositories/catalog-repository.ts`, `lib/repositories/interfaces.ts`, `lib/repositories/memory-repositories.ts`, `app/discover/actions.ts`, `app/discover/page.tsx`, `components/discover/PersonalizedEventCard.tsx`, `components/discover/PersonalizedDiscoverContainer.tsx`, `components/discover/PersonalizedDiscoverErrorState.tsx`, `components/discover/GuestDiscoverContainer.tsx`, `components/discover/GuestDiscoverErrorState.tsx`, `components/catalog/EventCard.tsx`, `components/recommendation/ScoringInspector.tsx`, `tests/unit/url-utils.test.ts`, `tests/unit/price-formatting.test.ts`, `tests/unit/discovery-modes.test.ts`, `tests/unit/recommendation-service.test.ts`, `tests/unit/catalog-repository.test.ts`, `tests/unit/discover-actions.test.ts`, `tests/unit/discover-components.test.tsx`, `tests/integration/personalized-discover.test.ts`, `tests/integration/catalog-rls.test.ts`, `tests/integration/recommendation-scoring.test.ts`, `tests/e2e/discover.spec.ts`, `tests/e2e/taste-auth.spec.ts`, `tests/e2e/smoke.spec.ts`.
+- **Verification Summary:**
+  - Prettier Formatting: 100% compliant (`npm run format:check`).
+  - ESLint: 0 errors, 0 warnings (`npm run lint`).
+  - Strict TypeScript: `tsc --noEmit` clean across entire codebase (`npm run typecheck`).
+  - Unit Tests: 510/510 passed across 38 test suites (`npm test`).
+  - PostgreSQL Integration Suite: 59/59 passed across 8 suites.
+  - Next.js Production Build: Compiled cleanly, 14 routes, `/discover` confirmed dynamic (`npm run build`).
+  - Playwright Browser E2E Tests: 11/11 tests passed (`npm run test:e2e`).
+  - Full Interactive Browser QA: 20 passed, 1 confirmed expected guard, 0 visual overflows.
 
 ---
 
@@ -504,4 +556,8 @@ Phase 2 will be accepted when:
 2. **Large-Payload Object Storage:** Storing raw HTML/API payloads $>500$ KB in S3/R2 is deferred until payload volume warrants.
 3. **Manual Resolution Operator UI:** Human-in-the-loop admin UI for reviewing `needs_review` candidates remains deferred.
 4. **Attendance Logging & Multi-Dimensional Experience Signals:** Past concert logging deferred to Phase 4 per `docs/product/attended-concerts-and-reviews.md`.
+5. **Save & Dismiss Event Actions:** Saving concerts to personal bookmarks or dismissing unwanted recommendations (scheduled for Phase 2 post-PR #12 / Phase 3).
+6. **Recommendation Feedback Loops:** Negative recommendation feedback ("Too expensive", "Not my vibe") to refine scoring weights and preferences (scheduled for Phase 3).
+7. **Multi-Day Festival Itinerary Planning:** Day-by-day festival lineups, conflict detection, and schedule curation (scheduled for Phase 3).
+8. **Price Drop & Tour Announcement Change Alerts:** Background notifications and watchlist alerting for ticket price changes or new tour announcements (scheduled for Phase 4).
 

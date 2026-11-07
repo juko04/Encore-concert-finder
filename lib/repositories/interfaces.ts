@@ -47,8 +47,11 @@ export interface EventListFilters {
   toDate?: string;
   venueId?: string;
   artistId?: string;
+  artistIds?: string[];
   city?: string;
   region?: string;
+  status?: Event['status'] | Event['status'][];
+  searchQuery?: string;
   limit?: number;
   offset?: number;
 }
@@ -57,6 +60,7 @@ export interface ICatalogRepository {
   // Read operations (public catalog)
   getEventById(id: string): Promise<CanonicalEventDetail | null>;
   listEvents(filters?: EventListFilters): Promise<CanonicalEventSummary[]>;
+  listCities(): Promise<string[]>;
   getArtistById(id: string): Promise<Artist | null>;
   searchArtists(query: string, limit?: number): Promise<Artist[]>;
   findArtistByName(normalizedName: string): Promise<Artist | null>;
@@ -65,6 +69,10 @@ export interface ICatalogRepository {
     provider: string,
     externalId: string,
   ): Promise<Artist | null>;
+  findArtistIdsByExternalIds(
+    provider: string,
+    externalIds: string[],
+  ): Promise<Map<string, string>>;
   findArtistExternalIds(artistId: string): Promise<ArtistExternalId[]>;
   findVenueByNameAndCity(
     normalizedName: string,

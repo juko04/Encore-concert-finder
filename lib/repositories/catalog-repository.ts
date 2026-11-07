@@ -419,10 +419,114 @@ export class SupabaseCatalogRepository implements ICatalogRepository {
   async listEvents(
     filters?: EventListFilters,
   ): Promise<CanonicalEventSummary[]> {
-    let query = this.client
-      .from('events')
-      .select('*, venues(*)')
-      .order('local_start_date', { ascending: true });
+    // If a large number of artist IDs is supplied, chunk into batches of 50 to avoid oversized request URIs
+    const CHUNK_SIZE = 50;
+    if (filters?.artistIds && filters.artistIds.length > CHUNK_SIZE) {
+      const chunks: string[][] = [];
+      for (let i = 0; i < filters.artistIds.length; i += CHUNK_SIZE) {
+        chunks.push(filters.artistIds.slice(i, i + CHUNK_SIZE));
+      }
+
+      const globalOffset = filters.offset ?? 0;
+      const globalLimit = filters.limit;
+      // Fetch up to (globalOffset + globalLimit) from each chunk so globally sorted top records are available
+      const chunkFetchLimit =
+        globalLimit !== undefined ? globalOffset + globalLimit : undefined;
+
+      const chunkPromises = chunks.map((chunk) =>
+        this.listEvents({
+          ...filters,
+          artistIds: chunk,
+          offset: undefined,
+          limit: chunkFetchLimit,
+        }),
+      );
+      const chunkResults = await Promise.all(chunkPromises);
+      const mergedMap = new Map<string, CanonicalEventSummary>();
+      for (const res of chunkResults) {
+        for (const ev of res) {
+          if (!mergedMap.has(ev.id)) {
+            mergedMap.set(ev.id, ev);
+          }
+        }
+      }
+      const allMerged = Array.from(mergedMap.values());
+      allMerged.sort(
+        (a, b) =>
+          a.localStartDate.localeCompare(b.localStartDate) ||
+          a.id.localeCompare(b.id),
+      );
+      const limit = globalLimit !== undefined ? globalLimit : allMerged.length;
+      return allMerged.slice(globalOffset, globalOffset + limit);
+    }
+
+    let selectString = '*, venues(*)';
+    if (
+      (filters?.artistIds && filters.artistIds.length > 0) ||
+      filters?.artistId
+    ) {
+      selectString = '*, venues(*), event_artists!inner(artist_id)';
+    }
+
+    let query = this.client.from('events').select(selectString);
+
+    // Filter by status if specified
+    if (filters?.status) {
+      if (Array.isArray(filters.status)) {
+        query = query.in('status', filters.status);
+      } else {
+        query = query.eq('status', filters.status);
+      }
+    }
+
+    // Database-side relation join & filter:
+    // Avoids unpaginated event_artists subqueries that truncate at PostgREST row limits.
+    // Joins event_artists!inner in PostgreSQL, ensuring chronological ordering (local_start_date ASC)
+    // and limits are evaluated inside PostgreSQL across all matching rows.
+    if (filters?.artistIds && filters.artistIds.length > 0) {
+      query = query.in('event_artists.artist_id', filters.artistIds);
+    } else if (filters?.artistId) {
+      query = query.eq('event_artists.artist_id', filters.artistId);
+    }
+
+    // Server-side text search across event title, venue name, and artist names
+    if (filters?.searchQuery?.trim()) {
+      const trimmedSearch = filters.searchQuery.trim();
+      const escaped = escapeLikePattern(trimmedSearch);
+      const orClauses: string[] = [`name.ilike.%${escaped}%`];
+
+      // Query matching venues
+      const { data: venuesData } = await this.client
+        .from('venues')
+        .select('id')
+        .ilike('name', `%${escaped}%`)
+        .limit(30);
+      const matchedVenueIds = (venuesData || []).map((v) => v.id);
+      if (matchedVenueIds.length > 0) {
+        orClauses.push(`venue_id.in.(${matchedVenueIds.join(',')})`);
+      }
+
+      // Query matching artists
+      const matchedArtists = await this.searchArtists(trimmedSearch, 30);
+      if (matchedArtists.length > 0) {
+        const matchedArtistIds = matchedArtists.map((a) => a.id);
+        const { data: eaData } = await this.client
+          .from('event_artists')
+          .select('event_id')
+          .in('artist_id', matchedArtistIds)
+          .limit(100);
+        const matchedEventIds = (eaData || []).map((ea) => ea.event_id);
+        if (matchedEventIds.length > 0) {
+          orClauses.push(`id.in.(${matchedEventIds.join(',')})`);
+        }
+      }
+
+      query = query.or(orClauses.join(','));
+    }
+
+    query = query
+      .order('local_start_date', { ascending: true })
+      .order('id', { ascending: true });
 
     if (filters?.fromDate) {
       query = query.gte('local_start_date', filters.fromDate);
@@ -440,31 +544,11 @@ export class SupabaseCatalogRepository implements ICatalogRepository {
       query = query.eq('region', filters.region);
     }
 
-    // Finding 11: Artist filtering support
-    if (filters?.artistId) {
-      const { data: ea, error: eaError } = await this.client
-        .from('event_artists')
-        .select('event_id')
-        .eq('artist_id', filters.artistId);
-
-      if (eaError) {
-        throw new Error(`Failed to filter by artist: ${eaError.message}`);
-      }
-      const eventIds = ea?.map((r) => r.event_id) ?? [];
-      if (eventIds.length === 0) {
-        return [];
-      }
-      query = query.in('id', eventIds);
-    }
-
-    if (filters?.limit) {
+    if (filters?.offset !== undefined && filters.offset > 0) {
+      const limit = filters.limit ?? 20;
+      query = query.range(filters.offset, filters.offset + limit - 1);
+    } else if (filters?.limit) {
       query = query.limit(filters.limit);
-    }
-    if (filters?.offset) {
-      query = query.range(
-        filters.offset,
-        filters.offset + (filters.limit ?? 20) - 1,
-      );
     }
 
     const { data: eventsData, error } = await query;
@@ -472,12 +556,23 @@ export class SupabaseCatalogRepository implements ICatalogRepository {
       throw new Error(`Failed to list events: ${error.message}`);
     }
 
-    const rows = eventsData || [];
-    if (rows.length === 0) {
+    const rawRows = eventsData || [];
+    if (rawRows.length === 0) {
       return [];
     }
 
-    const eventIds = rows.map((r) => (r as EventRow).id);
+    // Deduplicate event rows by ID in case multi-artist matches returned duplicate rows
+    const seenEventIds = new Set<string>();
+    const rows: EventRow[] = [];
+    for (const r of rawRows) {
+      const row = r as unknown as EventRow;
+      if (!seenEventIds.has(row.id)) {
+        seenEventIds.add(row.id);
+        rows.push(row);
+      }
+    }
+
+    const eventIds = rows.map((r) => r.id);
 
     // Batch-fetch artists for all returned events (1 query, ordered by sort_order)
     const { data: allArtistLinks, error: artistError } = await this.client
@@ -634,6 +729,29 @@ export class SupabaseCatalogRepository implements ICatalogRepository {
     return summaries;
   }
 
+  async listCities(): Promise<string[]> {
+    const { data, error } = await this.client
+      .from('events')
+      .select('city, venues(city)')
+      .eq('status', 'scheduled');
+
+    if (error) {
+      throw new Error(`Failed to list cities: ${error.message}`);
+    }
+
+    const citySet = new Set<string>();
+    for (const r of (data as unknown as Array<{
+      city?: string | null;
+      venues?: { city?: string | null } | null;
+    }>) || []) {
+      const c = r.venues?.city ?? r.city;
+      if (c && c.trim().length > 0) {
+        citySet.add(c.trim());
+      }
+    }
+    return Array.from(citySet).sort();
+  }
+
   async getArtistById(id: string): Promise<Artist | null> {
     const { data, error } = await this.client
       .from('artists')
@@ -718,6 +836,34 @@ export class SupabaseCatalogRepository implements ICatalogRepository {
     return mapArtistRow(data.artists as unknown as ArtistRow);
   }
 
+  async findArtistIdsByExternalIds(
+    provider: string,
+    externalIds: string[],
+  ): Promise<Map<string, string>> {
+    const result = new Map<string, string>();
+    if (!externalIds || externalIds.length === 0) return result;
+
+    const { data, error } = await this.client
+      .from('artist_external_ids')
+      .select('artist_id, external_id')
+      .eq('provider', provider)
+      .in('external_id', externalIds);
+
+    if (error) {
+      throw new Error(
+        `Failed to find artist IDs by external IDs: ${error.message}`,
+      );
+    }
+
+    for (const row of (data as Array<{
+      artist_id: string;
+      external_id: string;
+    }>) || []) {
+      result.set(row.external_id, row.artist_id);
+    }
+    return result;
+  }
+
   async findArtistExternalIds(artistId: string): Promise<ArtistExternalId[]> {
     const { data, error } = await this.client
       .from('artist_external_ids')
@@ -784,7 +930,10 @@ export class SupabaseCatalogRepository implements ICatalogRepository {
       query = query.ilike('country_code', countryCode.trim());
     }
 
-    const { data, error } = await query.maybeSingle();
+    const { data, error } = await query
+      .order('created_at', { ascending: true })
+      .limit(1)
+      .maybeSingle();
     if (error) {
       throw new Error(`Failed to find venue: ${error.message}`);
     }
