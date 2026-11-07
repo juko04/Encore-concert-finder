@@ -492,6 +492,16 @@ export async function getPersonalizedDiscoverData(
       queryFromDate = weekendWindow.startDate;
     }
     queryToDate = weekendWindow.endDate;
+  } else if (activeMode === 'cheap_and_nearby') {
+    const refInstantDate = referenceInstant
+      ? new Date(referenceInstant)
+      : referenceDate
+        ? new Date(`${referenceDate}T00:00:00Z`)
+        : new Date();
+    const lookahead14Date = new Date(
+      refInstantDate.getTime() + 14 * 24 * 60 * 60 * 1000,
+    );
+    queryToDate = lookahead14Date.toISOString().slice(0, 10);
   } else if (activeMode === 'worth_planning_for') {
     const refInstantDate = referenceInstant
       ? new Date(referenceInstant)
@@ -740,6 +750,16 @@ export async function getPublicDiscoverData(
       queryFromDate = weekendWindow.startDate;
     }
     queryToDate = weekendWindow.endDate;
+  } else if (activeMode === 'cheap_and_nearby') {
+    const refInstantDate = referenceInstant
+      ? new Date(referenceInstant)
+      : referenceDate
+        ? new Date(`${referenceDate}T00:00:00Z`)
+        : new Date();
+    const lookahead14Date = new Date(
+      refInstantDate.getTime() + 14 * 24 * 60 * 60 * 1000,
+    );
+    queryToDate = lookahead14Date.toISOString().slice(0, 10);
   } else if (activeMode === 'worth_planning_for') {
     const refInstantDate = referenceInstant
       ? new Date(referenceInstant)

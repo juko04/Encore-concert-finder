@@ -347,6 +347,42 @@ describe('Discovery Modes Domain Logic', () => {
       ).toBe(false);
     });
 
+    it('enforces 14-day lookahead horizon for spontaneous local discovery in "cheap_and_nearby"', () => {
+      const refDate = '2026-10-01';
+      const context = { referenceDate: refDate, city: 'Denver' };
+
+      // 5 days out (<= 14 days) -> eligible
+      const soonShow = makeStubEvent({
+        localStartDate: '2026-10-06',
+        city: 'Denver',
+        minPrice: 20,
+      });
+
+      // Exactly 14 days out -> eligible
+      const horizonShow = makeStubEvent({
+        localStartDate: '2026-10-15',
+        city: 'Denver',
+        minPrice: 20,
+      });
+
+      // 20 days out (> 14 days) -> fails spontaneous lookahead horizon
+      const farFutureShow = makeStubEvent({
+        localStartDate: '2026-10-21',
+        city: 'Denver',
+        minPrice: 20,
+      });
+
+      expect(
+        isEventEligibleForMode(soonShow, 'cheap_and_nearby', context),
+      ).toBe(true);
+      expect(
+        isEventEligibleForMode(horizonShow, 'cheap_and_nearby', context),
+      ).toBe(true);
+      expect(
+        isEventEligibleForMode(farFutureShow, 'cheap_and_nearby', context),
+      ).toBe(false);
+    });
+
     it('enforces 14-day minimum advance planning horizon in "worth_planning_for" (FIX 5)', () => {
       const refDate = '2026-10-01';
       const userPrefs = [

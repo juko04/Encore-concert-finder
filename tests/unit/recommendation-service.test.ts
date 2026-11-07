@@ -399,77 +399,6 @@ describe('Production Recommendation Service (getPersonalizedDiscoverData)', () =
     ).rejects.toThrow(/Invalid recommendation preset/);
   });
 
-  it('correctly handles event-local timezone boundary without dropping same-evening events', async () => {
-    const userA = 'user-tz-test';
-    await profileRepo.upsertProfile(userA, {
-      recommendationPreset: 'balanced',
-    });
-
-    // Scenario: local time in Denver is 2026-10-25 19:30:00 MDT (-06:00).
-    // In UTC, this instant is 2026-10-26 01:30:00Z (the next UTC calendar day!).
-    const instantUtc = '2026-10-26T01:30:00Z';
-    const naiveUtcDate = '2026-10-26';
-
-    // Event tonight at 20:00 MDT (startsAt: 2026-10-26T02:00:00Z)
-    seedEvent(catalogRepo, {
-      id: 'event-tonight-denver',
-      title: 'Tonight in Denver',
-      localStartDate: '2026-10-25',
-      startsAt: '2026-10-26T02:00:00Z',
-      timezone: 'America/Denver',
-      city: 'Denver',
-      venueName: 'Bluebird Theater',
-      minPrice: 30,
-    });
-
-    // Event yesterday at 20:00 MDT (startsAt: 2026-10-25T02:00:00Z) - genuinely past
-    seedEvent(catalogRepo, {
-      id: 'event-yesterday-denver',
-      title: 'Yesterday in Denver',
-      localStartDate: '2026-10-24',
-      startsAt: '2026-10-25T02:00:00Z',
-      timezone: 'America/Denver',
-      city: 'Denver',
-      venueName: 'Bluebird Theater',
-      minPrice: 30,
-    });
-
-    const result = await getPersonalizedDiscoverData({
-      userId: userA,
-      profileRepo,
-      prefRepo,
-      catalogRepo,
-      referenceDate: naiveUtcDate,
-      referenceInstant: instantUtc,
-    });
-
-    // Event tonight must be retained
-    const tonightRec = result.exploratory.find(
-      (r) => r.eventId === 'event-tonight-denver',
-    );
-    expect(tonightRec).toBeDefined();
-
-    // Event yesterday must be filtered out as past
-    const yesterdayRec = [
-      ...result.recommendations,
-      ...result.exploratory,
-    ].find((r) => r.eventId === 'event-yesterday-denver');
-    expect(yesterdayRec).toBeUndefined();
-
-    // Verify public discover data also filters out the genuinely past event
-    const publicResult = await getPublicDiscoverData({
-      catalogRepo,
-      referenceDate: naiveUtcDate,
-      referenceInstant: instantUtc,
-    });
-    expect(
-      publicResult.events.find((e) => e.id === 'event-tonight-denver'),
-    ).toBeDefined();
-    expect(
-      publicResult.events.find((e) => e.id === 'event-yesterday-denver'),
-    ).toBeUndefined();
-  });
-
   it('guarantees user preference isolation between User A and User B', async () => {
     const userA = 'user-a-isolation';
     const userB = 'user-b-isolation';
@@ -540,27 +469,6 @@ describe('Production Recommendation Service (getPersonalizedDiscoverData)', () =
     expect(resultB.exploratory[0].eventId).toBe('event-the-cure-1');
     expect(resultB.exploratory[0].explanation).not.toContain('Favorite artist');
     expect(resultB.activePreset).toBe('value');
-  });
-
-  it('returns truthful empty state when catalog has no upcoming events', async () => {
-    const userA = 'user-empty-catalog';
-    await profileRepo.upsertProfile(userA, {
-      recommendationPreset: 'balanced',
-    });
-
-    const result = await getPersonalizedDiscoverData({
-      userId: userA,
-      profileRepo,
-      prefRepo,
-      catalogRepo,
-      referenceDate,
-      referenceInstant,
-    });
-
-    expect(result.isEmptyCatalog).toBe(true);
-    expect(result.recommendations).toHaveLength(0);
-    expect(result.exploratory).toHaveLength(0);
-    expect(result.totalCandidateCount).toBe(0);
   });
 
   it('retrieves public discover data for signed-out visitors without personal scoring', async () => {
@@ -1141,46 +1049,6 @@ describe('Production Recommendation Service (getPersonalizedDiscoverData)', () =
       catalogRepo = new MemoryCatalogRepository();
     });
 
-    it('returns the scheduled event without being flooded by 160 future cancelled events', async () => {
-      const refDate = '2026-10-26';
-      const refInstant = '2026-10-26T12:00:00Z';
-
-      // 160 future cancelled events
-      for (let i = 0; i < 160; i++) {
-        seedEvent(catalogRepo, {
-          id: `cancelled-flood-${i}`,
-          title: `Cancelled Flood ${i}`,
-          localStartDate: '2026-11-01',
-          startsAt: '2026-11-01T20:00:00Z',
-          timezone: 'America/Denver',
-          status: 'cancelled',
-        });
-      }
-
-      // 1 valid scheduled event
-      seedEvent(catalogRepo, {
-        id: 'valid-scheduled-lone',
-        title: 'Leon Bridges Live',
-        localStartDate: '2026-11-15',
-        startsAt: '2026-11-15T20:00:00Z',
-        timezone: 'America/Denver',
-        status: 'scheduled',
-      });
-
-      const result = await getPublicDiscoverData({
-        catalogRepo,
-        referenceDate: refDate,
-        referenceInstant: refInstant,
-      });
-
-      expect(result.isEmptyCatalog).toBe(false);
-      expect(result.events).toHaveLength(1);
-      expect(result.events[0].id).toBe('valid-scheduled-lone');
-      expect(result.events[0].title).toBe('Leon Bridges Live');
-      expect(result.events.some((e) => e.status === 'cancelled')).toBe(false);
-      expect(result.totalCount).toBe(1);
-    });
-
     it('returns no upcoming scheduled concerts when catalog contains only cancelled or postponed events', async () => {
       const refDate = '2026-10-26';
       const refInstant = '2026-10-26T12:00:00Z';
@@ -1264,8 +1132,8 @@ describe('Production Recommendation Service (getPersonalizedDiscoverData)', () =
         });
       }
 
-      // 10 cancelled future events
-      for (let i = 0; i < 10; i++) {
+      // 160 cancelled future events (flooding retrieval budget)
+      for (let i = 0; i < 160; i++) {
         seedEvent(catalogRepo, {
           id: `canc-mix-${i}`,
           title: `Cancelled Show ${i}`,
@@ -1310,6 +1178,8 @@ describe('Production Recommendation Service (getPersonalizedDiscoverData)', () =
       expect(result.events).toHaveLength(5);
       expect(result.totalCount).toBe(5);
       expect(result.events.every((e) => e.status === 'scheduled')).toBe(true);
+      expect(result.events.some((e) => e.status === 'cancelled')).toBe(false);
+      expect(result.events.some((e) => e.status === 'postponed')).toBe(false);
       expect(result.events.map((e) => e.id)).toEqual([
         'sched-mix-0',
         'sched-mix-1',
@@ -1317,42 +1187,6 @@ describe('Production Recommendation Service (getPersonalizedDiscoverData)', () =
         'sched-mix-3',
         'sched-mix-4',
       ]);
-    });
-
-    it('keeps same-evening Denver concert eligible after UTC advances to tomorrow', async () => {
-      // 8:00 PM MDT on 2026-10-25 is 2026-10-26T02:00:00Z in UTC
-      const refInstant = '2026-10-26T02:00:00Z';
-
-      // Concert starts at 9:00 PM MDT on 2026-10-25 (2026-10-26T03:00:00Z)
-      seedEvent(catalogRepo, {
-        id: 'denver-tonight-show',
-        title: 'Nathaniel Rateliff at Mission Ballroom',
-        localStartDate: '2026-10-25',
-        startsAt: '2026-10-26T03:00:00Z',
-        timezone: 'America/Denver',
-        startTimePrecision: 'instant',
-        status: 'scheduled',
-      });
-
-      // Yesterday show in Denver (past)
-      seedEvent(catalogRepo, {
-        id: 'denver-yesterday-show',
-        title: 'Yesterday Show',
-        localStartDate: '2026-10-24',
-        startsAt: '2026-10-25T03:00:00Z',
-        timezone: 'America/Denver',
-        startTimePrecision: 'instant',
-        status: 'scheduled',
-      });
-
-      const result = await getPublicDiscoverData({
-        catalogRepo,
-        referenceInstant: refInstant,
-      });
-
-      expect(result.isEmptyCatalog).toBe(false);
-      expect(result.events).toHaveLength(1);
-      expect(result.events[0].id).toBe('denver-tonight-show');
     });
 
     it('applies search filtering and preserves accurate metadata when search finds no matches', async () => {

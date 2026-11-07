@@ -530,6 +530,7 @@ Phase 2 will be delivered in 6 focused, independently reviewable PRs:
 2. **Controlled Ingestion Trigger:** Manually triggered CLI execution runner (`npm run ingest:ticketmaster`) is approved for PR 1. Automated production background scheduling is deferred to future operational phases.
 3. **PR 1 Scope Boundary:** Approved: implement the Ticketmaster API client, adapter, parsing, validation, fixtures, and dry-run behavior. Canonicalization database persistence belongs in PR 2.
 4. **Planning PR Branch Precedence:** The planning specification (`docs/phase-2-specification`) must be merged into `main` before creating the first implementation branch (`feature/phase-2-ticketmaster-ingestion`), ensuring the implementation branch inherits the authoritative Phase 2 spec.
+5. **Cheap & Nearby Scope Alignment:** Cheap & Nearby is defined as spontaneous local discovery over a default 14-day lookahead horizon with $35 affordability and 35-mile proximity defaults. Candidate retrieval applies the 14-day date restriction in the database query (`toDate: today + 14d`) and geographically constrains before application-side eligibility filtering where practical.
 
 ---
 
@@ -568,4 +569,6 @@ Phase 2 will be accepted when:
 6. **Recommendation Feedback Loops:** Negative recommendation feedback ("Too expensive", "Not my vibe") to refine scoring weights and preferences (scheduled for Phase 3).
 7. **Multi-Day Festival Itinerary Planning:** Day-by-day festival lineups, conflict detection, and schedule curation (scheduled for Phase 3).
 8. **Price Drop & Tour Announcement Change Alerts:** Background notifications and watchlist alerting for ticket price changes or new tour announcements (scheduled for Phase 4).
+9. **Favorite-Artist Fairness Scaling:** Single bounded 100-event query and fair allocation (`applyFairArtistAllocation`) satisfies the initial launch catalog; multi-query windowed pagination across hundreds of favorite artists is deferred as future scaling debt.
+10. **Full-Text Search Migration:** Client-side disjunction query string is bounded to preserve GET URI limits under 6 KB; migrating multi-field search to a dedicated PostgreSQL full-text search index (`tsvector`) or RPC is scheduled for Phase 3 national scaling.
 

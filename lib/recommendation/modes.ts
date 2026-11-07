@@ -47,10 +47,10 @@ export const DISCOVERY_MODE_CONFIGS: Record<
     badge: '🎟️',
     tagline: 'Inexpensive concerts and local club discoveries',
     description:
-      'Focus on affordable tickets, clubs, small venues, and emerging artists you might love nearby.',
+      'Affordable shows under $35 within 35 miles over the next 14 days, featuring clubs, small venues, and emerging artists.',
     emptyStateHeading: 'No inexpensive shows nearby',
     emptyStateDescription:
-      'No upcoming concerts match your typical budget and distance radius. Try expanding your travel radius or adjusting your ticket budget.',
+      'No upcoming concerts match your typical budget and distance radius over the next 14 days. Try expanding your travel radius or adjusting your ticket budget.',
   },
   worth_planning_for: {
     id: 'worth_planning_for',
@@ -306,6 +306,35 @@ export function isEventEligibleForMode(
   }
 
   if (mode === 'cheap_and_nearby') {
+    // Spontaneous discovery window: default 14 days lookahead from reference date
+    if (context.referenceDate || context.referenceInstant) {
+      let refDateString = context.referenceDate;
+      if (!refDateString) {
+        const refInst = context.referenceInstant
+          ? typeof context.referenceInstant === 'string'
+            ? new Date(context.referenceInstant)
+            : context.referenceInstant
+          : new Date();
+        refDateString = getZonedTimeParts(
+          refInst,
+          event.timezone || 'America/Denver',
+        ).dateString;
+      }
+
+      const refDateMs = new Date(`${refDateString}T00:00:00Z`).getTime();
+      const eventDateMs = new Date(
+        `${event.localStartDate}T00:00:00Z`,
+      ).getTime();
+      const daysAhead = Math.round(
+        (eventDateMs - refDateMs) / (24 * 60 * 60 * 1000),
+      );
+
+      // Must occur within next 14 days (spontaneous lookahead horizon)
+      if (daysAhead < 0 || daysAhead > 14) {
+        return false;
+      }
+    }
+
     // Budget check: maxNormalTicketPrice (default $35 per Phase 2 spec)
     const budgetCeiling = context.userProfile?.maxNormalTicketPrice ?? 35;
 

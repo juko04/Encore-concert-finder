@@ -47,3 +47,17 @@ The following items were explicitly reviewed during Phase 1 and deferred:
    Defining the retention window and pruning cron for raw ingest bodies is deferred to Phase 4 / production operations.
 5. **Object-Storage Provider & Payload Size Threshold:**  
    Small payloads are stored in PostgreSQL with a nullable `external_storage_ref` column in `raw_ingests`; choosing S3/GCS/R2 and offloading large HTML payloads is deferred until high-volume scraping begins.
+
+---
+
+## 3. Phase 2 Deferred Architectural Optimizations (Accepted Scaling Debt)
+
+### 3.1 Favorite-Artist Fairness Under Extreme Starvation
+- **Status:** Deferred to post-launch / national catalog scaling.
+- **Context:** If a single favorite artist has >100 upcoming tour dates chronologically preceding all other favorite artists, a single-query 100-event favorite retrieval could theoretically starve subsequent artists.
+- **Accepted Tradeoff:** For the initial Colorado-focused launch, extreme single-artist saturation does not occur in practice. The system enforces a single bounded 100-event query with in-memory fair round-robin allocation (`applyFairArtistAllocation`), avoiding N separate database queries. Multi-query windowed pagination across hundreds of artists will be evaluated when catalog volume expands nationally.
+
+### 3.2 Full-Text Search Scalability (PostgreSQL tsvector / RPC)
+- **Status:** Deferred to Phase 3 / production scaling.
+- **Context:** Multi-field catalog search currently constructs PostgREST disjunction clauses (`.or(...)`) across event titles, venue IDs, and artist-event IDs. Extremely broad search queries (e.g. single-letter or common stop-words) matching thousands of entities could approach HTTP GET URI limits (~8 KB) without bounds.
+- **Accepted Tradeoff:** The disjunction ID count is bounded to preserve GET URI lengths under 6 KB, with double-quoted PostgREST pattern escaping. For searching millions of events and venues across nationwide catalogs, search will migrate to a dedicated PostgreSQL full-text search index (`tsvector` / GIN index) or RPC function.

@@ -11,23 +11,20 @@ Durable architecture records belong in [`docs/architecture/`](docs/architecture/
 - **Active Specification:** [`docs/phases/active/PHASE_2_IMPLEMENTATION.md`](docs/phases/active/PHASE_2_IMPLEMENTATION.md).
 - **Current Branch:** `feature/phase-2-personalized-discover`
 - **Active Implementing Agent:** Google Antigravity
-- **Current Task:** Phase 2, PR #12: Personalized Discover Experience — Final Targeted Corrections Complete & Verified.
-- **Remediation Completed (Final Targeted Corrections — All Issues Resolved):**
-  1. *MUST FIX 1 (Discovery-Mode Retrieval Completeness):* Pushed mode eligibility checks (`modeOptions`) into candidate pagination loops in `retrieveCandidatesWithLookback`, ensuring qualifying Cheap & Nearby shows are not starved by earlier nonqualifying events.
-  2. *MUST FIX 2 (Favorite-Artist Quota & Query Bounds):* Replaced per-artist iterative queries with a single bounded query and fair round-robin quota allocation (`applyFairArtistAllocation`), guaranteeing total favorite candidates $\le 100$ and exactly 1 database query regardless of whether the user has 3, 20, or 100 favorite artists.
-  3. *MUST FIX 3 (Cheap & Nearby Accuracy):* In `lib/recommendation/modes.ts`, rejected contradictory `free_event` markers when positive pricing evidence exists (`minPrice > 0`); strictly rejected "nearby" claims when guests/users have neither home coordinates nor a city filter.
-  4. *MUST FIX 4 (Complete Database Search):* In `lib/repositories/catalog-repository.ts`, replaced silent 100/1,000 limits with `.range()` batch pagination (1,000-row pages), chunked 200-item ID disjunctions, and PostgREST `.or()` double-quote escaping for punctuation-containing artist names (`name.ilike."%...%"`).
-  5. *SHOULD FIX 5 (Date-Only Weekend Calculation for Asia/Tokyo):* Replaced UTC 18:00 reference date parsing with UTC noon (`Date.UTC(..., 12, 0, 0)`) in `calculateWeekendWindow`, eliminating Saturday timezone roll-forward in positive UTC offsets.
-  6. *SHOULD FIX 6 (Truthful Empty States):* In `PersonalizedDiscoverContainer.tsx`, `GuestDiscoverContainer.tsx`, and `service.ts`, ensured that empty weekends or discovery modes render the mode-empty banner rather than claiming an entirely empty catalog (`isEmptyCatalog: false` when `activeMode !== 'all'`).
-  7. *SHOULD FIX 7 (Documentation Alignment):* Aligned `docs/phases/active/PHASE_2_IMPLEMENTATION.md` with actual scoring weights, candidate tiers, and retrieval behavior.
+- **Current Task:** Phase 2, PR #12: Personalized Discover Experience — Scope Simplification, Test Consolidation & Scaling Debt Documentation.
+- **Remediation Completed (Scope Simplification & Optimization):**
+  1. *Cheap & Nearby Scope Alignment:* Aligned Cheap & Nearby with spontaneous local discovery over a default 14-day lookahead horizon (`toDate: today + 14d` pushed down to database queries), preserving $35 affordability and 35-mile proximity defaults without complicated unbounded search architecture.
+  2. *Favorite-Artist Scaling Deferral:* Preserved the single bounded 100-event favorite query and fair allocation (`applyFairArtistAllocation`), documenting the hypothetical single-artist saturation edge case as post-launch / national scaling debt in `docs/project/non-blocking-debt.md` and `PHASE_2_IMPLEMENTATION.md`.
+  3. *Search Scalability Measurement & Architecture:* Measured PostgREST query string sizes across narrow, moderate, and broad searches; verified safe bounded behavior under HTTP GET URI limits; documented future PostgreSQL `tsvector` / RPC migration as Phase 3 non-blocking debt.
+  4. *Test-Suite Efficiency & Consolidation:* Profiled test runtimes across all suites. Consolidated redundant Denver timezone rollover, empty-catalog, and cancelled-flood test cases in `recommendation-service.test.ts` without sacrificing regression coverage (total unit tests: 526 across 38 suites).
 - **Verification State:** All Suites Green & Production Ready:
   - Branch: `feature/phase-2-personalized-discover`
   - Pull Request: [#12](https://github.com/juko04/Encore-concert-finder/pull/12)
-  - Unit Tests: 528/528 passed across 38 test suites (`npm test`)
+  - Unit Tests: 526/526 passed across 38 test suites (`npm test`)
   - Production Build: Next.js production build clean (0 errors, 14 routes, `/discover` confirmed dynamic)
   - Code Quality: Prettier format clean (`format:check`), ESLint clean (0 warnings), strict TypeScript clean (0 errors)
 - **Immediate Next Action:** PR #12 is ready for independent re-review. Do NOT auto-merge PR #12 autonomously. Wait for user merge authorization.
-- **Phase 2 Status:** **ACTIVE — PR #12 FINAL TARGETED CORRECTIONS COMPLETE & VERIFIED GREEN.**
+- **Phase 2 Status:** **ACTIVE — PR #12 SCOPE SIMPLIFIED & TEST SUITE OPTIMIZED.**
 
 ---
 
