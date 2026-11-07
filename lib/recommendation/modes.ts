@@ -141,6 +141,37 @@ export function getZonedTimeParts(
   };
 }
 
+/**
+ * Adds an integer number of calendar days to a YYYY-MM-DD date string.
+ * Uses Date.UTC with noon (12:00:00) to ensure zero timezone drift or DST skew.
+ */
+export function addDaysToDateString(dateString: string, days: number): string {
+  const [year, month, day] = dateString.split('-').map(Number);
+  const target = new Date(Date.UTC(year, month - 1, day + days, 12, 0, 0));
+  return target.toISOString().slice(0, 10);
+}
+
+/**
+ * Calculates the 14-day lookahead end date for spontaneous local discovery in the specified timezone.
+ * Resolves the reference date from referenceDate or referenceInstant in the event/local timezone.
+ */
+export function calculate14DayLookaheadEndDate(
+  referenceDate?: string,
+  referenceInstant?: string | Date,
+  timeZone = 'America/Denver',
+): string {
+  let refDateString = referenceDate;
+  if (!refDateString) {
+    const refInst = referenceInstant
+      ? typeof referenceInstant === 'string'
+        ? new Date(referenceInstant)
+        : referenceInstant
+      : new Date();
+    refDateString = getZonedTimeParts(refInst, timeZone).dateString;
+  }
+  return addDaysToDateString(refDateString, 14);
+}
+
 function addDaysToZonedDate(
   year: number,
   month: number,
@@ -306,33 +337,29 @@ export function isEventEligibleForMode(
   }
 
   if (mode === 'cheap_and_nearby') {
-    // Spontaneous discovery window: default 14 days lookahead from reference date
-    if (context.referenceDate || context.referenceInstant) {
-      let refDateString = context.referenceDate;
-      if (!refDateString) {
-        const refInst = context.referenceInstant
-          ? typeof context.referenceInstant === 'string'
-            ? new Date(context.referenceInstant)
-            : context.referenceInstant
-          : new Date();
-        refDateString = getZonedTimeParts(
-          refInst,
-          event.timezone || 'America/Denver',
-        ).dateString;
-      }
+    // Spontaneous discovery window: default 14 days lookahead in event local timezone
+    // Always resolve reference date to prevent skipping validation when context omits it
+    let refDateString = context.referenceDate;
+    if (!refDateString) {
+      const refInst = context.referenceInstant
+        ? typeof context.referenceInstant === 'string'
+          ? new Date(context.referenceInstant)
+          : context.referenceInstant
+        : new Date();
+      refDateString = getZonedTimeParts(
+        refInst,
+        event.timezone || 'America/Denver',
+      ).dateString;
+    }
 
-      const refDateMs = new Date(`${refDateString}T00:00:00Z`).getTime();
-      const eventDateMs = new Date(
-        `${event.localStartDate}T00:00:00Z`,
-      ).getTime();
-      const daysAhead = Math.round(
-        (eventDateMs - refDateMs) / (24 * 60 * 60 * 1000),
-      );
+    const maxLookaheadDate = addDaysToDateString(refDateString, 14);
 
-      // Must occur within next 14 days (spontaneous lookahead horizon)
-      if (daysAhead < 0 || daysAhead > 14) {
-        return false;
-      }
+    // Must occur on or after reference date and within the 14-day lookahead horizon
+    if (
+      event.localStartDate < refDateString ||
+      event.localStartDate > maxLookaheadDate
+    ) {
+      return false;
     }
 
     // Budget check: maxNormalTicketPrice (default $35 per Phase 2 spec)

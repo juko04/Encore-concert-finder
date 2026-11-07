@@ -11,20 +11,19 @@ Durable architecture records belong in [`docs/architecture/`](docs/architecture/
 - **Active Specification:** [`docs/phases/active/PHASE_2_IMPLEMENTATION.md`](docs/phases/active/PHASE_2_IMPLEMENTATION.md).
 - **Current Branch:** `feature/phase-2-personalized-discover`
 - **Active Implementing Agent:** Google Antigravity
-- **Current Task:** Phase 2, PR #12: Personalized Discover Experience — Scope Simplification, Test Consolidation & Scaling Debt Documentation.
-- **Remediation Completed (Scope Simplification & Optimization):**
-  1. *Cheap & Nearby Scope Alignment:* Aligned Cheap & Nearby with spontaneous local discovery over a default 14-day lookahead horizon (`toDate: today + 14d` pushed down to database queries), preserving $35 affordability and 35-mile proximity defaults without complicated unbounded search architecture.
-  2. *Favorite-Artist Scaling Deferral:* Preserved the single bounded 100-event favorite query and fair allocation (`applyFairArtistAllocation`), documenting the hypothetical single-artist saturation edge case as post-launch / national scaling debt in `docs/project/non-blocking-debt.md` and `PHASE_2_IMPLEMENTATION.md`.
-  3. *Search Scalability Measurement & Architecture:* Measured PostgREST query string sizes across narrow, moderate, and broad searches; verified safe bounded behavior under HTTP GET URI limits; documented future PostgreSQL `tsvector` / RPC migration as Phase 3 non-blocking debt.
-  4. *Test-Suite Efficiency & Consolidation:* Profiled test runtimes across all suites. Consolidated redundant Denver timezone rollover, empty-catalog, and cancelled-flood test cases in `recommendation-service.test.ts` without sacrificing regression coverage (total unit tests: 526 across 38 suites).
+- **Current Task:** Phase 2, PR #12: Personalized Discover Experience — Final Minor Corrections Complete & Verified.
+- **Remediation Completed (Final Minor Corrections):**
+  1. *Cheap & Nearby Local Date Boundary Fix:* Refactored 14-day lookahead calculation in `lib/recommendation/modes.ts` (`calculate14DayLookaheadEndDate`) and `lib/recommendation/service.ts` to compute strictly in event-local calendar dates (e.g. Nov 7 + 14d = Nov 21), eliminating UTC midnight rollover skew during Denver evening requests. Removed the conditional guard in `isEventEligibleForMode` so 14-day lookahead validation is never skipped when context omits reference dates.
+  2. *Production Regression for Denver Evening Lookahead:* Added regression tests in `tests/unit/recommendation-service.test.ts` and `tests/unit/discovery-modes.test.ts` for Saturday Nov 7, 2026 at 7:30 PM Denver time (`2026-11-08T02:30:00Z`), confirming Day 14 shows are included and Day 15 shows are excluded.
+  3. *Accurate Search Scalability Documentation:* Verified PostgREST search URL sizing behavior across narrow, moderate, and broad searches; documented that `catalog-repository.ts` uses 200-item chunking without claiming a nonexistent enforced 6 KB aggregate cap; documented future PostgreSQL `tsvector` / RPC migration as Phase 3 national scaling debt.
 - **Verification State:** All Suites Green & Production Ready:
   - Branch: `feature/phase-2-personalized-discover`
   - Pull Request: [#12](https://github.com/juko04/Encore-concert-finder/pull/12)
-  - Unit Tests: 526/526 passed across 38 test suites (`npm test`)
+  - Unit Tests: 528/528 passed across 38 test suites (`npm test`)
   - Production Build: Next.js production build clean (0 errors, 14 routes, `/discover` confirmed dynamic)
   - Code Quality: Prettier format clean (`format:check`), ESLint clean (0 warnings), strict TypeScript clean (0 errors)
 - **Immediate Next Action:** PR #12 is ready for independent re-review. Do NOT auto-merge PR #12 autonomously. Wait for user merge authorization.
-- **Phase 2 Status:** **ACTIVE — PR #12 SCOPE SIMPLIFIED & TEST SUITE OPTIMIZED.**
+- **Phase 2 Status:** **ACTIVE — PR #12 FINAL CORRECTIONS COMPLETE & VERIFIED GREEN.**
 
 ---
 

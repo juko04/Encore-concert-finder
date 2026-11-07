@@ -7,6 +7,7 @@ import type { UserProfile } from '@/lib/domain/profile';
 import { rankEvents } from '@/lib/recommendation/engine';
 import { calculateTimingFactor } from '@/lib/recommendation/factors/timing';
 import {
+  calculate14DayLookaheadEndDate,
   calculateWeekendWindow,
   getModeScoringWeights,
   isEventEligibleForMode,
@@ -493,15 +494,11 @@ export async function getPersonalizedDiscoverData(
     }
     queryToDate = weekendWindow.endDate;
   } else if (activeMode === 'cheap_and_nearby') {
-    const refInstantDate = referenceInstant
-      ? new Date(referenceInstant)
-      : referenceDate
-        ? new Date(`${referenceDate}T00:00:00Z`)
-        : new Date();
-    const lookahead14Date = new Date(
-      refInstantDate.getTime() + 14 * 24 * 60 * 60 * 1000,
+    queryToDate = calculate14DayLookaheadEndDate(
+      referenceDate,
+      referenceInstant,
+      'America/Denver',
     );
-    queryToDate = lookahead14Date.toISOString().slice(0, 10);
   } else if (activeMode === 'worth_planning_for') {
     const refInstantDate = referenceInstant
       ? new Date(referenceInstant)
@@ -751,15 +748,11 @@ export async function getPublicDiscoverData(
     }
     queryToDate = weekendWindow.endDate;
   } else if (activeMode === 'cheap_and_nearby') {
-    const refInstantDate = referenceInstant
-      ? new Date(referenceInstant)
-      : referenceDate
-        ? new Date(`${referenceDate}T00:00:00Z`)
-        : new Date();
-    const lookahead14Date = new Date(
-      refInstantDate.getTime() + 14 * 24 * 60 * 60 * 1000,
+    queryToDate = calculate14DayLookaheadEndDate(
+      referenceDate,
+      referenceInstant,
+      'America/Denver',
     );
-    queryToDate = lookahead14Date.toISOString().slice(0, 10);
   } else if (activeMode === 'worth_planning_for') {
     const refInstantDate = referenceInstant
       ? new Date(referenceInstant)

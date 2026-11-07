@@ -570,5 +570,5 @@ Phase 2 will be accepted when:
 7. **Multi-Day Festival Itinerary Planning:** Day-by-day festival lineups, conflict detection, and schedule curation (scheduled for Phase 3).
 8. **Price Drop & Tour Announcement Change Alerts:** Background notifications and watchlist alerting for ticket price changes or new tour announcements (scheduled for Phase 4).
 9. **Favorite-Artist Fairness Scaling:** Single bounded 100-event query and fair allocation (`applyFairArtistAllocation`) satisfies the initial launch catalog; multi-query windowed pagination across hundreds of favorite artists is deferred as future scaling debt.
-10. **Full-Text Search Migration:** Client-side disjunction query string is bounded to preserve GET URI limits under 6 KB; migrating multi-field search to a dedicated PostgreSQL full-text search index (`tsvector`) or RPC is scheduled for Phase 3 national scaling.
+10. **Full-Text Search Migration:** Client-side disjunction query string is chunked in 200-item slices to avoid PostgREST parser limits without an artificial aggregate cap; at Colorado launch scale (~100–300 events), queries operate well within standard 8 KB HTTP buffer limits. Migrating multi-field search to a dedicated PostgreSQL full-text search index (`tsvector`) or RPC is scheduled for Phase 3 national scaling.
 

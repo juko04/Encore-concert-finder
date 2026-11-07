@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  calculate14DayLookaheadEndDate,
   calculateWeekendWindow,
   getModeScoringWeights,
   isEventEligibleForMode,
@@ -241,7 +242,10 @@ describe('Discovery Modes Domain Logic', () => {
         eventKind: 'free_event',
       });
 
-      const contextWithCityAnchor = { city: 'Denver' };
+      const contextWithCityAnchor = {
+        city: 'Denver',
+        referenceDate: '2026-10-30',
+      };
 
       expect(
         isEventEligibleForMode(
@@ -319,14 +323,21 @@ describe('Discovery Modes Domain Logic', () => {
       });
 
       expect(
-        isEventEligibleForMode(nearbyShow, 'cheap_and_nearby', { userProfile }),
+        isEventEligibleForMode(nearbyShow, 'cheap_and_nearby', {
+          userProfile,
+          referenceDate: '2026-10-30',
+        }),
       ).toBe(true);
       expect(
-        isEventEligibleForMode(tooFarShow, 'cheap_and_nearby', { userProfile }),
+        isEventEligibleForMode(tooFarShow, 'cheap_and_nearby', {
+          userProfile,
+          referenceDate: '2026-10-30',
+        }),
       ).toBe(false);
       expect(
         isEventEligibleForMode(unknownCoordsShow, 'cheap_and_nearby', {
           userProfile,
+          referenceDate: '2026-10-30',
         }),
       ).toBe(false);
     });
@@ -338,11 +349,13 @@ describe('Discovery Modes Domain Logic', () => {
       expect(
         isEventEligibleForMode(denverShow, 'cheap_and_nearby', {
           city: 'Denver',
+          referenceDate: '2026-10-30',
         }),
       ).toBe(true);
       expect(
         isEventEligibleForMode(boulderShow, 'cheap_and_nearby', {
           city: 'Denver',
+          referenceDate: '2026-10-30',
         }),
       ).toBe(false);
     });
@@ -380,6 +393,34 @@ describe('Discovery Modes Domain Logic', () => {
       ).toBe(true);
       expect(
         isEventEligibleForMode(farFutureShow, 'cheap_and_nearby', context),
+      ).toBe(false);
+    });
+
+    it('correctly calculates 14-day lookahead end date across UTC midnight for Denver evening (Nov 7, 2026 7:30 PM)', () => {
+      // 7:30 PM MST on Nov 7, 2026 is 2026-11-08T02:30:00Z in UTC
+      const denverEveningInstant = '2026-11-08T02:30:00Z';
+      const endDate = calculate14DayLookaheadEndDate(
+        undefined,
+        denverEveningInstant,
+        'America/Denver',
+      );
+      // In Denver, Nov 7 + 14 days is Nov 21 (Day 14), NOT Nov 22 (Day 15)
+      expect(endDate).toBe('2026-11-21');
+    });
+
+    it('enforces 14-day lookahead validation even when reference date/instant is omitted from context', () => {
+      // Create a concert 30 days in the future from wall-clock now
+      const futureDate = new Date();
+      futureDate.setDate(futureDate.getDate() + 30);
+      const farShow = makeStubEvent({
+        localStartDate: futureDate.toISOString().slice(0, 10),
+        city: 'Denver',
+        minPrice: 20,
+      });
+
+      // Context without explicit referenceDate or referenceInstant MUST NOT skip validation
+      expect(
+        isEventEligibleForMode(farShow, 'cheap_and_nearby', { city: 'Denver' }),
       ).toBe(false);
     });
 

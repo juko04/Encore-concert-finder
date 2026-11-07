@@ -2055,5 +2055,78 @@ describe('Production Recommendation Service (getPersonalizedDiscoverData)', () =
       expect(publicWeekendRes.events).toHaveLength(0);
       expect(publicWeekendRes.activeMode).toBe('this_weekend');
     });
+
+    it('accurately bounds Cheap & Nearby 14-day lookahead for Denver evening (Nov 7, 2026 7:30 PM), excluding Day 15 concerts', async () => {
+      const user = 'user-denver-evening-lookahead';
+      await profileRepo.upsertProfile(user, {
+        homeLatApprox: 39.7392,
+        homeLngApprox: -104.9903,
+        defaultRadiusMiles: 35,
+        maxNormalTicketPrice: 35,
+      });
+
+      // Denver local time: Saturday Nov 7, 2026 at 7:30 PM MST (UTC: 2026-11-08T02:30:00Z)
+      // Day 14 date in Denver is Nov 21, 2026 (2026-11-21)
+      // Day 15 date in Denver is Nov 22, 2026 (2026-11-22)
+      const denverEveningInstant = '2026-11-08T02:30:00Z';
+
+      // 1. Qualifying Day 14 concert (2026-11-21, $20, Denver)
+      seedEvent(catalogRepo, {
+        id: 'concert-day-14',
+        title: 'Day 14 Concert ($20)',
+        localStartDate: '2026-11-21',
+        startsAt: '2026-11-22T03:00:00Z',
+        timezone: 'America/Denver',
+        status: 'scheduled',
+        city: 'Denver',
+        lat: 39.74,
+        lng: -104.99,
+        minPrice: 20,
+      });
+
+      // 2. Day 15 concert (2026-11-22, $20, Denver) -> MUST be excluded
+      seedEvent(catalogRepo, {
+        id: 'concert-day-15',
+        title: 'Day 15 Concert ($20)',
+        localStartDate: '2026-11-22',
+        startsAt: '2026-11-23T03:00:00Z',
+        timezone: 'America/Denver',
+        status: 'scheduled',
+        city: 'Denver',
+        lat: 39.74,
+        lng: -104.99,
+        minPrice: 20,
+      });
+
+      // Test personalized discover production path
+      const authRes = await getPersonalizedDiscoverData({
+        userId: user,
+        catalogRepo,
+        profileRepo,
+        prefRepo,
+        spotifyRepo,
+        mode: 'cheap_and_nearby',
+        referenceInstant: denverEveningInstant,
+      });
+
+      const authIds = [
+        ...authRes.recommendations.map((r) => r.eventId),
+        ...authRes.exploratory.map((r) => r.eventId),
+      ];
+      expect(authIds).toContain('concert-day-14');
+      expect(authIds).not.toContain('concert-day-15');
+
+      // Test public discover production path
+      const publicRes = await getPublicDiscoverData({
+        catalogRepo,
+        mode: 'cheap_and_nearby',
+        city: 'Denver',
+        referenceInstant: denverEveningInstant,
+      });
+
+      const publicIds = publicRes.events.map((e) => e.id);
+      expect(publicIds).toContain('concert-day-14');
+      expect(publicIds).not.toContain('concert-day-15');
+    });
   });
 });
