@@ -415,7 +415,41 @@ export class MemoryCatalogRepository implements ICatalogRepository {
     if (filters?.region) {
       result = result.filter((e) => e.region === filters.region);
     }
-    if (filters?.artistId) {
+    if (filters?.status) {
+      if (Array.isArray(filters.status)) {
+        const sSet = new Set(filters.status);
+        result = result.filter((e) => sSet.has(e.status));
+      } else {
+        result = result.filter((e) => e.status === filters.status);
+      }
+    }
+    if (filters?.searchQuery) {
+      const q = filters.searchQuery.trim().toLowerCase();
+      if (q) {
+        result = result.filter((e) => {
+          if (e.name.toLowerCase().includes(q)) return true;
+          const venue = e.venueId ? this.venues.get(e.venueId) : null;
+          if (venue?.name.toLowerCase().includes(q)) return true;
+          for (const ea of this.eventArtists.values()) {
+            if (ea.eventId === e.id) {
+              const a = this.artists.get(ea.artistId);
+              if (a?.name.toLowerCase().includes(q)) return true;
+            }
+          }
+          return false;
+        });
+      }
+    }
+    if (filters?.artistIds && filters.artistIds.length > 0) {
+      const idSet = new Set(filters.artistIds);
+      const matchingEventIds = new Set<string>();
+      for (const ea of this.eventArtists.values()) {
+        if (idSet.has(ea.artistId)) {
+          matchingEventIds.add(ea.eventId);
+        }
+      }
+      result = result.filter((e) => matchingEventIds.has(e.id));
+    } else if (filters?.artistId) {
       // Finding 11: filter by artistId
       const matchingEventIds = new Set<string>();
       for (const ea of this.eventArtists.values()) {
@@ -426,7 +460,11 @@ export class MemoryCatalogRepository implements ICatalogRepository {
       result = result.filter((e) => matchingEventIds.has(e.id));
     }
 
-    result.sort((a, b) => a.localStartDate.localeCompare(b.localStartDate));
+    result.sort(
+      (a, b) =>
+        a.localStartDate.localeCompare(b.localStartDate) ||
+        a.id.localeCompare(b.id),
+    );
 
     const offset = filters?.offset ?? 0;
     const limit = filters?.limit ?? 50;
@@ -545,6 +583,20 @@ export class MemoryCatalogRepository implements ICatalogRepository {
     return summaries;
   }
 
+  async listCities(): Promise<string[]> {
+    const citySet = new Set<string>();
+    for (const event of this.events.values()) {
+      if (event.status === 'scheduled') {
+        const venue = event.venueId ? this.venues.get(event.venueId) : null;
+        const city = venue?.city ?? event.city;
+        if (city && city.trim().length > 0) {
+          citySet.add(city.trim());
+        }
+      }
+    }
+    return Array.from(citySet).sort();
+  }
+
   async getArtistById(id: string): Promise<Artist | null> {
     return this.artists.get(id) ?? null;
   }
@@ -592,6 +644,20 @@ export class MemoryCatalogRepository implements ICatalogRepository {
       }
     }
     return null;
+  }
+
+  async findArtistIdsByExternalIds(
+    provider: string,
+    externalIds: string[],
+  ): Promise<Map<string, string>> {
+    const result = new Map<string, string>();
+    const extSet = new Set(externalIds);
+    for (const ext of this.artistExternalIds.values()) {
+      if (ext.provider === provider && extSet.has(ext.externalId)) {
+        result.set(ext.externalId, ext.artistId);
+      }
+    }
+    return result;
   }
 
   async findArtistExternalIds(artistId: string): Promise<ArtistExternalId[]> {

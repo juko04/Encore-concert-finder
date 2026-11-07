@@ -60,7 +60,8 @@ export function scoreEvent(
     context.userProfile?.recommendationPreset ||
     DEFAULT_PRESET;
   const preset: ScoringPreset = normalizeScoringPreset(rawPreset);
-  const weights: ScoringWeights = getPresetWeights(preset);
+  const weights: ScoringWeights =
+    context.weightsOverride ?? getPresetWeights(preset);
 
   // 1. Artist Interest Factor
   const artistResult = calculateArtistInterestFactor(
@@ -255,7 +256,7 @@ export function rankEvents(
     context.userProfile?.recommendationPreset ||
     DEFAULT_PRESET;
   const preset: ScoringPreset = normalizeScoringPreset(rawPreset);
-  const weights = getPresetWeights(preset);
+  const weights = context.weightsOverride ?? getPresetWeights(preset);
 
   // Invariant 4: Deduplicate events by ID to prevent duplicate recommendations
   const seenEventIds = new Set<string>();

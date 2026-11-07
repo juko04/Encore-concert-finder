@@ -197,6 +197,10 @@ test.describe('Authenticated Music Taste Profile Browser E2E Flow', () => {
     // Verify UI reflects update
     await expect(page.getByTestId('badge-favorite')).toBeVisible();
 
+    // Ensure the server mutation has finished before triggering reload
+    await expect(levelSelect).not.toBeDisabled();
+    await page.waitForTimeout(600);
+
     // Reload again to prove level update persisted in PostgreSQL
     await page.reload();
     await expect(page.getByTestId('taste-profile-manager')).toBeVisible();

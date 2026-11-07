@@ -1,81 +1,90 @@
 import React from 'react';
-import Link from 'next/link';
-import { EventCard } from '@/components/catalog/EventCard';
-import type { CanonicalEventSummary } from '@/lib/domain/catalog';
-import { SupabaseCatalogRepository } from '@/lib/repositories/catalog-repository';
+import { getAuthenticatedUser } from '@/lib/auth/session';
+import {
+  getPersonalizedDiscoverData,
+  getPublicDiscoverData,
+} from '@/lib/recommendation/service';
 import { isScoringPreviewAllowed } from '@/lib/recommendation/preview-guard';
+import { PersonalizedDiscoverContainer } from '@/components/discover/PersonalizedDiscoverContainer';
+import { PersonalizedDiscoverErrorState } from '@/components/discover/PersonalizedDiscoverErrorState';
+import { GuestDiscoverContainer } from '@/components/discover/GuestDiscoverContainer';
+import { GuestDiscoverErrorState } from '@/components/discover/GuestDiscoverErrorState';
 
-export const revalidate = 60;
+/**
+ * Production Discover Page
+ *
+ * Invariants:
+ * 1. Force dynamic execution: strictly request-scoped so private personalized recommendations
+ *    cannot be stored in shared CDN or Next.js ISR caches.
+ * 2. Authenticated user receives personalized recommendations based on explicit taste,
+ *    travel radius, and ticket budget thresholds.
+ * 3. Unauthenticated guest visitors receive truthful public catalog listings with an invitation
+ *    to personalize recommendations upon signing in.
+ * 4. Distinct error boundaries: an authenticated failure never shows a misleading guest sign-in interface,
+ *    and a public catalog failure never displays a false empty-catalog message.
+ * 5. Zero synthetic fixture leakage into production.
+ */
+export const dynamic = 'force-dynamic';
 
 export default async function DiscoverPage() {
   const showScoringInspector = isScoringPreviewAllowed();
-  let events: CanonicalEventSummary[] = [];
+  const user = await getAuthenticatedUser();
 
-  try {
-    const catalogRepo = new SupabaseCatalogRepository();
-    events = await catalogRepo.listEvents({ limit: 50 });
-  } catch {
-    // If Supabase is unavailable (e.g. during offline build), events list remains empty
-    events = [];
+  if (user) {
+    try {
+      const personalizedData = await getPersonalizedDiscoverData({
+        userId: user.id,
+      });
+
+      return (
+        <main className="min-h-screen bg-zinc-950 text-zinc-100">
+          <div className="mx-auto max-w-6xl px-4 py-12 sm:px-6 lg:px-8">
+            <PersonalizedDiscoverContainer
+              initialData={personalizedData}
+              showScoringInspector={showScoringInspector}
+            />
+          </div>
+        </main>
+      );
+    } catch (err) {
+      console.error(
+        '[DiscoverPage] Failed to retrieve personalized recommendations:',
+        err,
+      );
+      return (
+        <main className="min-h-screen bg-zinc-950 text-zinc-100">
+          <div className="mx-auto max-w-6xl px-4 py-12 sm:px-6 lg:px-8">
+            <PersonalizedDiscoverErrorState
+              showScoringInspector={showScoringInspector}
+            />
+          </div>
+        </main>
+      );
+    }
   }
 
-  return (
-    <main className="min-h-screen bg-zinc-950 text-zinc-100">
-      <div className="mx-auto max-w-6xl px-4 py-12 sm:px-6 lg:px-8">
-        <header className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <Link
-              href="/"
-              className="text-xs font-medium text-zinc-400 hover:text-zinc-200"
-            >
-              ← Back to Home
-            </Link>
-            <h1 className="mt-2 text-3xl font-bold tracking-tight text-white sm:text-4xl">
-              Discover Live Music
-            </h1>
-            <p className="mt-1 text-sm text-zinc-400">
-              Explore upcoming concerts and events across verified venues and
-              sources.
-            </p>
-          </div>
+  // Guest view (strictly for signed-out visitors)
+  try {
+    const publicData = await getPublicDiscoverData();
 
-          <div className="flex items-center gap-3">
-            {showScoringInspector && (
-              <Link
-                href="/discover/scoring-preview"
-                data-testid="discover-scoring-preview-link"
-                className="inline-flex items-center gap-1.5 rounded-lg border border-indigo-700/60 bg-indigo-950/40 px-3.5 py-2 text-xs font-semibold text-indigo-200 transition-colors hover:border-indigo-500 hover:text-white"
-              >
-                <span>🎯</span> Scoring Inspector
-              </Link>
-            )}
-            <Link
-              href="/profile/taste"
-              data-testid="discover-taste-link"
-              className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-700 bg-zinc-900/80 px-3.5 py-2 text-xs font-semibold text-zinc-200 transition-colors hover:border-indigo-500 hover:text-white"
-            >
-              <span>🎵</span> Music Taste
-            </Link>
-          </div>
-        </header>
-
-        {events.length === 0 ? (
-          <div className="rounded-2xl border border-zinc-800/80 bg-zinc-900/40 p-12 text-center">
-            <h2 className="text-lg font-semibold text-zinc-200">
-              No upcoming events found
-            </h2>
-            <p className="mt-2 text-sm text-zinc-400">
-              Events will appear here as source adapters ingest upcoming shows.
-            </p>
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
-            {events.map((event) => (
-              <EventCard key={event.id} event={event} />
-            ))}
-          </div>
-        )}
-      </div>
-    </main>
-  );
+    return (
+      <main className="min-h-screen bg-zinc-950 text-zinc-100">
+        <div className="mx-auto max-w-6xl px-4 py-12 sm:px-6 lg:px-8">
+          <GuestDiscoverContainer
+            initialData={publicData}
+            showScoringInspector={showScoringInspector}
+          />
+        </div>
+      </main>
+    );
+  } catch (err) {
+    console.error('[DiscoverPage] Failed to retrieve public catalog:', err);
+    return (
+      <main className="min-h-screen bg-zinc-950 text-zinc-100">
+        <div className="mx-auto max-w-6xl px-4 py-12 sm:px-6 lg:px-8">
+          <GuestDiscoverErrorState />
+        </div>
+      </main>
+    );
+  }
 }

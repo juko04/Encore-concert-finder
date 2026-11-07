@@ -23,6 +23,7 @@ coverage/
 playwright-report/
 test-results/
 *.tsbuildinfo
+*.diff
 
 # Local agent/runtime secrets
 .agents/local/

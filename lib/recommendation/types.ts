@@ -14,6 +14,9 @@ import type { RecommendationPreset, UserProfile } from '@/lib/domain/profile';
 
 export type ScoringPreset = RecommendationPreset;
 
+export type DiscoveryMode =
+  'all' | 'this_weekend' | 'cheap_and_nearby' | 'worth_planning_for';
+
 export interface ScoringWeights {
   artist: number;
   distance: number;
@@ -81,6 +84,7 @@ export interface ScoringContext {
   referenceDate?: string; // YYYY-MM-DD for deterministic time calculation
   referenceInstant?: Date | string; // Explicit instant for timezone-aware testing
   presetOverride?: ScoringPreset;
+  weightsOverride?: ScoringWeights;
   timingPreferences?: {
     preferredDays?: string[]; // e.g. ['friday', 'saturday', 'sunday']
   };

@@ -47,3 +47,17 @@ The following items were explicitly reviewed during Phase 1 and deferred:
    Defining the retention window and pruning cron for raw ingest bodies is deferred to Phase 4 / production operations.
 5. **Object-Storage Provider & Payload Size Threshold:**  
    Small payloads are stored in PostgreSQL with a nullable `external_storage_ref` column in `raw_ingests`; choosing S3/GCS/R2 and offloading large HTML payloads is deferred until high-volume scraping begins.
+
+---
+
+## 3. Phase 2 Deferred Architectural Optimizations (Accepted Scaling Debt)
+
+### 3.1 Favorite-Artist Fairness Under Extreme Starvation
+- **Status:** Deferred to post-launch / national catalog scaling.
+- **Context:** If a single favorite artist has >100 upcoming tour dates chronologically preceding all other favorite artists, a single-query 100-event favorite retrieval could theoretically starve subsequent artists.
+- **Accepted Tradeoff:** For the initial Colorado-focused launch, extreme single-artist saturation does not occur in practice. The system enforces a single bounded 100-event query with in-memory fair round-robin allocation (`applyFairArtistAllocation`), avoiding N separate database queries. Multi-query windowed pagination across hundreds of artists will be evaluated when catalog volume expands nationally.
+
+### 3.2 Full-Text Search Scalability (PostgreSQL tsvector / RPC)
+- **Status:** Deferred to Phase 3 / production scaling.
+- **Context:** Multi-field catalog search in `SupabaseCatalogRepository.searchEvents` constructs PostgREST disjunction clauses (`.or(...)`) across event titles (`name.ilike."%...%"`), matching venue IDs (`venue_id.in.(...)`), and artist-matched event IDs (`id.in.(...)`). Disjunctions are sliced into 200-item chunks with double-quote escaping to avoid single-clause parser overflow.
+- **Accepted Tradeoff:** `catalog-repository.ts` chunks disjunction IDs by 200 without enforcing an artificial global aggregate URL cap. At the expected Colorado launch scale (~100–300 total active events across the state), broad search queries produce filter strings of ~1.5–3.5 KB, which operate reliably and comfortably within standard 8 KB HTTP reverse proxy (Kong/Nginx) request buffers. For future national scale with thousands of concurrent event matches per query, search will migrate to a dedicated PostgreSQL full-text search index (`tsvector` / GIN index) or RPC search function.

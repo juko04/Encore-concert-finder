@@ -9,42 +9,40 @@ Durable architecture records belong in [`docs/architecture/`](docs/architecture/
 
 - **Current Milestone:** **Phase 2 — Live Ingestion & Personalization**.
 - **Active Specification:** [`docs/phases/active/PHASE_2_IMPLEMENTATION.md`](docs/phases/active/PHASE_2_IMPLEMENTATION.md).
-- **Current Branch:** `feature/phase-2-recommendation-scoring`
+- **Current Branch:** `feature/phase-2-personalized-discover`
 - **Active Implementing Agent:** Google Antigravity
-- **Current Task:** Phase 2, PR #11: Personalized Recommendation Scoring Foundation — Final Pre-Merge Corrections.
-- **PR #11 Objectives & Scope:**
-  1. Build a pure, deterministic, typed multi-factor recommendation scoring engine (`lib/recommendation/`).
-  2. Implement four fixed priority presets: Balanced (50/20/20/10), Artist-first (65/15/10/10), Nearby (40/35/15/10), Value (40/15/35/10).
-  3. Support explicit artist preferences with identity resolution via verified canonical/external IDs (Favorite=100, Like=75, Interested=55, Unmarked=40, Dislike=0 & suppressed).
-  4. Implement bounded travel/distance utility respecting user radius (`default_radius_miles`) and price affordability respecting profile thresholds (`max_normal_ticket_price`, `max_favorite_artist_price`).
-  5. Minimal database migration adding `recommendation_preset` to `public.profiles` protected by RLS.
-  6. Development-only inspection view at `/discover/scoring-preview` for inspecting real calculations on seeded fixtures.
-  7. Establish permanent repository development standards and mandatory PR review checklist ([`docs/development/PR_REVIEW_CHECKLIST.md`](docs/development/PR_REVIEW_CHECKLIST.md)).
-  8. Final three pre-merge corrections:
-     - Conservative treatment of contradictory free-event pricing evidence (neutral affordability 50 without advertising free admission when `free_event` has positive price).
-     - Currency-aware unverified zero presentation (`Unverified $0 USD`, `Unverified CAD 0`, `Unverified 0 (currency unknown)` without misleading `$` or USD semantics).
-     - Documentation alignment across `AGENTS.md`, `PR_REVIEW_CHECKLIST.md`, and `PHASE_2_IMPLEMENTATION.md` for deterministic Not-Interested suppression and the Favorite-headliner exception.
-- **Verification State:** PR #11 Final Pre-Merge Corrections Complete:
-  - Branch: `feature/phase-2-recommendation-scoring`
-  - Pull Request: [PR #11](https://github.com/juko04/Encore-concert-finder/pull/11)
-  - Unit Tests: 407/407 passed across 31 test suites (`npm test`)
-  - PostgreSQL Integration Tests: Fail-closed verification demonstrated (exits code 1 on missing DB; passes 100% in CI against running local Supabase)
-  - Production Build: Next.js production build clean (0 errors, 14 routes)
-  - Code Quality: Prettier format clean, ESLint clean (0 warnings), strict TypeScript clean (0 errors)
-- **Immediate Next Action:** Await user / independent reviewer inspection and merge of PR #11. Do NOT auto-merge. Do NOT proceed to PR #12 until PR #11 is merged to `main`.
-- **Phase 2 Status:** **ACTIVE — PR #11 FINAL INDEPENDENT REVIEW REMEDIATION COMPLETE.**
+- **Current Task:** Phase 2, PR #12: Personalized Discover Experience — Final Minor Corrections Complete & Verified.
+- **Remediation Completed (Final Minor Corrections):**
+  1. *Cheap & Nearby Local Date Boundary Fix:* Refactored 14-day lookahead calculation in `lib/recommendation/modes.ts` (`calculate14DayLookaheadEndDate`) and `lib/recommendation/service.ts` to compute strictly in event-local calendar dates (e.g. Nov 7 + 14d = Nov 21), eliminating UTC midnight rollover skew during Denver evening requests. Removed the conditional guard in `isEventEligibleForMode` so 14-day lookahead validation is never skipped when context omits reference dates.
+  2. *Production Regression for Denver Evening Lookahead:* Added regression tests in `tests/unit/recommendation-service.test.ts` and `tests/unit/discovery-modes.test.ts` for Saturday Nov 7, 2026 at 7:30 PM Denver time (`2026-11-08T02:30:00Z`), confirming Day 14 shows are included and Day 15 shows are excluded.
+  3. *Accurate Search Scalability Documentation:* Verified PostgREST search URL sizing behavior across narrow, moderate, and broad searches; documented that `catalog-repository.ts` uses 200-item chunking without claiming a nonexistent enforced 6 KB aggregate cap; documented future PostgreSQL `tsvector` / RPC migration as Phase 3 national scaling debt.
+- **Verification State:** All Suites Green & Production Ready:
+  - Branch: `feature/phase-2-personalized-discover`
+  - Pull Request: [#12](https://github.com/juko04/Encore-concert-finder/pull/12)
+  - Unit Tests: 528/528 passed across 38 test suites (`npm test`)
+  - Production Build: Next.js production build clean (0 errors, 14 routes, `/discover` confirmed dynamic)
+  - Code Quality: Prettier format clean (`format:check`), ESLint clean (0 warnings), strict TypeScript clean (0 errors)
+- **Immediate Next Action:** PR #12 is ready for independent re-review. Do NOT auto-merge PR #12 autonomously. Wait for user merge authorization.
+- **Phase 2 Status:** **ACTIVE — PR #12 FINAL CORRECTIONS COMPLETE & VERIFIED GREEN.**
 
 ---
 
 ## What the Next Agent Must Know
 
-1. **Strict Personalization Boundaries in PR #10:**
-   - Manual preferences (`user_artist_preferences`) remain first-class and authoritative.
-   - Spotify listening data is an optional enrichment source; it is explored on-demand and never automatically written to the catalog or database without explicit user confirmation.
-   - The 1-to-1 account invariant is strictly enforced: `UNIQUE(spotify_account_id)` ensures a single Spotify account cannot be silently linked to multiple Encore accounts.
-2. **Upcoming PR #11 Scope (Multi-Factor Recommendation Scoring):**
-   - Combine explicit manual preferences (`user_artist_preferences`), distance/venue affinity, timing/recency, and price tolerance into explainable match reasons (`match_score`, `match_reasons`).
-   - Answer: *"Why is this concert worth attending for me?"*
-3. **Deterministic Testing:**
-   - Zero live network calls to Spotify or Ticketmaster in CI or unit tests.
-   - All tests use deterministic mocks, fixtures, and local Supabase containers.
+1. **Preset Identifier Invariant:**
+   - The UI display label for the artist preset is "Artists", but the persisted database identifier must strictly be `artist_first`.
+2. **Discovery Modes vs Priority Presets:**
+   - Priority presets (`artist_first`, `value`, `nearby`, `balanced`) are persisted user preferences defining baseline factor weights.
+   - Discovery modes (`all`, `this_weekend`, `cheap_and_nearby`, `worth_planning_for`) are situational exploration lenses that filter candidates and apply temporary factor weighting overrides (`weightsOverride`).
+3. **Multi-Tier Candidate Pool & Anti-Starvation:**
+   - Upcoming shows for preferred artists are retrieved in prioritized tiers: Favorite (up to 100), Like (up to 75), Interested (up to 50), avoiding starvation of favorite acts by lower-tier preferences.
+4. **Threshold Isolation Invariant:**
+   - `updateTypicalBudgetAction` only modifies `maxNormalTicketPrice` in `public.profiles`. `maxFavoriteArtistPrice` and `maxSpontaneousPrice` must remain unchanged.
+5. **Dynamic Request-Scoped Discover:**
+   - `/discover` must remain `export const dynamic = 'force-dynamic'` to ensure private user recommendations are never stored in shared CDN or Next.js ISR caches.
+6. **No Synthetic Fallback in Production:**
+   - Production Discover must never fall back to synthetic fixtures on error or empty catalog.
+7. **Future Scope Boundaries (Post-PR #12):**
+   - Save/Dismiss Event Actions, Recommendation Feedback Loops, Multi-Day Festival Planning, and Price Alerts remain deferred to subsequent milestones.
+8. **E2E / Website Test Optimization Rule:**
+   - Browser/website tests (`npm run test:e2e` and full interactive browser QA) do not need to run every time, especially when changes are purely backend, repository, domain scoring, data model, or documentation, with no UI or interaction modifications.
