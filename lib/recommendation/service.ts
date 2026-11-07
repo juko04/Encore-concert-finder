@@ -11,6 +11,7 @@ import {
   getModeScoringWeights,
   isEventEligibleForMode,
   normalizeDiscoveryMode,
+  type ModeEligibilityContext,
 } from '@/lib/recommendation/modes';
 import {
   DEFAULT_PRESET,
@@ -184,6 +185,10 @@ export async function retrieveCandidatesWithLookback(
   targetEligibleLimit: number,
   referenceDate?: string,
   referenceInstant?: Date | string,
+  modeOptions?: {
+    mode?: DiscoveryMode;
+    modeContext?: ModeEligibilityContext;
+  },
 ): Promise<CanonicalEventSummary[]> {
   const pageSize = Math.max(targetEligibleLimit, 100);
   const collectedCandidates: CanonicalEventSummary[] = [];
@@ -215,7 +220,18 @@ export async function retrieveCandidatesWithLookback(
           referenceInstant,
         });
 
-        const isGenuinelyEligible = !timing.isPast && ev.status === 'scheduled';
+        const isTimingAndStatusEligible =
+          !timing.isPast && ev.status === 'scheduled';
+        const isModeEligible =
+          !modeOptions?.mode ||
+          modeOptions.mode === 'all' ||
+          isEventEligibleForMode(
+            ev,
+            modeOptions.mode,
+            modeOptions.modeContext ?? {},
+          );
+
+        const isGenuinelyEligible = isTimingAndStatusEligible && isModeEligible;
 
         if (isGenuinelyEligible) {
           if (eligibleCount < targetEligibleLimit) {
@@ -223,7 +239,7 @@ export async function retrieveCandidatesWithLookback(
             collectedCandidates.push(ev);
           }
         } else {
-          // Preserve past, cancelled, and postponed events within the scan window
+          // Preserve non-mode-eligible, past, cancelled, and postponed events within the scan window
           // so candidate diagnostics, totalCandidateCount, suppressedCount, and
           // ineligibleCount remain completely truthful and candidate-aware.
           collectedCandidates.push(ev);
@@ -278,6 +294,77 @@ async function resolveArtistIdsForPreferences(
   }
 
   return Array.from(artistIdSet);
+}
+
+/**
+ * Distributes a total candidate budget fairly across multiple artist IDs (Issue 2).
+ * Guarantees that high-volume favorite artists do not starve other favorites,
+ * while strictly bounding total candidate count to totalBudget.
+ */
+export function applyFairArtistAllocation(
+  events: CanonicalEventSummary[],
+  artistIds: string[],
+  totalBudget: number,
+): CanonicalEventSummary[] {
+  if (events.length <= totalBudget || artistIds.length <= 1) {
+    return events.slice(0, totalBudget);
+  }
+
+  const quotaPerArtist = Math.max(
+    1,
+    Math.floor(totalBudget / artistIds.length),
+  );
+  const artistEvents = new Map<string, CanonicalEventSummary[]>();
+  for (const id of artistIds) {
+    artistEvents.set(id, []);
+  }
+
+  // Group events by matching artist ID
+  for (const ev of events) {
+    for (const a of ev.artists) {
+      if (a.id && artistEvents.has(a.id)) {
+        artistEvents.get(a.id)!.push(ev);
+        break;
+      }
+    }
+  }
+
+  const selectedEventIds = new Set<string>();
+  const selectedEvents: CanonicalEventSummary[] = [];
+
+  // Pass 1: Fair guaranteed quota per artist
+  for (const id of artistIds) {
+    const list = artistEvents.get(id) ?? [];
+    const take = list.slice(0, quotaPerArtist);
+    for (const ev of take) {
+      if (!selectedEventIds.has(ev.id)) {
+        selectedEventIds.add(ev.id);
+        selectedEvents.push(ev);
+      }
+    }
+  }
+
+  // Pass 2: Fill remaining budget chronologically from remaining shows
+  if (selectedEvents.length < totalBudget) {
+    for (const ev of events) {
+      if (!selectedEventIds.has(ev.id)) {
+        selectedEventIds.add(ev.id);
+        selectedEvents.push(ev);
+        if (selectedEvents.length >= totalBudget) {
+          break;
+        }
+      }
+    }
+  }
+
+  // Preserve deterministic chronological ordering
+  selectedEvents.sort((a, b) => {
+    const dateComp = a.localStartDate.localeCompare(b.localStartDate);
+    if (dateComp !== 0) return dateComp;
+    return a.id.localeCompare(b.id);
+  });
+
+  return selectedEvents;
 }
 
 /**
@@ -405,6 +492,19 @@ export async function getPersonalizedDiscoverData(
       queryFromDate = weekendWindow.startDate;
     }
     queryToDate = weekendWindow.endDate;
+  } else if (activeMode === 'worth_planning_for') {
+    const refInstantDate = referenceInstant
+      ? new Date(referenceInstant)
+      : referenceDate
+        ? new Date(`${referenceDate}T00:00:00Z`)
+        : new Date();
+    const advance14Date = new Date(
+      refInstantDate.getTime() + 14 * 24 * 60 * 60 * 1000,
+    );
+    const advance14Str = advance14Date.toISOString().slice(0, 10);
+    if (advance14Str > queryFromDate) {
+      queryFromDate = advance14Str;
+    }
   }
 
   const commonFilters: EventListFilters = {
@@ -416,12 +516,22 @@ export async function getPersonalizedDiscoverData(
     searchQuery: searchQuery?.trim() || undefined,
   };
 
+  const modeOptions = {
+    mode: activeMode,
+    modeContext: {
+      userProfile,
+      artistPreferences: userPreferences,
+      referenceDate,
+      referenceInstant,
+      city: city || undefined,
+    },
+  };
+
   const candidateQueries: Promise<CanonicalEventSummary[]>[] = [];
 
-  // Tier 1A: Favorite artists with dedicated budget & fair coverage policy (Issue 9)
-  // Ensures multiple favorite artists each receive guaranteed candidate slots so high-volume artists
-  // do not starve upcoming shows of other Must-see favorites.
-  if (favoriteArtistIds.length === 1) {
+  // Tier 1A: Favorite artists with dedicated budget & fair coverage policy (Issue 2)
+  // Single bounded retrieval query regardless of whether user has 3, 20, or 100 favorite artists.
+  if (favoriteArtistIds.length > 0) {
     candidateQueries.push(
       retrieveCandidatesWithLookback(
         catalogRepo,
@@ -429,24 +539,15 @@ export async function getPersonalizedDiscoverData(
         FAVORITE_ARTIST_CANDIDATE_LIMIT,
         referenceDate,
         referenceInstant,
+        modeOptions,
+      ).then((evts) =>
+        applyFairArtistAllocation(
+          evts,
+          favoriteArtistIds,
+          FAVORITE_ARTIST_CANDIDATE_LIMIT,
+        ),
       ),
     );
-  } else if (favoriteArtistIds.length > 1) {
-    const perArtistLimit = Math.max(
-      15,
-      Math.floor(FAVORITE_ARTIST_CANDIDATE_LIMIT / favoriteArtistIds.length),
-    );
-    for (const favArtistId of favoriteArtistIds) {
-      candidateQueries.push(
-        retrieveCandidatesWithLookback(
-          catalogRepo,
-          { ...commonFilters, artistIds: [favArtistId] },
-          perArtistLimit,
-          referenceDate,
-          referenceInstant,
-        ),
-      );
-    }
   }
 
   // Tier 1B: Liked artists with dedicated budget
@@ -458,6 +559,7 @@ export async function getPersonalizedDiscoverData(
         LIKE_ARTIST_CANDIDATE_LIMIT,
         referenceDate,
         referenceInstant,
+        modeOptions,
       ),
     );
   }
@@ -471,6 +573,7 @@ export async function getPersonalizedDiscoverData(
         INTERESTED_ARTIST_CANDIDATE_LIMIT,
         referenceDate,
         referenceInstant,
+        modeOptions,
       ),
     );
   }
@@ -483,6 +586,7 @@ export async function getPersonalizedDiscoverData(
       GENERAL_CATALOG_CANDIDATE_LIMIT,
       referenceDate,
       referenceInstant,
+      modeOptions,
     ),
   );
 
@@ -541,7 +645,10 @@ export async function getPersonalizedDiscoverData(
       isSpotifyConnected,
       isLocationConfigured,
       isEmptyCatalog:
-        candidateCountBeforeFiltering === 0 && !searchQuery && !city,
+        activeMode === 'all' &&
+        candidateCountBeforeFiltering === 0 &&
+        !searchQuery &&
+        !city,
     };
   }
 
@@ -633,7 +740,26 @@ export async function getPublicDiscoverData(
       queryFromDate = weekendWindow.startDate;
     }
     queryToDate = weekendWindow.endDate;
+  } else if (activeMode === 'worth_planning_for') {
+    const refInstantDate = referenceInstant
+      ? new Date(referenceInstant)
+      : referenceDate
+        ? new Date(`${referenceDate}T00:00:00Z`)
+        : new Date();
+    const advance14Date = new Date(
+      refInstantDate.getTime() + 14 * 24 * 60 * 60 * 1000,
+    );
+    const advance14Str = advance14Date.toISOString().slice(0, 10);
+    if (advance14Str > queryFromDate) {
+      queryFromDate = advance14Str;
+    }
   }
+
+  const modeContext: ModeEligibilityContext = {
+    referenceDate,
+    referenceInstant,
+    city: city || undefined,
+  };
 
   const candidates = await retrieveCandidatesWithLookback(
     catalogRepo,
@@ -648,6 +774,10 @@ export async function getPublicDiscoverData(
     limit * 2, // scan enough to satisfy mode eligibility filtering
     referenceDate,
     referenceInstant,
+    {
+      mode: activeMode,
+      modeContext,
+    },
   );
 
   // Filter displayable scheduled concerts using timezone-aware timing eligibility and mode filters
@@ -693,7 +823,11 @@ export async function getPublicDiscoverData(
 
   return {
     events: returnedEvents,
-    isEmptyCatalog: candidateCountBeforeSearch === 0 && !searchQuery && !city,
+    isEmptyCatalog:
+      activeMode === 'all' &&
+      candidateCountBeforeSearch === 0 &&
+      !searchQuery &&
+      !city,
     totalCount: returnedEvents.length,
     activeMode,
   };

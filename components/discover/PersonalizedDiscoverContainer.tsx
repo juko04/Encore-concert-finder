@@ -348,8 +348,9 @@ export function PersonalizedDiscoverContainer({
   const isFilterActive =
     Boolean(searchQuery.trim()) || Boolean(selectedCity.trim());
 
-  // Genuinely empty candidate pool: zero candidates in database and no active search/city filter
-  const isCatalogEmpty = totalCandidateCount === 0 && !isFilterActive;
+  // Genuinely empty candidate pool: zero candidates in database and no active search/city filter in all mode
+  const isCatalogEmpty =
+    activeMode === 'all' && totalCandidateCount === 0 && !isFilterActive;
 
   // Nonempty candidate pool, but zero eligible/unsuppressed recommendations
   const isNoEligibleRecommendations =

@@ -493,31 +493,94 @@ export class SupabaseCatalogRepository implements ICatalogRepository {
     if (filters?.searchQuery?.trim()) {
       const trimmedSearch = filters.searchQuery.trim();
       const escaped = escapeLikePattern(trimmedSearch);
-      const orClauses: string[] = [`name.ilike.%${escaped}%`];
+      // PostgREST .or() requires quoting for values containing special characters (commas, parentheses, colons, quotes)
+      const quotedEscaped = escaped.replace(/"/g, '""');
+      const orClauses: string[] = [`name.ilike."%${quotedEscaped}%"`];
 
-      // Query matching venues
-      const { data: venuesData } = await this.client
-        .from('venues')
-        .select('id')
-        .ilike('name', `%${escaped}%`)
-        .limit(100);
-      const matchedVenueIds = (venuesData || []).map((v) => v.id);
-      if (matchedVenueIds.length > 0) {
-        orClauses.push(`venue_id.in.(${matchedVenueIds.join(',')})`);
+      // Query matching venues with pagination to avoid silent truncation (Issue 4)
+      const matchedVenueIds: string[] = [];
+      const VENUE_BATCH = 1000;
+      let venueOffset = 0;
+      while (true) {
+        const { data: venuesData, error: venueError } = await this.client
+          .from('venues')
+          .select('id')
+          .ilike('name', `%${escaped}%`)
+          .order('id', { ascending: true })
+          .range(venueOffset, venueOffset + VENUE_BATCH - 1);
+        if (venueError) {
+          throw new Error(
+            `Failed to query venues for search: ${venueError.message}`,
+          );
+        }
+        if (!venuesData || venuesData.length === 0) break;
+        for (const v of venuesData) {
+          matchedVenueIds.push(v.id);
+        }
+        if (venuesData.length < VENUE_BATCH) break;
+        venueOffset += VENUE_BATCH;
+      }
+      for (let i = 0; i < matchedVenueIds.length; i += 200) {
+        const chunk = matchedVenueIds.slice(i, i + 200);
+        orClauses.push(`venue_id.in.(${chunk.join(',')})`);
       }
 
-      // Query matching artists without arbitrary low truncation (Issue 7)
-      const matchedArtists = await this.searchArtists(trimmedSearch, 100);
-      if (matchedArtists.length > 0) {
-        const matchedArtistIds = matchedArtists.map((a) => a.id);
-        const { data: eaData } = await this.client
-          .from('event_artists')
-          .select('event_id')
-          .in('artist_id', matchedArtistIds)
-          .limit(1000);
-        const matchedEventIds = (eaData || []).map((ea) => ea.event_id);
-        if (matchedEventIds.length > 0) {
-          orClauses.push(`id.in.(${matchedEventIds.join(',')})`);
+      // Query matching artists with pagination (Issue 4)
+      const matchedArtistIds: string[] = [];
+      const ARTIST_BATCH = 1000;
+      let artistOffset = 0;
+      while (true) {
+        const { data: artistsData, error: artistError } = await this.client
+          .from('artists')
+          .select('id')
+          .ilike('name', `%${escaped}%`)
+          .order('id', { ascending: true })
+          .range(artistOffset, artistOffset + ARTIST_BATCH - 1);
+        if (artistError) {
+          throw new Error(
+            `Failed to query artists for search: ${artistError.message}`,
+          );
+        }
+        if (!artistsData || artistsData.length === 0) break;
+        for (const a of artistsData) {
+          matchedArtistIds.push(a.id);
+        }
+        if (artistsData.length < ARTIST_BATCH) break;
+        artistOffset += ARTIST_BATCH;
+      }
+
+      if (matchedArtistIds.length > 0) {
+        // Query event_artists with pagination to prevent silent 1,000-row truncation (Issue 4)
+        const matchedEventIds: string[] = [];
+        const seenEventIds = new Set<string>();
+        const EA_BATCH = 1000;
+        let eaOffset = 0;
+        while (true) {
+          const { data: eaData, error: eaError } = await this.client
+            .from('event_artists')
+            .select('event_id')
+            .in('artist_id', matchedArtistIds)
+            .order('event_id', { ascending: true })
+            .range(eaOffset, eaOffset + EA_BATCH - 1);
+          if (eaError) {
+            throw new Error(
+              `Failed to query event_artists for search: ${eaError.message}`,
+            );
+          }
+          if (!eaData || eaData.length === 0) break;
+          for (const ea of eaData) {
+            if (!seenEventIds.has(ea.event_id)) {
+              seenEventIds.add(ea.event_id);
+              matchedEventIds.push(ea.event_id);
+            }
+          }
+          if (eaData.length < EA_BATCH) break;
+          eaOffset += EA_BATCH;
+        }
+
+        for (let i = 0; i < matchedEventIds.length; i += 200) {
+          const chunk = matchedEventIds.slice(i, i + 200);
+          orClauses.push(`id.in.(${chunk.join(',')})`);
         }
       }
 
@@ -790,7 +853,7 @@ export class SupabaseCatalogRepository implements ICatalogRepository {
       return [];
     }
 
-    const safeLimit = Math.min(Math.max(1, limit), 100);
+    const safeLimit = Math.min(Math.max(1, limit), 1000);
     const escaped = escapeLikePattern(trimmed);
 
     const { data, error } = await this.client

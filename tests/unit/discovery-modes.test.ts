@@ -126,6 +126,15 @@ describe('Discovery Modes Domain Logic', () => {
       expect(windowNY.startDate).toBe('2026-10-30');
       expect(windowNY.endDate).toBe('2026-11-01');
     });
+
+    it('correctly calculates date-only weekend window for Asia/Tokyo on Friday, October 30, 2026 (SHOULD FIX 5)', () => {
+      const windowTokyo = calculateWeekendWindow({
+        referenceDate: '2026-10-30',
+        timeZone: 'Asia/Tokyo',
+      });
+      expect(windowTokyo.startDate).toBe('2026-10-30');
+      expect(windowTokyo.endDate).toBe('2026-11-01');
+    });
   });
 
   describe('isEventEligibleForMode', () => {
@@ -199,17 +208,20 @@ describe('Discovery Modes Domain Logic', () => {
         minPrice: 30,
         lat: 39.74,
         lng: -104.99,
+        city: 'Denver',
       });
       const aboveDefaultCeiling = makeStubEvent({
         minPrice: 40,
         lat: 39.74,
         lng: -104.99,
+        city: 'Denver',
       });
       const unknownPrice = makeStubEvent({
         minPrice: null,
         maxPrice: null,
         lat: 39.74,
         lng: -104.99,
+        city: 'Denver',
         eventKind: 'concert',
       });
       const freeEvent = makeStubEvent({
@@ -217,39 +229,62 @@ describe('Discovery Modes Domain Logic', () => {
         maxPrice: null,
         lat: 39.74,
         lng: -104.99,
+        city: 'Denver',
+        eventKind: 'free_event',
+      });
+      const contradictoryFreeEvent = makeStubEvent({
+        minPrice: 75,
+        maxPrice: 120,
+        lat: 39.74,
+        lng: -104.99,
+        city: 'Denver',
         eventKind: 'free_event',
       });
 
-      const contextWithDefault = {};
+      const contextWithCityAnchor = { city: 'Denver' };
 
       expect(
         isEventEligibleForMode(
           affordable,
           'cheap_and_nearby',
-          contextWithDefault,
+          contextWithCityAnchor,
         ),
       ).toBe(true);
       expect(
         isEventEligibleForMode(
           aboveDefaultCeiling,
           'cheap_and_nearby',
-          contextWithDefault,
+          contextWithCityAnchor,
         ),
       ).toBe(false);
       expect(
         isEventEligibleForMode(
           unknownPrice,
           'cheap_and_nearby',
-          contextWithDefault,
+          contextWithCityAnchor,
         ),
       ).toBe(false);
       expect(
         isEventEligibleForMode(
           freeEvent,
           'cheap_and_nearby',
-          contextWithDefault,
+          contextWithCityAnchor,
         ),
       ).toBe(true);
+
+      // MUST FIX 3: Contradictory pricing check - positive price evidence (> 0) overrides free_event marker
+      expect(
+        isEventEligibleForMode(
+          contradictoryFreeEvent,
+          'cheap_and_nearby',
+          contextWithCityAnchor,
+        ),
+      ).toBe(false);
+
+      // MUST FIX 3: Do not claim an event is nearby when guest/user has no location anchor
+      expect(isEventEligibleForMode(affordable, 'cheap_and_nearby', {})).toBe(
+        false,
+      );
     });
 
     it('enforces strict travel radius, 35-mile default, and rejects unknown distance in "cheap_and_nearby" (FIX 5)', () => {

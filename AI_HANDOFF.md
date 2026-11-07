@@ -11,26 +11,23 @@ Durable architecture records belong in [`docs/architecture/`](docs/architecture/
 - **Active Specification:** [`docs/phases/active/PHASE_2_IMPLEMENTATION.md`](docs/phases/active/PHASE_2_IMPLEMENTATION.md).
 - **Current Branch:** `feature/phase-2-personalized-discover`
 - **Active Implementing Agent:** Google Antigravity
-- **Current Task:** Phase 2, PR #12: Personalized Discover Experience — Remediation Round 2 Complete & Verified.
-- **Remediation Completed (Round 2 — All Issues Resolved):**
-  1. *FIX 1 (CRITICAL - Full Catalog Search & City Filter):* Pushed search and city filters down to database queries across entire catalog before pagination; wired 300ms input debouncing and `requestIdRef.current` stale response protection in both personalized and guest Discover containers.
-  2. *FIX 2 (HIGH - Database-Side Scheduled Status Filtering):* Pushed `status: 'scheduled'` down into `retrieveCandidatesWithLookback`, `getPersonalizedDiscoverData`, and `getPublicDiscoverData`, eliminating scan limit false negatives and preventing cancelled/postponed events from consuming candidate retrieval quotas.
-  3. *FIX 3 (HIGH - Timezone-Aware Weekend Window & Friday 17:00 Cutoff):* Replaced UTC day slicing with event-local IANA timezone calculations using `getZonedTimeParts` and `createZonedInstant`. Enforced Friday 17:00 (5 PM) local cutoff, robust Saturday/Sunday midnight crossing handling, and DST resilience.
-  4. *FIX 4 (HIGH - Reconcile Specs, Code, and Tests):* Reconciled discovery mode specifications across `PHASE_2_IMPLEMENTATION.md`, domain code, and unit tests ($35 budget ceiling, 35-mile radius, 14-day advance horizon for Worth Planning For, Friday 5 PM weekend start).
-  5. *FIX 5 (HIGH - Discovery Mode Eligibility Rules & Fallbacks):* Enforced strict $35/35mi ceilings rejecting unknown/null price and coordinates for Cheap & Nearby; added guest city matching; enforced 14-day advance horizon with guest major concert ($60+) / festival support for Worth Planning For.
-  6. *Issue 6 (SHOULD FIX - Paged listCities):* Implemented chunked `.range()` pagination (1,000 events/page) in `SupabaseCatalogRepository.listCities()` to prevent PostgREST row truncation.
-  7. *Issue 7 (SHOULD FIX - Expanded Search Limits):* Increased artist search limit to 100 and event-artist lookup limit to 1,000 in catalog repository.
-  8. *Issue 8 (SHOULD FIX - Search Debounce & Stale Protection):* Integrated 300ms debouncing and `requestIdRef.current` cancellation tokens in both `PersonalizedDiscoverContainer.tsx` and `GuestDiscoverContainer.tsx`.
-  9. *Issue 9 (SHOULD FIX - Multi-Favorite Fair Quota Allocation):* Implemented fair distribution of the 100-event favorite candidate budget across multiple favorite artists.
-  10. *Issue 10 (SHOULD FIX - Truthful Empty States):* Separated genuine empty catalog (`totalCandidateCount === 0 && !search && !city`) from filtered empty states (`isFilterEmpty`) with dedicated "Clear filters" action buttons (`data-testid="clear-filters-btn"`).
+- **Current Task:** Phase 2, PR #12: Personalized Discover Experience — Final Targeted Corrections Complete & Verified.
+- **Remediation Completed (Final Targeted Corrections — All Issues Resolved):**
+  1. *MUST FIX 1 (Discovery-Mode Retrieval Completeness):* Pushed mode eligibility checks (`modeOptions`) into candidate pagination loops in `retrieveCandidatesWithLookback`, ensuring qualifying Cheap & Nearby shows are not starved by earlier nonqualifying events.
+  2. *MUST FIX 2 (Favorite-Artist Quota & Query Bounds):* Replaced per-artist iterative queries with a single bounded query and fair round-robin quota allocation (`applyFairArtistAllocation`), guaranteeing total favorite candidates $\le 100$ and exactly 1 database query regardless of whether the user has 3, 20, or 100 favorite artists.
+  3. *MUST FIX 3 (Cheap & Nearby Accuracy):* In `lib/recommendation/modes.ts`, rejected contradictory `free_event` markers when positive pricing evidence exists (`minPrice > 0`); strictly rejected "nearby" claims when guests/users have neither home coordinates nor a city filter.
+  4. *MUST FIX 4 (Complete Database Search):* In `lib/repositories/catalog-repository.ts`, replaced silent 100/1,000 limits with `.range()` batch pagination (1,000-row pages), chunked 200-item ID disjunctions, and PostgREST `.or()` double-quote escaping for punctuation-containing artist names (`name.ilike."%...%"`).
+  5. *SHOULD FIX 5 (Date-Only Weekend Calculation for Asia/Tokyo):* Replaced UTC 18:00 reference date parsing with UTC noon (`Date.UTC(..., 12, 0, 0)`) in `calculateWeekendWindow`, eliminating Saturday timezone roll-forward in positive UTC offsets.
+  6. *SHOULD FIX 6 (Truthful Empty States):* In `PersonalizedDiscoverContainer.tsx`, `GuestDiscoverContainer.tsx`, and `service.ts`, ensured that empty weekends or discovery modes render the mode-empty banner rather than claiming an entirely empty catalog (`isEmptyCatalog: false` when `activeMode !== 'all'`).
+  7. *SHOULD FIX 7 (Documentation Alignment):* Aligned `docs/phases/active/PHASE_2_IMPLEMENTATION.md` with actual scoring weights, candidate tiers, and retrieval behavior.
 - **Verification State:** All Suites Green & Production Ready:
   - Branch: `feature/phase-2-personalized-discover`
   - Pull Request: [#12](https://github.com/juko04/Encore-concert-finder/pull/12)
-  - Unit Tests: 522/522 passed across 38 test suites (`npm test`)
+  - Unit Tests: 528/528 passed across 38 test suites (`npm test`)
   - Production Build: Next.js production build clean (0 errors, 14 routes, `/discover` confirmed dynamic)
   - Code Quality: Prettier format clean (`format:check`), ESLint clean (0 warnings), strict TypeScript clean (0 errors)
 - **Immediate Next Action:** PR #12 is ready for independent re-review. Do NOT auto-merge PR #12 autonomously. Wait for user merge authorization.
-- **Phase 2 Status:** **ACTIVE — PR #12 REMEDIATION ROUND 2 COMPLETE & VERIFIED GREEN.**
+- **Phase 2 Status:** **ACTIVE — PR #12 FINAL TARGETED CORRECTIONS COMPLETE & VERIFIED GREEN.**
 
 ---
 

@@ -201,14 +201,20 @@ export function calculateWeekendWindow(
     zoned = getZonedTimeParts(d, timeZone);
   } else if (referenceDate) {
     const parts = referenceDate.split('-').map(Number);
-    // Construct local noon date for the given calendar date to avoid midnight boundary shifts
-    const d = new Date(Date.UTC(parts[0], parts[1] - 1, parts[2], 18, 0, 0));
-    zoned = getZonedTimeParts(d, timeZone);
-    // Explicitly enforce the provided reference date components
-    zoned.year = parts[0];
-    zoned.month = parts[1];
-    zoned.day = parts[2];
-    zoned.dateString = referenceDate;
+    // Use UTC noon to calculate calendar weekday deterministically without timezone shift
+    const utcDate = new Date(
+      Date.UTC(parts[0], parts[1] - 1, parts[2], 12, 0, 0),
+    );
+    zoned = {
+      year: parts[0],
+      month: parts[1],
+      day: parts[2],
+      hour: 12,
+      minute: 0,
+      second: 0,
+      weekday: utcDate.getUTCDay(),
+      dateString: referenceDate,
+    };
   } else {
     zoned = getZonedTimeParts(new Date(), timeZone);
   }
@@ -304,43 +310,56 @@ export function isEventEligibleForMode(
     const budgetCeiling = context.userProfile?.maxNormalTicketPrice ?? 35;
 
     // Price must be confirmed free or confirmed <= budgetCeiling.
-    // Unknown ticket price (null/undefined) CANNOT pass as proven affordable.
-    const isFree = event.eventKind === 'free_event';
+    // In accordance with PR #11 conservative pricing rules:
+    // A contradictory free_event marker is NOT proof of free admission when positive pricing evidence exists.
     const hasKnownPrice =
       event.minPrice !== null && event.minPrice !== undefined;
+    const isFree =
+      event.eventKind === 'free_event' &&
+      (!hasKnownPrice || event.minPrice === 0);
+
+    // Contradictory pricing check: if eventKind === 'free_event' but minPrice > 0,
+    // it cannot claim free admission; it must satisfy minPrice <= budgetCeiling.
+    // If unknown price (null/undefined) and not verified free, fails closed.
     const isAffordable =
-      isFree || (hasKnownPrice && event.minPrice! <= budgetCeiling);
+      isFree ||
+      (hasKnownPrice &&
+        event.minPrice! >= 0 &&
+        event.minPrice! <= budgetCeiling);
 
     if (!isAffordable) return false;
 
     // Distance check: within preferred travel radius (default 35 miles per Phase 2 spec)
     const radius = context.userProfile?.defaultRadiusMiles ?? 35;
 
-    if (
+    const hasUserLocation =
       context.userProfile?.homeLatApprox != null &&
-      context.userProfile?.homeLngApprox != null
-    ) {
+      context.userProfile?.homeLngApprox != null;
+    const hasCityFilter = Boolean(context.city?.trim());
+
+    // Do not claim an event is nearby when no meaningful user location or selected city is available.
+    if (!hasUserLocation && !hasCityFilter) {
+      return false;
+    }
+
+    if (hasUserLocation) {
       // User has configured home coordinates:
       // Unknown event distance (missing event lat/lng) CANNOT pass as proven nearby.
       if (event.lat == null || event.lng == null) {
         return false;
       }
       const dist = calculateHaversineDistanceMiles(
-        context.userProfile.homeLatApprox,
-        context.userProfile.homeLngApprox,
+        context.userProfile!.homeLatApprox!,
+        context.userProfile!.homeLngApprox!,
         event.lat,
         event.lng,
       );
       if (dist > radius) return false;
-    } else if (context.city) {
+    } else if (hasCityFilter) {
       // User/guest has selected an active city filter: match city
-      if (event.city?.toLowerCase() !== context.city.toLowerCase()) {
+      if (event.city?.toLowerCase() !== context.city!.toLowerCase()) {
         return false;
       }
-    } else {
-      // Guest or unanchored user with no location or city specified:
-      // Event must have valid city and coordinates
-      if (!event.city) return false;
     }
 
     return true;

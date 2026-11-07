@@ -323,7 +323,7 @@ export function GuestDiscoverContainer({
       </section>
 
       {/* Empty States */}
-      {isEmptyCatalog ? (
+      {isEmptyCatalog && activeMode === 'all' ? (
         <div
           data-testid="empty-catalog-banner"
           className="rounded-2xl border border-zinc-800 bg-zinc-900/40 p-12 text-center"

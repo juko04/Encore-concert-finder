@@ -347,3 +347,262 @@ describe('SupabaseCatalogRepository - Chunked Artist Pagination (Unit Tests)', (
     ]);
   });
 });
+
+describe('SupabaseCatalogRepository - Search with Pagination and Punctuation (MUST FIX 4)', () => {
+  it('paginates beyond 1,000 event_artists and safely formats .or() for punctuation-containing artist names', async () => {
+    const totalEvents = 1020;
+    const allEventIds = Array.from(
+      { length: totalEvents },
+      (_, i) => `event-${i}`,
+    );
+    const capturedRanges: Record<string, Array<[number, number]>> = {
+      venues: [],
+      artists: [],
+      event_artists: [],
+    };
+    let capturedOrClause = '';
+
+    const mockClient = {
+      from: vi.fn((table: string) => {
+        let currentRange: [number, number] | undefined;
+        let inField: string | undefined;
+        let inValues: unknown[] | undefined;
+
+        const builder: Record<string, unknown> = {
+          select: vi.fn(() => builder),
+          ilike: vi.fn(() => builder),
+          order: vi.fn(() => builder),
+          eq: vi.fn(() => builder),
+          in: vi.fn((field: string, vals: unknown[]) => {
+            inField = field;
+            inValues = vals;
+            return builder;
+          }),
+          range: vi.fn((from: number, to: number) => {
+            currentRange = [from, to];
+            if (!capturedRanges[table]) capturedRanges[table] = [];
+            capturedRanges[table].push([from, to]);
+            return builder;
+          }),
+          or: vi.fn((clause: string) => {
+            capturedOrClause = clause;
+            return builder;
+          }),
+          limit: vi.fn(() => builder),
+          gte: vi.fn(() => builder),
+          lte: vi.fn(() => builder),
+          then: (
+            onfulfilled?: (value: { data: unknown[]; error: null }) => unknown,
+          ) => {
+            if (table === 'venues') {
+              const res = { data: [], error: null };
+              return Promise.resolve(onfulfilled ? onfulfilled(res) : res);
+            }
+            if (table === 'artists') {
+              const [start] = currentRange || [0, 999];
+              const res = {
+                data: start === 0 ? [{ id: 'artist-tyler' }] : [],
+                error: null,
+              };
+              return Promise.resolve(onfulfilled ? onfulfilled(res) : res);
+            }
+            if (table === 'event_artists') {
+              if (inField === 'event_id') {
+                const requestedIds = (inValues as string[]) || [];
+                const rows = requestedIds.map((eid) => ({
+                  id: `ea-${eid}`,
+                  event_id: eid,
+                  artist_id: 'artist-tyler',
+                  billing_position: 'headliner',
+                  sort_order: 1,
+                  artists: {
+                    id: 'artist-tyler',
+                    name: 'Tyler, The "Creator"',
+                    normalized_name: 'tyler, the "creator"',
+                    image_url: null,
+                    created_at: '2026-01-01T00:00:00Z',
+                    updated_at: '2026-01-01T00:00:00Z',
+                    artist_external_ids: [],
+                  },
+                }));
+                const res = { data: rows, error: null };
+                return Promise.resolve(onfulfilled ? onfulfilled(res) : res);
+              }
+              const [start, end] = currentRange || [0, 999];
+              const slice = allEventIds.slice(start, end + 1).map((eid) => ({
+                event_id: eid,
+              }));
+              const res = { data: slice, error: null };
+              return Promise.resolve(onfulfilled ? onfulfilled(res) : res);
+            }
+            if (table === 'events') {
+              const row = {
+                id: 'event-1015',
+                name: 'Tyler, The "Creator" Live',
+                normalized_name: 'tyler, the "creator" live',
+                event_kind: 'concert',
+                status: 'scheduled',
+                venue_id: 'venue-1',
+                city: 'Denver',
+                region: 'CO',
+                country_code: 'US',
+                lat: 39.75,
+                lng: -104.99,
+                timezone: 'America/Denver',
+                local_start_date: '2026-11-20',
+                local_end_date: null,
+                starts_at: '2026-11-20T20:00:00-07:00',
+                ends_at: null,
+                start_time_precision: 'instant',
+                doors_at: null,
+                is_multi_day: false,
+                official_url: null,
+                primary_ticket_url: null,
+                announced_at: null,
+                created_at: '2026-01-01T00:00:00Z',
+                updated_at: '2026-01-01T00:00:00Z',
+                venues: {
+                  id: 'venue-1',
+                  name: 'Ball Arena',
+                  normalized_name: 'ball arena',
+                  city: 'Denver',
+                  region: 'CO',
+                  country_code: 'US',
+                  lat: 39.75,
+                  lng: -104.99,
+                  timezone: 'America/Denver',
+                  website: null,
+                  capacity: 20000,
+                  created_at: '2026-01-01T00:00:00Z',
+                  updated_at: '2026-01-01T00:00:00Z',
+                },
+              };
+              const res = { data: [row], error: null };
+              return Promise.resolve(onfulfilled ? onfulfilled(res) : res);
+            }
+            if (table === 'event_ticket_links' || table === 'event_sources') {
+              const res = { data: [], error: null };
+              return Promise.resolve(onfulfilled ? onfulfilled(res) : res);
+            }
+            const fallback = { data: [], error: null };
+            return Promise.resolve(
+              onfulfilled ? onfulfilled(fallback) : fallback,
+            );
+          },
+        };
+        return builder;
+      }),
+    };
+
+    const repo = new SupabaseCatalogRepository(
+      mockClient as unknown as SupabaseClient,
+    );
+    const results = await repo.listEvents({
+      searchQuery: 'Tyler, The "Creator"',
+      limit: 50,
+    });
+
+    // Verify event_artists pagination occurred across 1,000 batch boundaries:
+    // First batch: [0, 999] (returns 1000)
+    // Second batch: [1000, 1999] (returns 20)
+    expect(capturedRanges.event_artists).toEqual([
+      [0, 999],
+      [1000, 1999],
+    ]);
+
+    // Verify PostgREST .or() double-quote wrapping and quote escaping
+    // The name clause MUST be wrapped in double quotes, with internal quotes escaped as ""
+    expect(capturedOrClause).toContain('name.ilike."%Tyler, The ""Creator""%"');
+
+    // Verify chunking of event IDs in max 200 items per id.in.(...) clause
+    // 1020 items chunked by 200 -> 6 chunks (200, 200, 200, 200, 200, 20)
+    const idInMatches = capturedOrClause.match(/id\.in\.\([^)]+\)/g) || [];
+    expect(idInMatches).toHaveLength(6);
+    expect(capturedOrClause).toContain('event-1015');
+
+    // Verify the concert beyond 1,000 matches is returned
+    expect(results).toHaveLength(1);
+    expect(results[0].id).toBe('event-1015');
+    expect(results[0].title).toBe('Tyler, The "Creator" Live');
+  });
+
+  it('paginates beyond 1,000 matching venues during search', async () => {
+    const totalVenues = 1050;
+    const allVenueIds = Array.from(
+      { length: totalVenues },
+      (_, i) => `venue-${i}`,
+    );
+    const venueRanges: Array<[number, number]> = [];
+    let capturedOrClause = '';
+
+    const mockClient = {
+      from: vi.fn((table: string) => {
+        let currentRange: [number, number] | undefined;
+
+        const builder: Record<string, unknown> = {
+          select: vi.fn(() => builder),
+          ilike: vi.fn(() => builder),
+          order: vi.fn(() => builder),
+          eq: vi.fn(() => builder),
+          in: vi.fn(() => builder),
+          range: vi.fn((from: number, to: number) => {
+            currentRange = [from, to];
+            if (table === 'venues') venueRanges.push([from, to]);
+            return builder;
+          }),
+          or: vi.fn((clause: string) => {
+            capturedOrClause = clause;
+            return builder;
+          }),
+          limit: vi.fn(() => builder),
+          gte: vi.fn(() => builder),
+          lte: vi.fn(() => builder),
+          then: (
+            onfulfilled?: (value: { data: unknown[]; error: null }) => unknown,
+          ) => {
+            if (table === 'venues') {
+              const [start, end] = currentRange || [0, 999];
+              const slice = allVenueIds
+                .slice(start, end + 1)
+                .map((vid) => ({ id: vid }));
+              const res = { data: slice, error: null };
+              return Promise.resolve(onfulfilled ? onfulfilled(res) : res);
+            }
+            if (table === 'artists') {
+              const res = { data: [], error: null };
+              return Promise.resolve(onfulfilled ? onfulfilled(res) : res);
+            }
+            if (table === 'events') {
+              const res = { data: [], error: null };
+              return Promise.resolve(onfulfilled ? onfulfilled(res) : res);
+            }
+            const fallback = { data: [], error: null };
+            return Promise.resolve(
+              onfulfilled ? onfulfilled(fallback) : fallback,
+            );
+          },
+        };
+        return builder;
+      }),
+    };
+
+    const repo = new SupabaseCatalogRepository(
+      mockClient as unknown as SupabaseClient,
+    );
+    await repo.listEvents({
+      searchQuery: 'Amphitheatre',
+      limit: 10,
+    });
+
+    expect(venueRanges).toEqual([
+      [0, 999],
+      [1000, 1999],
+    ]);
+
+    // 1050 venues chunked by 200 -> 6 chunks
+    const venueInMatches =
+      capturedOrClause.match(/venue_id\.in\.\([^)]+\)/g) || [];
+    expect(venueInMatches).toHaveLength(6);
+    expect(capturedOrClause).toContain('venue-1049');
+  });
+});

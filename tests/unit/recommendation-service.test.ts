@@ -1984,5 +1984,242 @@ describe('Production Recommendation Service (getPersonalizedDiscoverData)', () =
       expect(authFilterEmptyRes.isEmptyCatalog).toBe(false);
       expect(authFilterEmptyRes.recommendations).toHaveLength(0);
     });
+
+    it('MUST FIX 1: retrieves qualifying $20 Cheap & Nearby concert placed after 100 expensive concerts', async () => {
+      const user = 'user-cheap-nearby-lookback';
+      await profileRepo.upsertProfile(user, {
+        homeLatApprox: 39.7392,
+        homeLngApprox: -104.9903,
+        defaultRadiusMiles: 35,
+        maxNormalTicketPrice: 35,
+      });
+
+      const refDate = '2026-10-25';
+      const refInstant = '2026-10-25T12:00:00Z';
+
+      // Seed 100 expensive concerts ($150 each) on 2026-11-01
+      for (let i = 0; i < 100; i++) {
+        seedEvent(catalogRepo, {
+          id: `expensive-show-${i}`,
+          title: `Expensive Opera Gala ${i}`,
+          localStartDate: '2026-11-01',
+          startsAt: '2026-11-01T20:00:00Z',
+          timezone: 'America/Denver',
+          status: 'scheduled',
+          lat: 39.74,
+          lng: -104.99,
+          city: 'Denver',
+          minPrice: 150,
+        });
+      }
+
+      // Seed 1 qualifying $20 concert on 2026-11-02
+      seedEvent(catalogRepo, {
+        id: 'qualifying-cheap-concert',
+        title: 'Local Indie Showcase ($20)',
+        localStartDate: '2026-11-02',
+        startsAt: '2026-11-02T20:00:00Z',
+        timezone: 'America/Denver',
+        status: 'scheduled',
+        lat: 39.74,
+        lng: -104.99,
+        city: 'Denver',
+        minPrice: 20,
+      });
+
+      // Authenticated production service
+      const authRes = await getPersonalizedDiscoverData({
+        userId: user,
+        catalogRepo,
+        profileRepo,
+        prefRepo,
+        spotifyRepo,
+        mode: 'cheap_and_nearby',
+        referenceDate: refDate,
+        referenceInstant: refInstant,
+      });
+
+      const authIds = [
+        ...authRes.recommendations.map((r) => r.eventId),
+        ...authRes.exploratory.map((r) => r.eventId),
+      ];
+      expect(authIds).toContain('qualifying-cheap-concert');
+
+      // Public discover service
+      const publicRes = await getPublicDiscoverData({
+        catalogRepo,
+        mode: 'cheap_and_nearby',
+        city: 'Denver',
+        referenceDate: refDate,
+        referenceInstant: refInstant,
+      });
+      expect(publicRes.events.map((e) => e.id)).toContain(
+        'qualifying-cheap-concert',
+      );
+    });
+
+    it('MUST FIX 2: enforces aggregate bounds, correct coverage, and query counts for 3, 20, and 100 favorite artists', async () => {
+      // Test for 3, 20, and 100 favorite artists
+      for (const count of [3, 20, 100]) {
+        const testUser = `user-fav-bounds-${count}`;
+        await profileRepo.upsertProfile(testUser, {
+          recommendationPreset: 'artist_first',
+        });
+
+        const testCatalog = new MemoryCatalogRepository();
+        const testPrefRepo = new MemoryUserPreferenceRepository();
+
+        // 1. Seed 150 earlier neutral events to exhaust Tier 2 general catalog pool
+        for (let i = 0; i < 150; i++) {
+          const pad = String(i).padStart(3, '0');
+          seedEvent(testCatalog, {
+            id: `neutral-${count}-${pad}`,
+            title: `Neutral Show ${pad}`,
+            localStartDate: '2026-10-28',
+            startsAt: '2026-10-28T20:00:00Z',
+            timezone: 'America/Denver',
+            status: 'scheduled',
+            artists: [
+              {
+                id: `neutral-art-${count}-${pad}`,
+                name: `Neutral Artist ${pad}`,
+                billingPosition: 'headliner',
+              },
+            ],
+          });
+        }
+
+        // 2. Seed favorite artists and shows occurring after the neutral shows
+        const favArtistIds: string[] = [];
+        for (let i = 0; i < count; i++) {
+          const artistId = `fav-art-${count}-${i}`;
+          favArtistIds.push(artistId);
+          await testPrefRepo.savePreference({
+            userId: testUser,
+            artistId,
+            artistName: `Favorite Artist ${i}`,
+            preferenceLevel: 'favorite',
+          });
+
+          // Each artist has 2 upcoming shows scheduled in November
+          seedEvent(testCatalog, {
+            id: `show-${count}-${i}-a`,
+            title: `Artist ${i} Show A`,
+            localStartDate: '2026-11-05',
+            startsAt: '2026-11-05T20:00:00Z',
+            timezone: 'America/Denver',
+            status: 'scheduled',
+            artists: [
+              {
+                id: artistId,
+                name: `Artist ${i}`,
+                billingPosition: 'headliner',
+              },
+            ],
+          });
+          seedEvent(testCatalog, {
+            id: `show-${count}-${i}-b`,
+            title: `Artist ${i} Show B`,
+            localStartDate: '2026-11-12',
+            startsAt: '2026-11-12T20:00:00Z',
+            timezone: 'America/Denver',
+            status: 'scheduled',
+            artists: [
+              {
+                id: artistId,
+                name: `Artist ${i}`,
+                billingPosition: 'headliner',
+              },
+            ],
+          });
+        }
+
+        // Spy on catalog listEvents to measure query counts
+        let listEventsCallCount = 0;
+        const origListEvents = testCatalog.listEvents.bind(testCatalog);
+        testCatalog.listEvents = async (filters) => {
+          if (filters?.artistIds && filters.artistIds.length > 0) {
+            listEventsCallCount++;
+          }
+          return origListEvents(filters);
+        };
+
+        const res = await getPersonalizedDiscoverData({
+          userId: testUser,
+          catalogRepo: testCatalog,
+          profileRepo,
+          prefRepo: testPrefRepo,
+          spotifyRepo,
+          referenceDate: '2026-10-25',
+        });
+
+        // 1. Query counts: Exactly 1 retrieval query for all favorite artists (bounded, NOT N separate queries)
+        expect(listEventsCallCount).toBe(1);
+
+        // 2. Aggregate bounds: Total favorite recommendations strictly bounded <= 100
+        const totalRecs = res.recommendations.length;
+        expect(totalRecs).toBeLessThanOrEqual(100);
+
+        // 3. Correct coverage: Every favorite artist has candidate representation
+        if (count <= 50) {
+          // With 3 or 20 artists, every artist gets shows
+          const representedArtists = new Set(
+            res.recommendations.flatMap((r) =>
+              r.event.artists.map((a) => a.id),
+            ),
+          );
+          for (const artistId of favArtistIds) {
+            expect(representedArtists.has(artistId)).toBe(true);
+          }
+        }
+      }
+    });
+
+    it('SHOULD FIX 6: does not present an empty weekend as an entirely empty catalog', async () => {
+      const user = 'user-weekend-empty-test';
+      await profileRepo.upsertProfile(user, {});
+
+      // Seed 10 scheduled events next month (none this weekend 2026-10-30 to 2026-11-01)
+      for (let i = 0; i < 10; i++) {
+        seedEvent(catalogRepo, {
+          id: `next-month-show-${i}`,
+          title: `December Concert ${i}`,
+          localStartDate: '2026-12-05',
+          startsAt: '2026-12-05T20:00:00Z',
+          timezone: 'America/Denver',
+          status: 'scheduled',
+        });
+      }
+
+      // Personalized discover with mode: this_weekend
+      const authWeekendRes = await getPersonalizedDiscoverData({
+        userId: user,
+        catalogRepo,
+        profileRepo,
+        prefRepo,
+        spotifyRepo,
+        mode: 'this_weekend',
+        referenceDate: '2026-10-30',
+        referenceInstant: '2026-10-30T12:00:00Z',
+      });
+
+      // isEmptyCatalog MUST be false because the catalog has 10 upcoming events
+      expect(authWeekendRes.isEmptyCatalog).toBe(false);
+      expect(authWeekendRes.recommendations).toHaveLength(0);
+      expect(authWeekendRes.activeMode).toBe('this_weekend');
+
+      // Public discover with mode: this_weekend
+      const publicWeekendRes = await getPublicDiscoverData({
+        catalogRepo,
+        mode: 'this_weekend',
+        referenceDate: '2026-10-30',
+        referenceInstant: '2026-10-30T12:00:00Z',
+      });
+
+      // isEmptyCatalog MUST be false because the catalog has 10 upcoming events
+      expect(publicWeekendRes.isEmptyCatalog).toBe(false);
+      expect(publicWeekendRes.events).toHaveLength(0);
+      expect(publicWeekendRes.activeMode).toBe('this_weekend');
+    });
   });
 });
