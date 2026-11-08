@@ -47,6 +47,8 @@ This document is the authoritative directory and context router for the Encore c
   *Artist/venue identity resolution, external ID precedence, event matching, field-level merging, and atomic canonicalization.*
 - **Source Registry & Strategy:** [`architecture/sources.md`](architecture/sources.md)  
   *Categorization of ticketing APIs, aggregators, venues, promoters, and festivals.*
+- **Colorado Venue Sources Registry & Scraper Audit:** [`architecture/venue-sources-registry.md`](architecture/venue-sources-registry.md)  
+  *Phase 3 audit matrix of Colorado venue websites, platform clusters (Etix/RHP, Ticketmaster, Eventbrite, custom), scraping feasibility, and Cervantes reference architecture.*
 - **Security, Auth & Compliance:** [`architecture/security.md`](architecture/security.md)  
   *Supabase Auth, Row Level Security (RLS) policies, `service_role` isolation, and robots/scraping boundaries.*
 - **Module Plan & Boundaries:** [`architecture/modules-and-boundaries.md`](architecture/modules-and-boundaries.md)  
@@ -76,6 +78,8 @@ This document is the authoritative directory and context router for the Encore c
 
 ## Project Operations & Management
 
+- **Project Retrospective, Philosophy & Invariants:** [`project/project-retrospective-and-philosophy.md`](project/project-retrospective-and-philosophy.md)  
+  *High-density synthesis of core philosophy, architectural invariants, milestones achieved, and the 10 critical pitfalls.*
 - **Roadmap & Phase Breakdown:** [`project/roadmap.md`](project/roadmap.md)  
   *Phase 0 through Phase 5 scope, milestones, and deliverables.*
 - **AI Agent Collaboration Model:** [`project/agent-collaboration.md`](project/agent-collaboration.md)  

@@ -300,6 +300,79 @@ export class CanonicalizationCoordinator {
         a.name.trim().toLowerCase() !== 'unknown artist',
     );
 
+    // Cross-source contextual event match on date + venue + artist
+    if (!existingMatchedDetail && localStartDate && resolvedVenue?.id) {
+      const sameVenueEvents = await this.catalogRepo.findEventsOnDateAtVenue(
+        localStartDate,
+        resolvedVenue.id,
+      );
+      for (const ev of sameVenueEvents) {
+        const detail = await this.catalogRepo.getEventById(ev.id);
+        if (!detail) continue;
+
+        // Start-time conflict check: If both candidate and existing event have precise start times,
+        // start times differing by 90+ minutes indicate distinct performances (e.g. early show vs late show).
+        if (candidate.startsAt && detail.startsAt) {
+          const candTime = new Date(candidate.startsAt).getTime();
+          const existTime = new Date(detail.startsAt).getTime();
+          if (!isNaN(candTime) && !isNaN(existTime)) {
+            const diffMinutes = Math.abs(candTime - existTime) / (1000 * 60);
+            if (diffMinutes >= 90) {
+              continue; // Separate early / late performance
+            }
+          }
+        }
+
+        // Performance session conflict check (early vs late markers)
+        const hasEarlyMarker = (s: string) =>
+          /\b(early(\s+show)?|matinee)\b/i.test(s);
+        const hasLateMarker = (s: string) =>
+          /\b(late(\s+show)?|night\s+show)\b/i.test(s);
+        if (
+          (hasEarlyMarker(candidate.title) && hasLateMarker(detail.name)) ||
+          (hasLateMarker(candidate.title) && hasEarlyMarker(detail.name))
+        ) {
+          continue; // Early vs late performance marker conflict
+        }
+
+        const candidateNormTitle = normalizeName(candidate.title);
+        const eventNormTitle = normalizeName(detail.name);
+        const titleMatches =
+          candidateNormTitle === eventNormTitle ||
+          candidateNormTitle.includes(eventNormTitle) ||
+          eventNormTitle.includes(candidateNormTitle);
+
+        // Require headliner / primary artist match
+        const detailHeadliner =
+          detail.artists.find((a) => a.billingPosition === 'headliner') ??
+          detail.artists[0];
+        const candidateHeadliner = validCandidateArtists[0];
+
+        const headlinerMatches = Boolean(
+          detailHeadliner &&
+          candidateHeadliner &&
+          normalizeName(detailHeadliner.name) ===
+            normalizeName(candidateHeadliner.name),
+        );
+
+        // Conservative matching: require headliner match AND (title match or all artists match).
+        // Never merge merely because detail has a single artist without adequate title/lineup corroboration.
+        const allArtistsMatch =
+          detail.artists.length > 0 &&
+          validCandidateArtists.length > 0 &&
+          validCandidateArtists.every((ca) =>
+            detail.artists.some(
+              (da) => normalizeName(da.name) === normalizeName(ca.name),
+            ),
+          );
+
+        if (headlinerMatches && (titleMatches || allArtistsMatch)) {
+          existingMatchedDetail = detail;
+          break;
+        }
+      }
+    }
+
     if (validCandidateArtists.length === 0) {
       const payload: CanonicalizationPayload = {
         resolution: {
@@ -452,7 +525,11 @@ export class CanonicalizationCoordinator {
         event_kind:
           candidate.eventKind ??
           (candidate.isFestival ? 'festival' : 'concert'),
-        status: (candidate.rawPayload?.status as EventStatus) ?? 'scheduled',
+        status:
+          candidate.rawPayload?.isCanceled === true ||
+          candidate.rawPayload?.status === 'cancelled'
+            ? 'cancelled'
+            : ((candidate.rawPayload?.status as EventStatus) ?? 'scheduled'),
         venue_id: resolvedVenue.id,
         city: candidate.city ?? resolvedVenue.city ?? null,
         region: candidate.state ?? resolvedVenue.region ?? null,

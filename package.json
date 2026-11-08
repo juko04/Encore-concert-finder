@@ -18,11 +18,13 @@
     "db:start": "supabase start",
     "db:reset": "supabase db reset",
     "db:stop": "supabase stop",
-    "ingest:ticketmaster": "vite-node --config vitest.config.ts scripts/ingest-ticketmaster.ts"
+    "ingest:ticketmaster": "vite-node --config vitest.config.ts scripts/ingest-ticketmaster.ts",
+    "ingest:venue": "vite-node --config vitest.config.ts scripts/ingest-venue.ts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.5.2",
     "@supabase/supabase-js": "^2.49.1",
+    "cheerio": "^1.2.0",
     "next": "^15.2.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
