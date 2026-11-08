@@ -72,6 +72,7 @@ export class EventMatcher {
       const candidateNormArtists = candidate.artistNames.map(normalizeName);
       const candidatePrimaryNorm = candidateNormArtists[0];
       const candidatePrimaryId = resolvedArtistIds[0];
+      let hasDistinctPerformance = false;
 
       for (const existingEvent of sameVenueEvents) {
         const detail = await catalogRepo.getEventById(existingEvent.id);
@@ -117,13 +118,41 @@ export class EventMatcher {
           existingNormArtists.length > 0
         ) {
           allArtistsMatch =
+            !headlinerIdDisagreement &&
             candidateNormArtists.every((c) =>
               existingNormArtists.includes(c),
             ) &&
             existingNormArtists.every((e) => candidateNormArtists.includes(e));
         }
 
-        if (headlinerMatches) {
+        if (headlinerMatches || allArtistsMatch) {
+          // Check for start-time conflict on distinct performances (e.g. early show vs late show)
+          let isStartTimeConflict = false;
+          if (candidate.startsAt && existingEvent.startsAt) {
+            const candTime = new Date(candidate.startsAt).getTime();
+            const existTime = new Date(existingEvent.startsAt).getTime();
+            if (!isNaN(candTime) && !isNaN(existTime)) {
+              isStartTimeConflict =
+                Math.abs(candTime - existTime) / (1000 * 60) >= 90;
+            }
+          }
+
+          const hasEarlyMarker = (s: string) =>
+            /\b(early(\s+show)?|matinee)\b/i.test(s);
+          const hasLateMarker = (s: string) =>
+            /\b(late(\s+show)?|night\s+show)\b/i.test(s);
+          const isMarkerConflict =
+            (hasEarlyMarker(candidate.title) &&
+              hasLateMarker(existingEvent.name)) ||
+            (hasLateMarker(candidate.title) &&
+              hasEarlyMarker(existingEvent.name));
+
+          if (isStartTimeConflict || isMarkerConflict) {
+            hasDistinctPerformance = true;
+            // Distinct performance for same artist on same date — do not merge into this event
+            continue;
+          }
+
           const reasons = ['same_venue_and_date', 'same_primary_artist'];
           if (allArtistsMatch) {
             reasons.push('all_artists_match');
@@ -133,15 +162,6 @@ export class EventMatcher {
             matchedEvent: existingEvent,
             confidence: allArtistsMatch ? 0.95 : 0.92,
             reasons,
-          };
-        }
-
-        if (allArtistsMatch) {
-          return {
-            decision: 'match',
-            matchedEvent: existingEvent,
-            confidence: 0.95,
-            reasons: ['same_venue_and_date', 'all_artists_match'],
           };
         }
 
@@ -167,6 +187,15 @@ export class EventMatcher {
             ],
           };
         }
+      }
+
+      if (hasDistinctPerformance) {
+        // Legitimate separate performance (e.g., early vs late show) on the same date for the same artist
+        return {
+          decision: 'create',
+          confidence: 0.9,
+          reasons: ['distinct_performance_same_date_and_artist'],
+        };
       }
 
       // Same venue and date, but completely different artists

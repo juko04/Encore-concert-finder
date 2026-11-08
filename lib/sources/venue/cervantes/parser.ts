@@ -39,6 +39,24 @@ const KNOWN_VENUE_MAP: Record<
     state: 'CO',
     address: '2637 Welton Street',
   },
+  'cervantes and other side': {
+    venueName: "Cervantes' Masterpiece Ballroom",
+    city: 'Denver',
+    state: 'CO',
+    address: '2637 Welton Street',
+  },
+  'cervantes and other side dual venue': {
+    venueName: "Cervantes' Masterpiece Ballroom",
+    city: 'Denver',
+    state: 'CO',
+    address: '2637 Welton Street',
+  },
+  'cervantes’ and other side – dual venue': {
+    venueName: "Cervantes' Masterpiece Ballroom",
+    city: 'Denver',
+    state: 'CO',
+    address: '2637 Welton Street',
+  },
   'mission ballroom': {
     venueName: 'Mission Ballroom',
     city: 'Denver',
@@ -75,16 +93,42 @@ const KNOWN_VENUE_MAP: Record<
     state: 'CO',
     address: '6350 Greenwood Plaza Blvd',
   },
+  'the black sheep': {
+    venueName: 'The Black Sheep',
+    city: 'Colorado Springs',
+    state: 'CO',
+    address: '2106 E Platte Ave',
+  },
+  winterwondergrass: {
+    venueName: 'Steamboat Resort',
+    city: 'Steamboat Springs',
+    state: 'CO',
+  },
+  'winterwondergrass colorado': {
+    venueName: 'Steamboat Resort',
+    city: 'Steamboat Springs',
+    state: 'CO',
+  },
+  'winterwondergrass – colorado': {
+    venueName: 'Steamboat Resort',
+    city: 'Steamboat Springs',
+    state: 'CO',
+  },
 };
 
 /**
  * Resolves venue identity and locality, properly assigning offsite venues
- * when Cervantes presents shows at partner venues (e.g., Mission Ballroom, Ogden).
+ * when Cervantes presents shows at partner venues (e.g., Mission Ballroom, Ogden, The Black Sheep).
+ * Does NOT invent locality for unknown venues; unknown locations omit city/state
+ * so the pipeline routes them to needs_review with missing_venue_locality.
  */
-function resolveVenue(rawVenueText?: string): {
+function resolveVenue(
+  rawVenueText?: string,
+  eventUrl?: string,
+): {
   venueName: string;
-  city: string;
-  state: string;
+  city?: string;
+  state?: string;
   address?: string;
 } {
   if (!rawVenueText || rawVenueText.trim().length === 0) {
@@ -96,21 +140,44 @@ function resolveVenue(rawVenueText?: string): {
     };
   }
 
-  const cleaned = rawVenueText.toLowerCase().replace(/[’']/g, '').trim();
+  const cleaned = rawVenueText
+    .toLowerCase()
+    .replace(/[’'–—-]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
 
   // Check known map
   for (const [key, venue] of Object.entries(KNOWN_VENUE_MAP)) {
-    const keyCleaned = key.toLowerCase().replace(/[’']/g, '');
+    const keyCleaned = key
+      .toLowerCase()
+      .replace(/[’'–—-]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
     if (cleaned.includes(keyCleaned) || keyCleaned.includes(cleaned)) {
       return venue;
     }
   }
 
-  // Fallback: preserve extracted venue name with default Colorado locality
+  // Attempt to extract city and state from event URL if available (e.g. /<venue-slug>/<city-slug>-colorado/)
+  if (eventUrl) {
+    const localityMatch = eventUrl.match(/\/([a-z0-9-]+)-(colorado)\/?$/i);
+    if (localityMatch) {
+      const citySlug = localityMatch[1];
+      const city = citySlug
+        .split('-')
+        .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+        .join(' ');
+      return {
+        venueName: rawVenueText.trim(),
+        city,
+        state: 'CO',
+      };
+    }
+  }
+
+  // Fallback: preserve extracted venue name WITHOUT inventing locality
   return {
     venueName: rawVenueText.trim(),
-    city: 'Denver',
-    state: 'CO',
   };
 }
 
@@ -119,10 +186,12 @@ function resolveVenue(rawVenueText?: string): {
  * Examples:
  *   - "Daniel Donato’s Cosmic Country AT MISSION BALLROOM" -> headliner "Daniel Donato's Cosmic Country"
  *   - "Mfinity (Bass Sets) w/ 5AM, Phurn" -> headliner "Mfinity (Bass Sets)", support ["5AM", "Phurn"]
+ *   - "SHIFT Ft. Capochino w/ AG, Brittz, Panda $tyle" -> headliner "Capochino", support ["AG", "Brittz", "Panda $tyle"]
  */
 function parseArtistsFromTitle(rawTitle: string): {
   cleanTitle: string;
   isCanceled: boolean;
+  isFestival: boolean;
   artists: CandidateArtist[];
 } {
   let title = rawTitle
@@ -139,6 +208,11 @@ function parseArtistsFromTitle(rawTitle: string): {
   // Remove " AT <VENUE>" suffix from title to prevent venue duplication in artist names
   const cleanTitle = title.replace(/\s+AT\s+[A-Z0-9\s'.\-]+$/i, '').trim();
 
+  // Detect festival
+  const isFestival = /winterwondergrass|\bfestival\b|\bfest\b/i.test(
+    cleanTitle,
+  );
+
   let headlinerPart = cleanTitle;
   let supportPart = '';
 
@@ -146,6 +220,15 @@ function parseArtistsFromTitle(rawTitle: string): {
   if (withMatch) {
     headlinerPart = withMatch[1].trim();
     supportPart = withMatch[2].trim();
+  }
+
+  // Deterministic fix for Cervantes recurring event series: "SHIFT [Wednesday] Ft. <Artist>"
+  // SHIFT is a recurring electronic music series at Cervantes, not a performer.
+  const shiftMatch = headlinerPart.match(
+    /^SHIFT(?:\s+Wednesday)?\s+(?:ft\.?|feat\.?|featuring)\s+(.*)$/i,
+  );
+  if (shiftMatch) {
+    headlinerPart = shiftMatch[1].trim();
   }
 
   let mainHeadliner = headlinerPart;
@@ -160,11 +243,21 @@ function parseArtistsFromTitle(rawTitle: string): {
 
   const artists: CandidateArtist[] = [];
   if (mainHeadliner) {
-    artists.push({
-      name: mainHeadliner,
-      billingPosition: 'headliner',
-      sortOrder: 1,
-    });
+    // If this is a festival and mainHeadliner is simply the festival name (e.g. "WinterWonderGrass Colorado"),
+    // do not fabricate a single artist named after the festival. Leave artists empty to defer to review.
+    const isPureFestivalName =
+      isFestival &&
+      /winterwondergrass|\bfestival\b/i.test(mainHeadliner) &&
+      !supportPart &&
+      !featured;
+
+    if (!isPureFestivalName) {
+      artists.push({
+        name: mainHeadliner,
+        billingPosition: 'headliner',
+        sortOrder: 1,
+      });
+    }
   }
 
   if (featured) {
@@ -190,8 +283,8 @@ function parseArtistsFromTitle(rawTitle: string): {
     }
   }
 
-  // If no artist could be parsed, fallback to clean title as headliner
-  if (artists.length === 0 && cleanTitle.length > 0) {
+  // If no artist could be parsed and not a festival, fallback to clean title as headliner
+  if (artists.length === 0 && cleanTitle.length > 0 && !isFestival) {
     artists.push({
       name: cleanTitle,
       billingPosition: 'headliner',
@@ -199,7 +292,7 @@ function parseArtistsFromTitle(rawTitle: string): {
     });
   }
 
-  return { cleanTitle, isCanceled, artists };
+  return { cleanTitle, isCanceled, isFestival, artists };
 }
 
 /**
@@ -268,7 +361,7 @@ export function parseCervantesEvents(
       const statusClass = $el.find('.rhp-event-cta').attr('class') || '';
 
       // 1. Title, Status & Artist parsing
-      const { cleanTitle, isCanceled, artists } =
+      const { cleanTitle, isCanceled, isFestival, artists } =
         parseArtistsFromTitle(rawTitle);
       const isSoldOut = statusClass.includes('sold-out');
       const isStatusCanceled =
@@ -311,7 +404,7 @@ export function parseCervantesEvents(
       }
 
       // 3. Venue locality
-      const venue = resolveVenue(venueText);
+      const venue = resolveVenue(venueText, eventUrl);
 
       // 4. Ticket URL normalization
       let ticketUrl: string | undefined;
@@ -356,7 +449,8 @@ export function parseCervantesEvents(
         doorsOpenAt,
         startTimePrecision,
         ticketUrl,
-        eventKind: 'concert',
+        eventKind: isFestival ? 'festival' : 'concert',
+        isFestival,
         confidence: 0.98,
         verificationStatus: 'unverified',
         provenance,
@@ -367,6 +461,7 @@ export function parseCervantesEvents(
           venueText,
           statusClass,
           monthYearSeparator: currentMonthYear,
+          status: isStatusCanceled ? 'cancelled' : 'scheduled',
           isCanceled: isStatusCanceled,
           isSoldOut,
         },

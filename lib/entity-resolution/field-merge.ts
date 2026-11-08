@@ -104,8 +104,10 @@ export function evaluateFieldMerge(
   }
 
   // 6. Cancellation / Postponement / Reschedule status update
-  const candidateStatus = candidate.rawPayload?.status as
-    EventStatus | undefined;
+  const candidateStatus =
+    candidate.rawPayload?.isCanceled === true
+      ? 'cancelled'
+      : (candidate.rawPayload?.status as EventStatus | undefined);
   if (
     candidateStatus &&
     ['scheduled', 'cancelled', 'postponed', 'rescheduled'].includes(

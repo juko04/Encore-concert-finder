@@ -18,16 +18,22 @@ Durable architecture records belong in [`docs/architecture/`](docs/architecture/
   3. *Cervantes' Masterpiece Ballroom Adapter:* Implemented complete adapter in `lib/sources/venue/cervantes/` parsing 103 upcoming concerts from the Cervantes calendar; extracts headliner and support billing, doors/show times, offsite partner venue attribution (Mission Ballroom, Ogden Theatre, Fiddlers Green), and direct Etix ticket links without inventing missing data.
   4. *Pipeline Ingestion & Cross-Source Deduplication:* Wired venue adapter into `runVenueIngestion` pipeline (`lib/sources/venue/ingestion-pipeline.ts`); enforces immutable raw ingests (`raw_ingests`), deduplicated candidate observations (`event_candidates`), and atomic entity canonicalization via `CanonicalizationCoordinator`; matches pre-existing Ticketmaster events by venue, local date, and artist to merge multiple ticket sources onto a single canonical concert without creating duplicate events.
   5. *Safe CLI Runner:* Implemented `scripts/ingest-venue.ts` (`npm run ingest:venue`) with safe dry-run preview default, local static fixture replay (`--fixture`), live HTTP scraping (`--live`), and destination-guarded database persistence (`--persist`).
+  6. *Peer Review Remediation (PR #13):*
+     - Fixed offsite venue resolution in `lib/sources/venue/cervantes/parser.ts`: accurately mapped The Black Sheep (Colorado Springs, CO), WinterWonderGrass (Steamboat Springs, CO), and dual-room Cervantes events without inventing Denver locality; unmapped locations omit city/state to route to `needs_review` with `missing_venue_locality`.
+     - Preserved festival integrity: identified WinterWonderGrass as a festival (`eventKind: 'festival'`), deferring ambiguous festival records without fabricating festival titles as artists.
+     - Fixed cancelled concert status propagation: set `rawPayload.status = 'cancelled'` and updated `CanonicalizationCoordinator` and `field-merge.ts` to persist `status: 'cancelled'` and exclude cancelled shows from scheduled recommendations.
+     - Tightened cross-source deduplication in `canonicalization-coordinator.ts` and `event-matcher.ts`: added start-time conflict (90+ min diff) and session marker checks to distinguish separate early and late performances for the same artist on the same date without merging.
+     - Fixed recurring Cervantes event series: deterministically resolved `SHIFT Ft. <Artist>` to assign the actual performing artist as headliner rather than the event brand.
 - **Verification State:** All Suites Green & Production Ready:
   - Branch: `feature/phase-3-venue-ingestion`
   - Pull Request: [PR #13](https://github.com/juko04/Encore-concert-finder/pull/13) (Open — All GitHub Actions CI checks passing)
-  - Remote CI: 100% Green (`✓ CI/Verification and CI` elapsed 5m6s)
-  - Unit Tests: 569/569 passed across 44 test suites (`npm test`), including 41 dedicated venue tests across 6 new test suites
+  - Remote CI: 100% Green (`✓ CI/Verification and CI`)
+  - Unit Tests: 573/573 passed across 44 test suites (`npm test`), including 45 dedicated venue tests across 6 suites
   - Production Build: Next.js production build clean (0 errors, 14 routes optimized)
   - Code Quality: Prettier format clean (`npm run format:check`), ESLint clean (0 warnings, 0 errors), strict TypeScript clean (0 errors)
-  - Cumulative Diff: Exported to `~/Desktop/encore-phase3-venue-ingestion.diff` (859,298 bytes)
-- **Immediate Next Action:** Awaiting independent peer code review (ChatGPT / peer agent). Do NOT auto-merge PR #13 autonomously. Upon review approval and user merge to `main`, proceed to Phase 3 PR #14 (Z2 Entertainment Cluster: Boulder Theater, Fox Theatre, Aggie Theatre).
-- **Phase 3 Status:** **ACTIVE — PR #13 IMPLEMENTATION, CI VERIFICATION & DIFF EXPORT COMPLETE.**
+  - Cumulative Diff: Exported to `~/Desktop/encore-phase3-venue-ingestion.diff`
+- **Immediate Next Action:** Awaiting final review sign-off and merge to `main`. Do NOT auto-merge PR #13 autonomously. Upon merge to `main`, proceed to Phase 3 PR #14 (Z2 Entertainment Cluster: Boulder Theater, Fox Theatre, Aggie Theatre).
+- **Phase 3 Status:** **ACTIVE — PR #13 REVIEW REMEDIATION COMPLETE & VERIFIED.**
 
 ---
 

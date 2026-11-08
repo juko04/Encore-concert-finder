@@ -232,4 +232,173 @@ describe('Venue Ingestion Pipeline', () => {
     expect(result.candidatesNeedsReview).toBe(1);
     expect(result.reviewReasons['missing_event_date']).toBe(1);
   });
+
+  it('canonicalizes cancelled concerts with status "cancelled" and excludes them from scheduled catalog', async () => {
+    const sourceRepo = new MemorySourceRepository();
+    const rawIngestRepo = new MemoryRawIngestRepository();
+    const candidateRepo = new MemoryEventCandidateRepository();
+    const catalogRepo = new MemoryCatalogRepository();
+
+    const result = await runVenueIngestion({
+      sourceRepo,
+      rawIngestRepo,
+      candidateRepo,
+      catalogRepo,
+      useFixture: true,
+      fixtureHtml,
+      persist: true,
+    });
+
+    // Find all persisted events
+    const allEvents = await Promise.all(
+      result.persistedEventIds.map((id) => catalogRepo.getEventById(id)),
+    );
+
+    // Verify cancelled Ghengar concert from fixture was persisted with status: 'cancelled'
+    const ghengarShow = allEvents.find((e) => e?.name.includes('Ghengar'));
+    expect(ghengarShow).toBeDefined();
+    expect(ghengarShow?.status).toBe('cancelled');
+
+    // Verify scheduled catalog query strictly excludes cancelled events
+    const scheduledEvents = await catalogRepo.listEvents({
+      status: 'scheduled',
+      limit: 200,
+    });
+    const ghengarInScheduled = scheduledEvents.find((e) =>
+      e.title.includes('Ghengar'),
+    );
+    expect(ghengarInScheduled).toBeUndefined();
+  });
+
+  it('distinguishes separate early and late performances for the same artist on the same date without merging', async () => {
+    const crypto = await import('node:crypto');
+    const sourceRepo = new MemorySourceRepository();
+    const catalogRepo = new MemoryCatalogRepository();
+    const { CanonicalizationCoordinator } =
+      await import('@/lib/entity-resolution/canonicalization-coordinator');
+
+    const sourceId = crypto.randomUUID();
+    const rawIngestId = crypto.randomUUID();
+
+    const source = await sourceRepo.upsert({
+      id: sourceId,
+      name: "Cervantes' Other Side",
+      slug: 'cervantes-other-side',
+      sourceType: 'venue',
+      acquisitionMethod: 'html_http',
+      parserVersion: '1.0.0',
+      active: true,
+      consecutiveFailures: 0,
+      reliabilityScore: 0.98,
+    });
+
+    const venue = await catalogRepo.createVenue({
+      name: "Cervantes' Other Side",
+      normalizedName: 'cervantes other side',
+      city: 'Denver',
+      region: 'CO',
+      countryCode: 'US',
+      timezone: 'America/Denver',
+    });
+
+    const coordinator = new CanonicalizationCoordinator(catalogRepo);
+
+    const artistExternalIds = [
+      {
+        provider: 'spotify',
+        externalId: 'spotify-artist-julian-123',
+      },
+    ];
+
+    // 1. Ingest Early Performance (6:30 PM local = 01:30 UTC next day)
+    const earlyCandidate = {
+      id: crypto.randomUUID(),
+      rawIngestId,
+      sourceId: source.id,
+      title: 'Acoustic Showcase (Early Show)',
+      artistNames: ['Julian Solo'],
+      artists: [
+        {
+          name: 'Julian Solo',
+          billingPosition: 'headliner' as const,
+          sortOrder: 1,
+          externalIds: artistExternalIds,
+        },
+      ],
+      venueName: "Cervantes' Other Side",
+      city: 'Denver',
+      state: 'CO',
+      country: 'US',
+      timezone: 'America/Denver',
+      localStartDate: '2026-11-20',
+      startsAt: '2026-11-21T01:30:00.000Z',
+      startTimePrecision: 'instant' as const,
+      ticketUrl: 'https://www.etix.com/ticket/p/11111/early-show',
+      confidence: 0.98,
+      provenance: {
+        sourceId: source.id,
+        sourceType: 'venue' as const,
+        acquisitionMethod: 'html_http' as const,
+        sourceUrl: 'https://cervantesmasterpiece.com/events/early',
+        contentHash: 'early-content-hash-123',
+        fetchedAt: '2026-11-08T00:00:00.000Z',
+        parserVersion: '1.0.0',
+        confidence: 0.98,
+      },
+    };
+
+    const earlyOutcome = await coordinator.canonicalize(earlyCandidate);
+    expect(earlyOutcome.status).toBe('created');
+    const earlyEventId = earlyOutcome.eventId!;
+
+    // 2. Ingest Late Performance on same date & venue for same artist (9:30 PM local = 04:30 UTC next day)
+    const lateCandidate = {
+      id: crypto.randomUUID(),
+      rawIngestId,
+      sourceId: source.id,
+      title: 'Acoustic Showcase (Late Show)',
+      artistNames: ['Julian Solo'],
+      artists: [
+        {
+          name: 'Julian Solo',
+          billingPosition: 'headliner' as const,
+          sortOrder: 1,
+          externalIds: artistExternalIds,
+        },
+      ],
+      venueName: "Cervantes' Other Side",
+      city: 'Denver',
+      state: 'CO',
+      country: 'US',
+      timezone: 'America/Denver',
+      localStartDate: '2026-11-20',
+      startsAt: '2026-11-21T04:30:00.000Z',
+      startTimePrecision: 'instant' as const,
+      ticketUrl: 'https://www.etix.com/ticket/p/22222/late-show',
+      confidence: 0.98,
+      provenance: {
+        sourceId: source.id,
+        sourceType: 'venue' as const,
+        acquisitionMethod: 'html_http' as const,
+        sourceUrl: 'https://cervantesmasterpiece.com/events/late',
+        contentHash: 'late-content-hash-456',
+        fetchedAt: '2026-11-08T00:00:00.000Z',
+        parserVersion: '1.0.0',
+        confidence: 0.98,
+      },
+    };
+
+    const lateOutcome = await coordinator.canonicalize(lateCandidate);
+
+    // Negative deduplication assertion: Must NOT merge into early show! Must CREATE a separate canonical event.
+    expect(lateOutcome.status).toBe('created');
+    expect(lateOutcome.eventId).not.toBe(earlyEventId);
+
+    // Both distinct performances must coexist in catalog
+    const sameDayEvents = await catalogRepo.findEventsOnDateAtVenue(
+      '2026-11-20',
+      venue.id,
+    );
+    expect(sameDayEvents).toHaveLength(2);
+  });
 });

@@ -72,9 +72,75 @@ describe('Cervantes Parser', () => {
     expect(houseParty?.venueName).toBe("Cervantes' Other Side");
     expect(houseParty?.city).toBe('Denver');
     expect(houseParty?.state).toBe('CO');
+
+    // 4. The Black Sheep offsite show (Colorado Springs, NOT Denver)
+    const glareShow = candidates.find((c) => c.title.includes('Glare'));
+    expect(glareShow).toBeDefined();
+    expect(glareShow?.venueName).toBe('The Black Sheep');
+    expect(glareShow?.city).toBe('Colorado Springs');
+    expect(glareShow?.state).toBe('CO');
+
+    // 5. Dual-room show (Cervantes' and Other Side - Dual Venue resolves to physical ballroom, not a fictitious 3rd venue)
+    const dualShow = candidates.find((c) =>
+      c.title.includes('Desert Dwellers'),
+    );
+    expect(dualShow).toBeDefined();
+    expect(dualShow?.venueName).toBe("Cervantes' Masterpiece Ballroom");
+    expect(dualShow?.city).toBe('Denver');
+    expect(dualShow?.state).toBe('CO');
   });
 
-  it('cleans CANCELED prefix and identifies cancelled event status', () => {
+  it('handles recurring SHIFT event series by extracting true performing artist as headliner', () => {
+    const candidates = parseCervantesEvents(fixtureHtml, defaultContext);
+
+    // "SHIFT Ft. Capochino w/ AG, Brittz, Panda $tyle"
+    const capochinoShow = candidates.find((c) => c.title.includes('Capochino'));
+    expect(capochinoShow).toBeDefined();
+    expect(capochinoShow?.title).toBe(
+      'SHIFT Ft. Capochino w/ AG, Brittz, Panda $tyle',
+    );
+
+    const headliner = capochinoShow?.artists?.find(
+      (a) => a.billingPosition === 'headliner',
+    );
+    expect(headliner?.name).toBe('Capochino'); // True performing artist, NOT "SHIFT"
+    expect(headliner?.name).not.toBe('SHIFT');
+
+    const supportNames = capochinoShow?.artists
+      ?.filter((a) => a.billingPosition === 'support')
+      .map((a) => a.name);
+    expect(supportNames).toEqual(
+      expect.arrayContaining(['AG', 'Brittz', 'Panda $tyle']),
+    );
+
+    // "SHIFT Wednesday Ft. Mindset w/ POP THA TRUNK, BOSTN, Kleptoe, chum."
+    const mindsetShow = candidates.find((c) => c.title.includes('Mindset'));
+    expect(mindsetShow).toBeDefined();
+    const mindsetHeadliner = mindsetShow?.artists?.find(
+      (a) => a.billingPosition === 'headliner',
+    );
+    expect(mindsetHeadliner?.name).toBe('Mindset');
+  });
+
+  it('detects festivals and defers ambiguous records without fabricating festival title as artist', () => {
+    const candidates = parseCervantesEvents(fixtureHtml, defaultContext);
+
+    // "WinterWonderGrass Colorado"
+    const wwgEvent = candidates.find((c) =>
+      c.title.includes('WinterWonderGrass'),
+    );
+    expect(wwgEvent).toBeDefined();
+    expect(wwgEvent?.isFestival).toBe(true);
+    expect(wwgEvent?.eventKind).toBe('festival');
+    expect(wwgEvent?.city).toBe('Steamboat Springs');
+    expect(wwgEvent?.state).toBe('CO');
+
+    // Festival title must NOT be fabricated as a performing artist
+    expect(wwgEvent?.artists).toEqual([]);
+    expect(wwgEvent?.artistNames).toEqual([]);
+  });
+
+  it('cleans CANCELED prefix and identifies cancelled event status in rawPayload', () => {
     const candidates = parseCervantesEvents(fixtureHtml, defaultContext);
 
     const canceledShow = candidates.find((c) =>
@@ -83,6 +149,7 @@ describe('Cervantes Parser', () => {
     expect(canceledShow).toBeDefined();
     expect(canceledShow?.title).not.toMatch(/^CANCELED/i);
     expect(canceledShow?.rawPayload?.isCanceled).toBe(true);
+    expect(canceledShow?.rawPayload?.status).toBe('cancelled');
   });
 
   it('preserves IANA timezone America/Denver and derives valid startsAt instant', () => {
