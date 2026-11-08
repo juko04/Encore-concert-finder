@@ -300,6 +300,33 @@ export class CanonicalizationCoordinator {
         a.name.trim().toLowerCase() !== 'unknown artist',
     );
 
+    // Cross-source contextual event match on date + venue + artist
+    if (!existingMatchedDetail && localStartDate && resolvedVenue?.id) {
+      const sameVenueEvents = await this.catalogRepo.findEventsOnDateAtVenue(
+        localStartDate,
+        resolvedVenue.id,
+      );
+      for (const ev of sameVenueEvents) {
+        const detail = await this.catalogRepo.getEventById(ev.id);
+        if (!detail) continue;
+        const candidateNormTitle = normalizeName(candidate.title);
+        const eventNormTitle = normalizeName(detail.name);
+        const titleMatches =
+          candidateNormTitle === eventNormTitle ||
+          candidateNormTitle.includes(eventNormTitle) ||
+          eventNormTitle.includes(candidateNormTitle);
+        const artistMatches = detail.artists.some((a) =>
+          validCandidateArtists.some(
+            (ca) => normalizeName(ca.name) === normalizeName(a.name),
+          ),
+        );
+        if (artistMatches && (titleMatches || detail.artists.length === 1)) {
+          existingMatchedDetail = detail;
+          break;
+        }
+      }
+    }
+
     if (validCandidateArtists.length === 0) {
       const payload: CanonicalizationPayload = {
         resolution: {

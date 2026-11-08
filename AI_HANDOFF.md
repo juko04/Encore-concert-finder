@@ -7,27 +7,41 @@ Durable architecture records belong in [`docs/architecture/`](docs/architecture/
 
 ## Current Status & Location
 
-- **Current Milestone:** **Phase 2 — Live Ingestion & Personalization**.
-- **Active Specification:** [`docs/phases/active/PHASE_2_IMPLEMENTATION.md`](docs/phases/active/PHASE_2_IMPLEMENTATION.md).
-- **Current Branch:** `feature/phase-2-personalized-discover`
+- **Current Milestone:** **Phase 3 — Colorado Venue Ingestion**.
+- **Active Specification:** PR #13 Scope & Requirements (`docs/architecture/venue-sources-registry.md`).
+- **Current Branch:** `feature/phase-3-venue-ingestion`
 - **Active Implementing Agent:** Google Antigravity
-- **Current Task:** Phase 2, PR #12: Personalized Discover Experience — Final Minor Corrections Complete & Verified.
-- **Remediation Completed (Final Minor Corrections):**
-  1. *Cheap & Nearby Local Date Boundary Fix:* Refactored 14-day lookahead calculation in `lib/recommendation/modes.ts` (`calculate14DayLookaheadEndDate`) and `lib/recommendation/service.ts` to compute strictly in event-local calendar dates (e.g. Nov 7 + 14d = Nov 21), eliminating UTC midnight rollover skew during Denver evening requests. Removed the conditional guard in `isEventEligibleForMode` so 14-day lookahead validation is never skipped when context omits reference dates.
-  2. *Production Regression for Denver Evening Lookahead:* Added regression tests in `tests/unit/recommendation-service.test.ts` and `tests/unit/discovery-modes.test.ts` for Saturday Nov 7, 2026 at 7:30 PM Denver time (`2026-11-08T02:30:00Z`), confirming Day 14 shows are included and Day 15 shows are excluded.
-  3. *Accurate Search Scalability Documentation:* Verified PostgREST search URL sizing behavior across narrow, moderate, and broad searches; documented that `catalog-repository.ts` uses 200-item chunking without claiming a nonexistent enforced 6 KB aggregate cap; documented future PostgreSQL `tsvector` / RPC migration as Phase 3 national scaling debt.
+- **Current Task:** Phase 3, PR #13: Reusable Web Scraping Framework + First Venue Integration (Cervantes' Masterpiece Ballroom).
+- **Implementation Completed:**
+  1. *Colorado Venue Feasibility Audit:* Conducted comprehensive technical audit of 15 high-priority Colorado music venues across 268 research candidates; identified platform clustering (RHP/Etix, Ticketmaster, Eventbrite, custom WordPress); documented full architecture roadmap and audit matrix in `docs/architecture/venue-sources-registry.md`.
+  2. *Reusable Venue Scraping Framework:* Built modular venue scraping engine in `lib/sources/venue/` utilizing lightweight HTTP fetcher with polite rate-limiting, exponential backoff, Cheerio HTML parsing, Schema.org JSON-LD extraction, and IANA timezone-aware wall-clock date normalization.
+  3. *Cervantes' Masterpiece Ballroom Adapter:* Implemented complete adapter in `lib/sources/venue/cervantes/` parsing 103 upcoming concerts from the Cervantes calendar; extracts headliner and support billing, doors/show times, offsite partner venue attribution (Mission Ballroom, Ogden Theatre, Fiddlers Green), and direct Etix ticket links without inventing missing data.
+  4. *Pipeline Ingestion & Cross-Source Deduplication:* Wired venue adapter into `runVenueIngestion` pipeline (`lib/sources/venue/ingestion-pipeline.ts`); enforces immutable raw ingests (`raw_ingests`), deduplicated candidate observations (`event_candidates`), and atomic entity canonicalization via `CanonicalizationCoordinator`; matches pre-existing Ticketmaster events by venue, local date, and artist to merge multiple ticket sources onto a single canonical concert without creating duplicate events.
+  5. *Safe CLI Runner:* Implemented `scripts/ingest-venue.ts` (`npm run ingest:venue`) with safe dry-run preview default, local static fixture replay (`--fixture`), live HTTP scraping (`--live`), and destination-guarded database persistence (`--persist`).
 - **Verification State:** All Suites Green & Production Ready:
-  - Branch: `feature/phase-2-personalized-discover`
-  - Pull Request: [#12](https://github.com/juko04/Encore-concert-finder/pull/12)
-  - Unit Tests: 528/528 passed across 38 test suites (`npm test`)
-  - Production Build: Next.js production build clean (0 errors, 14 routes, `/discover` confirmed dynamic)
-  - Code Quality: Prettier format clean (`format:check`), ESLint clean (0 warnings), strict TypeScript clean (0 errors)
-- **Immediate Next Action:** PR #12 is ready for independent re-review. Do NOT auto-merge PR #12 autonomously. Wait for user merge authorization.
-- **Phase 2 Status:** **ACTIVE — PR #12 FINAL CORRECTIONS COMPLETE & VERIFIED GREEN.**
+  - Branch: `feature/phase-3-venue-ingestion`
+  - Pull Request: PR #13 (to be submitted)
+  - Unit Tests: 569/569 passed across 44 test suites (`npm test`), including 41 dedicated venue tests across 6 new test suites
+  - Production Build: Next.js production build clean (0 errors, 14 routes optimized)
+  - Code Quality: Prettier format clean (`npm run format:check`), ESLint clean (0 warnings, 0 errors), strict TypeScript clean (0 errors)
+- **Immediate Next Action:** Commit changes, push to `origin/feature/phase-3-venue-ingestion`, open PR #13 on GitHub, verify CI checks, export cumulative diff to `~/Desktop/encore-phase3-venue-ingestion.diff`, and submit for independent review. Do NOT auto-merge PR #13 autonomously.
+- **Phase 3 Status:** **ACTIVE — PR #13 IMPLEMENTATION & VERIFICATION COMPLETE.**
 
 ---
 
 ## What the Next Agent Must Know
+
+1. **Venue Ingestion Architecture:**
+   - Adapters implement `EventSourceAdapter` contract (`fetch`, `parse`, `crawl`) located under `lib/sources/venue/`.
+   - All venue scrapers MUST output `EventCandidate` objects with valid provenance, local dates, and IANA timezone (`America/Denver`).
+2. **Missing Price Invariant:**
+   - When a venue listing does not publish explicit dollar pricing, ticket price fields MUST remain `undefined` (rendered as Price TBA in the UI). Never fabricate $0 or free admission.
+3. **Offsite Venue Co-Promotion:**
+   - Cervantes and other independent promoters frequently host or co-promote shows at partner venues (e.g. Mission Ballroom, Ogden, Red Rocks). The parser inspects `.rhpVenueContent a` to assign the true physical host venue, preventing venue conflation.
+4. **Cross-Source Deduplication:**
+   - Ingesting a concert from an official venue website that was previously ingested from Ticketmaster merges onto the existing canonical event if venue, local date, and headliner match, adding the venue's direct ticketing link without creating duplicate events.
+5. **No Synthetic Fallback in Production:**
+   - Production venue ingestion must only write verified observations. Synthetic fixtures are restricted strictly to testing and CLI `--fixture` replays.
 
 1. **Preset Identifier Invariant:**
    - The UI display label for the artist preset is "Artists", but the persisted database identifier must strictly be `artist_first`.
