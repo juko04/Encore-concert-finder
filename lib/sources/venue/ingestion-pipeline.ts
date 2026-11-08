@@ -2,10 +2,11 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { EventCandidate } from '@/lib/domain/event-candidate';
-import type { RawIngest } from '@/lib/domain/source';
+import type { EventSourceAdapter, RawIngest } from '@/lib/domain/source';
 import { CanonicalizationCoordinator } from '@/lib/entity-resolution/canonicalization-coordinator';
 import type { ISourceRepository } from '@/lib/repositories/interfaces';
 import { CervantesVenueAdapter } from './cervantes/adapter';
+import { IndependentVenueAdapter } from './independent-venue-group/adapter';
 import { ensureVenueSource, CERVANTES_CONFIG } from './source-registry';
 import type {
   VenueIngestionOptions,
@@ -15,7 +16,33 @@ import type {
 
 export interface RunVenuePipelineOptions extends VenueIngestionOptions {
   config?: VenueSourceConfig;
-  adapter?: CervantesVenueAdapter;
+  adapter?: EventSourceAdapter;
+}
+
+function resolveDefaultFixturePath(slug: string): string {
+  switch (slug) {
+    case 'larimer-lounge':
+      return path.resolve(
+        process.cwd(),
+        'tests/fixtures/larimer-lounge-events-response.html',
+      );
+    case 'lost-lake-lounge':
+      return path.resolve(
+        process.cwd(),
+        'tests/fixtures/lost-lake-events-response.html',
+      );
+    case 'globe-hall':
+      return path.resolve(
+        process.cwd(),
+        'tests/fixtures/globe-hall-events-response.html',
+      );
+    case 'cervantes-masterpiece':
+    default:
+      return path.resolve(
+        process.cwd(),
+        'tests/fixtures/cervantes-events-response.html',
+      );
+  }
 }
 
 /**
@@ -29,7 +56,11 @@ export async function runVenueIngestion(
   const startMs = Date.now();
 
   const config = options.config ?? CERVANTES_CONFIG;
-  const adapter = options.adapter ?? new CervantesVenueAdapter();
+  const adapter =
+    options.adapter ??
+    (config.slug === CERVANTES_CONFIG.slug
+      ? new CervantesVenueAdapter()
+      : new IndependentVenueAdapter(config));
   const source = await ensureVenueSource(options.sourceRepo, config);
 
   // Link in-memory catalog repo with sourceRepo if supported
@@ -51,11 +82,7 @@ export async function runVenueIngestion(
     let rawHtml = options.fixtureHtml;
     if (!rawHtml) {
       const fixturePath =
-        options.fixturePath ??
-        path.resolve(
-          process.cwd(),
-          'tests/fixtures/cervantes-events-response.html',
-        );
+        options.fixturePath ?? resolveDefaultFixturePath(config.slug);
       rawHtml = fs.readFileSync(fixturePath, 'utf-8');
     }
 

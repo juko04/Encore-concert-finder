@@ -198,6 +198,26 @@ export class EventMatcher {
         };
       }
 
+      // Check if candidate and all existing events have non-overlapping distinct start times (90+ minutes difference)
+      const allEventsHaveDistinctTimes =
+        Boolean(candidate.startsAt) &&
+        sameVenueEvents.length > 0 &&
+        sameVenueEvents.every((e) => {
+          if (!e.startsAt) return false;
+          const candTime = new Date(candidate.startsAt!).getTime();
+          const existTime = new Date(e.startsAt).getTime();
+          if (isNaN(candTime) || isNaN(existTime)) return false;
+          return Math.abs(candTime - existTime) / (1000 * 60) >= 90;
+        });
+
+      if (allEventsHaveDistinctTimes) {
+        return {
+          decision: 'create',
+          confidence: 0.9,
+          reasons: ['distinct_performance_same_date_non_overlapping_time'],
+        };
+      }
+
       // Same venue and date, but completely different artists
       return {
         decision: 'needs_review',

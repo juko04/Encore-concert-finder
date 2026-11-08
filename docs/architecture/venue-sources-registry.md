@@ -17,13 +17,13 @@ This registry tracks the initial feasibility audit of high-priority Colorado mus
 
 | Venue | City | Platform / CMS | Ticketing | Extraction Method | Difficulty | TM Overlap | Reuse Potential | Selected for PR #13 |
 |---|---|---|---|---|---|---|---|---|
-| **Cervantes' Masterpiece Ballroom & The Other Side** | Denver | WordPress (RHP Events) | Etix | Server HTML (`.rhp-event__single-event--list`) + Schema.org JSON-LD | **Low** | Very Low | **High** (RHP/Etix ecosystem) | **YES (Initial Adapter)** |
-| **Boulder Theater** | Boulder | Z2 Entertainment Network | AXS | Server HTML + structured event nodes | Low-Medium | Low/Med | **Very High** (Shares Z2 engine with Fox/Aggie) | Next (PR #14) |
-| **Fox Theatre** | Boulder | Z2 Entertainment Network | AXS | Server HTML + structured event nodes | Low-Medium | Low/Med | **Very High** (Z2 Network) | Next (PR #14) |
-| **Aggie Theatre** | Fort Collins | Z2 Entertainment Network | AXS | Server HTML + structured event nodes | Low-Medium | Low/Med | **Very High** (Z2 Network) | Next (PR #14) |
-| **Larimer Lounge** | Denver | Independent Venue Group | Etix / AXS | Server HTML (`.calendar-event`) | Low-Medium | Low | **Very High** (Shares engine with Globe/Lost Lake) | Next (PR #15) |
-| **Globe Hall** | Denver | Independent Venue Group | Etix | Server HTML (`.calendar-event`) | Low-Medium | Low | **Very High** (IVG Network) | Next (PR #15) |
-| **Lost Lake Lounge** | Denver | Independent Venue Group | Etix | Server HTML (`.calendar-event`) | Low-Medium | Low | **Very High** (IVG Network) | Next (PR #15) |
+| **Cervantes' Masterpiece Ballroom & The Other Side** | Denver | WordPress (RHP Events) | Etix | Server HTML (`.rhp-event__single-event--list`) + Schema.org JSON-LD | **Low** | Very Low | **High** (RHP/Etix ecosystem) | **YES (Implemented PR #13)** |
+| **Larimer Lounge** | Denver | Independent Venue Group (RHP Events) | Etix | Server HTML (`.rhpSingleEvent`) + stage detection | Low | Low | **Very High** (IVG Network) | **YES (Implemented PR #14)** |
+| **Globe Hall** | Denver | Independent Venue Group (RHP Events) | Etix | Server HTML (`.rhpSingleEvent`) | Low | Low | **Very High** (IVG Network) | **YES (Implemented PR #14)** |
+| **Lost Lake Lounge** | Denver | Independent Venue Group (RHP Events) | Etix | Server HTML (`.rhpSingleEvent`) | Low | Low | **Very High** (IVG Network) | **YES (Implemented PR #14)** |
+| **Boulder Theater** | Boulder | Z2 Entertainment Network | AXS | Server HTML + structured event nodes | Low-Medium | Low/Med | **Very High** (Shares Z2 engine with Fox/Aggie) | Next (PR #15) |
+| **Fox Theatre** | Boulder | Z2 Entertainment Network | AXS | Server HTML + structured event nodes | Low-Medium | Low/Med | **Very High** (Z2 Network) | Next (PR #15) |
+| **Aggie Theatre** | Fort Collins | Z2 Entertainment Network | AXS | Server HTML + structured event nodes | Low-Medium | Low/Med | **Very High** (Z2 Network) | Next (PR #15) |
 | **Velvet Elk Lounge** | Boulder | BentoBox | Etix | Server HTML + Etix event links | Low-Medium | Zero | **High** (BentoBox restaurant/lounge platform) | Subsequent |
 | **Roots Music Project** | Boulder | Squarespace | Eventbrite | Server HTML (`.eventlist-event`) | Low-Medium | Zero | **High** (Squarespace events engine) | Subsequent |
 | **hi-dive** | Denver | WordPress + Plot Bella | DICE | Client widget (`widgets.dice.fm`) or WP REST API | Medium | Zero | **High** (DICE platform integration) | Subsequent |
@@ -59,9 +59,9 @@ The audit revealed three major multi-venue platform clusters in Colorado:
 1. **Z2 Entertainment Cluster (AXS Ticketing):**
    - *Venues:* Boulder Theater, Fox Theatre, Aggie Theatre.
    - *Architecture:* Unified calendar feed on `z2ent.com/events`. One parser implementation can onboard all three venues simultaneously with venue-filtering options.
-2. **Independent Venue Group Cluster (Etix Ticketing):**
+2. **Independent Venue Group Cluster (Etix Ticketing) — Implemented PR #14:**
    - *Venues:* Larimer Lounge, Globe Hall, Lost Lake Lounge.
-   - *Architecture:* Identical layout, selectors, and Etix ticketing integrations.
+   - *Architecture:* Standardized Rockhouse Partners (RHP Events) WordPress plugin with unified `.rhpSingleEvent` and `.rhp-events-list-separator-month` structure, Etix ticketing, stage identification (Larimer Lounge, Treehouse, Campground, Skihouse), and year-boundary tracking across both list and grid views. Implemented via shared `IndependentVenueAdapter` and `parseIndependentVenueEvents`.
 3. **BentoBox & Squarespace Cluster (Indie / DIY):**
    - *Venues:* Velvet Elk Lounge (BentoBox), Roots Music Project (Squarespace).
    - *Architecture:* Standard CMS event structures with high statewide portability for smaller bars and intimate listening rooms.

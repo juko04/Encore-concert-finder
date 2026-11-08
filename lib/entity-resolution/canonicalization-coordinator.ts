@@ -404,6 +404,57 @@ export class CanonicalizationCoordinator {
         }
       }
 
+      // Contextual artist resolution for same-venue performances (e.g. distinct early/late shows or multi-night runs)
+      if (!disambiguatedArtistId && localStartDate && resolvedVenue?.id) {
+        // 1. Same date check
+        const sameVenueEvents = await this.catalogRepo.findEventsOnDateAtVenue(
+          localStartDate,
+          resolvedVenue.id,
+        );
+        for (const ev of sameVenueEvents) {
+          const detail = await this.catalogRepo.getEventById(ev.id);
+          const matched = detail?.artists.find(
+            (a) =>
+              normalizeName(a.name) === normalizeName(candidateArtist.name),
+          );
+          if (matched) {
+            disambiguatedArtistId = matched.id;
+            break;
+          }
+        }
+
+        // 2. Multi-night run check at same venue (adjacent dates: yesterday or tomorrow)
+        if (!disambiguatedArtistId) {
+          const candDate = new Date(`${localStartDate}T12:00:00Z`);
+          const prevDate = new Date(candDate.getTime() - 24 * 60 * 60 * 1000)
+            .toISOString()
+            .substring(0, 10);
+          const nextDate = new Date(candDate.getTime() + 24 * 60 * 60 * 1000)
+            .toISOString()
+            .substring(0, 10);
+
+          for (const adjacentDate of [prevDate, nextDate]) {
+            const adjacentEvents =
+              await this.catalogRepo.findEventsOnDateAtVenue(
+                adjacentDate,
+                resolvedVenue.id,
+              );
+            for (const ev of adjacentEvents) {
+              const detail = await this.catalogRepo.getEventById(ev.id);
+              const matched = detail?.artists.find(
+                (a) =>
+                  normalizeName(a.name) === normalizeName(candidateArtist.name),
+              );
+              if (matched) {
+                disambiguatedArtistId = matched.id;
+                break;
+              }
+            }
+            if (disambiguatedArtistId) break;
+          }
+        }
+      }
+
       const resolved = await this.artistResolver.resolveOrPrepare(
         this.catalogRepo,
         {
