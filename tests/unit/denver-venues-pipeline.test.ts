@@ -297,7 +297,7 @@ describe('Denver Independent Venues Ingestion Pipeline', () => {
       persist: true,
     });
 
-    const events = await catalogRepo.listEvents();
+    const events = await catalogRepo.listEvents({ limit: 100 });
 
     // 1. Verified free event created in catalog as free_event
     const freeShow = events.find((e) => e.title.includes('s1ms'));
