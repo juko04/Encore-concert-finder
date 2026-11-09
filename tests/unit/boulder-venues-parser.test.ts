@@ -198,7 +198,7 @@ describe('Boulder Independent Venues Parsers', () => {
       expect(artShow).toBeDefined();
       expect(artShow?.artists).toHaveLength(0);
 
-      // Verify verified free admission show: OPEN DECKS DJ night
+      // Verify verified free admission show: OPEN DECKS DJ night (series without named performer routes to review)
       const openDecks = candidates.find((c) => c.title.includes('OPEN DECKS'));
       expect(openDecks).toBeDefined();
       expect(openDecks?.eventKind).toBe('free_event');
@@ -208,8 +208,9 @@ describe('Boulder Independent Venues Parsers', () => {
         max: 0,
         currency: 'USD',
       });
-      expect(openDecks?.artists).toHaveLength(1);
-      expect(openDecks?.artists?.[0].name).toBe('OPEN DECKS');
+      // Does not fabricate an artist named "OPEN DECKS"
+      expect(openDecks?.artists).toHaveLength(0);
+      expect(openDecks?.artistNames).toHaveLength(0);
 
       // Verify Assembly of Dust multi-night stand
       const night1 = candidates.find(
@@ -269,12 +270,18 @@ describe('Boulder Independent Venues Parsers', () => {
       expect(soulsis?.artists?.[3].name).toBe('Kathleen Hooper of LVDY');
       expect(soulsis?.artists?.[4].name).toBe('Stella Lumina');
 
-      // Verify promoter presents act: Nonstandard Sound presents Roots Underground
+      // Verify event series / showcases without named artists route to review with empty artists
       const underground = candidates.find((c) =>
         c.title.includes('Roots Underground'),
       );
       expect(underground).toBeDefined();
-      expect(underground?.artists?.[0].name).toBe('Roots Underground');
+      expect(underground?.artists).toHaveLength(0);
+
+      const studentShowcase = candidates.find((c) =>
+        c.title.includes('Student Songwriter'),
+      );
+      expect(studentShowcase).toBeDefined();
+      expect(studentShowcase?.artists).toHaveLength(0);
 
       // Verify venue attribution across all candidates
       for (const c of candidates) {
@@ -296,12 +303,30 @@ describe('Boulder Independent Venues Parsers', () => {
         expect(res.artists[0].name).toBe('Assembly of Dust');
       });
 
-      it('correctly handles promoter presents patterns', () => {
+      it('correctly handles promoter presents patterns with actual performing artists', () => {
         const res = parseRootsArtistsFromTitle(
-          'Nonstandard Sound presents Roots Underground',
+          'Live Nation presents The Wood Brothers',
         );
         expect(res.artists).toHaveLength(1);
-        expect(res.artists[0].name).toBe('Roots Underground');
+        expect(res.artists[0].name).toBe('The Wood Brothers');
+      });
+
+      it('does not fabricate artists for event series, DJ nights, or open showcases', () => {
+        const openDecks = parseRootsArtistsFromTitle(
+          "OPEN DECKS: Boulder's Free All-Ages DJ Night",
+        );
+        expect(openDecks.artists).toHaveLength(0);
+        expect(openDecks.isExplicitFree).toBe(true);
+
+        const showcase = parseRootsArtistsFromTitle(
+          "CU Student Songwriter's Showcase",
+        );
+        expect(showcase.artists).toHaveLength(0);
+
+        const underground = parseRootsArtistsFromTitle(
+          'Nonstandard Sound presents Roots Underground',
+        );
+        expect(underground.artists).toHaveLength(0);
       });
 
       it('identifies non-music workshops and art sales', () => {

@@ -184,6 +184,51 @@ export function parseDateHeading(
 }
 
 /**
+ * Determines whether raw HTML represents an event detail subpage or the calendar listing.
+ */
+export function isVelvetElkDetailPage(html: string): boolean {
+  if (!html || typeof html !== 'string') return false;
+  const $ = cheerio.load(html);
+  return $('article.content, .boxes-event-template').length > 0;
+}
+
+/**
+ * Extracts unique event detail page URLs from calendar listing card links.
+ */
+export function extractVelvetElkDetailUrls(
+  html: string,
+  baseUrl = 'https://www.velvetelklounge.com',
+): string[] {
+  if (!html || typeof html !== 'string') return [];
+  const $ = cheerio.load(html);
+  const urls: string[] = [];
+  const seen = new Set<string>();
+
+  $('li.card, .card--cols-three').each((_, cardEl) => {
+    const rawHref = $(cardEl).find('a.card__btn').attr('href') || '';
+    if (!rawHref) return;
+
+    let eventUrl: string | undefined = undefined;
+    if (rawHref.startsWith('http')) {
+      eventUrl = rawHref;
+    } else {
+      try {
+        eventUrl = new URL(rawHref, baseUrl).toString();
+      } catch {
+        eventUrl = undefined;
+      }
+    }
+
+    if (eventUrl && isValidHttpUrl(eventUrl) && !seen.has(eventUrl)) {
+      seen.add(eventUrl);
+      urls.push(eventUrl);
+    }
+  });
+
+  return urls;
+}
+
+/**
  * Parses Velvet Elk Lounge HTML calendar listing or event detail page into EventCandidate objects.
  */
 export function parseVelvetElkEvents(
@@ -198,7 +243,7 @@ export function parseVelvetElkEvents(
   const candidates: EventCandidate[] = [];
 
   // Check if this is an Event Detail Page:
-  const isDetailPage = $('article.content, .boxes-event-template').length > 0;
+  const isDetailPage = isVelvetElkDetailPage(html);
 
   if (isDetailPage) {
     const titleHeader = $('article.content h1, h1').first().text().trim();

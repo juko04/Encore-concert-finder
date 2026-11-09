@@ -35,6 +35,22 @@ export function isRootsNonMusicEvent(title: string): boolean {
 }
 
 /**
+ * Detects demonstrated event series, open decks sessions, and showcases that lack
+ * a verified individual performing artist or band.
+ */
+export function isRootsEventSeriesOrShowcase(title: string): boolean {
+  const norm = title.toLowerCase().trim();
+  return (
+    norm.includes('open decks') ||
+    norm.includes('open mic') ||
+    norm.includes('songwriters showcase') ||
+    norm.includes("songwriter's showcase") ||
+    norm.includes('student showcase') ||
+    norm.includes('roots underground')
+  );
+}
+
+/**
  * Parses artist acts from title string for Roots Music Project.
  */
 export function parseRootsArtistsFromTitle(rawTitle: string): {
@@ -61,8 +77,11 @@ export function parseRootsArtistsFromTitle(rawTitle: string): {
 
   const cleanTitle = text.replace(/\s+/g, ' ').trim();
 
-  // If non-music event, return empty artists list so it routes to review
-  if (isRootsNonMusicEvent(cleanTitle)) {
+  // If non-music event or event series/showcase without named artist, return empty artists list so it routes to review
+  if (
+    isRootsNonMusicEvent(cleanTitle) ||
+    isRootsEventSeriesOrShowcase(cleanTitle)
+  ) {
     return { cleanTitle, isCanceled, isExplicitFree, artists: [] };
   }
 
@@ -72,7 +91,7 @@ export function parseRootsArtistsFromTitle(rawTitle: string): {
   const promoterMatch = cleanTitle.match(/^(?:.*?\s+presents)\s+(.*)$/i);
   if (promoterMatch) {
     const act = cleanRootsArtistName(promoterMatch[1]);
-    if (act) {
+    if (act && !isRootsEventSeriesOrShowcase(act)) {
       artists.push({
         name: act,
         billingPosition: 'headliner',
@@ -86,7 +105,7 @@ export function parseRootsArtistsFromTitle(rawTitle: string): {
   if (cleanTitle.includes('|')) {
     const pipeParts = cleanTitle.split('|').map((s) => s.trim());
     const headlinerName = cleanRootsArtistName(pipeParts[0]);
-    if (headlinerName) {
+    if (headlinerName && !isRootsEventSeriesOrShowcase(headlinerName)) {
       artists.push({
         name: headlinerName,
         billingPosition: 'headliner',
@@ -96,13 +115,13 @@ export function parseRootsArtistsFromTitle(rawTitle: string): {
     }
   }
 
-  // Pattern C: "Series: Subtitle" (e.g. "OPEN DECKS: Boulder's Free All-Ages DJ Night" or "Dave ABear’s A Very Jerry Band: Cosmic Jams & Good Vibes")
+  // Pattern C: "Series: Subtitle" (e.g. "Dave ABear’s A Very Jerry Band: Cosmic Jams & Good Vibes")
   if (cleanTitle.includes(':')) {
     const colonParts = cleanTitle.split(':').map((s) => s.trim());
-    const headlinerName = cleanRootsArtistName(colonParts[0]);
-    if (headlinerName) {
+    const potentialArtist = cleanRootsArtistName(colonParts[0]);
+    if (potentialArtist && !isRootsEventSeriesOrShowcase(potentialArtist)) {
       artists.push({
-        name: headlinerName,
+        name: potentialArtist,
         billingPosition: 'headliner',
         sortOrder: 1,
       });
@@ -174,9 +193,9 @@ export function parseRootsArtistsFromTitle(rawTitle: string): {
     return { cleanTitle, isCanceled, isExplicitFree, artists };
   }
 
-  // Default: Title itself is the performing artist / showcase
+  // Default: Title itself is the performing artist / act
   const singleName = cleanRootsArtistName(cleanTitle);
-  if (singleName.length > 0) {
+  if (singleName.length > 0 && !isRootsEventSeriesOrShowcase(singleName)) {
     artists.push({
       name: singleName,
       billingPosition: 'headliner',
