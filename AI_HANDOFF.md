@@ -32,7 +32,7 @@ Durable architecture records belong in [`docs/architecture/`](docs/architecture/
   - Production Build: Next.js production build clean (0 errors, 14 routes optimized)
   - Code Quality: Prettier format clean (`npm run format:check`), ESLint clean (0 warnings, 0 errors), strict TypeScript clean (0 errors)
   - Smoke Test: Verified atomic canonicalization, verified free-event classification, artist disambiguation, and repeat-ingestion idempotency via memory integration suite; host Docker/local Supabase environment is currently not running.
-  - Cumulative Diff: Exported to `encore-phase3-denver-venues-pr14-final.diff` (project root) and `~/Desktop/encore-phase3-denver-venues-pr14-final.diff`.
+  - Cumulative Diff: Exported to `encore-phase3-denver-venues-pr14-final.diff` (project root).
 - **Immediate Next Action:** Awaiting independent code review. Do NOT auto-merge PR #14 autonomously. Upon merge to `main`, proceed to **Phase 3 PR #15: Smaller Boulder Venues (Velvet Elk Lounge & Roots Music Project)** as the agreed priority. Z2 Entertainment remains a later candidate.
 - **Phase 3 Status:** **ACTIVE — PR #14 REMEDIATION COMPLETE & 100% VERIFIED.**
 
@@ -41,7 +41,7 @@ Durable architecture records belong in [`docs/architecture/`](docs/architecture/
 ## What the Next Agent Must Know
 
 1. **Diff Export Location Convention:**
-   - Save cumulative diffs directly in the Encore repository root (e.g. `encore-phase<X>-<slug>-pr<N>.diff`), and optionally duplicate to `~/Desktop` if requested. `.gitignore` ignores `*.diff` to keep git status clean.
+   - Save cumulative diffs exclusively in the Encore repository root (e.g. `encore-phase<X>-<slug>-pr<N>.diff`). Do NOT export diffs to `~/Desktop`. `.gitignore` already ignores `*.diff` to keep git status clean.
 2. **Next Milestone Priority (PR #15):**
    - The agreed priority for PR #15 is **Smaller Boulder Venues** (Velvet Elk Lounge via BentoBox, Roots Music Project via Squarespace). Z2 Entertainment (Boulder Theater, Fox Theatre, Aggie Theatre) is a later candidate.
 3. **Independent Venue Group Ingestion Architecture:**
