@@ -5,6 +5,12 @@ export interface VenueHttpClientOptions {
   userAgent?: string;
 }
 
+export interface VenueHttpGetOptions {
+  redirect?: RequestRedirect;
+  validateRedirectUrl?: (url: string) => boolean;
+  maxRedirects?: number;
+}
+
 export interface VenueHttpResponse {
   url: string;
   status: number;
@@ -49,9 +55,20 @@ export class VenueHttpClient {
     this.userAgent = options?.userAgent ?? DEFAULT_USER_AGENT;
   }
 
-  async get(url: string): Promise<VenueHttpResponse> {
+  async get(
+    url: string,
+    options?: VenueHttpGetOptions,
+  ): Promise<VenueHttpResponse> {
     let attempt = 0;
     let lastError: Error | null = null;
+
+    // Validate initial URL if validateRedirectUrl is provided
+    if (options?.validateRedirectUrl && !options.validateRedirectUrl(url)) {
+      throw new Error(`Disallowed initial destination URL: ${url}`);
+    }
+
+    const maxRedirects = options?.maxRedirects ?? 3;
+    const isManualRedirect = Boolean(options?.validateRedirectUrl);
 
     while (attempt <= this.maxRetries) {
       const fetchedAt = new Date().toISOString();
@@ -59,19 +76,72 @@ export class VenueHttpClient {
       const timeoutId = setTimeout(() => controller.abort(), this.timeoutMs);
 
       try {
-        const response = await fetch(url, {
-          method: 'GET',
-          headers: {
-            'User-Agent': this.userAgent,
-            Accept:
-              'text/html,application/xhtml+xml,application/xml;q=0.9,application/json;q=0.8,*/*;q=0.7',
-            'Accept-Language': 'en-US,en;q=0.9',
-            'Cache-Control': 'no-cache',
-          },
-          signal: controller.signal,
-        });
+        let currentUrl = url;
+        let redirectsFollowed = 0;
+        let response: Response | null = null;
+
+        while (true) {
+          response = await fetch(currentUrl, {
+            method: 'GET',
+            headers: {
+              'User-Agent': this.userAgent,
+              Accept:
+                'text/html,application/xhtml+xml,application/xml;q=0.9,application/json;q=0.8,*/*;q=0.7',
+              'Accept-Language': 'en-US,en;q=0.9',
+              'Cache-Control': 'no-cache',
+            },
+            redirect: isManualRedirect
+              ? 'manual'
+              : (options?.redirect ?? 'follow'),
+            signal: controller.signal,
+          });
+
+          // If manual redirect validation is active and a redirect status is returned:
+          if (
+            isManualRedirect &&
+            response.status >= 300 &&
+            response.status < 400
+          ) {
+            redirectsFollowed++;
+            if (redirectsFollowed > maxRedirects) {
+              throw new Error(
+                `Exceeded maximum redirect limit of ${maxRedirects}`,
+              );
+            }
+
+            const location = response.headers.get('location');
+            if (!location) {
+              throw new Error(
+                `Redirect response from ${currentUrl} missing Location header`,
+              );
+            }
+
+            let nextUrl: string;
+            try {
+              nextUrl = new URL(location, currentUrl).toString();
+            } catch {
+              throw new Error(
+                `Invalid redirect Location header from ${currentUrl}: ${location}`,
+              );
+            }
+
+            // CRITICAL: Validate destination URL BEFORE making the next network request!
+            if (!options!.validateRedirectUrl!(nextUrl)) {
+              throw new Error(`Disallowed redirect destination: ${nextUrl}`);
+            }
+
+            currentUrl = nextUrl;
+            continue;
+          }
+
+          break;
+        }
 
         clearTimeout(timeoutId);
+
+        if (!response) {
+          throw new Error(`No response received for ${url}`);
+        }
 
         // Handle retryable status codes (429 Too Many Requests, 502/503/504 server errors)
         if (
@@ -93,7 +163,7 @@ export class VenueHttpClient {
 
         if (!response.ok) {
           throw new Error(
-            `Venue HTTP fetch failed for ${url} with status ${response.status} (${response.statusText})`,
+            `Venue HTTP fetch failed for ${currentUrl} with status ${response.status} (${response.statusText})`,
           );
         }
 
@@ -101,7 +171,7 @@ export class VenueHttpClient {
         const body = await response.text();
 
         return {
-          url: response.url || url,
+          url: response.url || currentUrl,
           status: response.status,
           contentType,
           body,
@@ -111,6 +181,14 @@ export class VenueHttpClient {
         clearTimeout(timeoutId);
         const error = err instanceof Error ? err : new Error(String(err));
         lastError = error;
+
+        // Never retry security validation or redirect limit errors
+        if (
+          error.message.includes('Disallowed') ||
+          error.message.includes('redirect')
+        ) {
+          throw error;
+        }
 
         // If aborted due to timeout, retry if attempts remain
         if (attempt < this.maxRetries) {

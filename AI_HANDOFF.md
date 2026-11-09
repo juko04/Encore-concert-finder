@@ -36,20 +36,20 @@ Durable architecture records belong in [`docs/architecture/`](docs/architecture/
      - Extended `scripts/ingest-venue.ts` to support `--venue=velvetelk`, `--venue=roots`, `--venue=all-boulder`, and updated `--venue=all` to execute all 6 Denver + Boulder venues with consolidated summary and non-zero exit code on failure.
   8. *Comprehensive Unit & Pipeline Test Suites:*
      - `tests/unit/boulder-venues-parser.test.ts` (17 tests, including URL security & format verification)
-     - `tests/unit/boulder-venues-adapter.test.ts` (11 tests, including redirect security protection)
+     - `tests/unit/boulder-venues-adapter.test.ts` (11 tests, including redirect pre-validation preventing follow-up requests)
      - `tests/unit/boulder-venues-pipeline.test.ts` (6 tests)
-     - `tests/unit/venue-http-client.test.ts` (5 tests, including post-redirect URL surfacing)
+     - `tests/unit/venue-http-client.test.ts` (8 tests, including redirect destination pre-validation, same-site redirect following, and redirect bounds)
   9. *Permanent Multi-Agent Development Workflow:*
      - Established reusable, permanent multi-agent workflow specification in `docs/development/multi-agent-workflow.md`.
      - Documented role definitions (Lead Agent Coordinator, Implementation Workers, Verification Specialist), file ownership boundaries, and verification standards in `AGENTS.md` and `docs/index.md`.
-  10. *Velvet Elk Detail URL Security & Redirect Protection:*
+  10. *Velvet Elk Detail URL Security & Pre-Request Redirect Protection:*
       - Implemented `isAllowedVelvetElkDetailUrl` restricting automatic detail-page fetching strictly to official Velvet Elk event subpaths (`/event/<slug>/`, `/events/<slug>/` on `velvetelklounge.com` / `www.velvetelklounge.com`).
       - Hardened `extractVelvetElkDetailUrls` to reject external ticketing links (Etix), third-party/malicious domains, calendar roots, and non-event paths, while preserving external ticket URLs on candidate objects.
-      - Hardened `VelvetElkAdapter` and `VenueHttpClient` to prevent HTTP redirect bypass by validating both requested and post-redirect response URLs.
+      - Hardened `VenueHttpClient` with request-scoped `validateRedirectUrl` and bounded `maxRedirects`, validating redirect destinations *before following them* and throwing immediately on unapproved destinations without triggering follow-up network requests, while preserving standard `redirect: 'follow'` for unrelated adapters.
 - **Verification State:** All Suites Green & Production Ready:
   - Branch: `feature/phase-3-boulder-independent-venues`
   - Pull Request: [PR #15](https://github.com/juko04/Encore-concert-finder/pull/15)
-  - Unit Tests: **642/642 passed across 50 test suites** (`npm test`) (+35 tests over PR #14)
+  - Unit Tests: **645/645 passed across 50 test suites** (`npm test`) (+38 tests over PR #14)
   - Production Build: Next.js production build clean (`npm run build`, 0 errors, 14 routes optimized)
   - Code Quality: Prettier format clean (`npm run format:check`), ESLint clean (0 warnings, 0 errors), strict TypeScript clean (`tsc --noEmit`, 0 errors)
   - Live & Fixture CLI: Verified dry-run, live execution, and multi-venue batch runner for all Boulder and Denver independent venues. Live Velvet Elk fetch enriches 6 detail subpages with instant precision and direct Etix links.

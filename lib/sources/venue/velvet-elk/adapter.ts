@@ -80,9 +80,13 @@ export class VelvetElkAdapter implements EventSourceAdapter {
         }
 
         try {
-          const detailResponse = await this.httpClient.get(detailUrl);
+          const detailResponse = await this.httpClient.get(detailUrl, {
+            validateRedirectUrl: (targetUrl) =>
+              isAllowedVelvetElkDetailUrl(targetUrl, baseUrl),
+            maxRedirects: 3,
+          });
           if (detailResponse.status === 200 && detailResponse.body) {
-            // Ensure HTTP redirects cannot bypass origin/path restriction
+            // Defense in depth: verify final response URL also matches allowed Velvet Elk detail URL
             if (!isAllowedVelvetElkDetailUrl(detailResponse.url, baseUrl)) {
               continue;
             }
