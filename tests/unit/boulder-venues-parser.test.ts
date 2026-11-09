@@ -5,6 +5,8 @@ import {
   parseVelvetElkEvents,
   parseVelvetElkArtistsFromTitle,
   parseDateHeading,
+  isAllowedVelvetElkDetailUrl,
+  extractVelvetElkDetailUrls,
   VELVET_ELK_CONFIG,
   parseRootsMusicProjectEvents,
   parseRootsArtistsFromTitle,
@@ -169,6 +171,116 @@ describe('Boulder Independent Venues Parsers', () => {
         );
         expect(nextYearJan.localStartDate).toBe('2027-01-15');
         expect(nextYearJan.remainingTitle).toBe('Winter Residency');
+      });
+    });
+
+    describe('Velvet Elk Detail URL Security & Restriction', () => {
+      it('accepts legitimate Velvet Elk event detail URLs', () => {
+        expect(
+          isAllowedVelvetElkDetailUrl(
+            'https://www.velvetelklounge.com/event/november-13-the-galentine-with-abernathy/',
+          ),
+        ).toBe(true);
+        expect(
+          isAllowedVelvetElkDetailUrl(
+            'https://velvetelklounge.com/event/november-15-peach-rat',
+          ),
+        ).toBe(true);
+        expect(
+          isAllowedVelvetElkDetailUrl(
+            'https://www.velvetelklounge.com/events/special-showcase/',
+          ),
+        ).toBe(true);
+      });
+
+      it('rejects external ticketing links (Etix, Eventbrite, etc.)', () => {
+        expect(
+          isAllowedVelvetElkDetailUrl(
+            'https://www.etix.com/ticket/p/96771462/the-galentines-with-abernathy-boulder-velvet-elk-lounge',
+          ),
+        ).toBe(false);
+        expect(
+          isAllowedVelvetElkDetailUrl(
+            'https://eventbrite.com/e/velvet-elk-show-12345',
+          ),
+        ).toBe(false);
+      });
+
+      it('rejects third-party and spoofed domains', () => {
+        expect(
+          isAllowedVelvetElkDetailUrl(
+            'https://evil.com/event/november-13-the-galentine',
+          ),
+        ).toBe(false);
+        expect(
+          isAllowedVelvetElkDetailUrl(
+            'https://velvetelklounge.com.attacker.net/event/november-13',
+          ),
+        ).toBe(false);
+        expect(
+          isAllowedVelvetElkDetailUrl(
+            'http://169.254.169.254/latest/meta-data/',
+          ),
+        ).toBe(false);
+      });
+
+      it('rejects calendar roots, non-event paths, and script schemes', () => {
+        expect(
+          isAllowedVelvetElkDetailUrl(
+            'https://www.velvetelklounge.com/events/',
+          ),
+        ).toBe(false);
+        expect(
+          isAllowedVelvetElkDetailUrl('https://www.velvetelklounge.com/events'),
+        ).toBe(false);
+        expect(
+          isAllowedVelvetElkDetailUrl('https://www.velvetelklounge.com/event/'),
+        ).toBe(false);
+        expect(
+          isAllowedVelvetElkDetailUrl(
+            'https://www.velvetelklounge.com/private-events/',
+          ),
+        ).toBe(false);
+        expect(
+          isAllowedVelvetElkDetailUrl('https://www.velvetelklounge.com/menu/'),
+        ).toBe(false);
+        expect(
+          isAllowedVelvetElkDetailUrl(
+            'https://www.velvetelklounge.com/about-us',
+          ),
+        ).toBe(false);
+        expect(isAllowedVelvetElkDetailUrl('javascript:alert(1)')).toBe(false);
+      });
+
+      it('extracts only legitimate Velvet Elk detail URLs from card HTML, filtering external and non-event links', () => {
+        const mixedCardHtml = `
+          <ul>
+            <li class="card">
+              <a class="card__btn" href="/event/november-13-the-galentine-with-abernathy/">Details</a>
+            </li>
+            <li class="card">
+              <a class="card__btn" href="https://www.etix.com/ticket/p/96771462/test">Buy Tickets</a>
+            </li>
+            <li class="card">
+              <a class="card__btn" href="https://evil.com/event/malicious-link">External Phish</a>
+            </li>
+            <li class="card">
+              <a class="card__btn" href="/menu/">Drink Menu</a>
+            </li>
+            <li class="card">
+              <a class="card__btn" href="https://www.velvetelklounge.com/events/november-15-peach-rat/">Peach Rat</a>
+            </li>
+            <li class="card">
+              <a class="card__btn" href="/events/">Calendar Home</a>
+            </li>
+          </ul>
+        `;
+
+        const extracted = extractVelvetElkDetailUrls(mixedCardHtml);
+        expect(extracted).toEqual([
+          'https://www.velvetelklounge.com/event/november-13-the-galentine-with-abernathy/',
+          'https://www.velvetelklounge.com/events/november-15-peach-rat/',
+        ]);
       });
     });
   });

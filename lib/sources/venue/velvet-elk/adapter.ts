@@ -11,6 +11,7 @@ import { VenueHttpClient } from '../http-client';
 import type { VenueSourceConfig } from '../types';
 import {
   extractVelvetElkDetailUrls,
+  isAllowedVelvetElkDetailUrl,
   isVelvetElkDetailPage,
   parseVelvetElkEvents,
 } from './parser';
@@ -70,11 +71,22 @@ export class VelvetElkAdapter implements EventSourceAdapter {
       );
 
       const urlsToFetch = detailUrls.slice(0, this.maxDetailPages);
+      const baseUrl = this.config.baseUrl || 'https://www.velvetelklounge.com';
 
       for (const detailUrl of urlsToFetch) {
+        // Enforce origin and path validation before issuing HTTP request
+        if (!isAllowedVelvetElkDetailUrl(detailUrl, baseUrl)) {
+          continue;
+        }
+
         try {
           const detailResponse = await this.httpClient.get(detailUrl);
           if (detailResponse.status === 200 && detailResponse.body) {
+            // Ensure HTTP redirects cannot bypass origin/path restriction
+            if (!isAllowedVelvetElkDetailUrl(detailResponse.url, baseUrl)) {
+              continue;
+            }
+
             const detailHash = crypto
               .createHash('sha256')
               .update(detailResponse.body)
@@ -82,7 +94,7 @@ export class VelvetElkAdapter implements EventSourceAdapter {
 
             rawIngests.push({
               sourceId: context.sourceId,
-              sourceUrl: detailUrl,
+              sourceUrl: detailResponse.url || detailUrl,
               acquisitionMethod: this.acquisitionMethod,
               fetchedAt: detailResponse.fetchedAt,
               contentHash: detailHash,

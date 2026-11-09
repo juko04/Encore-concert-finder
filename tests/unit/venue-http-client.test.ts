@@ -78,4 +78,23 @@ describe('VenueHttpClient', () => {
       'Venue HTTP fetch failed for https://example.com/events with status 404',
     );
   });
+
+  it('surfaces post-redirect URL when response.url is populated', async () => {
+    const mockResponse = new Response('<html>redirected</html>', {
+      status: 200,
+      headers: { 'content-type': 'text/html; charset=utf-8' },
+    });
+    Object.defineProperty(mockResponse, 'url', {
+      value: 'https://example.com/events/final-destination',
+      writable: false,
+    });
+
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(mockResponse);
+
+    const client = new VenueHttpClient({ maxRetries: 0 });
+    const result = await client.get('https://example.com/events/initial');
+
+    expect(result.status).toBe(200);
+    expect(result.url).toBe('https://example.com/events/final-destination');
+  });
 });

@@ -12,6 +12,8 @@ This document is the authoritative directory and context router for the Encore c
   *Non-negotiable engineering invariants, context-routing rules, and testing requirements.*
 - **PR Review & Self-Audit Checklist:** [`development/PR_REVIEW_CHECKLIST.md`](development/PR_REVIEW_CHECKLIST.md)  
   *Mandatory cross-layer data tracing, security boundaries, historical regression checks, and self-review protocol.*
+- **Multi-Agent Development Workflow:** [`development/multi-agent-workflow.md`](development/multi-agent-workflow.md)  
+  *Role definitions (Lead Coordinator, Implementation Workers, Verification Specialist), file boundaries, and coordination protocols.*
 - **Human Contribution Guide:** [`CONTRIBUTING.md`](../CONTRIBUTING.md)
 
 ---

@@ -101,7 +101,7 @@ export class VenueHttpClient {
         const body = await response.text();
 
         return {
-          url,
+          url: response.url || url,
           status: response.status,
           contentType,
           body,

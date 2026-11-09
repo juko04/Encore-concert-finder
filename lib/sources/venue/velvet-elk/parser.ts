@@ -192,8 +192,62 @@ export function isVelvetElkDetailPage(html: string): boolean {
   return $('article.content, .boxes-event-template').length > 0;
 }
 
+const ALLOWED_VELVET_ELK_HOSTS = new Set([
+  'velvetelklounge.com',
+  'www.velvetelklounge.com',
+]);
+
+/**
+ * Validates that a URL is an expected official Velvet Elk event detail page URL.
+ * Restricts automatic detail-page fetching to expected official Velvet Elk event-page origins and paths.
+ * Rejects external ticketing origins (e.g. Etix), third-party hosts, calendar roots, and non-event paths.
+ */
+export function isAllowedVelvetElkDetailUrl(
+  urlStr: string,
+  allowedBaseUrl = 'https://www.velvetelklounge.com',
+): boolean {
+  if (!isValidHttpUrl(urlStr)) return false;
+  try {
+    const parsed = new URL(urlStr);
+
+    const allowedHosts = new Set(ALLOWED_VELVET_ELK_HOSTS);
+    if (allowedBaseUrl) {
+      try {
+        allowedHosts.add(new URL(allowedBaseUrl).hostname.toLowerCase());
+      } catch {
+        // ignore invalid allowedBaseUrl
+      }
+    }
+
+    if (!allowedHosts.has(parsed.hostname.toLowerCase())) {
+      return false;
+    }
+
+    // Must be an event detail path under /event/ or /events/
+    // e.g. /event/november-13-the-galentine-with-abernathy/
+    const normalizedPath = parsed.pathname.replace(/\/+$/, '');
+    const isEventSubpath =
+      normalizedPath.startsWith('/event/') ||
+      normalizedPath.startsWith('/events/');
+
+    if (!isEventSubpath) {
+      return false;
+    }
+
+    // Reject the listing root itself (/events or /event)
+    if (normalizedPath === '/events' || normalizedPath === '/event') {
+      return false;
+    }
+
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Extracts unique event detail page URLs from calendar listing card links.
+ * Strictly restricted to official Velvet Elk event detail URLs.
  */
 export function extractVelvetElkDetailUrls(
   html: string,
@@ -219,7 +273,11 @@ export function extractVelvetElkDetailUrls(
       }
     }
 
-    if (eventUrl && isValidHttpUrl(eventUrl) && !seen.has(eventUrl)) {
+    if (
+      eventUrl &&
+      isAllowedVelvetElkDetailUrl(eventUrl, baseUrl) &&
+      !seen.has(eventUrl)
+    ) {
       seen.add(eventUrl);
       urls.push(eventUrl);
     }

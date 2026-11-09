@@ -133,6 +133,89 @@ describe('Boulder Independent Venues Adapters', () => {
       expect(rawIngests[1].rawContent).toBe(velvetSingleEventHtml);
     });
 
+    it('rejects detail pages that redirect to external or disallowed URLs', async () => {
+      const redirectingDetailUrl =
+        'https://www.velvetelklounge.com/event/redirect-test/';
+
+      const mockCalendarHtmlWithRedirect = `
+        <ul>
+          <li class="card">
+            <h2 class="card__heading">Redirecting Event</h2>
+            <a class="card__btn" href="/event/redirect-test/">Details</a>
+          </li>
+          <li class="card">
+            <h2 class="card__heading">Valid Event</h2>
+            <a class="card__btn" href="/event/valid-show/">Details</a>
+          </li>
+        </ul>
+      `;
+
+      const mockHttpClient = {
+        get: vi.fn().mockImplementation((url: string) => {
+          if (url === VELVET_ELK_CONFIG.calendarUrl) {
+            return Promise.resolve({
+              url: VELVET_ELK_CONFIG.calendarUrl,
+              status: 200,
+              contentType: 'text/html',
+              body: mockCalendarHtmlWithRedirect,
+              fetchedAt: '2026-11-09T20:00:00.000Z',
+            });
+          }
+          if (url === redirectingDetailUrl) {
+            // Simulated HTTP redirect to an external origin
+            return Promise.resolve({
+              url: 'https://evil.com/phishing-detail',
+              status: 200,
+              contentType: 'text/html',
+              body: '<article class="content"><h1>Malicious Event</h1></article>',
+              fetchedAt: '2026-11-09T20:01:00.000Z',
+            });
+          }
+          if (url === 'https://www.velvetelklounge.com/event/valid-show/') {
+            return Promise.resolve({
+              url: 'https://www.velvetelklounge.com/event/valid-show/',
+              status: 200,
+              contentType: 'text/html',
+              body: velvetSingleEventHtml,
+              fetchedAt: '2026-11-09T20:01:00.000Z',
+            });
+          }
+          return Promise.resolve({
+            url,
+            status: 404,
+            contentType: 'text/html',
+            body: 'Not Found',
+            fetchedAt: '2026-11-09T20:02:00.000Z',
+          });
+        }),
+      } as unknown as VenueHttpClient;
+
+      const adapter = new VelvetElkAdapter(VELVET_ELK_CONFIG, {
+        httpClient: mockHttpClient,
+        enrichEventDetails: true,
+      });
+
+      const rawIngests = await adapter.fetch({
+        sourceId: VELVET_ELK_CONFIG.id!,
+        sourceType: 'venue',
+        acquisitionMethod: 'html_http',
+        targetUrl: VELVET_ELK_CONFIG.calendarUrl,
+        crawlStartedAt: '2026-11-09T20:00:00.000Z',
+      });
+
+      // Calendar listing + 1 valid detail page (redirected detail page is discarded!)
+      expect(rawIngests).toHaveLength(2);
+      expect(rawIngests[0].sourceUrl).toBe(VELVET_ELK_CONFIG.calendarUrl);
+      expect(rawIngests[1].sourceUrl).toBe(
+        'https://www.velvetelklounge.com/event/valid-show/',
+      );
+      // Ensure the external redirected URL was never stored
+      const externalIngest = rawIngests.find((i) =>
+        i.sourceUrl.includes('evil.com'),
+      );
+      expect(externalIngest).toBeUndefined();
+    });
+
     it('enriches calendar candidates with exact show time and Etix ticket link while preserving listing fallback', async () => {
       const galentinesDetailUrl =
         'https://www.velvetelklounge.com/event/november-13-the-galentine-with-abernathy/';
