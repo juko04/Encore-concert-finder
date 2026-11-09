@@ -103,10 +103,65 @@ export const GLOBE_HALL_CONFIG: VenueSourceConfig = {
   },
 };
 
+// Velvet Elk Lounge (PR #15 - Boulder Independent Venues)
+export const VELVET_ELK_SOURCE_SLUG = 'velvet-elk-lounge';
+export const VELVET_ELK_DEFAULT_SOURCE_ID =
+  'b0000000-0000-0000-0000-000000000008';
+
+export const VELVET_ELK_CONFIG: VenueSourceConfig = {
+  id: VELVET_ELK_DEFAULT_SOURCE_ID,
+  slug: VELVET_ELK_SOURCE_SLUG,
+  name: 'Velvet Elk Lounge',
+  baseUrl: 'https://www.velvetelklounge.com',
+  calendarUrl: 'https://www.velvetelklounge.com/events/',
+  city: 'Boulder',
+  state: 'CO',
+  country: 'US',
+  defaultTimezone: 'America/Denver',
+  reliabilityScore: 0.98,
+  parserVersion: '1.0.0',
+  defaultAddress: '2037 13th Street',
+  defaultPostalCode: '80302',
+  defaultCoordinates: {
+    latitude: 40.0189,
+    longitude: -105.2785,
+  },
+};
+
+// Roots Music Project (PR #15 - Boulder Independent Venues)
+export const ROOTS_MUSIC_PROJECT_SOURCE_SLUG = 'roots-music-project';
+export const ROOTS_MUSIC_PROJECT_DEFAULT_SOURCE_ID =
+  'b0000000-0000-0000-0000-000000000009';
+
+export const ROOTS_MUSIC_PROJECT_CONFIG: VenueSourceConfig = {
+  id: ROOTS_MUSIC_PROJECT_DEFAULT_SOURCE_ID,
+  slug: ROOTS_MUSIC_PROJECT_SOURCE_SLUG,
+  name: 'Roots Music Project',
+  baseUrl: 'https://www.rootsmusicproject.org',
+  calendarUrl: 'https://www.eventbrite.com/o/roots-music-project-28110994095',
+  city: 'Boulder',
+  state: 'CO',
+  country: 'US',
+  defaultTimezone: 'America/Denver',
+  reliabilityScore: 0.98,
+  parserVersion: '1.0.0',
+  defaultAddress: '4747 Pearl, Suite V3A',
+  defaultPostalCode: '80301',
+  defaultCoordinates: {
+    latitude: 40.0262,
+    longitude: -105.2418,
+  },
+};
+
 export const DENVER_INDEPENDENT_VENUE_CONFIGS: VenueSourceConfig[] = [
   LARIMER_LOUNGE_CONFIG,
   LOST_LAKE_CONFIG,
   GLOBE_HALL_CONFIG,
+];
+
+export const BOULDER_VENUE_CONFIGS: VenueSourceConfig[] = [
+  VELVET_ELK_CONFIG,
+  ROOTS_MUSIC_PROJECT_CONFIG,
 ];
 
 export const ALL_SUPPORTED_VENUE_CONFIGS: VenueSourceConfig[] = [
@@ -114,6 +169,8 @@ export const ALL_SUPPORTED_VENUE_CONFIGS: VenueSourceConfig[] = [
   LARIMER_LOUNGE_CONFIG,
   LOST_LAKE_CONFIG,
   GLOBE_HALL_CONFIG,
+  VELVET_ELK_CONFIG,
+  ROOTS_MUSIC_PROJECT_CONFIG,
 ];
 
 /**
@@ -148,6 +205,23 @@ export function getVenueSourceConfig(
   if (norm === 'lostlake' || norm === 'lost lake') return LOST_LAKE_CONFIG;
   if (norm === 'globehall' || norm === 'globe hall') return GLOBE_HALL_CONFIG;
   if (norm === 'cervantes') return CERVANTES_CONFIG;
+  if (
+    norm === 'velvetelk' ||
+    norm === 'velvet elk' ||
+    norm === 'velvet elk lounge' ||
+    norm === 'velvet'
+  ) {
+    return VELVET_ELK_CONFIG;
+  }
+  if (
+    norm === 'roots' ||
+    norm === 'rootsmusic' ||
+    norm === 'roots music' ||
+    norm === 'roots music project' ||
+    norm === 'rmp'
+  ) {
+    return ROOTS_MUSIC_PROJECT_CONFIG;
+  }
 
   return undefined;
 }

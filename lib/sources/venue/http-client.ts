@@ -17,6 +17,22 @@ const DEFAULT_USER_AGENT =
   'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 (compatible; EncoreConcertFinder/1.0; +https://encore.live)';
 
 /**
+ * Validates that a string is a well-formed HTTP/HTTPS URL and not a script/javascript link.
+ */
+export function isValidHttpUrl(urlStr?: string | null): boolean {
+  if (!urlStr || typeof urlStr !== 'string') return false;
+  const trimmed = urlStr.trim();
+  if (!/^https?:\/\//i.test(trimmed)) return false;
+  if (/^javascript:/i.test(trimmed)) return false;
+  try {
+    const parsed = new URL(trimmed);
+    return parsed.protocol === 'http:' || parsed.protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Shared polite HTTP client for fetching external venue calendars and pages.
  * Handles timeouts, polite headers, and exponential backoff on transient errors.
  */

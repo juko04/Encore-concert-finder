@@ -578,9 +578,12 @@ export class CanonicalizationCoordinator {
           (candidate.isFestival ? 'festival' : 'concert'),
         status:
           candidate.rawPayload?.isCanceled === true ||
-          candidate.rawPayload?.status === 'cancelled'
+          candidate.rawPayload?.status === 'cancelled' ||
+          candidate.resolutionProvenance?.status === 'cancelled'
             ? 'cancelled'
-            : ((candidate.rawPayload?.status as EventStatus) ?? 'scheduled'),
+            : ((candidate.rawPayload?.status as EventStatus) ??
+              (candidate.resolutionProvenance?.status as EventStatus) ??
+              'scheduled'),
         venue_id: resolvedVenue.id,
         city: candidate.city ?? resolvedVenue.city ?? null,
         region: candidate.state ?? resolvedVenue.region ?? null,
