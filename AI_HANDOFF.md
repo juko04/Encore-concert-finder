@@ -30,7 +30,7 @@ Durable architecture records belong in [`docs/architecture/`](docs/architecture/
   - Unit Tests: 600/600 passed across 47 test suites (`npm test`) (up from 573 in PR #13, +27 new tests)
   - Production Build: Next.js production build clean (0 errors, 14 routes optimized)
   - Code Quality: Prettier format clean (`npm run format:check`), ESLint clean (0 warnings, 0 errors), strict TypeScript clean (0 errors)
-  - Cumulative Diff: Exported to `~/Desktop/encore-phase3-denver-venues-pr14.diff`
+  - Cumulative Diff: Exported to `encore-phase3-denver-venues-pr14.diff` (project root)
 - **Immediate Next Action:** Awaiting independent code review. Do NOT auto-merge PR #14 autonomously. Upon merge to `main`, proceed to Phase 3 PR #15 (Z2 Entertainment Cluster: Boulder Theater, Fox Theatre, Aggie Theatre).
 - **Phase 3 Status:** **ACTIVE — PR #14 IMPLEMENTATION & LOCAL VERIFICATION COMPLETE.**
 
@@ -38,15 +38,17 @@ Durable architecture records belong in [`docs/architecture/`](docs/architecture/
 
 ## What the Next Agent Must Know
 
-1. **Independent Venue Group Ingestion Architecture:**
+1. **Diff Export Location Convention:**
+   - Save cumulative diffs directly in the Encore repository root (e.g. `encore-phase<X>-<slug>-pr<N>.diff`), NOT on `~/Desktop`. `.gitignore` already ignores `*.diff` to keep git status clean.
+2. **Independent Venue Group Ingestion Architecture:**
    - Single shared adapter (`IndependentVenueAdapter`) and parser (`parseIndependentVenueEvents`) in `lib/sources/venue/independent-venue-group/` powers Larimer Lounge, Lost Lake Lounge, and Globe Hall.
    - Configured via `IndependentVenueConfig` records in `lib/sources/venue/source-registry.ts`.
    - Any future venue utilizing Rockhouse Partners (RHP Events) on WordPress can be added with a simple configuration entry.
-2. **Missing Price Invariant:**
+3. **Missing Price Invariant:**
    - When an Etix/venue listing does not publish explicit dollar pricing, ticket price fields MUST remain `undefined` (rendered as Price TBA in the UI). Never fabricate $0 or free admission.
-3. **Larimer Lounge Stage Modeling:**
+4. **Larimer Lounge Stage Modeling:**
    - Larimer Lounge includes stages: Treehouse, Campground, and Skihouse. All share physical address `2721 Larimer St, Denver, CO 80205`. The parser outputs stage names in `venue.name` while retaining true physical address.
-4. **Early/Late Performance Disambiguation:**
+5. **Early/Late Performance Disambiguation:**
    - Performances on the same date with start-time differences >= 90 minutes are treated as distinct canonical performances. Same-venue contextual matching allows the same artist to link to both events without triggering ambiguous artist rejection.
-5. **No Synthetic Fallback in Production:**
+6. **No Synthetic Fallback in Production:**
    - Production venue ingestion must only write verified observations. Static fixtures are restricted strictly to testing and CLI `--fixture` replays.
