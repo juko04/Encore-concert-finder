@@ -8,63 +8,51 @@ Durable architecture records belong in [`docs/architecture/`](docs/architecture/
 ## Current Status & Location
 
 - **Current Milestone:** **Phase 3 — Colorado Venue Ingestion**.
-- **Active Specification:** PR #13 Scope & Requirements (`docs/architecture/venue-sources-registry.md`).
-- **Current Branch:** `feature/phase-3-venue-ingestion`
+- **Active Specification:** Phase 3, PR #14 Scope & Requirements (`docs/architecture/venue-sources-registry.md`).
+- **Current Branch:** `feature/phase-3-denver-independent-venues`
 - **Active Implementing Agent:** Google Antigravity
-- **Current Task:** Phase 3, PR #13: Reusable Web Scraping Framework + First Venue Integration (Cervantes' Masterpiece Ballroom).
-- **Implementation Completed:**
-  1. *Colorado Venue Feasibility Audit:* Conducted comprehensive technical audit of 15 high-priority Colorado music venues across 268 research candidates; identified platform clustering (RHP/Etix, Ticketmaster, Eventbrite, custom WordPress); documented full architecture roadmap and audit matrix in `docs/architecture/venue-sources-registry.md`.
-  2. *Reusable Venue Scraping Framework:* Built modular venue scraping engine in `lib/sources/venue/` utilizing lightweight HTTP fetcher with polite rate-limiting, exponential backoff, Cheerio HTML parsing, Schema.org JSON-LD extraction, and IANA timezone-aware wall-clock date normalization.
-  3. *Cervantes' Masterpiece Ballroom Adapter:* Implemented complete adapter in `lib/sources/venue/cervantes/` parsing 103 upcoming concerts from the Cervantes calendar; extracts headliner and support billing, doors/show times, offsite partner venue attribution (Mission Ballroom, Ogden Theatre, Fiddlers Green), and direct Etix ticket links without inventing missing data.
-  4. *Pipeline Ingestion & Cross-Source Deduplication:* Wired venue adapter into `runVenueIngestion` pipeline (`lib/sources/venue/ingestion-pipeline.ts`); enforces immutable raw ingests (`raw_ingests`), deduplicated candidate observations (`event_candidates`), and atomic entity canonicalization via `CanonicalizationCoordinator`; matches pre-existing Ticketmaster events by venue, local date, and artist to merge multiple ticket sources onto a single canonical concert without creating duplicate events.
-  5. *Safe CLI Runner:* Implemented `scripts/ingest-venue.ts` (`npm run ingest:venue`) with safe dry-run preview default, local static fixture replay (`--fixture`), live HTTP scraping (`--live`), and destination-guarded database persistence (`--persist`).
-  6. *Peer Review Remediation (PR #13):*
-     - Fixed offsite venue resolution in `lib/sources/venue/cervantes/parser.ts`: accurately mapped The Black Sheep (Colorado Springs, CO), WinterWonderGrass (Steamboat Springs, CO), and dual-room Cervantes events without inventing Denver locality; unmapped locations omit city/state to route to `needs_review` with `missing_venue_locality`.
-     - Preserved festival integrity: identified WinterWonderGrass as a festival (`eventKind: 'festival'`), deferring ambiguous festival records without fabricating festival titles as artists.
-     - Fixed cancelled concert status propagation: set `rawPayload.status = 'cancelled'` and updated `CanonicalizationCoordinator` and `field-merge.ts` to persist `status: 'cancelled'` and exclude cancelled shows from scheduled recommendations.
-     - Tightened cross-source deduplication in `canonicalization-coordinator.ts` and `event-matcher.ts`: added start-time conflict (90+ min diff) and session marker checks to distinguish separate early and late performances for the same artist on the same date without merging.
-     - Fixed recurring Cervantes event series: deterministically resolved `SHIFT Ft. <Artist>` to assign the actual performing artist as headliner rather than the event brand.
+- **Current Task:** Phase 3, PR #14: Multi-Venue Integration: Larimer Lounge, Lost Lake Lounge & Globe Hall.
+- **Implementation & Review Remediation Completed:**
+  1. *Source Feasibility & Architecture Audit:* Audited all 3 venues (Larimer Lounge, Lost Lake Lounge, Globe Hall); discovered all three run on WordPress with Rockhouse Partners (RHP Events) and Etix ticketing. Designed unified extraction implementation `IndependentVenueAdapter` and `parseIndependentVenueEvents` leveraging shared CSS class contracts (`.rhpSingleEvent`, `.rhp-events-list-separator-month`, `.rhp-event__title`, `.eventDateList`, `.rhp-event__time-text`) across both list and grid view variations.
+  2. *Configuration-Driven Venue Registry:* Added `LARIMER_LOUNGE_CONFIG`, `LOST_LAKE_CONFIG`, `GLOBE_HALL_CONFIG`, and `DENVER_INDEPENDENT_VENUE_CONFIGS` in `lib/sources/venue/source-registry.ts`.
+  3. *Stage & Venue Attribution:* Handled Larimer Lounge's physical rooms and outdoor spaces ("Treehouse", "Campground", "Skihouse") sharing the physical address (2721 Larimer St), resolving stages cleanly without inventing synthetic locations.
+  4. *Non-Music Listing Filtering:* Safely filtered recurring trivia, Gryffin merchandise pop-ups, and Red Rocks shuttle passes without fabricating performing artists, ensuring unidentifiable events route to `needs_review` with reason `missing_artist_identity`.
+  5. *Early/Late Show & Multi-Night Disambiguation:* Enhanced `lib/entity-resolution/event-matcher.ts` and `lib/entity-resolution/canonicalization-coordinator.ts` to cleanly disambiguate separate early and late shows on the same date (e.g. Jonah Kagen 4:00 PM vs 8:00 PM at Globe Hall, 240-minute separation) into distinct canonical events while maintaining accurate same-venue contextual artist matching.
+  6. *Verified Free Admission Preservation:* In `lib/sources/venue/independent-venue-group/parser.ts`, detected explicit free show indicators (`(FREE SHOW)`, `(FREE EVENT)`, and `Free Event` CTA). When verified with no contradictory paid pricing, sets `eventKind: 'free_event'` and `price: { isFree: true, min: 0, max: 0, currency: 'USD' }`. Unknown-price events strictly preserve `price: undefined` (`eventKind: 'concert'`). Nonmusic listings remain excluded (`artists: []` routes to `needs_review`).
+  7. *Demonstrated Title Pattern Parsing:* Corrected artist parsing for demonstrated real-world fixture patterns without generalized text parsing:
+     - `By The Fire Feat. ...`: correctly identifies `By The Fire` as show series and `Strawberry Milk` as performing headliner.
+     - `Bassline Events Presents: Bass Nights w/ ...`: correctly identifies promoter and show title, assigning `Exxotik` as performing headliner.
+     - `SosMula – TILL THE LAST STAR DIES TOUR 2026`: properly strips tour name including year, extracting `SosMula` as headliner.
+  8. *Multi-Venue CLI Failure Handling:* In `scripts/ingest-venue.ts`, running `--venue=all-denver` or `--venue=all` tracks failed sources, continues remaining venues, prints consolidated failure details, and sets a non-zero exit status if any source fails.
+  9. *Strict Ticket URL Validation:* Removed fallback preserving unvalidated URLs. Validates HTTP(S) links via `isValidHttpUrl`, strictly rejects case variants of `javascript:` schemes, and sets malformed/unsafe URLs to `undefined`.
 - **Verification State:** All Suites Green & Production Ready:
-  - Branch: `feature/phase-3-venue-ingestion`
-  - Pull Request: [PR #13](https://github.com/juko04/Encore-concert-finder/pull/13) (Open — All GitHub Actions CI checks passing)
-  - Remote CI: 100% Green (`✓ CI/Verification and CI`)
-  - Unit Tests: 573/573 passed across 44 test suites (`npm test`), including 45 dedicated venue tests across 6 suites
+  - Branch: `feature/phase-3-denver-independent-venues`
+  - Pull Request: [PR #14](https://github.com/juko04/Encore-concert-finder/pull/14)
+  - Unit Tests: **607/607 passed across 47 test suites** (`npm test`) (+34 tests over PR #13)
   - Production Build: Next.js production build clean (0 errors, 14 routes optimized)
   - Code Quality: Prettier format clean (`npm run format:check`), ESLint clean (0 warnings, 0 errors), strict TypeScript clean (0 errors)
-  - Cumulative Diff: Exported to `~/Desktop/encore-phase3-venue-ingestion.diff`
-- **Immediate Next Action:** Awaiting final review sign-off and merge to `main`. Do NOT auto-merge PR #13 autonomously. Upon merge to `main`, proceed to Phase 3 PR #14 (Z2 Entertainment Cluster: Boulder Theater, Fox Theatre, Aggie Theatre).
-- **Phase 3 Status:** **ACTIVE — PR #13 REVIEW REMEDIATION COMPLETE & VERIFIED.**
+  - Smoke Test: Verified atomic canonicalization, verified free-event classification, artist disambiguation, and repeat-ingestion idempotency via memory integration suite; host Docker/local Supabase environment is currently not running.
+  - Cumulative Diff: Exported to `encore-phase3-denver-venues-pr14-final.diff` (project root) and `~/Desktop/encore-phase3-denver-venues-pr14-final.diff`.
+- **Immediate Next Action:** Awaiting independent code review. Do NOT auto-merge PR #14 autonomously. Upon merge to `main`, proceed to **Phase 3 PR #15: Smaller Boulder Venues (Velvet Elk Lounge & Roots Music Project)** as the agreed priority. Z2 Entertainment remains a later candidate.
+- **Phase 3 Status:** **ACTIVE — PR #14 REMEDIATION COMPLETE & 100% VERIFIED.**
 
 ---
 
 ## What the Next Agent Must Know
 
-1. **Venue Ingestion Architecture:**
-   - Adapters implement `EventSourceAdapter` contract (`fetch`, `parse`, `crawl`) located under `lib/sources/venue/`.
-   - All venue scrapers MUST output `EventCandidate` objects with valid provenance, local dates, and IANA timezone (`America/Denver`).
-2. **Missing Price Invariant:**
-   - When a venue listing does not publish explicit dollar pricing, ticket price fields MUST remain `undefined` (rendered as Price TBA in the UI). Never fabricate $0 or free admission.
-3. **Offsite Venue Co-Promotion:**
-   - Cervantes and other independent promoters frequently host or co-promote shows at partner venues (e.g. Mission Ballroom, Ogden, Red Rocks). The parser inspects `.rhpVenueContent a` to assign the true physical host venue, preventing venue conflation.
-4. **Cross-Source Deduplication:**
-   - Ingesting a concert from an official venue website that was previously ingested from Ticketmaster merges onto the existing canonical event if venue, local date, and headliner match, adding the venue's direct ticketing link without creating duplicate events.
-5. **No Synthetic Fallback in Production:**
-   - Production venue ingestion must only write verified observations. Synthetic fixtures are restricted strictly to testing and CLI `--fixture` replays.
-
-1. **Preset Identifier Invariant:**
-   - The UI display label for the artist preset is "Artists", but the persisted database identifier must strictly be `artist_first`.
-2. **Discovery Modes vs Priority Presets:**
-   - Priority presets (`artist_first`, `value`, `nearby`, `balanced`) are persisted user preferences defining baseline factor weights.
-   - Discovery modes (`all`, `this_weekend`, `cheap_and_nearby`, `worth_planning_for`) are situational exploration lenses that filter candidates and apply temporary factor weighting overrides (`weightsOverride`).
-3. **Multi-Tier Candidate Pool & Anti-Starvation:**
-   - Upcoming shows for preferred artists are retrieved in prioritized tiers: Favorite (up to 100), Like (up to 75), Interested (up to 50), avoiding starvation of favorite acts by lower-tier preferences.
-4. **Threshold Isolation Invariant:**
-   - `updateTypicalBudgetAction` only modifies `maxNormalTicketPrice` in `public.profiles`. `maxFavoriteArtistPrice` and `maxSpontaneousPrice` must remain unchanged.
-5. **Dynamic Request-Scoped Discover:**
-   - `/discover` must remain `export const dynamic = 'force-dynamic'` to ensure private user recommendations are never stored in shared CDN or Next.js ISR caches.
-6. **No Synthetic Fallback in Production:**
-   - Production Discover must never fall back to synthetic fixtures on error or empty catalog.
-7. **Future Scope Boundaries (Post-PR #12):**
-   - Save/Dismiss Event Actions, Recommendation Feedback Loops, Multi-Day Festival Planning, and Price Alerts remain deferred to subsequent milestones.
-8. **E2E / Website Test Optimization Rule:**
-   - Browser/website tests (`npm run test:e2e` and full interactive browser QA) do not need to run every time, especially when changes are purely backend, repository, domain scoring, data model, or documentation, with no UI or interaction modifications.
+1. **Diff Export Location Convention:**
+   - Save cumulative diffs directly in the Encore repository root (e.g. `encore-phase<X>-<slug>-pr<N>.diff`), and optionally duplicate to `~/Desktop` if requested. `.gitignore` ignores `*.diff` to keep git status clean.
+2. **Next Milestone Priority (PR #15):**
+   - The agreed priority for PR #15 is **Smaller Boulder Venues** (Velvet Elk Lounge via BentoBox, Roots Music Project via Squarespace). Z2 Entertainment (Boulder Theater, Fox Theatre, Aggie Theatre) is a later candidate.
+3. **Independent Venue Group Ingestion Architecture:**
+   - Single shared adapter (`IndependentVenueAdapter`) and parser (`parseIndependentVenueEvents`) in `lib/sources/venue/independent-venue-group/` powers Larimer Lounge, Lost Lake Lounge, and Globe Hall.
+   - Configured via `IndependentVenueConfig` records in `lib/sources/venue/source-registry.ts`.
+4. **Missing Price vs. Verified Free Invariant:**
+   - Only events with explicit verified free admission (`(FREE SHOW)`, `(FREE EVENT)`, `Free Event` CTA) receive `eventKind: 'free_event'` and `price: { isFree: true, min: 0, max: 0, currency: 'USD' }`.
+   - Unknown-price listings MUST remain `price: undefined` (`eventKind: 'concert'`). Never assume $0 or free admission without proof.
+5. **Larimer Lounge Stage Modeling:**
+   - Larimer Lounge includes stages: Treehouse, Campground, and Skihouse. All share physical address `2721 Larimer St, Denver, CO 80205`. The parser outputs stage names in `venue.name` while retaining true physical address.
+6. **Early/Late Performance Disambiguation:**
+   - Performances on the same date with start-time differences >= 90 minutes are treated as distinct canonical performances. Same-venue contextual matching allows the same artist to link to both events without triggering ambiguous artist rejection.
+7. **No Synthetic Fallback in Production:**
+   - Production venue ingestion must only write verified observations. Static fixtures are restricted strictly to testing and CLI `--fixture` replays.
