@@ -21,11 +21,11 @@ This registry tracks the initial feasibility audit of high-priority Colorado mus
 | **Larimer Lounge** | Denver | Independent Venue Group (RHP Events) | Etix | Server HTML (`.rhpSingleEvent`) + stage detection | Low | Low | **Very High** (IVG Network) | **YES (Implemented PR #14)** |
 | **Globe Hall** | Denver | Independent Venue Group (RHP Events) | Etix | Server HTML (`.rhpSingleEvent`) | Low | Low | **Very High** (IVG Network) | **YES (Implemented PR #14)** |
 | **Lost Lake Lounge** | Denver | Independent Venue Group (RHP Events) | Etix | Server HTML (`.rhpSingleEvent`) | Low | Low | **Very High** (IVG Network) | **YES (Implemented PR #14)** |
-| **Boulder Theater** | Boulder | Z2 Entertainment Network | AXS | Server HTML + structured event nodes | Low-Medium | Low/Med | **Very High** (Shares Z2 engine with Fox/Aggie) | Next (PR #15) |
-| **Fox Theatre** | Boulder | Z2 Entertainment Network | AXS | Server HTML + structured event nodes | Low-Medium | Low/Med | **Very High** (Z2 Network) | Next (PR #15) |
-| **Aggie Theatre** | Fort Collins | Z2 Entertainment Network | AXS | Server HTML + structured event nodes | Low-Medium | Low/Med | **Very High** (Z2 Network) | Next (PR #15) |
-| **Velvet Elk Lounge** | Boulder | BentoBox | Etix | Server HTML + Etix event links | Low-Medium | Zero | **High** (BentoBox restaurant/lounge platform) | Subsequent |
-| **Roots Music Project** | Boulder | Squarespace | Eventbrite | Server HTML (`.eventlist-event`) | Low-Medium | Zero | **High** (Squarespace events engine) | Subsequent |
+| **Velvet Elk Lounge** | Boulder | BentoBox | Etix | Server HTML + Etix event links | Low-Medium | Zero | **High** (BentoBox restaurant/lounge platform) | **Next (PR #15 - Smaller Boulder Priority)** |
+| **Roots Music Project** | Boulder | Squarespace | Eventbrite | Server HTML (`.eventlist-event`) | Low-Medium | Zero | **High** (Squarespace events engine) | **Next (PR #15 - Smaller Boulder Priority)** |
+| **Boulder Theater** | Boulder | Z2 Entertainment Network | AXS | Server HTML + structured event nodes | Low-Medium | Low/Med | **Very High** (Shares Z2 engine with Fox/Aggie) | Later Candidate |
+| **Fox Theatre** | Boulder | Z2 Entertainment Network | AXS | Server HTML + structured event nodes | Low-Medium | Low/Med | **Very High** (Z2 Network) | Later Candidate |
+| **Aggie Theatre** | Fort Collins | Z2 Entertainment Network | AXS | Server HTML + structured event nodes | Low-Medium | Low/Med | **Very High** (Z2 Network) | Later Candidate |
 | **hi-dive** | Denver | WordPress + Plot Bella | DICE | Client widget (`widgets.dice.fm`) or WP REST API | Medium | Zero | **High** (DICE platform integration) | Subsequent |
 | **Dazzle Denver** | Denver | WordPress | Eventbrite / In-house | Server HTML (`.event-item`) | Medium | Zero | Medium | Subsequent |
 | **Washington's** | Fort Collins | Bohemian Foundation | AXS | Server HTML | Medium | Med | Medium | Subsequent |

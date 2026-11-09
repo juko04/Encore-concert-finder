@@ -1,11 +1,14 @@
 import * as cheerio from 'cheerio';
 import type {
   CandidateArtist,
+  CandidatePrice,
   EventCandidate,
+  EventKind,
   StartTimePrecision,
 } from '@/lib/domain/event-candidate';
 import type { SourceProvenance } from '@/lib/domain/source';
 import { normalizeUrl } from '@/lib/domain/value-objects';
+import { isValidHttpUrl } from '@/lib/utils/url';
 import {
   localDateTimeToUtcInstant,
   parseDateString,
@@ -267,6 +270,7 @@ export function parseArtistsFromTitle(rawTitle: string): {
   cleanTitle: string;
   isCanceled: boolean;
   isFestival: boolean;
+  isExplicitFree: boolean;
   artists: CandidateArtist[];
 } {
   let title = rawTitle
@@ -280,12 +284,18 @@ export function parseArtistsFromTitle(rawTitle: string): {
     title = title.replace(/^cancel(?:l?ed)?\s*[-–—:]\s*/i, '').trim();
   }
 
+  // Detect explicit free show indicators in the raw title before stripping
+  const isExplicitFree =
+    /\((?:FREE\s+(?:SHOW|EVENT)|FREE)\)|\[(?:FREE\s+(?:SHOW|EVENT)|FREE)\]/i.test(
+      rawTitle,
+    );
+
   // Strip trailing " AT <VENUE>" suffix
   let cleanTitle = title.replace(/\s+AT\s+[A-Z0-9\s'.\-]+$/i, '').trim();
 
-  // Strip trailing (FREE EVENT), (FREE SHOW), or (FREE)
+  // Strip trailing or bracketed (FREE EVENT), (FREE SHOW), or (FREE)
   cleanTitle = cleanTitle
-    .replace(/\s*\((?:FREE\s+(?:EVENT|SHOW)|FREE)\)/i, '')
+    .replace(/\s*[\(\[](?:FREE\s+(?:EVENT|SHOW)|FREE)[\)\]]/gi, '')
     .trim();
 
   // Non-music event filters: Do not fabricate musical artists for shuttle buses, merch pop-ups, or bingo
@@ -298,6 +308,7 @@ export function parseArtistsFromTitle(rawTitle: string): {
       cleanTitle,
       isCanceled,
       isFestival: false,
+      isExplicitFree,
       artists: [],
     };
   }
@@ -329,13 +340,14 @@ export function parseArtistsFromTitle(rawTitle: string): {
     cleanTitle = presentsMatch[1].trim();
   }
 
-  // Handle "Open House feat. <Artists>" recurring club night series
-  const openHouseMatch = cleanTitle.match(
-    /^Open\s+House(?:\s+feat\.?|\s+featuring)\s+(.*)$/i,
+  // Handle promoter + show series where title is a series name followed by performers:
+  // e.g. "Bassline Events Presents: Bass Nights w/ <Artists>"
+  const promoterSeriesWithMatch = cleanTitle.match(
+    /^Bassline\s+Events\s+Presents(?:\s*:)?\s*Bass\s+Nights\s+(?:w\/|with)\s+(.*)$/i,
   );
-  if (openHouseMatch) {
-    const rawActs = openHouseMatch[1]
-      .split(/\s*[-–—]\s*|,\s*|\s*\+\s*/)
+  if (promoterSeriesWithMatch) {
+    const rawActs = promoterSeriesWithMatch[1]
+      .split(/,\s*(?:and\s+)?|\s+and\s+|\s*[-–—]\s*|\s*\+\s*/i)
       .map((s) => cleanArtistName(s))
       .filter((s) => s.length > 0);
 
@@ -354,7 +366,36 @@ export function parseArtistsFromTitle(rawTitle: string): {
         });
       }
     }
-    return { cleanTitle, isCanceled, isFestival, artists };
+    return { cleanTitle, isCanceled, isFestival, isExplicitFree, artists };
+  }
+
+  // Handle recurring show / party series before feat:
+  // e.g. "By The Fire Feat. <Artists>", "Open House feat. <Artists>", "Defectiv Electric Presents Feat. <Artists>"
+  const seriesFeatMatch = cleanTitle.match(
+    /^(?:By\s+The\s+Fire|Open\s+House|Defectiv\s+Electric\s+Presents)(?:\s+feat\.?|\s+featuring)\s+(.*)$/i,
+  );
+  if (seriesFeatMatch) {
+    const rawActs = seriesFeatMatch[1]
+      .split(/\s*[-–—]\s*|,\s*(?:and\s+)?|\s+and\s+|\s*\+\s*/i)
+      .map((s) => cleanArtistName(s))
+      .filter((s) => s.length > 0);
+
+    const artists: CandidateArtist[] = [];
+    if (rawActs.length > 0) {
+      artists.push({
+        name: rawActs[0],
+        billingPosition: 'headliner',
+        sortOrder: 1,
+      });
+      for (let i = 1; i < rawActs.length; i++) {
+        artists.push({
+          name: rawActs[i],
+          billingPosition: 'support',
+          sortOrder: i + 1,
+        });
+      }
+    }
+    return { cleanTitle, isCanceled, isFestival, isExplicitFree, artists };
   }
 
   let headlinerPart = cleanTitle;
@@ -376,9 +417,10 @@ export function parseArtistsFromTitle(rawTitle: string): {
     featured = featMatch[2].trim();
   }
 
-  // Strip tour names from main headliner if present before w/ (e.g. "LETDOWN. – The Happy Tour" -> "LETDOWN.")
+  // Strip tour names from main headliner if present before w/
+  // (e.g. "LETDOWN. – The Happy Tour" -> "LETDOWN.", "SosMula – TILL THE LAST STAR DIES TOUR 2026" -> "SosMula")
   const tourMatch = mainHeadliner.match(
-    /^(.*?)\s*[-–—]\s*(?:The\s+)?[A-Za-z0-9\s'.\-]+\s+Tour$/i,
+    /^(.*?)\s*[-–—]\s*(?:The\s+)?[A-Za-z0-9\s'.’\-]+Tour(?:\s+(?:19|20)?\d{2})?$/i,
   );
   if (tourMatch && tourMatch[1].trim().length > 0) {
     mainHeadliner = tourMatch[1].trim();
@@ -412,7 +454,7 @@ export function parseArtistsFromTitle(rawTitle: string): {
           sortOrder: i + 1,
         });
       }
-      return { cleanTitle, isCanceled, isFestival, artists };
+      return { cleanTitle, isCanceled, isFestival, isExplicitFree, artists };
     }
   }
 
@@ -465,7 +507,7 @@ export function parseArtistsFromTitle(rawTitle: string): {
     });
   }
 
-  return { cleanTitle, isCanceled, isFestival, artists };
+  return { cleanTitle, isCanceled, isFestival, isExplicitFree, artists };
 }
 
 /**
@@ -623,28 +665,64 @@ export function parseIndependentVenueEvents(
     const rawTicketUrl = $el.find('.rhp-event-cta a').attr('href');
     let ticketUrl: string | undefined;
 
-    if (
-      rawTicketUrl &&
-      !rawTicketUrl.startsWith('javascript:') &&
-      rawTicketUrl.trim().length > 0
-    ) {
-      try {
-        ticketUrl = normalizeUrl(rawTicketUrl);
-      } catch {
-        ticketUrl = rawTicketUrl;
+    if (rawTicketUrl && rawTicketUrl.trim().length > 0) {
+      const trimmedTicketUrl = rawTicketUrl.trim();
+      if (
+        !/^javascript:/i.test(trimmedTicketUrl) &&
+        isValidHttpUrl(trimmedTicketUrl)
+      ) {
+        try {
+          ticketUrl = normalizeUrl(trimmedTicketUrl);
+        } catch {
+          // Invariant: Do not preserve unvalidated or malformed ticket URLs
+          ticketUrl = undefined;
+        }
       }
     }
 
     const isSoldOut = statusClass.includes('sold-out');
-    const { cleanTitle, isCanceled, isFestival, artists } =
+    const { cleanTitle, isCanceled, isFestival, isExplicitFree, artists } =
       parseArtistsFromTitle(rawTitle);
     const isStatusCanceled =
       isCanceled ||
       statusClass.includes('canceled') ||
       statusClass.includes('Canceled');
 
+    // Free admission verification: explicit free label in title or free CTA
+    const ctaText = $el.find('.rhp-event-cta a').text().trim().toLowerCase();
+    const isCtaFree =
+      statusClass.split(/\s+/).includes('free') ||
+      ctaText.includes('free event') ||
+      ctaText.includes('free show') ||
+      ctaText === 'free';
+
+    const isVerifiedFree = isExplicitFree || isCtaFree;
+
+    // Check for contradictory paid-admission evidence (e.g. explicit positive dollar price in text)
+    const rawPriceText = $el
+      .find('.eventPrice, .rhp-event__price, .price')
+      .text()
+      .trim();
+    const hasConflictingPaidPrice =
+      /\$\s*[1-9]\d*(?:\.\d{2})?/.test(rawPriceText) ||
+      /\$\s*[1-9]\d*(?:\.\d{2})?/.test(rawTitle);
+
+    let eventKind: EventKind = isFestival ? 'festival' : 'concert';
+    let price: CandidatePrice | undefined;
+
+    // Only assign free_event and free price if verified free AND no contradictory paid pricing exists
+    if (isVerifiedFree && !hasConflictingPaidPrice) {
+      eventKind = 'free_event';
+      price = {
+        isFree: true,
+        min: 0,
+        max: 0,
+        currency: 'USD',
+      };
+    }
+
     // 7. Source Event ID
-    const sourceEventId = extractSourceEventId(eventUrl, rawTicketUrl);
+    const sourceEventId = extractSourceEventId(eventUrl, ticketUrl);
 
     // 8. Provenance
     const provenance: SourceProvenance = {
@@ -676,7 +754,8 @@ export function parseIndependentVenueEvents(
       doorsOpenAt,
       startTimePrecision,
       ticketUrl,
-      eventKind: isFestival ? 'festival' : 'concert',
+      price,
+      eventKind,
       isFestival,
       confidence: 0.98,
       verificationStatus: 'unverified',

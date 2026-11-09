@@ -52,8 +52,17 @@ describe('Denver Independent Venue Group Parser', () => {
         expect(c.timezone).toBe('America/Denver');
         expect(c.country).toBe('US');
         expect(c.state).toBe('CO');
-        // Non-negotiable price invariant: prices must be undefined (Price TBA)
-        expect(c.price).toBeUndefined();
+        if (c.eventKind === 'free_event') {
+          expect(c.price).toEqual({
+            isFree: true,
+            min: 0,
+            max: 0,
+            currency: 'USD',
+          });
+        } else {
+          // Non-negotiable price invariant: unknown prices must be undefined (Price TBA)
+          expect(c.price).toBeUndefined();
+        }
       }
     });
 
@@ -152,6 +161,49 @@ describe('Denver Independent Venue Group Parser', () => {
       expect(susto?.startTimePrecision).toBe('instant');
       // Off-sale show suppresses javascript:void(0) link
       expect(susto?.ticketUrl).toBeUndefined();
+    });
+
+    it('preserves verified free admission vs unknown-price concerts', () => {
+      const candidates = parseIndependentVenueEvents(larimerHtml, {
+        sourceId: LARIMER_LOUNGE_CONFIG.id!,
+        sourceUrl: LARIMER_LOUNGE_CONFIG.calendarUrl,
+        fetchedAt: '2026-11-07T20:00:00.000Z',
+        defaultVenueConfig: LARIMER_LOUNGE_CONFIG,
+      });
+
+      // 1. Verified free concert with performers: Skihouse – s1ms – DEXII... (FREE SHOW)
+      const freeConcert = candidates.find((c) => c.title.includes('s1ms'));
+      expect(freeConcert).toBeDefined();
+      expect(freeConcert?.eventKind).toBe('free_event');
+      expect(freeConcert?.price).toEqual({
+        isFree: true,
+        min: 0,
+        max: 0,
+        currency: 'USD',
+      });
+      expect(freeConcert?.artists?.[0].name).toBe('s1ms');
+
+      // 2. Verified free concert from By The Fire series:
+      const byTheFire = candidates.find((c) =>
+        c.title.includes('By The Fire Feat. Strawberry Milk'),
+      );
+      expect(byTheFire).toBeDefined();
+      expect(byTheFire?.eventKind).toBe('free_event');
+      expect(byTheFire?.price).toEqual({
+        isFree: true,
+        min: 0,
+        max: 0,
+        currency: 'USD',
+      });
+      expect(byTheFire?.artists?.[0].name).toBe('Strawberry Milk');
+
+      // 3. Unknown-price concert: Susto (solo) w/ Jake Luna
+      const paidUnknownConcert = candidates.find((c) =>
+        c.title.includes('Susto'),
+      );
+      expect(paidUnknownConcert).toBeDefined();
+      expect(paidUnknownConcert?.eventKind).toBe('concert');
+      expect(paidUnknownConcert?.price).toBeUndefined();
     });
   });
 
@@ -345,6 +397,94 @@ describe('Denver Independent Venue Group Parser', () => {
       });
       expect(parsed.artists[1].name).toBe('Tedd Adam');
       expect(parsed.artists[2].name).toBe('Calvin Campbell b2b Crisco');
+    });
+
+    it('correctly distinguishes show series from performers in By The Fire', () => {
+      const parsed = parseArtistsFromTitle(
+        'Campground – By The Fire Feat. Strawberry Milk, The Band Sundog, Katie Overby, John Samson (FREE SHOW)',
+      );
+      expect(parsed.isExplicitFree).toBe(true);
+      expect(parsed.artists).toHaveLength(4);
+      expect(parsed.artists[0]).toEqual({
+        name: 'Strawberry Milk',
+        billingPosition: 'headliner',
+        sortOrder: 1,
+      });
+      expect(parsed.artists[1].name).toBe('The Band Sundog');
+      expect(parsed.artists[2].name).toBe('Katie Overby');
+      expect(parsed.artists[3].name).toBe('John Samson');
+    });
+
+    it('correctly distinguishes promoter and show title from performers in Bassline Events Presents', () => {
+      const parsed = parseArtistsFromTitle(
+        'Bassline Events Presents: Bass Nights w/ Exxotik, Mainiac, Koy + Empath',
+      );
+      expect(parsed.artists).toHaveLength(4);
+      expect(parsed.artists[0]).toEqual({
+        name: 'Exxotik',
+        billingPosition: 'headliner',
+        sortOrder: 1,
+      });
+      expect(parsed.artists[1].name).toBe('Mainiac');
+      expect(parsed.artists[2].name).toBe('Koy');
+      expect(parsed.artists[3].name).toBe('Empath');
+    });
+
+    it('correctly strips tour suffixes including year in SosMula', () => {
+      const parsed = parseArtistsFromTitle(
+        'SosMula – TILL THE LAST STAR DIES TOUR 2026 w/ Ricky Hil + DJ Jacky P',
+      );
+      expect(parsed.artists).toHaveLength(3);
+      expect(parsed.artists[0]).toEqual({
+        name: 'SosMula',
+        billingPosition: 'headliner',
+        sortOrder: 1,
+      });
+      expect(parsed.artists[1].name).toBe('Ricky Hil');
+      expect(parsed.artists[2].name).toBe('DJ Jacky P');
+    });
+  });
+
+  describe('Ticket URL Safety & Validation', () => {
+    it('strictly validates ticket URLs, rejecting javascript: schemes and malformed URLs without falling back', () => {
+      const htmlSnippet = `
+        <div class="generalView">
+          <div class="rhpSingleEvent">
+            <h2 class="rhp-event__title--list">Test Artist 1 w/ Opener</h2>
+            <div id="eventDate">Fri, Nov 13</div>
+            <div class="rhp-event-cta">
+              <a href="javascript:alert(1)" class="btn">Get Tickets</a>
+            </div>
+          </div>
+          <div class="rhpSingleEvent">
+            <h2 class="rhp-event__title--list">Test Artist 2 w/ Opener</h2>
+            <div id="eventDate">Sat, Nov 14</div>
+            <div class="rhp-event-cta">
+              <a href="JavaScript:void(0)" class="btn">Get Tickets</a>
+            </div>
+          </div>
+          <div class="rhpSingleEvent">
+            <h2 class="rhp-event__title--list">Test Artist 3 w/ Opener</h2>
+            <div id="eventDate">Sun, Nov 15</div>
+            <div class="rhp-event-cta">
+              <a href="htp://not-a-valid-url" class="btn">Get Tickets</a>
+            </div>
+          </div>
+        </div>
+      `;
+
+      const candidates = parseIndependentVenueEvents(htmlSnippet, {
+        sourceId: LOST_LAKE_CONFIG.id!,
+        sourceUrl: LOST_LAKE_CONFIG.calendarUrl,
+        fetchedAt: '2026-11-07T20:00:00.000Z',
+        defaultVenueConfig: LOST_LAKE_CONFIG,
+      });
+
+      expect(candidates).toHaveLength(3);
+      // All three unsafe/invalid ticket URLs must be rejected (undefined)
+      expect(candidates[0].ticketUrl).toBeUndefined();
+      expect(candidates[1].ticketUrl).toBeUndefined();
+      expect(candidates[2].ticketUrl).toBeUndefined();
     });
   });
 });

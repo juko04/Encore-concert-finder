@@ -245,6 +245,7 @@ async function main(): Promise<void> {
   );
 
   const results: VenueIngestionResult[] = [];
+  const failedVenues: Array<{ name: string; slug: string; error: string }> = [];
 
   for (const config of targetConfigs) {
     const adapter: EventSourceAdapter =
@@ -274,18 +275,25 @@ async function main(): Promise<void> {
       console.error(
         `\nPipeline execution failed for ${config.name}: ${message}`,
       );
+      failedVenues.push({
+        name: config.name,
+        slug: config.slug,
+        error: message,
+      });
       if (targetConfigs.length === 1) {
         process.exit(1);
       }
     }
   }
 
-  // If multiple venues were ingested, print consolidated summary
-  if (results.length > 1) {
+  // If multiple venues were targeted, print consolidated summary
+  if (targetConfigs.length > 1) {
     console.log('\n' + '='.repeat(70));
     console.log('  CONSOLIDATED MULTI-VENUE INGESTION SUMMARY');
     console.log('='.repeat(70));
-    console.log(`Total Venues Processed:     ${results.length}`);
+    console.log(`Total Venues Targeted:      ${targetConfigs.length}`);
+    console.log(`Successful Venues:          ${results.length}`);
+    console.log(`Failed Venues:              ${failedVenues.length}`);
     console.log(
       `Total Raw Ingests Fetched:  ${results.reduce((s, r) => s + r.rawIngestsFetched, 0)}`,
     );
@@ -308,7 +316,21 @@ async function main(): Promise<void> {
     console.log(
       `Total Execution Duration:   ${(totalDuration / 1000).toFixed(2)}s`,
     );
+
+    if (failedVenues.length > 0) {
+      console.log('\nFailed Venues:');
+      for (const failed of failedVenues) {
+        console.log(`  - ${failed.name} (${failed.slug}): ${failed.error}`);
+      }
+    }
     console.log('='.repeat(70));
+  }
+
+  if (failedVenues.length > 0) {
+    console.error(
+      `\nVenue ingestion CLI completed with ${failedVenues.length} failure(s) out of ${targetConfigs.length} venue(s).\n`,
+    );
+    process.exit(1);
   }
 
   console.log('\nVenue ingestion CLI completed successfully.\n');

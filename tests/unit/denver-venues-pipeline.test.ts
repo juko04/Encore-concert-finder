@@ -280,4 +280,91 @@ describe('Denver Independent Venues Ingestion Pipeline', () => {
     expect(result.reviewReasons['missing_artist_identity']).toBe(8);
     expect(result.candidatesNeedsReview).toBeGreaterThanOrEqual(8);
   });
+
+  it('canonicalizes verified free concert with event_kind: free_event while keeping unknown prices as concert', async () => {
+    const sourceRepo = new MemorySourceRepository();
+    const rawIngestRepo = new MemoryRawIngestRepository();
+    const candidateRepo = new MemoryEventCandidateRepository();
+    const catalogRepo = new MemoryCatalogRepository();
+
+    await runVenueIngestion({
+      config: LARIMER_LOUNGE_CONFIG,
+      sourceRepo,
+      rawIngestRepo,
+      candidateRepo,
+      catalogRepo,
+      useFixture: true,
+      persist: true,
+    });
+
+    const events = await catalogRepo.listEvents();
+
+    // 1. Verified free event created in catalog as free_event
+    const freeShow = events.find((e) => e.title.includes('s1ms'));
+    expect(freeShow).toBeDefined();
+    expect(freeShow?.eventKind).toBe('free_event');
+
+    // 2. Verified free event with series title By The Fire resolved to performer Strawberry Milk
+    const byTheFire = events.find((e) =>
+      e.title.includes('By The Fire Feat. Strawberry Milk'),
+    );
+    expect(byTheFire).toBeDefined();
+    expect(byTheFire?.eventKind).toBe('free_event');
+    const byTheFireDetail = await catalogRepo.getEventById(byTheFire!.id);
+    expect(byTheFireDetail?.artists[0].name).toBe('Strawberry Milk');
+
+    // 3. Ordinary unknown-price event created as concert
+    const concertShow = events.find((e) => e.title.includes('Susto'));
+    expect(concertShow).toBeDefined();
+    expect(concertShow?.eventKind).toBe('concert');
+  });
+
+  it('continues processing remaining venues when an individual venue fails and records failure', async () => {
+    const sourceRepo = new MemorySourceRepository();
+    const rawIngestRepo = new MemoryRawIngestRepository();
+    const candidateRepo = new MemoryEventCandidateRepository();
+    const catalogRepo = new MemoryCatalogRepository();
+
+    const faultyConfig = {
+      ...LARIMER_LOUNGE_CONFIG,
+      slug: 'faulty-venue',
+      name: 'Faulty Venue',
+      calendarUrl: 'https://invalid-url-that-fails.com/events/',
+    };
+
+    const targetConfigs = [faultyConfig, LOST_LAKE_CONFIG];
+    const results = [];
+    const failedVenues: Array<{ name: string; slug: string; error: string }> =
+      [];
+
+    for (const config of targetConfigs) {
+      try {
+        if (config.slug === 'faulty-venue') {
+          throw new Error('Connection refused to faulty-venue');
+        }
+        const result = await runVenueIngestion({
+          config,
+          sourceRepo,
+          rawIngestRepo,
+          candidateRepo,
+          catalogRepo,
+          useFixture: true,
+          persist: false,
+        });
+        results.push(result);
+      } catch (err: unknown) {
+        failedVenues.push({
+          name: config.name,
+          slug: config.slug,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+
+    expect(results).toHaveLength(1);
+    expect(results[0].source.slug).toBe(LOST_LAKE_CONFIG.slug);
+    expect(failedVenues).toHaveLength(1);
+    expect(failedVenues[0].name).toBe('Faulty Venue');
+    expect(failedVenues[0].error).toContain('Connection refused');
+  });
 });
