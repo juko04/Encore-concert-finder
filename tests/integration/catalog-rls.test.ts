@@ -359,6 +359,34 @@ describe('Catalog RLS, Security & Canonicalization Atomicity', () => {
       .select('id')
       .eq('normalized_name', `rollback artist ${rollbackSuffix}`);
     expect(orphanedArtist?.length).toBe(0);
+
+    // Teardown success data to maintain zero test pollution
+    if (successData?.eventId) {
+      await adminClient
+        .from('event_sources')
+        .delete()
+        .eq('event_id', successData.eventId);
+      await adminClient
+        .from('candidate_resolutions')
+        .delete()
+        .eq('event_id', successData.eventId);
+      await adminClient
+        .from('event_artists')
+        .delete()
+        .eq('event_id', successData.eventId);
+      await adminClient.from('events').delete().eq('id', successData.eventId);
+    }
+    if (successData?.venueId) {
+      await adminClient.from('venues').delete().eq('id', successData.venueId);
+    }
+    if (candData?.id) {
+      await adminClient.from('event_candidates').delete().eq('id', candData.id);
+    }
+    await adminClient.from('raw_ingests').delete().eq('id', rawIngestId);
+    await adminClient
+      .from('artists')
+      .delete()
+      .eq('name', `Success Artist ${timestamp}`);
   });
 
   it('enforces temporal database check constraints', async () => {
@@ -489,6 +517,11 @@ describe('Catalog RLS, Security & Canonicalization Atomicity', () => {
     expect(crossSourceError).not.toBeNull();
     // 23503 is foreign_key_violation in PostgreSQL
     expect(crossSourceError?.code).toBe('23503');
+
+    // Teardown raw ingest
+    if (rawA?.id) {
+      await adminClient.from('raw_ingests').delete().eq('id', rawA.id);
+    }
   });
 
   it('proves seeded operational tables remain completely hidden from anon users', async () => {
@@ -574,6 +607,22 @@ describe('Catalog RLS, Security & Canonicalization Atomicity', () => {
     expect(duplicateLinkError).not.toBeNull();
     // 23505 is unique_violation in PostgreSQL
     expect(duplicateLinkError?.code).toBe('23505');
+
+    // Teardown test events
+    if (event1?.id) {
+      await adminClient
+        .from('event_sources')
+        .delete()
+        .eq('event_id', event1.id);
+      await adminClient.from('events').delete().eq('id', event1.id);
+    }
+    if (event2?.id) {
+      await adminClient
+        .from('event_sources')
+        .delete()
+        .eq('event_id', event2.id);
+      await adminClient.from('events').delete().eq('id', event2.id);
+    }
   });
 
   it('verifies batched listEvents correctly joins source names, handles multiple/inactive sources, preserves artist/ticket ordering, and supports anon RLS reads', async () => {
@@ -831,6 +880,41 @@ describe('Catalog RLS, Security & Canonicalization Atomicity', () => {
     expect(
       anonEventSourcesError || anonEventSources?.length === 0,
     ).toBeTruthy();
+
+    // Teardown test entities to maintain zero pollution
+    if (event1?.id) {
+      await adminClient
+        .from('event_sources')
+        .delete()
+        .eq('event_id', event1.id);
+      await adminClient
+        .from('event_artists')
+        .delete()
+        .eq('event_id', event1.id);
+      await adminClient
+        .from('event_ticket_links')
+        .delete()
+        .eq('event_id', event1.id);
+      await adminClient.from('events').delete().eq('id', event1.id);
+    }
+    if (event2?.id) {
+      await adminClient.from('events').delete().eq('id', event2.id);
+    }
+    if (artist1?.id) {
+      await adminClient.from('artists').delete().eq('id', artist1.id);
+    }
+    if (artist2?.id) {
+      await adminClient.from('artists').delete().eq('id', artist2.id);
+    }
+    if (venue?.id) {
+      await adminClient.from('venues').delete().eq('id', venue.id);
+    }
+    if (sourceA?.id) {
+      await adminClient.from('sources').delete().eq('id', sourceA.id);
+    }
+    if (sourceB?.id) {
+      await adminClient.from('sources').delete().eq('id', sourceB.id);
+    }
   });
 
   it('validates production preferred-artist query completeness exceeding API row limit (>1000 event_artists rows)', async () => {

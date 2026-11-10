@@ -1,17 +1,23 @@
 #!/usr/bin/env node
 
 /**
- * Reusable Local Database Cleanup Script for Synthetic & Test Fixtures.
+ * Provenance-Based Local Database Cleanup Utility for Synthetic & Test Fixtures.
  *
- * Requirements:
+ * Requirements (Findings 1 & 2):
  * 1. Safe by default: `--dry-run` is active unless `--apply` is explicitly passed.
- * 2. Destination Guard: Strictly fails if run against non-local database without explicit override.
- * 3. Atomic / Dependency-Safe: Deletes in proper relational order:
- *    event_field_evidence -> event_ticket_links -> event_artists -> events ->
- *    event_candidates -> raw_ingests -> unreferenced synthetic artists ->
- *    unreferenced synthetic venues -> synthetic sources.
- * 4. User Data Isolation: NEVER touches auth.users, profiles, user_spotify_connections, or user_artist_preferences.
- * 5. Legitimate Data Isolation: NEVER deletes genuine venue-ingested concerts or evidence.
+ * 2. Strict Destination Guard: Restricted exclusively to local development instances
+ *    (127.0.0.1 or localhost). Production can NEVER be targeted under any condition.
+ * 3. Provenance-Based Identification: Identification of synthetic records is based
+ *    strictly on source adapter provenance, example.com URLs, and foreign-key evidence
+ *    traces. Overly broad name patterns and official Ticketmaster URLs are never used
+ *    as indicators of synthetic data.
+ * 4. Recoverable Backup: Before executing any deletion in apply mode, full raw database
+ *    rows for all targeted records are queried and serialized to disk under `.backup/`.
+ *    If backup creation fails, the cleanup aborts immediately before any deletion.
+ * 5. Fail-Loud Error Handling: If any deletion query fails, an exception is thrown
+ *    immediately so the process exits with a non-zero exit code.
+ * 6. User Data Isolation: NEVER touches profiles, user_spotify_connections, or user_artist_preferences.
+ * 7. Legitimate Data Isolation: NEVER deletes genuine venue-ingested concerts or evidence.
  */
 
 import fs from 'node:fs';
@@ -22,20 +28,17 @@ import { assertSafeDatabaseTarget } from '@/lib/supabase/destination-guard';
 interface ParsedArgs {
   apply: boolean;
   dryRun: boolean;
-  allowProductionWrite: boolean;
   backup: boolean;
 }
 
 function parseArgs(argv: string[]): ParsedArgs {
   const apply = argv.includes('--apply');
   const dryRun = !apply || argv.includes('--dry-run');
-  const allowProductionWrite = argv.includes('--allow-production-write');
   const backup = !argv.includes('--no-backup');
 
   return {
     apply: apply && !argv.includes('--dry-run'),
     dryRun,
-    allowProductionWrite,
     backup,
   };
 }
@@ -65,65 +68,35 @@ function loadEnvLocal(): void {
   }
 }
 
-// Known test fixture patterns
-const KNOWN_SYNTHETIC_EVENT_PATTERNS = [
-  /^FK Test Event/i,
-  /^Atomic Concert Success/i,
-  /^Idempotent Concert/i,
-  /^Enrichment Concert/i,
-  /\[mw5uv3ze_maeh\]/i,
-  /57cdb36c/i,
-  /^Ghost Live - Tour A/i,
-  /^Acoustic Sunday \(Date Only\)/i,
-  /^Canyon Winds Live/i,
-  /^The Mountain Echoes Live/i,
-  /^Event [12]$/i,
-  /^Batch Show (One|Two)/i,
-];
-
-const KNOWN_SYNTHETIC_ARTIST_NAMES = new Set([
-  'The Mountain Echoes',
-  'River Pines',
-  'Canyon Winds',
-  'Local Acoustic Duo',
-  'Ghost',
-  'Artist One',
-  'Artist Two',
+// Canonical Colorado venue source slugs that must NEVER be treated as synthetic
+const CANONICAL_GENUINE_SOURCE_SLUGS = new Set([
+  'cervantes-masterpiece',
+  'larimer-lounge',
+  'lost-lake-lounge',
+  'globe-hall',
+  'velvet-elk-lounge',
+  'roots-music-project',
+  'ticketmaster-discovery',
 ]);
 
-const KNOWN_SYNTHETIC_ARTIST_PATTERNS = [
-  /\[mw5uv3ze_maeh\]/i,
-  /57cdb36c/i,
-  /17940228\d+/i,
-  /^Test (Match|Idempotent|Alpha|Beta) Artist/i,
-  /^Success Artist/i,
-];
-
-const KNOWN_SYNTHETIC_VENUE_NAMES = new Set([
-  'Red Rock Amphitheatre', // Note the singular "Rock" used in fake adapter
-]);
-
-const KNOWN_SYNTHETIC_VENUE_PATTERNS = [
-  /57cdb36c/i,
-  /17940228\d+/i,
-  /^Success Venue/i,
-  /^Test (Primary|Secondary) Venue/i,
-];
-
-const KNOWN_SYNTHETIC_RAW_INGEST_URL_PATTERNS = [
-  /^https?:\/\/example(-venue)?\.com/i,
-  /^https?:\/\/example\.org/i,
-  /ticketmaster\.com\/discovery\/v2\/events\.json\?classificationName=Music&stateCode=CO/i,
-];
-
+// Known synthetic test source IDs and prefixes
 const KNOWN_SYNTHETIC_SOURCE_IDS = new Set([
   'fake-venue-adapter',
   'fake-secondary-adapter',
-  'source-alpha-57cdb36c',
-  'source-beta-57cdb36c',
   'a0000000-0000-0000-0000-000000000001',
-  'b0000000-0000-0000-0000-000000000003',
+  'b0000000-0000-0000-0000-000000000002',
 ]);
+
+const SYNTHETIC_SOURCE_SLUG_PREFIXES = [
+  'source-alpha-',
+  'source-beta-',
+  'test-',
+];
+
+// Synthetic raw ingest URL patterns (strictly mock/example domains)
+const SYNTHETIC_URL_PATTERNS = [
+  /^https?:\/\/(?:[a-zA-Z0-9-]+\.)?example(?:-venue)?\.(?:com|org)/i,
+];
 
 export interface CleanupReport {
   targetDatabaseUrl: string;
@@ -146,7 +119,6 @@ export interface CleanupReport {
     authUsersCount: number;
     userSpotifyConnectionsCount: number;
     userPreferencesCount: number;
-    ambiguousCount: number;
   };
   backupFile?: string;
 }
@@ -163,11 +135,18 @@ export async function runCleanup(args: ParsedArgs): Promise<CleanupReport> {
     );
   }
 
-  assertSafeDatabaseTarget(
-    url,
-    args.allowProductionWrite,
-    'Synthetic Catalog Cleanup',
-  );
+  // 1. Destination Safety Guard: strictly reject non-local hosts
+  assertSafeDatabaseTarget(url, false, 'Synthetic Catalog Cleanup');
+
+  const parsedUrl = new URL(url);
+  if (
+    parsedUrl.hostname !== '127.0.0.1' &&
+    parsedUrl.hostname !== 'localhost'
+  ) {
+    throw new Error(
+      `Synthetic cleanup is strictly restricted to local development instances (127.0.0.1 / localhost). Target ${url} is rejected.`,
+    );
+  }
 
   const client: SupabaseClient = createClient(url, serviceRoleKey);
 
@@ -178,45 +157,48 @@ export async function runCleanup(args: ParsedArgs): Promise<CleanupReport> {
   console.log(`Target Database: ${url}`);
   console.log('----------------------------------------------------');
 
-  // 1. Fetch all events and determine synthetic vs genuine
-  const { data: allEvents, error: eventsErr } = await client
-    .from('events')
-    .select('id, name, local_start_date, venue_id, created_at');
-  if (eventsErr)
-    throw new Error(`Failed to query events: ${eventsErr.message}`);
-
-  // Fetch all raw ingests
-  const { data: allRawIngests, error: rawErr } = await client
-    .from('raw_ingests')
-    .select('id, source_id, source_url, fetched_at');
-  if (rawErr) throw new Error(`Failed to query raw_ingests: ${rawErr.message}`);
-
-  // Fetch all candidates
-  const { data: allCandidates, error: candErr } = await client
-    .from('event_candidates')
-    .select('id, raw_ingest_id, title, source_id');
-  if (candErr)
-    throw new Error(`Failed to query event_candidates: ${candErr.message}`);
-
-  // Fetch all venues
-  const { data: allVenues, error: venErr } = await client
-    .from('venues')
-    .select('id, name, created_at');
-  if (venErr) throw new Error(`Failed to query venues: ${venErr.message}`);
-
-  // Fetch all artists
-  const { data: allArtists, error: artErr } = await client
-    .from('artists')
-    .select('id, name, created_at');
-  if (artErr) throw new Error(`Failed to query artists: ${artErr.message}`);
-
-  // Fetch all sources
+  // 2. Fetch all sources to classify by provenance
   const { data: allSources, error: srcErr } = await client
     .from('sources')
     .select('id, name, slug, source_type');
   if (srcErr) throw new Error(`Failed to query sources: ${srcErr.message}`);
 
-  // 2. Identify synthetic raw ingests
+  const syntheticSourceIds = new Set<string>();
+  const genuineSourceIds = new Set<string>();
+  const identifiedSources: Array<{ id: string; name: string; reason: string }> =
+    [];
+
+  for (const src of allSources || []) {
+    if (CANONICAL_GENUINE_SOURCE_SLUGS.has(src.slug)) {
+      genuineSourceIds.add(src.id);
+    } else if (
+      KNOWN_SYNTHETIC_SOURCE_IDS.has(src.id) ||
+      KNOWN_SYNTHETIC_SOURCE_IDS.has(src.slug) ||
+      SYNTHETIC_SOURCE_SLUG_PREFIXES.some((prefix) =>
+        src.slug.startsWith(prefix),
+      )
+    ) {
+      syntheticSourceIds.add(src.id);
+      if (
+        src.slug.startsWith('source-alpha-') ||
+        src.slug.startsWith('source-beta-') ||
+        src.slug.startsWith('test-')
+      ) {
+        identifiedSources.push({
+          id: src.id,
+          name: src.name,
+          reason: `Dynamic test source matching prefix: ${src.slug}`,
+        });
+      }
+    }
+  }
+
+  // 3. Fetch all raw ingests and identify synthetic records strictly by source/URL provenance
+  const { data: allRawIngests, error: rawErr } = await client
+    .from('raw_ingests')
+    .select('id, source_id, source_url, fetched_at');
+  if (rawErr) throw new Error(`Failed to query raw_ingests: ${rawErr.message}`);
+
   const syntheticRawIngestIds = new Set<string>();
   const identifiedRawIngests: Array<{
     id: string;
@@ -228,14 +210,12 @@ export async function runCleanup(args: ParsedArgs): Promise<CleanupReport> {
     let isSynthetic = false;
     let reason = '';
 
-    if (KNOWN_SYNTHETIC_SOURCE_IDS.has(r.source_id)) {
+    if (syntheticSourceIds.has(r.source_id)) {
       isSynthetic = true;
-      reason = `Matches test source_id: ${r.source_id}`;
-    } else if (
-      KNOWN_SYNTHETIC_RAW_INGEST_URL_PATTERNS.some((p) => p.test(r.source_url))
-    ) {
+      reason = `Originated from test source ID: ${r.source_id}`;
+    } else if (SYNTHETIC_URL_PATTERNS.some((p) => p.test(r.source_url))) {
       isSynthetic = true;
-      reason = `Matches test URL pattern: ${r.source_url}`;
+      reason = `Originated from mock/example URL pattern: ${r.source_url}`;
     }
 
     if (isSynthetic) {
@@ -244,7 +224,13 @@ export async function runCleanup(args: ParsedArgs): Promise<CleanupReport> {
     }
   }
 
-  // 3. Identify synthetic candidates
+  // 4. Fetch all candidates and trace back to synthetic raw ingests or sources
+  const { data: allCandidates, error: candErr } = await client
+    .from('event_candidates')
+    .select('id, raw_ingest_id, title, source_id');
+  if (candErr)
+    throw new Error(`Failed to query event_candidates: ${candErr.message}`);
+
   const syntheticCandidateIds = new Set<string>();
   const identifiedCandidates: Array<{
     id: string;
@@ -258,10 +244,10 @@ export async function runCleanup(args: ParsedArgs): Promise<CleanupReport> {
 
     if (syntheticRawIngestIds.has(c.raw_ingest_id)) {
       isSynthetic = true;
-      reason = `Originated from synthetic raw_ingest ${c.raw_ingest_id}`;
-    } else if (KNOWN_SYNTHETIC_SOURCE_IDS.has(c.source_id)) {
+      reason = `Originated from synthetic raw_ingest: ${c.raw_ingest_id}`;
+    } else if (syntheticSourceIds.has(c.source_id)) {
       isSynthetic = true;
-      reason = `Matches test source_id: ${c.source_id}`;
+      reason = `Originated from synthetic source_id: ${c.source_id}`;
     }
 
     if (isSynthetic) {
@@ -270,129 +256,244 @@ export async function runCleanup(args: ParsedArgs): Promise<CleanupReport> {
     }
   }
 
-  // 4. Identify synthetic events
+  // 5. Fetch all events and determine synthetic status strictly by provenance
+  const { data: allEvents, error: eventsErr } = await client
+    .from('events')
+    .select('id, name, local_start_date, venue_id, created_at');
+  if (eventsErr)
+    throw new Error(`Failed to query events: ${eventsErr.message}`);
+
+  // Fetch all field evidence and event_sources to trace event provenance
+  const { data: allEvidence, error: evErr } = await client
+    .from('event_field_evidence')
+    .select('id, event_id, candidate_id, source_id');
+  if (evErr)
+    throw new Error(`Failed to query event_field_evidence: ${evErr.message}`);
+
+  const { data: allEventSources, error: esErr } = await client
+    .from('event_sources')
+    .select('id, event_id, candidate_id, source_id');
+  if (esErr) throw new Error(`Failed to query event_sources: ${esErr.message}`);
+
+  const eventGenuineCount = new Map<string, number>();
+  const eventSyntheticCount = new Map<string, number>();
+
+  for (const ev of allEvidence || []) {
+    if (ev.event_id) {
+      if (genuineSourceIds.has(ev.source_id)) {
+        eventGenuineCount.set(
+          ev.event_id,
+          (eventGenuineCount.get(ev.event_id) || 0) + 1,
+        );
+      } else if (
+        syntheticSourceIds.has(ev.source_id) ||
+        (ev.candidate_id && syntheticCandidateIds.has(ev.candidate_id))
+      ) {
+        eventSyntheticCount.set(
+          ev.event_id,
+          (eventSyntheticCount.get(ev.event_id) || 0) + 1,
+        );
+      }
+    }
+  }
+
+  for (const es of allEventSources || []) {
+    if (es.event_id) {
+      if (genuineSourceIds.has(es.source_id)) {
+        eventGenuineCount.set(
+          es.event_id,
+          (eventGenuineCount.get(es.event_id) || 0) + 1,
+        );
+      } else if (
+        syntheticSourceIds.has(es.source_id) ||
+        (es.candidate_id && syntheticCandidateIds.has(es.candidate_id))
+      ) {
+        eventSyntheticCount.set(
+          es.event_id,
+          (eventSyntheticCount.get(es.event_id) || 0) + 1,
+        );
+      }
+    }
+  }
+
   const syntheticEventIds = new Set<string>();
   const identifiedEvents: Array<{ id: string; name: string; reason: string }> =
     [];
   const genuineEvents: Array<{ id: string; name: string }> = [];
 
   for (const ev of allEvents || []) {
-    let isSynthetic = false;
-    let reason = '';
+    const genuineLinks = eventGenuineCount.get(ev.id) || 0;
+    const syntheticLinks = eventSyntheticCount.get(ev.id) || 0;
 
-    for (const pattern of KNOWN_SYNTHETIC_EVENT_PATTERNS) {
-      if (pattern.test(ev.name)) {
-        isSynthetic = true;
-        reason = `Matches test event name pattern: ${pattern}`;
-        break;
-      }
-    }
-
-    if (isSynthetic) {
-      syntheticEventIds.add(ev.id);
-      identifiedEvents.push({ id: ev.id, name: ev.name, reason });
-    } else {
+    if (genuineLinks > 0) {
       genuineEvents.push({ id: ev.id, name: ev.name });
+    } else if (syntheticLinks > 0) {
+      syntheticEventIds.add(ev.id);
+      identifiedEvents.push({
+        id: ev.id,
+        name: ev.name,
+        reason: `Linked exclusively to synthetic candidates/evidence (${syntheticLinks} synthetic links, 0 genuine links)`,
+      });
+    } else {
+      // Event has 0 field evidence and 0 event_sources
+      if (
+        /^FK Test Event/i.test(ev.name) ||
+        /57cdb36c|ad8047ff|5f36a446/i.test(ev.name)
+      ) {
+        syntheticEventIds.add(ev.id);
+        identifiedEvents.push({
+          id: ev.id,
+          name: ev.name,
+          reason: 'Zero provenance links and matches test nonce metadata',
+        });
+      } else {
+        genuineEvents.push({ id: ev.id, name: ev.name });
+      }
     }
   }
 
-  // 5. Check event_field_evidence, event_ticket_links, event_artists linked to synthetic events
+  // 6. Check counts of dependent records for identified synthetic events
   let evidenceToDelete = 0;
   let ticketLinksToDelete = 0;
   let eventArtistsToDelete = 0;
 
   if (syntheticEventIds.size > 0 || syntheticCandidateIds.size > 0) {
+    const evArr = Array.from(syntheticEventIds);
+    const candArr = Array.from(syntheticCandidateIds);
+
     const { count: evCount } = await client
       .from('event_field_evidence')
       .select('*', { count: 'exact', head: true })
       .or(
-        syntheticEventIds.size > 0
-          ? `event_id.in.(${Array.from(syntheticEventIds).join(',')})`
-          : 'id.is.null',
+        evArr.length > 0
+          ? `event_id.in.(${evArr.join(',')})`
+          : candArr.length > 0
+            ? `candidate_id.in.(${candArr.join(',')})`
+            : 'id.is.null',
       );
     evidenceToDelete = evCount || 0;
 
-    const { count: tlCount } = await client
-      .from('event_ticket_links')
-      .select('*', { count: 'exact', head: true })
-      .in('event_id', Array.from(syntheticEventIds));
-    ticketLinksToDelete = tlCount || 0;
+    if (evArr.length > 0) {
+      const { count: tlCount } = await client
+        .from('event_ticket_links')
+        .select('*', { count: 'exact', head: true })
+        .in('event_id', evArr);
+      ticketLinksToDelete = tlCount || 0;
 
-    const { count: eaCount } = await client
-      .from('event_artists')
-      .select('*', { count: 'exact', head: true })
-      .in('event_id', Array.from(syntheticEventIds));
-    eventArtistsToDelete = eaCount || 0;
+      const { count: eaCount } = await client
+        .from('event_artists')
+        .select('*', { count: 'exact', head: true })
+        .in('event_id', evArr);
+      eventArtistsToDelete = eaCount || 0;
+    }
   }
 
-  // 6. Identify synthetic artists (only if not referenced by genuine events)
+  // 7. Identify synthetic artists (strictly provenance-based: only artists linked exclusively to synthetic events)
+  const { data: allArtists, error: artErr } = await client
+    .from('artists')
+    .select('id, name, created_at');
+  if (artErr) throw new Error(`Failed to query artists: ${artErr.message}`);
+
+  const { data: allEventArtists, error: eaErr } = await client
+    .from('event_artists')
+    .select('event_id, artist_id');
+  if (eaErr) throw new Error(`Failed to query event_artists: ${eaErr.message}`);
+
+  const { data: allUserPrefs, error: upErr } = await client
+    .from('user_artist_preferences')
+    .select('artist_id');
+  if (upErr)
+    throw new Error(
+      `Failed to query user_artist_preferences: ${upErr.message}`,
+    );
+
+  const artistsWithGenuineLinks = new Set<string>();
+  const artistsWithUserPrefs = new Set<string>(
+    (allUserPrefs || []).map((p) => p.artist_id),
+  );
+  const artistsWithSyntheticLinks = new Set<string>();
+
+  for (const ea of allEventArtists || []) {
+    if (syntheticEventIds.has(ea.event_id)) {
+      artistsWithSyntheticLinks.add(ea.artist_id);
+    } else {
+      artistsWithGenuineLinks.add(ea.artist_id);
+    }
+  }
+
+  const syntheticArtistIds = new Set<string>();
   const identifiedArtists: Array<{ id: string; name: string; reason: string }> =
     [];
-  const syntheticArtistIds = new Set<string>();
 
   for (const art of allArtists || []) {
-    let isSynthetic = false;
-    let reason = '';
-
-    if (KNOWN_SYNTHETIC_ARTIST_NAMES.has(art.name)) {
-      isSynthetic = true;
-      reason = `Matches known synthetic artist name "${art.name}"`;
-    } else if (KNOWN_SYNTHETIC_ARTIST_PATTERNS.some((p) => p.test(art.name))) {
-      isSynthetic = true;
-      reason = `Matches synthetic artist pattern: "${art.name}"`;
+    // Never touch artists with user preferences or genuine event links
+    if (
+      artistsWithUserPrefs.has(art.id) ||
+      artistsWithGenuineLinks.has(art.id)
+    ) {
+      continue;
     }
 
-    if (isSynthetic) {
+    if (artistsWithSyntheticLinks.has(art.id)) {
       syntheticArtistIds.add(art.id);
-      identifiedArtists.push({ id: art.id, name: art.name, reason });
+      identifiedArtists.push({
+        id: art.id,
+        name: art.name,
+        reason:
+          'Linked exclusively to synthetic events (0 genuine events, 0 user preferences)',
+      });
+    } else if (/\[mw5uv3ze_maeh\]|57cdb36c|ad8047ff|5f36a446/i.test(art.name)) {
+      syntheticArtistIds.add(art.id);
+      identifiedArtists.push({
+        id: art.id,
+        name: art.name,
+        reason:
+          'Orphaned test fixture with test run nonce (0 events, 0 user preferences)',
+      });
     }
   }
 
-  // 7. Identify synthetic venues (only if not referenced by genuine events)
+  // 8. Identify synthetic venues (strictly provenance-based: only venues linked exclusively to synthetic events)
+  const { data: allVenues, error: venErr } = await client
+    .from('venues')
+    .select('id, name, created_at');
+  if (venErr) throw new Error(`Failed to query venues: ${venErr.message}`);
+
+  const venuesWithGenuineEvents = new Set<string>();
+  const venuesWithSyntheticEvents = new Set<string>();
+
+  for (const ev of allEvents || []) {
+    if (ev.venue_id) {
+      if (syntheticEventIds.has(ev.id)) {
+        venuesWithSyntheticEvents.add(ev.venue_id);
+      } else {
+        venuesWithGenuineEvents.add(ev.venue_id);
+      }
+    }
+  }
+
+  const syntheticVenueIds = new Set<string>();
   const identifiedVenues: Array<{ id: string; name: string; reason: string }> =
     [];
-  const syntheticVenueIds = new Set<string>();
 
   for (const ven of allVenues || []) {
-    let isSynthetic = false;
-    let reason = '';
-
-    if (KNOWN_SYNTHETIC_VENUE_NAMES.has(ven.name)) {
-      isSynthetic = true;
-      reason = `Matches known synthetic venue name "${ven.name}"`;
-    } else if (KNOWN_SYNTHETIC_VENUE_PATTERNS.some((p) => p.test(ven.name))) {
-      isSynthetic = true;
-      reason = `Matches synthetic venue pattern: "${ven.name}"`;
+    if (venuesWithGenuineEvents.has(ven.id)) {
+      continue;
     }
 
-    if (isSynthetic) {
+    if (venuesWithSyntheticEvents.has(ven.id)) {
       syntheticVenueIds.add(ven.id);
-      identifiedVenues.push({ id: ven.id, name: ven.name, reason });
-    }
-  }
-
-  // 8. Identify synthetic sources (preserve baseline seed sources from seed.sql)
-  const BASELINE_SEED_SOURCE_SLUGS = new Set([
-    'fake-venue-adapter',
-    'fake-secondary-adapter',
-  ]);
-  const identifiedSources: Array<{ id: string; name: string; reason: string }> =
-    [];
-  const syntheticSourceIds = new Set<string>();
-
-  for (const src of allSources || []) {
-    if (BASELINE_SEED_SOURCE_SLUGS.has(src.slug)) {
-      continue; // Preserve seed sources
-    }
-    if (
-      KNOWN_SYNTHETIC_SOURCE_IDS.has(src.id) ||
-      src.name.includes('57cdb36c')
-    ) {
-      syntheticSourceIds.add(src.id);
-      identifiedSources.push({
-        id: src.id,
-        name: src.name,
-        reason: `Matches synthetic source ID/name: ${src.id}`,
+      identifiedVenues.push({
+        id: ven.id,
+        name: ven.name,
+        reason: 'Linked exclusively to synthetic events (0 genuine events)',
+      });
+    } else if (/57cdb36c|ad8047ff|5f36a446/i.test(ven.name)) {
+      syntheticVenueIds.add(ven.id);
+      identifiedVenues.push({
+        id: ven.id,
+        name: ven.name,
+        reason: 'Orphaned test venue with test run nonce (0 genuine events)',
       });
     }
   }
@@ -429,7 +530,6 @@ export async function runCleanup(args: ParsedArgs): Promise<CleanupReport> {
       authUsersCount: authUsersCount || 0,
       userSpotifyConnectionsCount: spotifyConnCount || 0,
       userPreferencesCount: userPrefsCount || 0,
-      ambiguousCount: 0,
     },
   };
 
@@ -468,10 +568,10 @@ export async function runCleanup(args: ParsedArgs): Promise<CleanupReport> {
     return report;
   }
 
-  // 10. Execute deletion in dependency-safe order
+  // 10. Execute deletion in dependency-safe order with recoverable backup
   console.log('\n[APPLYING CLEANUP...]');
 
-  // Optional backup before deletion
+  // Recoverable Backup: Fetch complete rows before deleting
   if (args.backup) {
     const backupDir = path.resolve(process.cwd(), '.backup');
     if (!fs.existsSync(backupDir)) {
@@ -481,163 +581,317 @@ export async function runCleanup(args: ParsedArgs): Promise<CleanupReport> {
       backupDir,
       `synthetic-cleanup-backup-${Date.now()}.json`,
     );
-    const backupData = {
+
+    const evIds = Array.from(syntheticEventIds);
+    const candIds = Array.from(syntheticCandidateIds);
+    const rawIds = Array.from(syntheticRawIngestIds);
+    const artIds = Array.from(syntheticArtistIds);
+    const venIds = Array.from(syntheticVenueIds);
+    const srcIds = identifiedSources.map((s) => s.id);
+
+    const fullBackupData: Record<string, unknown> = {
       timestamp: new Date().toISOString(),
       databaseUrl: url,
-      events: identifiedEvents,
-      rawIngests: identifiedRawIngests,
-      candidates: identifiedCandidates,
-      artists: identifiedArtists,
-      venues: identifiedVenues,
-      sources: identifiedSources,
     };
-    fs.writeFileSync(backupFile, JSON.stringify(backupData, null, 2), 'utf-8');
-    report.backupFile = backupFile;
-    console.log(`Backup saved to: ${backupFile}`);
-  }
 
-  // Step A: Delete event_field_evidence
-  if (syntheticEventIds.size > 0) {
-    const evArr = Array.from(syntheticEventIds);
-    const { error: delEvidenceErr } = await client
-      .from('event_field_evidence')
-      .delete()
-      .in('event_id', evArr);
-    if (delEvidenceErr) {
-      console.warn(
-        `Warning deleting event_field_evidence by event_id: ${delEvidenceErr.message}`,
+    if (evIds.length > 0) {
+      const { data: bEv, error: eErr } = await client
+        .from('events')
+        .select('*')
+        .in('id', evIds);
+      if (eErr)
+        throw new Error(`Backup failed querying events: ${eErr.message}`);
+      fullBackupData.events = bEv;
+
+      const { data: bEa, error: eaErr2 } = await client
+        .from('event_artists')
+        .select('*')
+        .in('event_id', evIds);
+      if (eaErr2)
+        throw new Error(
+          `Backup failed querying event_artists: ${eaErr2.message}`,
+        );
+      fullBackupData.event_artists = bEa;
+
+      const { data: bTl, error: tlErr2 } = await client
+        .from('event_ticket_links')
+        .select('*')
+        .in('event_id', evIds);
+      if (tlErr2)
+        throw new Error(
+          `Backup failed querying event_ticket_links: ${tlErr2.message}`,
+        );
+      fullBackupData.event_ticket_links = bTl;
+
+      const { data: bEs, error: esErr2 } = await client
+        .from('event_sources')
+        .select('*')
+        .in('event_id', evIds);
+      if (esErr2)
+        throw new Error(
+          `Backup failed querying event_sources: ${esErr2.message}`,
+        );
+      fullBackupData.event_sources = bEs;
+
+      const { data: bCr, error: crErr2 } = await client
+        .from('candidate_resolutions')
+        .select('*')
+        .in('event_id', evIds);
+      if (crErr2)
+        throw new Error(
+          `Backup failed querying candidate_resolutions: ${crErr2.message}`,
+        );
+      fullBackupData.candidate_resolutions = bCr;
+
+      const { data: bFe, error: feErr2 } = await client
+        .from('event_field_evidence')
+        .select('*')
+        .in('event_id', evIds);
+      if (feErr2)
+        throw new Error(
+          `Backup failed querying event_field_evidence: ${feErr2.message}`,
+        );
+      fullBackupData.event_field_evidence = bFe;
+    }
+
+    if (candIds.length > 0) {
+      const { data: bCand, error: cErr } = await client
+        .from('event_candidates')
+        .select('*')
+        .in('id', candIds);
+      if (cErr)
+        throw new Error(
+          `Backup failed querying event_candidates: ${cErr.message}`,
+        );
+      fullBackupData.event_candidates = bCand;
+    }
+
+    if (rawIds.length > 0) {
+      const { data: bRaw, error: rErr } = await client
+        .from('raw_ingests')
+        .select('*')
+        .in('id', rawIds);
+      if (rErr)
+        throw new Error(`Backup failed querying raw_ingests: ${rErr.message}`);
+      fullBackupData.raw_ingests = bRaw;
+    }
+
+    if (artIds.length > 0) {
+      const { data: bArt, error: aErr } = await client
+        .from('artists')
+        .select('*')
+        .in('id', artIds);
+      if (aErr)
+        throw new Error(`Backup failed querying artists: ${aErr.message}`);
+      fullBackupData.artists = bArt;
+
+      const { data: bExt, error: extErr } = await client
+        .from('artist_external_ids')
+        .select('*')
+        .in('artist_id', artIds);
+      if (extErr)
+        throw new Error(
+          `Backup failed querying artist_external_ids: ${extErr.message}`,
+        );
+      fullBackupData.artist_external_ids = bExt;
+    }
+
+    if (venIds.length > 0) {
+      const { data: bVen, error: vErr } = await client
+        .from('venues')
+        .select('*')
+        .in('id', venIds);
+      if (vErr)
+        throw new Error(`Backup failed querying venues: ${vErr.message}`);
+      fullBackupData.venues = bVen;
+    }
+
+    if (srcIds.length > 0) {
+      const { data: bSrc, error: sErr } = await client
+        .from('sources')
+        .select('*')
+        .in('id', srcIds);
+      if (sErr)
+        throw new Error(`Backup failed querying sources: ${sErr.message}`);
+      fullBackupData.sources = bSrc;
+    }
+
+    try {
+      fs.writeFileSync(
+        backupFile,
+        JSON.stringify(fullBackupData, null, 2),
+        'utf-8',
+      );
+      if (!fs.existsSync(backupFile) || fs.statSync(backupFile).size === 0) {
+        throw new Error(
+          'Backup file verification failed: file is missing or empty.',
+        );
+      }
+      report.backupFile = backupFile;
+      console.log(`Recoverable backup successfully saved to: ${backupFile}`);
+    } catch (err) {
+      throw new Error(
+        `Failed to write recoverable backup: ${err instanceof Error ? err.message : String(err)}. Aborting cleanup.`,
       );
     }
   }
 
-  if (syntheticCandidateIds.size > 0) {
-    const candArr = Array.from(syntheticCandidateIds);
-    const { error: delEvidenceCandErr } = await client
+  // Execute deletions step by step with fail-loud error checks
+  const evArr = Array.from(syntheticEventIds);
+  const candArr = Array.from(syntheticCandidateIds);
+  const rawArr = Array.from(syntheticRawIngestIds);
+  const artArr = Array.from(syntheticArtistIds);
+  const venArr = Array.from(syntheticVenueIds);
+  const srcArr = identifiedSources.map((s) => s.id);
+
+  // A. event_field_evidence
+  if (evArr.length > 0) {
+    const { error } = await client
+      .from('event_field_evidence')
+      .delete()
+      .in('event_id', evArr);
+    if (error)
+      throw new Error(
+        `Failed to delete event_field_evidence by event_id: ${error.message}`,
+      );
+  }
+  if (candArr.length > 0) {
+    const { error } = await client
       .from('event_field_evidence')
       .delete()
       .in('candidate_id', candArr);
-    if (delEvidenceCandErr) {
-      console.warn(
-        `Warning deleting event_field_evidence by candidate_id: ${delEvidenceCandErr.message}`,
+    if (error)
+      throw new Error(
+        `Failed to delete event_field_evidence by candidate_id: ${error.message}`,
       );
-    }
   }
 
-  // Step B: Delete event_ticket_links
-  if (syntheticEventIds.size > 0) {
-    const evArr = Array.from(syntheticEventIds);
-    const { error: delTicketLinksErr } = await client
+  // B. event_ticket_links
+  if (evArr.length > 0) {
+    const { error } = await client
       .from('event_ticket_links')
       .delete()
       .in('event_id', evArr);
-    if (delTicketLinksErr) {
-      throw new Error(
-        `Failed to delete event_ticket_links: ${delTicketLinksErr.message}`,
-      );
-    }
+    if (error)
+      throw new Error(`Failed to delete event_ticket_links: ${error.message}`);
   }
 
-  // Step C: Delete event_artists
-  if (syntheticEventIds.size > 0) {
-    const evArr = Array.from(syntheticEventIds);
-    const { error: delEventArtistsErr } = await client
+  // C. event_artists
+  if (evArr.length > 0) {
+    const { error } = await client
       .from('event_artists')
       .delete()
       .in('event_id', evArr);
-    if (delEventArtistsErr) {
-      throw new Error(
-        `Failed to delete event_artists: ${delEventArtistsErr.message}`,
-      );
-    }
+    if (error)
+      throw new Error(`Failed to delete event_artists: ${error.message}`);
   }
 
-  // Step D: Delete events
-  if (syntheticEventIds.size > 0) {
-    const evArr = Array.from(syntheticEventIds);
-    const { error: delEventsErr } = await client
-      .from('events')
+  // D. event_sources
+  if (evArr.length > 0) {
+    const { error } = await client
+      .from('event_sources')
       .delete()
-      .in('id', evArr);
-    if (delEventsErr) {
-      throw new Error(`Failed to delete events: ${delEventsErr.message}`);
-    }
+      .in('event_id', evArr);
+    if (error)
+      throw new Error(`Failed to delete event_sources: ${error.message}`);
+  }
+  if (candArr.length > 0) {
+    const { error } = await client
+      .from('event_sources')
+      .delete()
+      .in('candidate_id', candArr);
+    if (error)
+      throw new Error(
+        `Failed to delete event_sources by candidate_id: ${error.message}`,
+      );
+  }
+
+  // E. candidate_resolutions
+  if (evArr.length > 0) {
+    const { error } = await client
+      .from('candidate_resolutions')
+      .delete()
+      .in('event_id', evArr);
+    if (error)
+      throw new Error(
+        `Failed to delete candidate_resolutions: ${error.message}`,
+      );
+  }
+
+  // F. events
+  if (evArr.length > 0) {
+    const { error } = await client.from('events').delete().in('id', evArr);
+    if (error) throw new Error(`Failed to delete events: ${error.message}`);
     console.log(`Deleted ${evArr.length} synthetic events.`);
   }
 
-  // Step E: Delete event_candidates
-  if (syntheticCandidateIds.size > 0) {
-    const candArr = Array.from(syntheticCandidateIds);
-    const { error: delCandidatesErr } = await client
+  // G. event_candidates
+  if (candArr.length > 0) {
+    const { error } = await client
       .from('event_candidates')
       .delete()
       .in('id', candArr);
-    if (delCandidatesErr) {
-      throw new Error(
-        `Failed to delete event_candidates: ${delCandidatesErr.message}`,
-      );
-    }
+    if (error)
+      throw new Error(`Failed to delete event_candidates: ${error.message}`);
     console.log(`Deleted ${candArr.length} synthetic candidates.`);
   }
 
-  // Step F: Delete raw_ingests
-  if (syntheticRawIngestIds.size > 0) {
-    const rawArr = Array.from(syntheticRawIngestIds);
-    const { error: delRawErr } = await client
+  // H. raw_ingests
+  if (rawArr.length > 0) {
+    const { error } = await client
       .from('raw_ingests')
       .delete()
       .in('id', rawArr);
-    if (delRawErr) {
-      throw new Error(`Failed to delete raw_ingests: ${delRawErr.message}`);
-    }
+    if (error)
+      throw new Error(`Failed to delete raw_ingests: ${error.message}`);
     console.log(`Deleted ${rawArr.length} synthetic raw_ingests.`);
   }
 
-  // Step G: Delete synthetic artists
-  if (syntheticArtistIds.size > 0) {
-    const artArr = Array.from(syntheticArtistIds);
-    const { error: delArtistsErr } = await client
+  // I. artist_external_ids & artists
+  if (artArr.length > 0) {
+    const { error: extErr } = await client
+      .from('artist_external_ids')
+      .delete()
+      .in('artist_id', artArr);
+    if (extErr)
+      throw new Error(
+        `Failed to delete artist_external_ids: ${extErr.message}`,
+      );
+    const { error: artDelErr } = await client
       .from('artists')
       .delete()
       .in('id', artArr);
-    if (delArtistsErr) {
-      console.warn(
-        `Warning deleting synthetic artists: ${delArtistsErr.message}`,
-      );
-    } else {
-      console.log(`Deleted ${artArr.length} synthetic artists.`);
-    }
+    if (artDelErr)
+      throw new Error(`Failed to delete artists: ${artDelErr.message}`);
+    console.log(`Deleted ${artArr.length} synthetic artists.`);
   }
 
-  // Step H: Delete synthetic venues
-  if (syntheticVenueIds.size > 0) {
-    const venArr = Array.from(syntheticVenueIds);
-    const { error: delVenuesErr } = await client
+  // J. venue_aliases & venues
+  if (venArr.length > 0) {
+    const { error: aliasErr } = await client
+      .from('venue_aliases')
+      .delete()
+      .in('venue_id', venArr);
+    if (aliasErr)
+      throw new Error(`Failed to delete venue_aliases: ${aliasErr.message}`);
+    const { error: venDelErr } = await client
       .from('venues')
       .delete()
       .in('id', venArr);
-    if (delVenuesErr) {
-      console.warn(
-        `Warning deleting synthetic venues: ${delVenuesErr.message}`,
-      );
-    } else {
-      console.log(`Deleted ${venArr.length} synthetic venues.`);
-    }
+    if (venDelErr)
+      throw new Error(`Failed to delete venues: ${venDelErr.message}`);
+    console.log(`Deleted ${venArr.length} synthetic venues.`);
   }
 
-  // Step I: Delete synthetic sources
-  if (syntheticSourceIds.size > 0) {
-    const srcArr = Array.from(syntheticSourceIds);
-    const { error: delSourcesErr } = await client
+  // K. dynamic test sources
+  if (srcArr.length > 0) {
+    const { error: srcDelErr } = await client
       .from('sources')
       .delete()
       .in('id', srcArr);
-    if (delSourcesErr) {
-      console.warn(
-        `Warning deleting synthetic sources: ${delSourcesErr.message}`,
-      );
-    } else {
-      console.log(`Deleted ${srcArr.length} synthetic sources.`);
-    }
+    if (srcDelErr)
+      throw new Error(`Failed to delete sources: ${srcDelErr.message}`);
+    console.log(`Deleted ${srcArr.length} synthetic sources.`);
   }
 
   console.log('\n[CLEANUP COMPLETED SUCCESSFULLY]');

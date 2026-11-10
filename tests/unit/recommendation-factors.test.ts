@@ -450,6 +450,69 @@ describe('Recommendation Factors (Independent Factor Unit Tests)', () => {
       expect(dislikeRes.factorScore.score).toBe(0);
       expect(dislikeRes.suppressionReason).toContain('Not Interested');
     });
+
+    it('Finding 5 verification: proves explicit Interested (55) reduces automated Spotify top-artist affinity (70) per Invariant 11', () => {
+      const spotifyTopArtists: SpotifyTopArtist[] = [
+        {
+          id: 'spotify-rotation-star',
+          name: 'Rotation Star',
+          rank: 1, // #1 on Spotify: automated affinity = 70
+          genres: ['indie'],
+          imageUrl: null,
+          spotifyUrl: 'https://open.spotify.com/artist/spotify-rotation-star',
+          popularity: 80,
+          trend: 'rising' as const,
+          timeRange: 'medium_term',
+        },
+      ];
+
+      // 1. Without manual preference: artist receives automated top-5 listening affinity score of 70
+      const autoRes = calculateArtistInterestFactor(
+        [
+          {
+            id: 'canon-rotation-star',
+            name: 'Rotation Star',
+            spotifyArtistId: 'spotify-rotation-star',
+          },
+        ],
+        [],
+        spotifyTopArtists,
+      );
+      expect(autoRes.factorScore.score).toBe(70);
+
+      // 2. User manually marks artist as 'interested' (score 55):
+      // Per Invariant 11, explicit preference strictly overrides inferred signal, reducing score from 70 to 55
+      const manualInterestedPref: UserArtistPreference = {
+        id: 'pref-interested-rotation-star',
+        userId: 'user-1',
+        artistId: 'canon-rotation-star',
+        artistName: 'Rotation Star',
+        normalizedArtistName: 'rotation star',
+        preferenceLevel: 'interested',
+        spotifyArtistId: 'spotify-rotation-star',
+        createdAt: '2026-10-01T00:00:00Z',
+        updatedAt: '2026-10-01T00:00:00Z',
+      };
+
+      const manualRes = calculateArtistInterestFactor(
+        [
+          {
+            id: 'canon-rotation-star',
+            name: 'Rotation Star',
+            spotifyArtistId: 'spotify-rotation-star',
+          },
+        ],
+        [manualInterestedPref],
+        spotifyTopArtists,
+      );
+      expect(manualRes.factorScore.score).toBe(55);
+      expect(manualRes.factorScore.score).toBeLessThan(
+        autoRes.factorScore.score,
+      );
+      expect(manualRes.factorScore.explanation).toContain(
+        'Interested in Rotation Star',
+      );
+    });
   });
 
   describe('Factor 2: Distance & Travel Utility', () => {

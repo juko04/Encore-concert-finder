@@ -443,7 +443,10 @@ test.describe('Discover Page E2E Suite', () => {
     await page.getByTestId('password-input').fill(testPassword);
     await page.getByTestId('auth-submit-btn').click();
 
-    // 2. Wait for navigation to /discover
+    // 2. Wait for navigation away from /login to /discover
+    await page.waitForURL((url) => url.pathname === '/discover', {
+      timeout: 15000,
+    });
     await expect(page).toHaveURL(/\/discover/);
 
     // 3. Confirm discover controls toolbar is visible

@@ -78,6 +78,13 @@ describe('Supabase Integration: Ticketmaster Ingestion & Canonicalization', () =
   let candidateRepo: SupabaseEventCandidateRepository;
   let catalogRepo: SupabaseCatalogRepository;
 
+  const trackedCreated = {
+    rawIngestIds: new Set<string>(),
+    candidateIds: new Set<string>(),
+    eventIds: new Set<string>(),
+    artistIds: new Set<string>(),
+  };
+
   function ensureDbAvailable(): boolean {
     if (!isDbAvailable || !adminClient) {
       if (process.env.CI) {
@@ -188,6 +195,18 @@ describe('Supabase Integration: Ticketmaster Ingestion & Canonicalization', () =
     expect(result.candidatesPersisted).toBeGreaterThan(0);
     expect(result.canonicalEventsCreated).toBeGreaterThan(0);
 
+    for (const id of result.persistedEventIds) {
+      trackedCreated.eventIds.add(id);
+    }
+    for (const cand of result.candidates) {
+      if (cand.id) {
+        trackedCreated.candidateIds.add(cand.id);
+      }
+      if (cand.rawIngestId) {
+        trackedCreated.rawIngestIds.add(cand.rawIngestId);
+      }
+    }
+
     // Verify canonical events are listed in catalog
     const events = await catalogRepo.listEvents({ limit: 10 });
     expect(events.length).toBeGreaterThan(0);
@@ -246,6 +265,18 @@ describe('Supabase Integration: Ticketmaster Ingestion & Canonicalization', () =
     expect(reprocessRun.candidatesReused).toBeGreaterThan(0);
     expect(reprocessRun.canonicalEventsCreated).toBe(0);
     expect(reprocessRun.canonicalEventsMatched).toBeGreaterThan(0);
+
+    for (const id of reprocessRun.persistedEventIds) {
+      trackedCreated.eventIds.add(id);
+    }
+    for (const cand of reprocessRun.candidates) {
+      if (cand.id) {
+        trackedCreated.candidateIds.add(cand.id);
+      }
+      if (cand.rawIngestId) {
+        trackedCreated.rawIngestIds.add(cand.rawIngestId);
+      }
+    }
   });
 
   it('successfully enriches external IDs for matched artist in PostgreSQL stored procedure', async () => {
@@ -266,6 +297,7 @@ describe('Supabase Integration: Ticketmaster Ingestion & Canonicalization', () =
 
     expect(artistError).toBeNull();
     expect(artist?.id).toBeDefined();
+    trackedCreated.artistIds.add(artist!.id);
 
     // 2. Execute canonicalization transaction enriching the artist with a Ticketmaster external ID
     const externalId = `TM-ENRICH-${testNonce}`;
@@ -293,6 +325,7 @@ describe('Supabase Integration: Ticketmaster Ingestion & Canonicalization', () =
 
     const res = await catalogRepo.applyCanonicalization(payload);
     expect(res.eventId).toBeDefined();
+    if (res.eventId) trackedCreated.eventIds.add(res.eventId);
 
     // 3. Verify external ID record was committed to artist_external_ids
     const { data: extRecords, error: extError } = await adminClient!
@@ -323,6 +356,7 @@ describe('Supabase Integration: Ticketmaster Ingestion & Canonicalization', () =
 
     expect(artistError).toBeNull();
     expect(artist?.id).toBeDefined();
+    trackedCreated.artistIds.add(artist!.id);
 
     const externalId = `TM-IDEM-${testNonce}`;
     const payload: CanonicalizationPayload = {
@@ -349,10 +383,12 @@ describe('Supabase Integration: Ticketmaster Ingestion & Canonicalization', () =
     // First application
     const res1 = await catalogRepo.applyCanonicalization(payload);
     expect(res1.eventId).toBeDefined();
+    if (res1.eventId) trackedCreated.eventIds.add(res1.eventId);
 
     // Replay with identical (artist_id, provider, external_id)
     const res2 = await catalogRepo.applyCanonicalization(payload);
     expect(res2.eventId).toBeDefined();
+    if (res2.eventId) trackedCreated.eventIds.add(res2.eventId);
 
     // Verify row count in artist_external_ids remains exactly 1
     const { data: extRecords } = await adminClient!
@@ -381,6 +417,7 @@ describe('Supabase Integration: Ticketmaster Ingestion & Canonicalization', () =
       .select('id')
       .single();
     expect(a1Error).toBeNull();
+    trackedCreated.artistIds.add(artist1!.id);
 
     const sharedExternalId = `TM-SHARED-${testNonce}`;
     const { error: ext1Error } = await adminClient!
@@ -402,6 +439,7 @@ describe('Supabase Integration: Ticketmaster Ingestion & Canonicalization', () =
       .select('id')
       .single();
     expect(a2Error).toBeNull();
+    trackedCreated.artistIds.add(artist2!.id);
 
     // 3. Attempt canonicalization transaction with a new event and venue, attempting to assign artist 1's external ID to artist 2
     const conflictingEventName = `Conflicting Concert ${testNonce}`;
@@ -472,63 +510,267 @@ describe('Supabase Integration: Ticketmaster Ingestion & Canonicalization', () =
 
   afterAll(async () => {
     if (!adminClient || !isDbAvailable) return;
-    try {
-      // Find events with suiteNonce or test patterns
-      const { data: testEvents } = await adminClient
+
+    const eventIds = Array.from(trackedCreated.eventIds);
+    const candidateIds = Array.from(trackedCreated.candidateIds);
+    const rawIngestIds = Array.from(trackedCreated.rawIngestIds);
+    const trackedArtistIds = Array.from(trackedCreated.artistIds);
+
+    // Also include any events or candidates namespaced with this suite's unique nonce
+    const { data: nonceEvents, error: nonceEvErr } = await adminClient
+      .from('events')
+      .select('id')
+      .ilike('name', `%[${suiteNonce}]%`);
+    if (nonceEvErr) {
+      throw new Error(
+        `Failed to query nonce events in cleanup: ${nonceEvErr.message}`,
+      );
+    }
+    if (nonceEvents) {
+      for (const ne of nonceEvents) eventIds.push(ne.id);
+    }
+
+    const { data: nonceCandidates, error: nonceCandErr } = await adminClient
+      .from('event_candidates')
+      .select('id, raw_ingest_id')
+      .ilike('title', `%[${suiteNonce}]%`);
+    if (nonceCandErr) {
+      throw new Error(
+        `Failed to query nonce candidates in cleanup: ${nonceCandErr.message}`,
+      );
+    }
+    if (nonceCandidates) {
+      for (const nc of nonceCandidates) {
+        candidateIds.push(nc.id);
+        if (nc.raw_ingest_id) rawIngestIds.push(nc.raw_ingest_id);
+      }
+    }
+
+    const uniqueEventIds = Array.from(new Set(eventIds));
+    const uniqueCandidateIds = Array.from(new Set(candidateIds));
+    const uniqueRawIngestIds = Array.from(new Set(rawIngestIds));
+
+    // Identify linked artists and venues before deleting the canonical events
+    let linkedArtistIds = [...trackedArtistIds];
+    let linkedVenueIds: string[] = [];
+
+    if (uniqueEventIds.length > 0) {
+      const { data: ea, error: eaErr } = await adminClient
+        .from('event_artists')
+        .select('artist_id')
+        .in('event_id', uniqueEventIds);
+      if (eaErr) {
+        throw new Error(
+          `Failed to query event_artists in cleanup: ${eaErr.message}`,
+        );
+      }
+      if (ea) {
+        for (const r of ea) linkedArtistIds.push(r.artist_id);
+      }
+
+      const { data: ev, error: evErr } = await adminClient
         .from('events')
-        .select('id')
-        .or(
-          `name.ilike.%[${suiteNonce}]%,name.ilike.Enrichment Concert%,name.ilike.Idempotent Concert%,name.ilike.Conflicting Concert%`,
+        .select('venue_id')
+        .in('id', uniqueEventIds);
+      if (evErr) {
+        throw new Error(
+          `Failed to query events for venue_ids in cleanup: ${evErr.message}`,
         );
-      if (testEvents && testEvents.length > 0) {
-        const evIds = testEvents.map((e) => e.id);
-        await adminClient
-          .from('event_field_evidence')
-          .delete()
-          .in('event_id', evIds);
-        await adminClient
-          .from('event_ticket_links')
-          .delete()
-          .in('event_id', evIds);
-        await adminClient.from('event_artists').delete().in('event_id', evIds);
-        await adminClient.from('events').delete().in('id', evIds);
       }
-      // Candidates with suiteNonce
-      const { data: testCandidates } = await adminClient
+      if (ev) {
+        linkedVenueIds = Array.from(
+          new Set(ev.map((r) => r.venue_id).filter(Boolean) as string[]),
+        );
+      }
+    }
+
+    // Also include any artists created with suiteNonce in their name
+    const { data: nonceArtists, error: nonceArtErr } = await adminClient
+      .from('artists')
+      .select('id')
+      .ilike('name', `%[${suiteNonce}]%`);
+    if (nonceArtErr) {
+      throw new Error(
+        `Failed to query nonce artists in cleanup: ${nonceArtErr.message}`,
+      );
+    }
+    if (nonceArtists) {
+      for (const na of nonceArtists) linkedArtistIds.push(na.id);
+    }
+
+    const uniqueArtistIds = Array.from(new Set(linkedArtistIds));
+
+    // 1. Delete event_field_evidence
+    if (uniqueEventIds.length > 0) {
+      const { error: delEvidenceErr } = await adminClient
+        .from('event_field_evidence')
+        .delete()
+        .in('event_id', uniqueEventIds);
+      if (delEvidenceErr) {
+        throw new Error(
+          `Failed to delete event_field_evidence by event_id: ${delEvidenceErr.message}`,
+        );
+      }
+    }
+    if (uniqueCandidateIds.length > 0) {
+      const { error: delEvidenceCandErr } = await adminClient
+        .from('event_field_evidence')
+        .delete()
+        .in('candidate_id', uniqueCandidateIds);
+      if (delEvidenceCandErr) {
+        throw new Error(
+          `Failed to delete event_field_evidence by candidate_id: ${delEvidenceCandErr.message}`,
+        );
+      }
+    }
+
+    // 2. Delete event_ticket_links
+    if (uniqueEventIds.length > 0) {
+      const { error: delTlErr } = await adminClient
+        .from('event_ticket_links')
+        .delete()
+        .in('event_id', uniqueEventIds);
+      if (delTlErr) {
+        throw new Error(
+          `Failed to delete event_ticket_links: ${delTlErr.message}`,
+        );
+      }
+    }
+
+    // 3. Delete event_artists
+    if (uniqueEventIds.length > 0) {
+      const { error: delEaErr } = await adminClient
+        .from('event_artists')
+        .delete()
+        .in('event_id', uniqueEventIds);
+      if (delEaErr) {
+        throw new Error(`Failed to delete event_artists: ${delEaErr.message}`);
+      }
+    }
+
+    // 4. Delete event_sources
+    if (uniqueEventIds.length > 0) {
+      const { error: delEsErr } = await adminClient
+        .from('event_sources')
+        .delete()
+        .in('event_id', uniqueEventIds);
+      if (delEsErr) {
+        throw new Error(
+          `Failed to delete event_sources by event_id: ${delEsErr.message}`,
+        );
+      }
+    }
+    if (uniqueCandidateIds.length > 0) {
+      const { error: delEsCandErr } = await adminClient
+        .from('event_sources')
+        .delete()
+        .in('candidate_id', uniqueCandidateIds);
+      if (delEsCandErr) {
+        throw new Error(
+          `Failed to delete event_sources by candidate_id: ${delEsCandErr.message}`,
+        );
+      }
+    }
+
+    // 5. Delete events
+    if (uniqueEventIds.length > 0) {
+      const { error: delEventsErr } = await adminClient
+        .from('events')
+        .delete()
+        .in('id', uniqueEventIds);
+      if (delEventsErr) {
+        throw new Error(`Failed to delete events: ${delEventsErr.message}`);
+      }
+    }
+
+    // 6. Delete event_candidates
+    if (uniqueCandidateIds.length > 0) {
+      const { error: delCandErr } = await adminClient
         .from('event_candidates')
-        .select('id, raw_ingest_id')
-        .or(
-          `title.ilike.%[${suiteNonce}]%,title.ilike.Enrichment Concert%,title.ilike.Idempotent Concert%`,
+        .delete()
+        .in('id', uniqueCandidateIds);
+      if (delCandErr) {
+        throw new Error(
+          `Failed to delete event_candidates: ${delCandErr.message}`,
         );
-      if (testCandidates && testCandidates.length > 0) {
-        const candIds = testCandidates.map((c) => c.id);
-        const rawIds = testCandidates
-          .map((c) => c.raw_ingest_id)
-          .filter(Boolean);
-        await adminClient
-          .from('event_field_evidence')
-          .delete()
-          .in('candidate_id', candIds);
-        await adminClient.from('event_candidates').delete().in('id', candIds);
-        if (rawIds.length > 0) {
-          await adminClient.from('raw_ingests').delete().in('id', rawIds);
-        }
       }
-      // Artists with suiteNonce or test patterns
-      const { data: testArtists } = await adminClient
-        .from('artists')
-        .select('id')
-        .or(`name.ilike.%[${suiteNonce}]%,name.ilike.Test % Artist%`);
-      if (testArtists && testArtists.length > 0) {
-        const artIds = testArtists.map((a) => a.id);
-        await adminClient
+    }
+
+    // 7. Delete raw_ingests
+    if (uniqueRawIngestIds.length > 0) {
+      const { error: delRawErr } = await adminClient
+        .from('raw_ingests')
+        .delete()
+        .in('id', uniqueRawIngestIds);
+      if (delRawErr) {
+        throw new Error(`Failed to delete raw_ingests: ${delRawErr.message}`);
+      }
+    }
+
+    // 8. Delete test artists and their external IDs (strictly checking remaining references)
+    for (const artistId of uniqueArtistIds) {
+      const { count: remainingEventCount, error: countErr } = await adminClient
+        .from('event_artists')
+        .select('id', { count: 'exact', head: true })
+        .eq('artist_id', artistId);
+      if (countErr) {
+        throw new Error(
+          `Failed to check remaining event_artists: ${countErr.message}`,
+        );
+      }
+
+      if (remainingEventCount === 0) {
+        const { error: extErr } = await adminClient
           .from('artist_external_ids')
           .delete()
-          .in('artist_id', artIds);
-        await adminClient.from('artists').delete().in('id', artIds);
+          .eq('artist_id', artistId);
+        if (extErr) {
+          throw new Error(
+            `Failed to delete artist_external_ids: ${extErr.message}`,
+          );
+        }
+
+        const { error: artErr } = await adminClient
+          .from('artists')
+          .delete()
+          .eq('id', artistId);
+        if (artErr) {
+          throw new Error(`Failed to delete artist: ${artErr.message}`);
+        }
       }
-    } catch {
-      // Safe cleanup fallback
+    }
+
+    // 9. Clean up test venues (if 0 remaining events)
+    for (const venueId of linkedVenueIds) {
+      const { count: remainingVenueCount, error: countErr } = await adminClient
+        .from('events')
+        .select('id', { count: 'exact', head: true })
+        .eq('venue_id', venueId);
+      if (countErr) {
+        throw new Error(
+          `Failed to check remaining events for venue: ${countErr.message}`,
+        );
+      }
+
+      if (remainingVenueCount === 0) {
+        const { error: aliasErr } = await adminClient
+          .from('venue_aliases')
+          .delete()
+          .eq('venue_id', venueId);
+        if (aliasErr) {
+          throw new Error(
+            `Failed to delete venue_aliases: ${aliasErr.message}`,
+          );
+        }
+
+        const { error: venErr } = await adminClient
+          .from('venues')
+          .delete()
+          .eq('id', venueId);
+        if (venErr) {
+          throw new Error(`Failed to delete venue: ${venErr.message}`);
+        }
+      }
     }
   });
 });
