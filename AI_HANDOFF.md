@@ -7,67 +7,54 @@ Durable architecture records belong in [`docs/architecture/`](docs/architecture/
 
 ## Current Status & Location
 
-- **Current Milestone:** **Phase 3 — Colorado Venue Ingestion**.
-- **Active Specification:** Phase 3, PR #15 Scope & Requirements (Boulder Independent Music Venues).
-- **Current Branch:** `feature/phase-3-boulder-independent-venues`
-- **Active Implementing Agent:** Google Antigravity
-- **Current Task:** Phase 3, PR #15: Boulder Independent Music Venues: Velvet Elk Lounge & Roots Music Project.
-- **Implementation & Review Remediation Completed:**
-  1. *Source Feasibility & Architecture Discovery:*
-     - **Velvet Elk Lounge (`https://www.velvetelklounge.com/events/`):** Built on BentoBox platform. Primary calendar lists cards (`li.card`) with event titles, date headings, and URLs. Ingestion retrieves event detail pages (`extractVelvetElkDetailUrls`, conservative limit of 15) to parse Schema.org `Event` JSON-LD and HTML strong tags for verified show times (`startsAt`, instant precision) and direct Etix ticket links (`https://www.etix.com/ticket/p/...`), retaining listing card data as fallback.
-     - **Roots Music Project (`https://www.rootsmusicproject.org/`):** Public calendar powered by Eventbrite organizer profile (`https://www.eventbrite.com/o/roots-music-project-28110994095`, promoted as `RMPtix.com`), serving full server-rendered `__NEXT_DATA__` JSON with exact start times, pricing, verified free event flags, and Boulder venue geolocation. Secondary Cheerio/JSON-LD fallback supports alternate presentations.
-  2. *Detail Page Enrichment & Fallback Discipline:*
-     - `VelvetElkAdapter` fetches calendar listing and individual event detail subpages concurrently using shared HTTP client.
-     - `VelvetElkAdapter.parse` matches card listings with detail subpages to enrich events with exact start times and Etix ticket links while maintaining listing cards as fallback when details are unavailable.
-     - Preserves raw-source provenance (`rawIngestId` points to the detail page `RawIngest`), eliminates duplicate candidate observations, and preserves idempotency on repeat runs.
-  3. *Elimination of False Artist Identities at Roots:*
-     - Narrow rule (`isRootsEventSeriesOrShowcase`) detects event series, DJ nights, and open showcases (`OPEN DECKS: Boulder's Free All-Ages DJ Night`, `CU Student Songwriter's Showcase`, `Roots Underground`).
-     - Preserves full event title, local start date, exact start time, ticket URL, and verified free admission (`eventKind: 'free_event'`, `$0` price), while producing empty artists array (`artists: []`).
-     - Safely routes artist-unspecified events to `needs_review` with reason `missing_artist_identity`. Zero fabricated artist entities.
-  4. *Bounded Eventbrite Pagination Investigation:*
-     - Investigated `upcomingEventsTotal: 13` vs 12 returned in initial SSR `__NEXT_DATA__`.
-     - Confirmed Eventbrite's SSR endpoint ignores `?page=2`. Fetching additional pages requires reverse-engineering private CSRF-authenticated client-side GraphQL RPCs, which was avoided to preserve security boundaries. Documented coverage limit as future technical debt.
-  5. *Configuration & Registry:*
-     - Added `VELVET_ELK_CONFIG`, `ROOTS_MUSIC_PROJECT_CONFIG`, and `BOULDER_VENUE_CONFIGS` in `lib/sources/venue/source-registry.ts`.
-     - Registered Boulder venues in `ALL_SUPPORTED_VENUE_CONFIGS` and updated ingestion pipeline dispatch.
-  6. *Cancellation Preservation:*
-     - Explicit cancellations (e.g. `November 20th, Robert Ellis with Wheelwright (CANCELLED)`) are captured in `rawPayload.isCanceled`, `rawPayload.status: 'cancelled'`, and `resolutionProvenance.status: 'cancelled'`, persisting with canonical `status: 'cancelled'`.
-  7. *Venue CLI Extensions:*
-     - Extended `scripts/ingest-venue.ts` to support `--venue=velvetelk`, `--venue=roots`, `--venue=all-boulder`, and updated `--venue=all` to execute all 6 Denver + Boulder venues with consolidated summary and non-zero exit code on failure.
-  8. *Comprehensive Unit & Pipeline Test Suites:*
-     - `tests/unit/boulder-venues-parser.test.ts` (17 tests, including URL security & format verification)
-     - `tests/unit/boulder-venues-adapter.test.ts` (11 tests, including redirect pre-validation preventing follow-up requests)
-     - `tests/unit/boulder-venues-pipeline.test.ts` (6 tests)
-     - `tests/unit/venue-http-client.test.ts` (8 tests, including redirect destination pre-validation, same-site redirect following, and redirect bounds)
-  9. *Permanent Multi-Agent Development Workflow:*
-     - Established reusable, permanent multi-agent workflow specification in `docs/development/multi-agent-workflow.md`.
-     - Documented role definitions (Lead Agent Coordinator, Implementation Workers, Verification Specialist), file ownership boundaries, and verification standards in `AGENTS.md` and `docs/index.md`.
-  10. *Velvet Elk Detail URL Security & Pre-Request Redirect Protection:*
-      - Implemented `isAllowedVelvetElkDetailUrl` restricting automatic detail-page fetching strictly to official Velvet Elk event subpaths (`/event/<slug>/`, `/events/<slug>/` on `velvetelklounge.com` / `www.velvetelklounge.com`).
-      - Hardened `extractVelvetElkDetailUrls` to reject external ticketing links (Etix), third-party/malicious domains, calendar roots, and non-event paths, while preserving external ticket URLs on candidate objects.
-      - Hardened `VenueHttpClient` with request-scoped `validateRedirectUrl` and bounded `maxRedirects`, validating redirect destinations *before following them* and throwing immediately on unapproved destinations without triggering follow-up network requests, while preserving standard `redirect: 'follow'` for unrelated adapters.
-- **Verification State:** All Suites Green & Production Ready:
-  - Branch: `feature/phase-3-boulder-independent-venues`
-  - Pull Request: [PR #15](https://github.com/juko04/Encore-concert-finder/pull/15)
-  - Unit Tests: **645/645 passed across 50 test suites** (`npm test`) (+38 tests over PR #14)
-  - Production Build: Next.js production build clean (`npm run build`, 0 errors, 14 routes optimized)
-  - Code Quality: Prettier format clean (`npm run format:check`), ESLint clean (0 warnings, 0 errors), strict TypeScript clean (`tsc --noEmit`, 0 errors)
-  - Live & Fixture CLI: Verified dry-run, live execution, and multi-venue batch runner for all Boulder and Denver independent venues. Live Velvet Elk fetch enriches 6 detail subpages with instant precision and direct Etix links.
-  - Integration & DB Persistence: Host Docker/local Supabase environment is currently not running; full database integration and RLS coverage verified via GitHub Actions CI.
-- **Immediate Next Action:** Awaiting independent code review. Do NOT auto-merge PR #15 autonomously. Upon merge to `main`, proceed to **Phase 3 PR #16: Z2 Entertainment Venues (Boulder Theater, Fox Theatre, Aggie Theatre)**.
-- **Phase 3 Status:** **ACTIVE — PR #15 IMPLEMENTATION COMPLETE & 100% VERIFIED.**
+- **Current Milestone:** **Local Data Cleanup & Spotify Personalization Verification**.
+- **Active Branch:** `fix/local-data-cleanup-spotify-verification`
+- **Active Implementing Agent:** Google Antigravity (Lead Agent Coordinator)
+- **Current Task:** Local database cleanup of synthetic testing artifacts, test fixture leakage prevention, Spotify listening-affinity recommendation bridge, and genuine Colorado venue verification.
+- **Completed Work:**
+  1. *Problem A — Synthetic Catalog Data Cleanup:*
+     - Built `scripts/cleanup-synthetic-data.ts` with `--dry-run` and `--apply` flags, destination guards (`assertSafeDatabaseTarget`), backup before deletion (`.backup/`), and foreign-key-safe deletion order (`event_field_evidence` -> `event_ticket_links` -> `event_artists` -> `events` -> `event_candidates` -> `raw_ingests` -> unreferenced synthetic artists -> unreferenced synthetic venues -> synthetic sources). Added npm script `"cleanup:synthetic"`.
+     - Preserved user account (`juliankotara@gmail.com`), encrypted Spotify OAuth credentials, and baseline seed venues/sources.
+     - Safely removed all 18 synthetic test events, 10 raw ingests, 16 candidates, 18 event artists, 8 ticket links, 119 field evidence rows, 19 test artists, and 3 test venues.
+     - Added targeted `afterAll` teardown hooks to both `tests/integration/golden-path.test.ts` and `tests/integration/ticketmaster-canonicalization.test.ts`. Verified both tests run green and leave 0 leaked events or candidates.
+  2. *Problem B — Spotify Personalization Bridge:*
+     - Verified Spotify connection works and returns live top artists (John Summit, Dom Dolla, Cloonee, Bella Ora, Tate McRae, Mac Miller, Post Malone, it's murph).
+     - Confirmed that prior to this task, Spotify top artists were only displayed on `/profile/taste` for manual import via "+ Add to Interests" into `user_artist_preferences`; Discover never queried or scored Spotify top artists.
+     - Built `lib/sources/spotify/affinity-service.ts` with `getActiveSpotifyTopArtistsForUser` (5-minute in-memory cache, fail-closed handling).
+     - Updated recommendation engine and factor scoring (`lib/recommendation/factors/artist-interest.ts`): scores Spotify top artists with tiered listening affinity (top 5 -> 70, top 10 -> 65, top 20 -> 60) when no explicit manual preference exists.
+     - Preserved Invariant 11: explicit manual user preferences (`user_artist_preferences`) strictly take precedence (`favorite`=100, `like`=75, `interested`=55, `dislike`=0 suppresses).
+     - Updated explainer (`lib/recommendation/explainer.ts`) to label matches transparently as `🎧 Spotify top artist (#rank in your listening history)`.
+     - Updated UI copy in `components/discover/PersonalizedDiscoverContainer.tsx` and `components/taste/SpotifyTastePreview.tsx` to clarify that Spotify listening history automatically influences recommendations, while "+ Add to Interests" is for explicit priority promotion.
+  3. *Problem C — Real Concert Inventory Ingestion & Verification:*
+     - Ingested genuine Colorado venue inventory across 6 venues:
+       - Cervantes' Masterpiece Ballroom (55 events) & Cervantes' Other Side (37 events)
+       - Globe Hall (41 events)
+       - Larimer Lounge (36 events) + Treehouse (10) + Campground (9)
+       - Lost Lake Lounge (35 events)
+       - Velvet Elk Lounge (5 events)
+       - Roots Music Project (6 events)
+       - Other Colorado venues (Red Rocks 3, Ogden 3, Mission Ballroom 2, Black Sheep 1, Fiddlers Green 1)
+       - Total: **244 genuine upcoming canonical events**, 241 real ticket links, 590 artist billings, 579 artists, 17 venues, 3,380 verified field evidences. Zero synthetic test fixtures remain.
+     - Updated `tests/e2e/discover.spec.ts` date offsets to ensure E2E assertions test real catalog pagination behavior cleanly without collisions.
+- **Verification Suite Results (100% Green):**
+  - `npm run format:check`: PASS (All files adhere to Prettier style)
+  - `npm run lint`: PASS (0 warnings, 0 errors)
+  - `npm run typecheck`: PASS (`tsc --noEmit`, 0 errors)
+  - `npm test`: PASS (50 test suites, 648 passed)
+  - `npm run test:integration`: PASS (8 test suites, 59 passed against local Supabase)
+  - `npm run build`: PASS (Next.js production build clean, 9/9 routes compiled)
+  - `npm run test:e2e`: PASS (11 Playwright browser tests passed)
+  - `npm run cleanup:synthetic -- --dry-run`: PASS (0 leaked events, 246 genuine events preserved)
+- **Cumulative Diff Export:**
+  - Exported to `./encore-local-cleanup-spotify-verification.diff` (1,611 lines, in project repository root).
+- **Next Immediate Action:**
+  - Review changes and merge `fix/local-data-cleanup-spotify-verification` or proceed to next roadmap phase.
 
 ---
 
-## What the Next Agent Must Know
+## Key Invariants Preserved
 
-1. **Diff Export Location Convention:**
-   - Cumulative diffs must ONLY be saved in the project repository root (`./encore-phase3-boulder-venues-pr15-final.diff`), never on the Desktop (`~/Desktop`).
-2. **Next Milestone Priority (PR #16):**
-   - The agreed priority for PR #16 is **Z2 Entertainment Venues** (Boulder Theater, Fox Theatre, Aggie Theatre) utilizing their shared calendar engine (`z2ent.com/events`) and AXS ticketing.
-3. **Eventbrite / Next.js Architecture for Community Venues:**
-   - Roots Music Project embeds an Eventbrite calendar on their site. Fetching their Eventbrite organizer URL directly yields structured `__NEXT_DATA__` JSON with clean venue geocodes, exact timestamps, and ticket tiers.
-4. **BentoBox Architecture:**
-   - Velvet Elk Lounge runs on BentoBox. Main calendar lists cards with title and date heading; detail pages contain Schema.org `Event` JSON-LD and direct Etix ticket links.
-5. **No Synthetic Fallbacks:**
-   - Never fabricate artist names or ticket links for non-music events or bar nights. Let them route cleanly to `needs_review`.
+1. **Safe Database Targets:** Cleanup script and tests enforce `assertSafeDatabaseTarget`; zero chance of accidental writes to remote or production databases.
+2. **Invariant 11 (Manual Preference Precedence):** Explicit user preferences (`favorite`, `like`, `interested`, `dislike`) strictly take precedence over inferred Spotify listening affinities. A disliked headliner always suppresses the show.
+3. **Fail-Closed Spotify Affinity:** Spotify network or token issues return an empty array and never crash the Discover feed.
+4. **No Synthetic Data Pollution:** Integration tests cleanly tear down all test entities in `afterAll` hooks.
