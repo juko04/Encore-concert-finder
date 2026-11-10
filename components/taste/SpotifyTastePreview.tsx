@@ -82,8 +82,8 @@ export function SpotifyTastePreview({
             )}
           </div>
           <p className="mt-0.5 text-xs text-zinc-400">
-            Compare your active rotation across time horizons and incorporate
-            artists into your live concert profile.
+            Your Spotify rotation automatically ranks concerts. Add explicit
+            Favorite or Liked preferences to give artists highest priority.
           </p>
         </div>
 
@@ -140,13 +140,12 @@ export function SpotifyTastePreview({
           <span className="text-base">✦</span>
           <div>
             <strong className="font-semibold text-indigo-100">
-              Recency-Weighted Taste Hypothesis (PR #10 Preview):
+              Recency-Weighted Taste Hypothesis:
             </strong>{' '}
-            Listening recency signals distinct concert intent. Rising artists
-            (heavy 4-week listening) reflect immediate discovery momentum,
-            whereas consistent staples indicate enduring multi-year affinity. In
-            PR #10, this is surfaced for intentional manual review; automated
-            recommendation scoring will build on this in PR #11.
+            Your active Spotify rotation automatically informs concert
+            recommendation scores. You can optionally add any artist below to an
+            explicit preference tier (★ Favorite / ♥ Like) to give them
+            guaranteed priority over your general listening rotation.
           </div>
         </div>
       </div>

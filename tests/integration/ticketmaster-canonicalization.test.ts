@@ -1,4 +1,4 @@
-import { beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { execSync } from 'node:child_process';
 import { SupabaseSourceRepository } from '@/lib/repositories/source-repository';
@@ -468,5 +468,67 @@ describe('Supabase Integration: Ticketmaster Ingestion & Canonicalization', () =
       .eq('external_id', sharedExternalId);
     expect(artist1Ext?.length).toBe(1);
     expect(artist1Ext![0].artist_id).toBe(artist1!.id);
+  });
+
+  afterAll(async () => {
+    if (!adminClient || !isDbAvailable) return;
+    try {
+      // Find events with suiteNonce or test patterns
+      const { data: testEvents } = await adminClient
+        .from('events')
+        .select('id')
+        .or(
+          `name.ilike.%[${suiteNonce}]%,name.ilike.Enrichment Concert%,name.ilike.Idempotent Concert%,name.ilike.Conflicting Concert%`,
+        );
+      if (testEvents && testEvents.length > 0) {
+        const evIds = testEvents.map((e) => e.id);
+        await adminClient
+          .from('event_field_evidence')
+          .delete()
+          .in('event_id', evIds);
+        await adminClient
+          .from('event_ticket_links')
+          .delete()
+          .in('event_id', evIds);
+        await adminClient.from('event_artists').delete().in('event_id', evIds);
+        await adminClient.from('events').delete().in('id', evIds);
+      }
+      // Candidates with suiteNonce
+      const { data: testCandidates } = await adminClient
+        .from('event_candidates')
+        .select('id, raw_ingest_id')
+        .or(
+          `title.ilike.%[${suiteNonce}]%,title.ilike.Enrichment Concert%,title.ilike.Idempotent Concert%`,
+        );
+      if (testCandidates && testCandidates.length > 0) {
+        const candIds = testCandidates.map((c) => c.id);
+        const rawIds = testCandidates
+          .map((c) => c.raw_ingest_id)
+          .filter(Boolean);
+        await adminClient
+          .from('event_field_evidence')
+          .delete()
+          .in('candidate_id', candIds);
+        await adminClient.from('event_candidates').delete().in('id', candIds);
+        if (rawIds.length > 0) {
+          await adminClient.from('raw_ingests').delete().in('id', rawIds);
+        }
+      }
+      // Artists with suiteNonce or test patterns
+      const { data: testArtists } = await adminClient
+        .from('artists')
+        .select('id')
+        .or(`name.ilike.%[${suiteNonce}]%,name.ilike.Test % Artist%`);
+      if (testArtists && testArtists.length > 0) {
+        const artIds = testArtists.map((a) => a.id);
+        await adminClient
+          .from('artist_external_ids')
+          .delete()
+          .in('artist_id', artIds);
+        await adminClient.from('artists').delete().in('id', artIds);
+      }
+    } catch {
+      // Safe cleanup fallback
+    }
   });
 });

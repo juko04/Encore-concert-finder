@@ -1,4 +1,4 @@
-import { beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { execSync } from 'node:child_process';
 import { FakeVenueSourceAdapter } from '../fixtures/fake-source-adapter';
@@ -118,6 +118,23 @@ describe('Supabase Golden Path Integration: Full Ingestion & Canonicalization Pi
     candidateRepo = new SupabaseEventCandidateRepository(adminClient);
     catalogRepo = new SupabaseCatalogRepository(adminClient);
     coordinator = new CanonicalizationCoordinator(catalogRepo);
+
+    await adminClient.from('sources').upsert(
+      [
+        {
+          id: 'a0000000-0000-0000-0000-000000000001',
+          slug: 'fake-venue-adapter',
+          name: 'Fake Venue Source Adapter',
+          source_type: 'venue',
+          acquisition_method: 'structured_json',
+          base_url: 'https://venue.example.com',
+          reliability_score: 0.95,
+          active: true,
+          parser_version: '1.1.0',
+        },
+      ],
+      { onConflict: 'slug' },
+    );
   });
 
   it('core golden path: end-to-end multi-event ingestion, canonicalization, artist external ID roundtrip, rescheduling update, evidence preservation, and reassignment conflict rejection', async () => {
@@ -766,5 +783,96 @@ describe('Supabase Golden Path Integration: Full Ingestion & Canonicalization Pi
       .eq('raw_ingest_id', rawBatch.id);
 
     expect(dbCandidates?.length).toBe(2);
+  });
+
+  afterAll(async () => {
+    if (!adminClient || !isDbAvailable) return;
+    try {
+      // Find events linked to fake source or test names
+      const testNames = [
+        'Canyon Winds Live',
+        'The Mountain Echoes Live',
+        'Acoustic Sunday (Date Only)',
+        'Ghost Live - Tour A',
+        'Event 1',
+        'Event 2',
+      ];
+      const { data: testEvents } = await adminClient
+        .from('events')
+        .select('id')
+        .or(
+          `name.ilike.FK Test Event%,name.ilike.Atomic Concert Success%,name.ilike.Idempotent Concert%,name.ilike.Enrichment Concert%,name.ilike.%57cdb36c%,name.in.(${testNames.map((n) => `"${n}"`).join(',')})`,
+        );
+      if (testEvents && testEvents.length > 0) {
+        const evIds = testEvents.map((e) => e.id);
+        await adminClient
+          .from('event_field_evidence')
+          .delete()
+          .in('event_id', evIds);
+        await adminClient
+          .from('event_ticket_links')
+          .delete()
+          .in('event_id', evIds);
+        await adminClient.from('event_artists').delete().in('event_id', evIds);
+        await adminClient.from('events').delete().in('id', evIds);
+      }
+
+      // Delete test candidates & raw ingests
+      const { data: testIngests } = await adminClient
+        .from('raw_ingests')
+        .select('id')
+        .or(
+          `source_id.eq.${adapter.id},source_url.ilike.https://example%,source_url.ilike.https://venue.example%`,
+        );
+      if (testIngests && testIngests.length > 0) {
+        const rawIds = testIngests.map((r) => r.id);
+        const { data: testCandidates } = await adminClient
+          .from('event_candidates')
+          .select('id')
+          .in('raw_ingest_id', rawIds);
+        if (testCandidates && testCandidates.length > 0) {
+          const candIds = testCandidates.map((c) => c.id);
+          await adminClient
+            .from('event_field_evidence')
+            .delete()
+            .in('candidate_id', candIds);
+          await adminClient.from('event_candidates').delete().in('id', candIds);
+        }
+        await adminClient.from('raw_ingests').delete().in('id', rawIds);
+      }
+
+      // Delete test artists
+      const testArtists = [
+        'The Mountain Echoes',
+        'River Pines',
+        'Canyon Winds',
+        'Local Acoustic Duo',
+        'Ghost',
+        'Artist One',
+        'Artist Two',
+      ];
+      await adminClient
+        .from('artists')
+        .delete()
+        .or(
+          `name.ilike.%57cdb36c%,name.ilike.Test % Artist%,name.ilike.Success Artist%,name.in.(${testArtists.map((a) => `"${a}"`).join(',')})`,
+        );
+
+      // Delete test venues
+      await adminClient
+        .from('venues')
+        .delete()
+        .or(
+          'name.ilike.%57cdb36c%,name.ilike.Success Venue%,name.eq.Red Rock Amphitheatre',
+        );
+
+      // Delete test sources (only dynamic ones, not seed)
+      await adminClient
+        .from('sources')
+        .delete()
+        .or('id.in.(source-alpha-57cdb36c,source-beta-57cdb36c)');
+    } catch {
+      // Safe cleanup fallback
+    }
   });
 });

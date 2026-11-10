@@ -11,6 +11,7 @@ import type {
   UserArtistPreference,
 } from '@/lib/domain/user-preference';
 import type { RecommendationPreset, UserProfile } from '@/lib/domain/profile';
+import type { SpotifyTopArtist } from '@/lib/domain/spotify';
 
 export type ScoringPreset = RecommendationPreset;
 
@@ -44,6 +45,8 @@ export interface MatchedArtistInfo {
   score: number;
   isFavorite: boolean;
   isDisliked: boolean;
+  isSpotifyAffinity?: boolean;
+  spotifyRank?: number;
 }
 
 export interface ScoredEvent {
@@ -81,6 +84,7 @@ export interface ScoredEvent {
 export interface ScoringContext {
   userProfile?: UserProfile | null;
   artistPreferences: UserArtistPreference[];
+  spotifyTopArtists?: SpotifyTopArtist[];
   referenceDate?: string; // YYYY-MM-DD for deterministic time calculation
   referenceInstant?: Date | string; // Explicit instant for timezone-aware testing
   presetOverride?: ScoringPreset;

@@ -23,6 +23,7 @@ import type {
   PreferenceLevel,
   UserArtistPreference,
 } from '@/lib/domain/user-preference';
+import type { SpotifyTopArtist } from '@/lib/domain/spotify';
 import type { FactorScore, MatchedArtistInfo } from '../types';
 
 export const ARTIST_PREFERENCE_SCORES: Record<PreferenceLevel, number> = {
@@ -50,11 +51,18 @@ export interface ArtistFactorResult {
 }
 
 /**
- * Evaluates the artist interest factor for an event against the user's explicit preferences.
+ * Evaluates the artist interest factor for an event against the user's explicit preferences
+ * and optional Spotify listening affinities.
+ *
+ * Invariants:
+ * - Explicit user preferences ALWAYS take strict precedence over Spotify listening affinities.
+ * - Disliked artist suppression is preserved regardless of Spotify signals.
+ * - Inferred Spotify signals match strictly via verified spotifyArtistId.
  */
 export function calculateArtistInterestFactor(
   eventArtists: EventArtistInput[],
   userPreferences: UserArtistPreference[],
+  spotifyTopArtists?: SpotifyTopArtist[],
 ): ArtistFactorResult {
   if (!eventArtists || eventArtists.length === 0) {
     return {
@@ -320,6 +328,71 @@ export function calculateArtistInterestFactor(
       isSuppressed: false,
       isExploratory: false,
     };
+  }
+
+  // If no explicit user preferences matched, check Spotify listening affinities
+  if (spotifyTopArtists && spotifyTopArtists.length > 0) {
+    const spotifyMap = new Map<string, SpotifyTopArtist>();
+    for (const sa of spotifyTopArtists) {
+      if (sa.id) {
+        spotifyMap.set(sa.id, sa);
+      }
+    }
+
+    const spotifyMatches: Array<{
+      artist: EventArtistInput;
+      spotifyArtist: SpotifyTopArtist;
+      score: number;
+    }> = [];
+
+    for (const artist of eventArtists) {
+      if (artist.spotifyArtistId && spotifyMap.has(artist.spotifyArtistId)) {
+        const sa = spotifyMap.get(artist.spotifyArtistId)!;
+        // Tiered listening affinity: top 5 -> 70, top 10 -> 65, top 20 -> 60
+        const score = sa.rank <= 5 ? 70 : sa.rank <= 10 ? 65 : 60;
+        spotifyMatches.push({ artist, spotifyArtist: sa, score });
+      }
+    }
+
+    if (spotifyMatches.length > 0) {
+      spotifyMatches.sort((a, b) => b.score - a.score);
+      const best = spotifyMatches[0];
+
+      let explanation = `🎧 Spotify top artist (#${best.spotifyArtist.rank} in your listening history)`;
+      if (spotifyMatches.length > 1) {
+        explanation += ` (+${spotifyMatches.length - 1} more on lineup)`;
+      }
+
+      const matchedArtistInfo: MatchedArtistInfo = {
+        id: best.artist.id ?? undefined,
+        name: best.artist.name,
+        preferenceLevel: 'like',
+        score: best.score,
+        isFavorite: false,
+        isDisliked: false,
+        isSpotifyAffinity: true,
+        spotifyRank: best.spotifyArtist.rank,
+      };
+
+      return {
+        factorScore: {
+          factor: 'artist',
+          score: best.score,
+          isAvailable: true,
+          fieldStatus: 'verified',
+          explanation,
+          diagnostics: {
+            spotifyAffinity: true,
+            spotifyRank: best.spotifyArtist.rank,
+            matchedCount: spotifyMatches.length,
+            bestArtist: best.artist.name,
+          },
+        },
+        matchedArtist: matchedArtistInfo,
+        isSuppressed: false,
+        isExploratory: false,
+      };
+    }
   }
 
   // Invariant 4: Unmarked artist receives neutral exploratory discovery score (40)

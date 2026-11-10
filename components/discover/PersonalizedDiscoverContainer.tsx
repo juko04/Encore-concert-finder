@@ -502,7 +502,7 @@ export function PersonalizedDiscoverContainer({
               </h2>
               <p className="mt-1 text-xs text-zinc-300 sm:text-sm">
                 {initialData.isSpotifyConnected
-                  ? 'Your Spotify account is connected! Add artists you love in Music Taste to unlock personalized scores and highlight must-see shows.'
+                  ? 'Your Spotify account is connected! Your listening history automatically ranks shows. Add artists in Music Taste to give them top priority.'
                   : "You haven't added any favorite artists or connected Spotify yet. Add artists you love to unlock personalized scores and highlight must-see shows!"}
               </p>
             </div>
