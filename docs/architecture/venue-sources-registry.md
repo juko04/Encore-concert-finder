@@ -21,8 +21,8 @@ This registry tracks the initial feasibility audit of high-priority Colorado mus
 | **Larimer Lounge** | Denver | Independent Venue Group (RHP Events) | Etix | Server HTML (`.rhpSingleEvent`) + stage detection | Low | Low | **Very High** (IVG Network) | **YES (Implemented PR #14)** |
 | **Globe Hall** | Denver | Independent Venue Group (RHP Events) | Etix | Server HTML (`.rhpSingleEvent`) | Low | Low | **Very High** (IVG Network) | **YES (Implemented PR #14)** |
 | **Lost Lake Lounge** | Denver | Independent Venue Group (RHP Events) | Etix | Server HTML (`.rhpSingleEvent`) | Low | Low | **Very High** (IVG Network) | **YES (Implemented PR #14)** |
-| **Velvet Elk Lounge** | Boulder | BentoBox | Etix | Server HTML + Etix event links | Low-Medium | Zero | **High** (BentoBox restaurant/lounge platform) | **Next (PR #15 - Smaller Boulder Priority)** |
-| **Roots Music Project** | Boulder | Squarespace | Eventbrite | Server HTML (`.eventlist-event`) | Low-Medium | Zero | **High** (Squarespace events engine) | **Next (PR #15 - Smaller Boulder Priority)** |
+| **Velvet Elk Lounge** | Boulder | BentoBox | Etix | Server HTML (`li.card`) + Detail Page Schema.org JSON-LD | Low-Medium | Zero | **High** (BentoBox restaurant/lounge platform) | **YES (Implemented PR #15)** |
+| **Roots Music Project** | Boulder | Eventbrite (`__NEXT_DATA__`) / Wix | Eventbrite | Eventbrite Organizer Profile (`__NEXT_DATA__` JSON props) + JSON-LD Fallback | Low-Medium | Zero | **High** (Eventbrite organizer feed & RMPtix.com ecosystem) | **YES (Implemented PR #15)** |
 | **Boulder Theater** | Boulder | Z2 Entertainment Network | AXS | Server HTML + structured event nodes | Low-Medium | Low/Med | **Very High** (Shares Z2 engine with Fox/Aggie) | Later Candidate |
 | **Fox Theatre** | Boulder | Z2 Entertainment Network | AXS | Server HTML + structured event nodes | Low-Medium | Low/Med | **Very High** (Z2 Network) | Later Candidate |
 | **Aggie Theatre** | Fort Collins | Z2 Entertainment Network | AXS | Server HTML + structured event nodes | Low-Medium | Low/Med | **Very High** (Z2 Network) | Later Candidate |
@@ -62,9 +62,12 @@ The audit revealed three major multi-venue platform clusters in Colorado:
 2. **Independent Venue Group Cluster (Etix Ticketing) — Implemented PR #14:**
    - *Venues:* Larimer Lounge, Globe Hall, Lost Lake Lounge.
    - *Architecture:* Standardized Rockhouse Partners (RHP Events) WordPress plugin with unified `.rhpSingleEvent` and `.rhp-events-list-separator-month` structure, Etix ticketing, stage identification (Larimer Lounge, Treehouse, Campground, Skihouse), and year-boundary tracking across both list and grid views. Implemented via shared `IndependentVenueAdapter` and `parseIndependentVenueEvents`.
-3. **BentoBox & Squarespace Cluster (Indie / DIY):**
-   - *Venues:* Velvet Elk Lounge (BentoBox), Roots Music Project (Squarespace).
-   - *Architecture:* Standard CMS event structures with high statewide portability for smaller bars and intimate listening rooms.
+3. **BentoBox & Eventbrite Community Cluster (Indie / DIY) — Implemented PR #15:**
+   - *Venues:* Velvet Elk Lounge (BentoBox), Roots Music Project (Eventbrite Organizer / Wix).
+   - *Architecture:*
+     - **Velvet Elk Lounge:** Uses BentoBox cards (`li.card`) with individual detail page enrichment (`extractVelvetElkDetailUrls`). Normal ingestion retrieves detail pages (up to 15 concurrent) to extract verified show times (`startsAt`, instant precision) and direct Etix ticket links (`etix.com/ticket/p/...`), retaining the calendar card listing as a robust fallback.
+     - **Roots Music Project:** Exposes server-rendered `__NEXT_DATA__` JSON on its official Eventbrite schedule (`RMPtix.com`), delivering rich structured data including verified free event indicators, exact show times, and venue coordinates. Event series without named performers (`OPEN DECKS`, `CU Student Songwriter's Showcase`, `Roots Underground`) route cleanly to `needs_review` with reason `missing_artist_identity` rather than fabricating false artists.
+     - **Eventbrite Pagination Technical Debt Note:** The Eventbrite organizer profile page reports `hasMoreUpcoming: true` (e.g. 13 total events, 12 returned on initial SSR). Bounded investigation confirmed `?page=2` is ignored by Eventbrite's SSR `getServerSideProps` endpoint. Pagination requires reverse-engineering private CSRF-authenticated client-side GraphQL RPCs, which was intentionally deferred as non-blocking technical debt to avoid building an unauthorized API subsystem. Both venues integrate with Encore's venue CLI and atomic canonicalization pipeline.
 
 ---
 

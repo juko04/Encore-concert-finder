@@ -30,10 +30,15 @@ import path from 'node:path';
 import {
   CervantesVenueAdapter,
   IndependentVenueAdapter,
+  VelvetElkAdapter,
+  RootsMusicProjectAdapter,
   runVenueIngestion,
   CERVANTES_CONFIG,
   DENVER_INDEPENDENT_VENUE_CONFIGS,
+  BOULDER_VENUE_CONFIGS,
   ALL_SUPPORTED_VENUE_CONFIGS,
+  VELVET_ELK_CONFIG,
+  ROOTS_MUSIC_PROJECT_CONFIG,
   getVenueSourceConfig,
   type VenueSourceConfig,
   type VenueIngestionResult,
@@ -207,6 +212,8 @@ async function main(): Promise<void> {
     args.venue === 'ivg'
   ) {
     targetConfigs = [...DENVER_INDEPENDENT_VENUE_CONFIGS];
+  } else if (args.venue === 'all-boulder' || args.venue === 'boulder') {
+    targetConfigs = [...BOULDER_VENUE_CONFIGS];
   } else if (args.venue === 'all') {
     targetConfigs = [...ALL_SUPPORTED_VENUE_CONFIGS];
   } else {
@@ -218,8 +225,11 @@ async function main(): Promise<void> {
           '  - larimer (or larimer-lounge)\n' +
           '  - lostlake (or lost-lake-lounge)\n' +
           '  - globehall (or globe-hall)\n' +
+          '  - velvetelk (or velvet-elk-lounge)\n' +
+          '  - roots (or roots-music-project)\n' +
           '  - all-denver (runs Larimer Lounge, Lost Lake, Globe Hall)\n' +
-          '  - all (runs all 4 Denver venues)',
+          '  - all-boulder (runs Velvet Elk Lounge, Roots Music Project)\n' +
+          '  - all (runs all supported Denver & Boulder venues)',
       );
       process.exit(1);
     }
@@ -251,7 +261,11 @@ async function main(): Promise<void> {
     const adapter: EventSourceAdapter =
       config.slug === CERVANTES_CONFIG.slug
         ? new CervantesVenueAdapter()
-        : new IndependentVenueAdapter(config);
+        : config.slug === VELVET_ELK_CONFIG.slug
+          ? new VelvetElkAdapter(config)
+          : config.slug === ROOTS_MUSIC_PROJECT_CONFIG.slug
+            ? new RootsMusicProjectAdapter(config)
+            : new IndependentVenueAdapter(config);
 
     try {
       console.log(`\n>>> Processing ${config.name} (${config.slug})...`);

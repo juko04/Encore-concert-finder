@@ -7,7 +7,14 @@ import { CanonicalizationCoordinator } from '@/lib/entity-resolution/canonicaliz
 import type { ISourceRepository } from '@/lib/repositories/interfaces';
 import { CervantesVenueAdapter } from './cervantes/adapter';
 import { IndependentVenueAdapter } from './independent-venue-group/adapter';
-import { ensureVenueSource, CERVANTES_CONFIG } from './source-registry';
+import { VelvetElkAdapter } from './velvet-elk/adapter';
+import { RootsMusicProjectAdapter } from './roots-music-project/adapter';
+import {
+  ensureVenueSource,
+  CERVANTES_CONFIG,
+  VELVET_ELK_CONFIG,
+  ROOTS_MUSIC_PROJECT_CONFIG,
+} from './source-registry';
 import type {
   VenueIngestionOptions,
   VenueIngestionResult,
@@ -36,6 +43,16 @@ function resolveDefaultFixturePath(slug: string): string {
         process.cwd(),
         'tests/fixtures/globe-hall-events-response.html',
       );
+    case 'velvet-elk-lounge':
+      return path.resolve(
+        process.cwd(),
+        'tests/fixtures/velvet-elk-events-response.html',
+      );
+    case 'roots-music-project':
+      return path.resolve(
+        process.cwd(),
+        'tests/fixtures/roots-music-project-events-response.html',
+      );
     case 'cervantes-masterpiece':
     default:
       return path.resolve(
@@ -60,7 +77,11 @@ export async function runVenueIngestion(
     options.adapter ??
     (config.slug === CERVANTES_CONFIG.slug
       ? new CervantesVenueAdapter()
-      : new IndependentVenueAdapter(config));
+      : config.slug === VELVET_ELK_CONFIG.slug
+        ? new VelvetElkAdapter(config)
+        : config.slug === ROOTS_MUSIC_PROJECT_CONFIG.slug
+          ? new RootsMusicProjectAdapter(config)
+          : new IndependentVenueAdapter(config));
   const source = await ensureVenueSource(options.sourceRepo, config);
 
   // Link in-memory catalog repo with sourceRepo if supported

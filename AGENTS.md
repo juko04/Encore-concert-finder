@@ -29,6 +29,7 @@ Do not load the entire repository documentation into prompt context. Practice pr
 | **Entity resolution, deduplication, matching** | Active phase spec, [`docs/architecture/entity-resolution.md`](docs/architecture/entity-resolution.md) |
 | **UI, pages, components** | Active phase spec, [`docs/product/vision.md`](docs/product/vision.md) |
 | **Architectural decisions & tradeoffs** | [`docs/decisions/index.md`](docs/decisions/index.md), [`docs/project/non-blocking-debt.md`](docs/project/non-blocking-debt.md) |
+| **Multi-agent tasks & delegation** | [`docs/development/multi-agent-workflow.md`](docs/development/multi-agent-workflow.md) |
 | **Historical implementation context** | [`docs/phases/completed/`](docs/phases/completed/) *(only when strictly necessary)* |
 
 ---
@@ -104,6 +105,13 @@ Agents must never:
 - One task per branch. Never commit directly to `main`.
 - Only one agent owns an active implementation branch at a time; peer agents review.
 - Never merge a branch without green CI and independent code review.
+
+### Multi-Agent Collaboration
+When splitting tasks across multiple agents, follow [`docs/development/multi-agent-workflow.md`](docs/development/multi-agent-workflow.md):
+- **Lead Agent (Coordinator):** Recovers context, defines task boundaries, integrates worker output, runs the standard verification suite, and manages GitHub PR/handoff.
+- **Implementation Agents (Workers):** 1–2 on-demand workers for independent, non-overlapping files in isolated workspaces; run focused tests and report back to lead.
+- **Verification Agent (Optional):** Audits invariant preservation and edge cases for high-risk changes without speculative refactors.
+- **Efficiency Rule:** Use the smallest useful team. Linear or single-file fixes stay with one agent; parallelize only independent, decoupled work.
 
 ### Standard Verification Commands
 Run before submitting code for review:
