@@ -151,6 +151,9 @@ test.describe('Authenticated Music Taste Profile Browser E2E Flow', () => {
     await page.getByTestId('auth-submit-btn').click();
 
     // 3. Confirm redirected to /profile/taste and authenticated UI loaded
+    await page.waitForURL((url) => url.pathname === '/profile/taste', {
+      timeout: 15000,
+    });
     await expect(page).toHaveURL(/\/profile\/taste/);
     await expect(page.getByTestId('taste-profile-manager')).toBeVisible();
     await expect(
@@ -221,6 +224,9 @@ test.describe('Authenticated Music Taste Profile Browser E2E Flow', () => {
     await expect(
       page.getByRole('heading', { level: 3, name: customArtistName }),
     ).not.toBeVisible();
+
+    // Ensure server deletion mutation has settled before triggering reload
+    await page.waitForTimeout(600);
 
     // Reload to verify deletion persistence
     await page.reload();

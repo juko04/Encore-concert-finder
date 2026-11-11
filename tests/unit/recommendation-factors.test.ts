@@ -28,6 +28,7 @@ import {
   FIXTURE_USER_PROFILE,
 } from '@/tests/fixtures/recommendation-fixtures';
 import type { UserArtistPreference } from '@/lib/domain/user-preference';
+import type { SpotifyTopArtist } from '@/lib/domain/spotify';
 
 describe('Recommendation Factors (Independent Factor Unit Tests)', () => {
   describe('Factor 1: Artist Interest & Identity Resolution', () => {
@@ -287,6 +288,230 @@ describe('Recommendation Factors (Independent Factor Unit Tests)', () => {
       );
       expect(jazzRes.factorScore.score).toBe(UNMARKED_ARTIST_SCORE);
       expect(jazzRes.isExploratory).toBe(true);
+    });
+
+    it('automatically scores Spotify top artists with listening affinity when no explicit preference exists', () => {
+      const spotifyTopArtists: SpotifyTopArtist[] = [
+        {
+          id: 'spotify-summit-1',
+          name: 'John Summit',
+          rank: 1,
+          genres: ['tech house'],
+          imageUrl: null,
+          spotifyUrl: 'https://open.spotify.com/artist/spotify-summit-1',
+          popularity: 85,
+          trend: 'rising' as const,
+          timeRange: 'medium_term',
+        },
+        {
+          id: 'spotify-dolla-8',
+          name: 'Dom Dolla',
+          rank: 8,
+          genres: ['house'],
+          imageUrl: null,
+          spotifyUrl: 'https://open.spotify.com/artist/spotify-dolla-8',
+          popularity: 80,
+          trend: 'consistent' as const,
+          timeRange: 'medium_term',
+        },
+        {
+          id: 'spotify-murph-15',
+          name: "it's murph",
+          rank: 15,
+          genres: ['electronic'],
+          imageUrl: null,
+          spotifyUrl: 'https://open.spotify.com/artist/spotify-murph-15',
+          popularity: 70,
+          trend: 'rising' as const,
+          timeRange: 'medium_term',
+        },
+      ];
+
+      // Top 5 Spotify artist -> 70
+      const summitRes = calculateArtistInterestFactor(
+        [
+          {
+            id: 'canon-summit',
+            name: 'John Summit',
+            spotifyArtistId: 'spotify-summit-1',
+          },
+        ],
+        [], // no explicit manual preferences
+        spotifyTopArtists,
+      );
+      expect(summitRes.factorScore.score).toBe(70);
+      expect(summitRes.isExploratory).toBe(false);
+      expect(summitRes.factorScore.explanation).toContain(
+        'Spotify top artist (#1',
+      );
+
+      // Top 6-10 Spotify artist -> 65
+      const dollaRes = calculateArtistInterestFactor(
+        [
+          {
+            id: 'canon-dolla',
+            name: 'Dom Dolla',
+            spotifyArtistId: 'spotify-dolla-8',
+          },
+        ],
+        [],
+        spotifyTopArtists,
+      );
+      expect(dollaRes.factorScore.score).toBe(65);
+      expect(dollaRes.isExploratory).toBe(false);
+
+      // Top 11-20 Spotify artist -> 60
+      const murphRes = calculateArtistInterestFactor(
+        [
+          {
+            id: 'canon-murph',
+            name: "it's murph",
+            spotifyArtistId: 'spotify-murph-15',
+          },
+        ],
+        [],
+        spotifyTopArtists,
+      );
+      expect(murphRes.factorScore.score).toBe(60);
+      expect(murphRes.isExploratory).toBe(false);
+    });
+
+    it('enforces Invariant 11: explicit user preferences strictly override Spotify listening signals', () => {
+      const spotifyTopArtists: SpotifyTopArtist[] = [
+        {
+          id: 'spotify-artist-underground-777',
+          name: 'Spotify Underground Live',
+          rank: 1, // #1 on Spotify
+          genres: ['indie'],
+          imageUrl: null,
+          spotifyUrl:
+            'https://open.spotify.com/artist/spotify-artist-underground-777',
+          popularity: 75,
+          trend: 'rising' as const,
+          timeRange: 'medium_term',
+        },
+        {
+          id: 'spotify-disliked-artist',
+          name: 'Disliked Star',
+          rank: 2, // #2 on Spotify
+          genres: ['pop'],
+          imageUrl: null,
+          spotifyUrl: 'https://open.spotify.com/artist/spotify-disliked-artist',
+          popularity: 90,
+          trend: 'consistent' as const,
+          timeRange: 'medium_term',
+        },
+      ];
+
+      // 1. Explicit Favorite (100) overrides Spotify #1 (70)
+      const favRes = calculateArtistInterestFactor(
+        [
+          {
+            id: 'canon-catalog-new-88',
+            name: 'Spotify Underground Live',
+            spotifyArtistId: 'spotify-artist-underground-777',
+          },
+        ],
+        preferences, // has 'like' (75) for this artist
+        spotifyTopArtists,
+      );
+      // The explicit manual preference (75) takes precedence over the inferred Spotify score (70)
+      expect(favRes.factorScore.score).toBe(75);
+      expect(favRes.factorScore.explanation).toContain('Liked artist');
+
+      // 2. Explicit Dislike suppresses the event even if the artist is #2 on Spotify!
+      const userDislikePref: UserArtistPreference = {
+        id: 'pref-dislike-star',
+        userId: 'user-1',
+        artistId: 'canon-disliked-star',
+        artistName: 'Disliked Star',
+        normalizedArtistName: 'disliked star',
+        preferenceLevel: 'dislike',
+        spotifyArtistId: 'spotify-disliked-artist',
+        createdAt: '2026-09-01T00:00:00Z',
+        updatedAt: '2026-09-01T00:00:00Z',
+      };
+
+      const dislikeRes = calculateArtistInterestFactor(
+        [
+          {
+            id: 'canon-disliked-star',
+            name: 'Disliked Star',
+            spotifyArtistId: 'spotify-disliked-artist',
+            billingPosition: 'headliner',
+          },
+        ],
+        [userDislikePref],
+        spotifyTopArtists,
+      );
+
+      // Invariant 11: Dislike suppresses the event, Spotify affinity cannot un-suppress
+      expect(dislikeRes.isSuppressed).toBe(true);
+      expect(dislikeRes.factorScore.score).toBe(0);
+      expect(dislikeRes.suppressionReason).toContain('Not Interested');
+    });
+
+    it('Finding 5 verification: proves explicit Interested (55) reduces automated Spotify top-artist affinity (70) per Invariant 11', () => {
+      const spotifyTopArtists: SpotifyTopArtist[] = [
+        {
+          id: 'spotify-rotation-star',
+          name: 'Rotation Star',
+          rank: 1, // #1 on Spotify: automated affinity = 70
+          genres: ['indie'],
+          imageUrl: null,
+          spotifyUrl: 'https://open.spotify.com/artist/spotify-rotation-star',
+          popularity: 80,
+          trend: 'rising' as const,
+          timeRange: 'medium_term',
+        },
+      ];
+
+      // 1. Without manual preference: artist receives automated top-5 listening affinity score of 70
+      const autoRes = calculateArtistInterestFactor(
+        [
+          {
+            id: 'canon-rotation-star',
+            name: 'Rotation Star',
+            spotifyArtistId: 'spotify-rotation-star',
+          },
+        ],
+        [],
+        spotifyTopArtists,
+      );
+      expect(autoRes.factorScore.score).toBe(70);
+
+      // 2. User manually marks artist as 'interested' (score 55):
+      // Per Invariant 11, explicit preference strictly overrides inferred signal, reducing score from 70 to 55
+      const manualInterestedPref: UserArtistPreference = {
+        id: 'pref-interested-rotation-star',
+        userId: 'user-1',
+        artistId: 'canon-rotation-star',
+        artistName: 'Rotation Star',
+        normalizedArtistName: 'rotation star',
+        preferenceLevel: 'interested',
+        spotifyArtistId: 'spotify-rotation-star',
+        createdAt: '2026-10-01T00:00:00Z',
+        updatedAt: '2026-10-01T00:00:00Z',
+      };
+
+      const manualRes = calculateArtistInterestFactor(
+        [
+          {
+            id: 'canon-rotation-star',
+            name: 'Rotation Star',
+            spotifyArtistId: 'spotify-rotation-star',
+          },
+        ],
+        [manualInterestedPref],
+        spotifyTopArtists,
+      );
+      expect(manualRes.factorScore.score).toBe(55);
+      expect(manualRes.factorScore.score).toBeLessThan(
+        autoRes.factorScore.score,
+      );
+      expect(manualRes.factorScore.explanation).toContain(
+        'Interested in Rotation Star',
+      );
     });
   });
 

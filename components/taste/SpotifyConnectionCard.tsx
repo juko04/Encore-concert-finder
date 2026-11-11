@@ -97,7 +97,7 @@ export function SpotifyConnectionCard({
 
             <p className="mt-1 text-xs text-zinc-400">
               {connected
-                ? 'Your Spotify account is connected. Inspect your listening history below and intentionally add artists to your live concert interests.'
+                ? 'Your Spotify account is connected. Inspect your top listening history below and add artists to your live concert interests to guarantee priority while catalog matches are enriched.'
                 : status === 'expired'
                   ? 'Your Spotify authorization has expired. Reconnect your account to refresh listening preferences, or disconnect to remove your stored credentials.'
                   : status === 'revoked'

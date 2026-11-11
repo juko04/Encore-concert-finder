@@ -82,8 +82,12 @@ export function SpotifyTastePreview({
             )}
           </div>
           <p className="mt-0.5 text-xs text-zinc-400">
-            Compare your active rotation across time horizons and incorporate
-            artists into your live concert profile.
+            Spotify affinity scoring is ready to rank concerts (scores 60–70) as
+            verified Spotify artist IDs match in our catalog. Set an explicit
+            preference below to guarantee priority right away:
+            <strong> ★ Favorite (100)</strong> or <strong>♥ Like (75)</strong>{' '}
+            immediately elevates the artist; <strong>✦ Interested (55)</strong>{' '}
+            sets a lower exploratory priority.
           </p>
         </div>
 
@@ -140,13 +144,13 @@ export function SpotifyTastePreview({
           <span className="text-base">✦</span>
           <div>
             <strong className="font-semibold text-indigo-100">
-              Recency-Weighted Taste Hypothesis (PR #10 Preview):
+              Recency-Weighted Taste Hypothesis:
             </strong>{' '}
-            Listening recency signals distinct concert intent. Rising artists
-            (heavy 4-week listening) reflect immediate discovery momentum,
-            whereas consistent staples indicate enduring multi-year affinity. In
-            PR #10, this is surfaced for intentional manual review; automated
-            recommendation scoring will build on this in PR #11.
+            Spotify listening affinity scoring is built in and will
+            automatically score concerts as verified Spotify artist IDs match in
+            our catalog. You can add any artist below to an explicit preference
+            tier (★ Favorite / ♥ Like) to give them immediate guaranteed
+            priority.
           </div>
         </div>
       </div>
@@ -289,35 +293,48 @@ export function SpotifyTastePreview({
                         '⊘ Disliked'}
                     </span>
                   ) : isAddingThis ? (
-                    <div className="flex items-center gap-2">
-                      <select
-                        aria-label="Preference level for artist"
-                        value={selectedLevel}
-                        onChange={(e) =>
-                          setSelectedLevel(e.target.value as PreferenceLevel)
-                        }
-                        className="rounded-lg border border-zinc-700 bg-zinc-950 px-2 py-1 text-xs font-medium text-white focus:outline-none"
-                      >
-                        <option value="favorite">★ Favorite</option>
-                        <option value="like">♥ Like</option>
-                        <option value="interested">✦ Interested</option>
-                      </select>
-                      <button
-                        type="button"
-                        data-testid={`confirm-import-btn-${artist.id}`}
-                        onClick={() => handleConfirmAdd(artist)}
-                        disabled={isSubmittingThis}
-                        className="rounded-lg bg-indigo-600 px-3 py-1 text-xs font-semibold text-white shadow hover:bg-indigo-500 disabled:opacity-50"
-                      >
-                        {isSubmittingThis ? 'Adding...' : 'Save'}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setAddingArtistId(null)}
-                        className="rounded-lg border border-zinc-700 bg-transparent px-2 py-1 text-xs font-medium text-zinc-400 hover:text-white"
-                      >
-                        Cancel
-                      </button>
+                    <div className="flex flex-col gap-1.5 sm:items-end">
+                      <div className="flex items-center gap-2">
+                        <select
+                          aria-label="Preference level for artist"
+                          value={selectedLevel}
+                          onChange={(e) =>
+                            setSelectedLevel(e.target.value as PreferenceLevel)
+                          }
+                          className="rounded-lg border border-zinc-700 bg-zinc-950 px-2 py-1 text-xs font-medium text-white focus:outline-none"
+                        >
+                          <option value="favorite">
+                            ★ Favorite (100 — Max Priority)
+                          </option>
+                          <option value="like">♥ Like (75 — Boost)</option>
+                          <option value="interested">
+                            ✦ Interested (55 — Lower Priority)
+                          </option>
+                        </select>
+                        <button
+                          type="button"
+                          data-testid={`confirm-import-btn-${artist.id}`}
+                          onClick={() => handleConfirmAdd(artist)}
+                          disabled={isSubmittingThis}
+                          className="rounded-lg bg-indigo-600 px-3 py-1 text-xs font-semibold text-white shadow hover:bg-indigo-500 disabled:opacity-50"
+                        >
+                          {isSubmittingThis ? 'Adding...' : 'Save'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setAddingArtistId(null)}
+                          className="rounded-lg border border-zinc-700 bg-transparent px-2 py-1 text-xs font-medium text-zinc-400 hover:text-white"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                      {selectedLevel === 'interested' && (
+                        <p className="text-[10px] text-amber-400">
+                          Notice: Setting &quot;Interested&quot; (score 55) sets
+                          priority lower than your automated Spotify listening
+                          affinity (60–70).
+                        </p>
+                      )}
                     </div>
                   ) : (
                     <button
@@ -329,7 +346,7 @@ export function SpotifyTastePreview({
                       }}
                       className="rounded-lg border border-indigo-900/60 bg-indigo-950/40 px-3 py-1.5 text-xs font-semibold text-indigo-300 transition-colors hover:border-indigo-700 hover:bg-indigo-900/60 hover:text-white"
                     >
-                      + Add to Interests
+                      + Set Priority
                     </button>
                   )}
                 </div>

@@ -1,4 +1,4 @@
-import { beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { execSync } from 'node:child_process';
 import { FakeVenueSourceAdapter } from '../fixtures/fake-source-adapter';
@@ -67,6 +67,18 @@ describe('Supabase Golden Path Integration: Full Ingestion & Canonicalization Pi
   let coordinator: CanonicalizationCoordinator;
   const adapter = new FakeVenueSourceAdapter();
 
+  const trackedCreated = {
+    rawIngestIds: new Set<string>(),
+    candidateIds: new Set<string>(),
+    eventIds: new Set<string>(),
+    artistIds: new Set<string>(),
+    venueIds: new Set<string>(),
+    sourceIds: new Set<string>(),
+  };
+
+  const preExistingArtistIds = new Set<string>();
+  const preExistingVenueIds = new Set<string>();
+
   function ensureDbAvailable(): boolean {
     if (!isDbAvailable || !adminClient) {
       if (process.env.CI) {
@@ -118,6 +130,42 @@ describe('Supabase Golden Path Integration: Full Ingestion & Canonicalization Pi
     candidateRepo = new SupabaseEventCandidateRepository(adminClient);
     catalogRepo = new SupabaseCatalogRepository(adminClient);
     coordinator = new CanonicalizationCoordinator(catalogRepo);
+
+    // Snapshot pre-existing artists and venues to protect against accidental teardown (Finding 2)
+    const { data: existingArtists, error: artErr } = await adminClient
+      .from('artists')
+      .select('id');
+    if (artErr)
+      throw new Error(`Failed to query existing artists: ${artErr.message}`);
+    for (const a of existingArtists || []) {
+      preExistingArtistIds.add(a.id);
+    }
+
+    const { data: existingVenues, error: venErr } = await adminClient
+      .from('venues')
+      .select('id');
+    if (venErr)
+      throw new Error(`Failed to query existing venues: ${venErr.message}`);
+    for (const v of existingVenues || []) {
+      preExistingVenueIds.add(v.id);
+    }
+
+    await adminClient.from('sources').upsert(
+      [
+        {
+          id: 'a0000000-0000-0000-0000-000000000001',
+          slug: 'fake-venue-adapter',
+          name: 'Fake Venue Source Adapter',
+          source_type: 'venue',
+          acquisition_method: 'structured_json',
+          base_url: 'https://venue.example.com',
+          reliability_score: 0.95,
+          active: true,
+          parser_version: '1.1.0',
+        },
+      ],
+      { onConflict: 'slug' },
+    );
   });
 
   it('core golden path: end-to-end multi-event ingestion, canonicalization, artist external ID roundtrip, rescheduling update, evidence preservation, and reassignment conflict rejection', async () => {
@@ -138,6 +186,7 @@ describe('Supabase Golden Path Integration: Full Ingestion & Canonicalization Pi
     // 2. Persist raw ingest row
     const persistedRaw1 = await rawIngestRepo.create(rawPage1);
     expect(persistedRaw1.id).toBeDefined();
+    trackedCreated.rawIngestIds.add(persistedRaw1.id);
 
     // 3. Adapter parses candidates associated with persistedRaw1
     const rawForParse = { ...rawPage1, id: persistedRaw1.id };
@@ -155,6 +204,8 @@ describe('Supabase Golden Path Integration: Full Ingestion & Canonicalization Pi
     const persistedCandB = await candidateRepo.create(
       candBInput as EventCandidate & { rawIngestId: string; sourceId: string },
     );
+    trackedCreated.candidateIds.add(persistedCandA.id);
+    trackedCreated.candidateIds.add(persistedCandB.id);
 
     // Assert candidates have valid, non-colliding UUIDs
     expect(persistedCandA.id).toBeDefined();
@@ -177,6 +228,8 @@ describe('Supabase Golden Path Integration: Full Ingestion & Canonicalization Pi
     // 5. Canonicalize both candidates
     const resA = await coordinator.canonicalize(persistedCandA);
     const resB = await coordinator.canonicalize(persistedCandB);
+    if (resA.eventId) trackedCreated.eventIds.add(resA.eventId);
+    if (resB.eventId) trackedCreated.eventIds.add(resB.eventId);
 
     expect(resA.status).toBe('created');
     expect(resB.status).toBe('created');
@@ -284,6 +337,7 @@ describe('Supabase Golden Path Integration: Full Ingestion & Canonicalization Pi
       httpStatus: 200,
       parserVersion: '1.1.0',
     });
+    trackedCreated.rawIngestIds.add(rawObs2.id);
 
     expect(rawObs2.id).not.toBe(persistedRaw1.id);
 
@@ -305,6 +359,7 @@ describe('Supabase Golden Path Integration: Full Ingestion & Canonicalization Pi
         fetchedAt: rawObs2.fetchedAt,
       },
     });
+    trackedCreated.candidateIds.add(candA_obs2.id);
 
     // Verify candidate observation is an immutable separate row
     expect(candA_obs2.id).not.toBe(persistedCandA.id);
@@ -312,6 +367,7 @@ describe('Supabase Golden Path Integration: Full Ingestion & Canonicalization Pi
 
     // Canonicalize second candidate
     const resA_obs2 = await coordinator.canonicalize(candA_obs2);
+    if (resA_obs2.eventId) trackedCreated.eventIds.add(resA_obs2.eventId);
 
     // Must resolve to existing canonical event, NOT create a duplicate
     expect(resA_obs2.status).toBe('matched');
@@ -391,6 +447,7 @@ describe('Supabase Golden Path Integration: Full Ingestion & Canonicalization Pi
       httpStatus: 200,
       parserVersion: '1.1.0',
     });
+    trackedCreated.rawIngestIds.add(rawDateOnly.id);
 
     // Candidate has localStartDate, but NO startsAt and NO explicit startTimePrecision
     const dateOnlyCandidateInput: EventCandidate & {
@@ -430,6 +487,7 @@ describe('Supabase Golden Path Integration: Full Ingestion & Canonicalization Pi
       dateOnlyCandidateInput,
     );
     expect(persistedDateOnly.id).toBeDefined();
+    trackedCreated.candidateIds.add(persistedDateOnly.id);
 
     // 2. Reload candidate from database
     const reloaded = await candidateRepo.getById(persistedDateOnly.id);
@@ -442,6 +500,7 @@ describe('Supabase Golden Path Integration: Full Ingestion & Canonicalization Pi
     const resDateOnly = await coordinator.canonicalize(reloaded!);
     expect(resDateOnly.status).toBe('created');
     expect(resDateOnly.eventId).toBeDefined();
+    if (resDateOnly.eventId) trackedCreated.eventIds.add(resDateOnly.eventId);
 
     // 4. Verify canonical event in database
     const { data: dbEvent } = await adminClient!
@@ -472,6 +531,7 @@ describe('Supabase Golden Path Integration: Full Ingestion & Canonicalization Pi
       httpStatus: 200,
       parserVersion: '1.1.0',
     });
+    trackedCreated.rawIngestIds.add(rawGhost.id);
 
     // Show 1: Artist "Ghost" with external ID provider-1 / artist-A
     const candGhostA = await candidateRepo.create({
@@ -510,10 +570,12 @@ describe('Supabase Golden Path Integration: Full Ingestion & Canonicalization Pi
         confidence: 0.95,
       },
     });
+    trackedCreated.candidateIds.add(candGhostA.id);
 
     const resGhostA = await coordinator.canonicalize(candGhostA);
     expect(resGhostA.status).toBe('created');
     expect(resGhostA.eventId).toBeDefined();
+    if (resGhostA.eventId) trackedCreated.eventIds.add(resGhostA.eventId);
 
     // Show 2: Same venue, same local start date, same artist name "Ghost", but different external ID provider-1 / artist-B
     const candGhostB = await candidateRepo.create({
@@ -552,8 +614,10 @@ describe('Supabase Golden Path Integration: Full Ingestion & Canonicalization Pi
         confidence: 0.95,
       },
     });
+    trackedCreated.candidateIds.add(candGhostB.id);
 
     const resGhostB = await coordinator.canonicalize(candGhostB);
+    if (resGhostB.eventId) trackedCreated.eventIds.add(resGhostB.eventId);
     // Must NOT merge into Event A!
     expect(resGhostB.status).not.toBe('matched');
     expect(resGhostB.status).toBe('needs_review');
@@ -584,6 +648,7 @@ describe('Supabase Golden Path Integration: Full Ingestion & Canonicalization Pi
     expect(testEventError).toBeNull();
     expect(testEvent?.id).toBeDefined();
     const eventId = testEvent!.id;
+    trackedCreated.eventIds.add(eventId);
 
     // Raw Ingest 1
     const raw1 = await rawIngestRepo.create({
@@ -597,6 +662,7 @@ describe('Supabase Golden Path Integration: Full Ingestion & Canonicalization Pi
       httpStatus: 200,
       parserVersion: '1.1.0',
     });
+    trackedCreated.rawIngestIds.add(raw1.id);
 
     // Candidate 1 under Raw Ingest 1
     const cand1 = await candidateRepo.create({
@@ -624,6 +690,7 @@ describe('Supabase Golden Path Integration: Full Ingestion & Canonicalization Pi
         confidence: 0.95,
       },
     });
+    trackedCreated.candidateIds.add(cand1.id);
 
     // Raw Ingest 2 under same Source A
     const raw2 = await rawIngestRepo.create({
@@ -637,6 +704,7 @@ describe('Supabase Golden Path Integration: Full Ingestion & Canonicalization Pi
       httpStatus: 200,
       parserVersion: '1.1.0',
     });
+    trackedCreated.rawIngestIds.add(raw2.id);
 
     expect(raw1.id).not.toBe(raw2.id);
 
@@ -750,6 +818,9 @@ describe('Supabase Golden Path Integration: Full Ingestion & Canonicalization Pi
     const run1 = await candidateRepo.createMany(batchInput);
     expect(run1.length).toBe(2);
     expect(run1[0].id).not.toBe(run1[1].id);
+    trackedCreated.rawIngestIds.add(rawBatch.id);
+    trackedCreated.candidateIds.add(run1[0].id);
+    trackedCreated.candidateIds.add(run1[1].id);
 
     // Replay identical batch
     const run2 = await candidateRepo.createMany(batchInput);
@@ -766,5 +837,225 @@ describe('Supabase Golden Path Integration: Full Ingestion & Canonicalization Pi
       .eq('raw_ingest_id', rawBatch.id);
 
     expect(dbCandidates?.length).toBe(2);
+  });
+
+  afterAll(async () => {
+    if (!adminClient || !isDbAvailable) return;
+
+    const eventIds = Array.from(trackedCreated.eventIds);
+    const candidateIds = Array.from(trackedCreated.candidateIds);
+    const rawIngestIds = Array.from(trackedCreated.rawIngestIds);
+
+    // Identify strictly newly created artists and venues for all tracked events before deletion
+    if (eventIds.length > 0) {
+      const { data: ea, error: eaErr } = await adminClient
+        .from('event_artists')
+        .select('artist_id')
+        .in('event_id', eventIds);
+      if (eaErr) {
+        throw new Error(
+          `Failed to query event_artists in cleanup: ${eaErr.message}`,
+        );
+      }
+      for (const r of ea || []) {
+        if (!preExistingArtistIds.has(r.artist_id)) {
+          trackedCreated.artistIds.add(r.artist_id);
+        }
+      }
+
+      const { data: ev, error: evErr } = await adminClient
+        .from('events')
+        .select('venue_id')
+        .in('id', eventIds);
+      if (evErr) {
+        throw new Error(
+          `Failed to query events for venue_ids in cleanup: ${evErr.message}`,
+        );
+      }
+      for (const r of ev || []) {
+        if (r.venue_id && !preExistingVenueIds.has(r.venue_id)) {
+          trackedCreated.venueIds.add(r.venue_id);
+        }
+      }
+    }
+
+    // 1. Delete candidate_resolutions explicitly (Finding 2)
+    if (eventIds.length > 0) {
+      const { error: delCrEvErr } = await adminClient
+        .from('candidate_resolutions')
+        .delete()
+        .in('event_id', eventIds);
+      if (delCrEvErr) {
+        throw new Error(
+          `Failed to delete candidate_resolutions by event_id: ${delCrEvErr.message}`,
+        );
+      }
+    }
+    if (candidateIds.length > 0) {
+      const { error: delCrCandErr } = await adminClient
+        .from('candidate_resolutions')
+        .delete()
+        .in('event_candidate_id', candidateIds);
+      if (delCrCandErr) {
+        throw new Error(
+          `Failed to delete candidate_resolutions by event_candidate_id: ${delCrCandErr.message}`,
+        );
+      }
+    }
+
+    // 2. Delete event_field_evidence by tracked event IDs or candidate IDs
+    if (eventIds.length > 0) {
+      const { error: delEvidenceErr } = await adminClient
+        .from('event_field_evidence')
+        .delete()
+        .in('event_id', eventIds);
+      if (delEvidenceErr) {
+        throw new Error(
+          `Failed to delete event_field_evidence by event_id: ${delEvidenceErr.message}`,
+        );
+      }
+    }
+    if (candidateIds.length > 0) {
+      const { error: delEvidenceCandErr } = await adminClient
+        .from('event_field_evidence')
+        .delete()
+        .in('candidate_id', candidateIds);
+      if (delEvidenceCandErr) {
+        throw new Error(
+          `Failed to delete event_field_evidence by candidate_id: ${delEvidenceCandErr.message}`,
+        );
+      }
+    }
+
+    // 3. Delete event_ticket_links
+    if (eventIds.length > 0) {
+      const { error: delTlErr } = await adminClient
+        .from('event_ticket_links')
+        .delete()
+        .in('event_id', eventIds);
+      if (delTlErr) {
+        throw new Error(
+          `Failed to delete event_ticket_links: ${delTlErr.message}`,
+        );
+      }
+    }
+
+    // 4. Delete event_artists
+    if (eventIds.length > 0) {
+      const { error: delEaErr } = await adminClient
+        .from('event_artists')
+        .delete()
+        .in('event_id', eventIds);
+      if (delEaErr) {
+        throw new Error(`Failed to delete event_artists: ${delEaErr.message}`);
+      }
+    }
+
+    // 5. Delete event_sources
+    if (eventIds.length > 0) {
+      const { error: delEsErr } = await adminClient
+        .from('event_sources')
+        .delete()
+        .in('event_id', eventIds);
+      if (delEsErr) {
+        throw new Error(
+          `Failed to delete event_sources by event_id: ${delEsErr.message}`,
+        );
+      }
+    }
+    if (candidateIds.length > 0) {
+      const { error: delEsCandErr } = await adminClient
+        .from('event_sources')
+        .delete()
+        .in('candidate_id', candidateIds);
+      if (delEsCandErr) {
+        throw new Error(
+          `Failed to delete event_sources by candidate_id: ${delEsCandErr.message}`,
+        );
+      }
+    }
+
+    // 6. Delete events
+    if (eventIds.length > 0) {
+      const { error: delEventsErr } = await adminClient
+        .from('events')
+        .delete()
+        .in('id', eventIds);
+      if (delEventsErr) {
+        throw new Error(`Failed to delete events: ${delEventsErr.message}`);
+      }
+    }
+
+    // 7. Delete event_candidates
+    if (candidateIds.length > 0) {
+      const { error: delCandErr } = await adminClient
+        .from('event_candidates')
+        .delete()
+        .in('id', candidateIds);
+      if (delCandErr) {
+        throw new Error(
+          `Failed to delete event_candidates: ${delCandErr.message}`,
+        );
+      }
+    }
+
+    // 8. Delete raw_ingests
+    if (rawIngestIds.length > 0) {
+      const { error: delRawErr } = await adminClient
+        .from('raw_ingests')
+        .delete()
+        .in('id', rawIngestIds);
+      if (delRawErr) {
+        throw new Error(`Failed to delete raw_ingests: ${delRawErr.message}`);
+      }
+    }
+
+    // 9. Clean up strictly test-created artists (never pre-existing artists!)
+    for (const artistId of trackedCreated.artistIds) {
+      if (preExistingArtistIds.has(artistId)) {
+        continue;
+      }
+
+      const { error: extErr } = await adminClient
+        .from('artist_external_ids')
+        .delete()
+        .eq('artist_id', artistId);
+      if (extErr) {
+        throw new Error(
+          `Failed to delete artist_external_ids: ${extErr.message}`,
+        );
+      }
+
+      const { error: artErr } = await adminClient
+        .from('artists')
+        .delete()
+        .eq('id', artistId);
+      if (artErr) {
+        throw new Error(`Failed to delete artist: ${artErr.message}`);
+      }
+    }
+
+    // 10. Clean up strictly test-created venues (never pre-existing venues!)
+    for (const venueId of trackedCreated.venueIds) {
+      if (preExistingVenueIds.has(venueId)) {
+        continue;
+      }
+
+      const { error: aliasErr } = await adminClient
+        .from('venue_aliases')
+        .delete()
+        .eq('venue_id', venueId);
+      if (aliasErr) {
+        throw new Error(`Failed to delete venue_aliases: ${aliasErr.message}`);
+      }
+
+      const { error: venErr } = await adminClient
+        .from('venues')
+        .delete()
+        .eq('id', venueId);
+      if (venErr) {
+        throw new Error(`Failed to delete venue: ${venErr.message}`);
+      }
+    }
   });
 });

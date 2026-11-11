@@ -24,6 +24,8 @@ playwright-report/
 test-results/
 *.tsbuildinfo
 *.diff
+scratch/
+.backup/
 
 # Local agent/runtime secrets
 .agents/local/

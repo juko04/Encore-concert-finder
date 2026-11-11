@@ -31,7 +31,14 @@ export function buildRecommendationExplanation(input: ExplainerInput): string {
 
   // 1. Artist interest part
   if (input.matchedArtist) {
-    if (input.matchedArtist.preferenceLevel === 'favorite') {
+    if (input.matchedArtist.isSpotifyAffinity) {
+      const rankStr = input.matchedArtist.spotifyRank
+        ? ` (#${input.matchedArtist.spotifyRank})`
+        : '';
+      parts.push(
+        `🎧 Spotify top artist${rankStr} (${input.matchedArtist.name})`,
+      );
+    } else if (input.matchedArtist.preferenceLevel === 'favorite') {
       parts.push(`★ Favorite artist (${input.matchedArtist.name})`);
     } else if (input.matchedArtist.preferenceLevel === 'like') {
       parts.push(`♥ Liked artist (${input.matchedArtist.name})`);

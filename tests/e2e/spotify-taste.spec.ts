@@ -157,6 +157,9 @@ test.describe('Spotify Taste Explorer & Preview E2E Flow', () => {
     await page.getByTestId('password-input').fill(testPassword);
     await page.getByTestId('auth-submit-btn').click();
 
+    await page.waitForURL((url) => url.pathname === '/profile/taste', {
+      timeout: 15000,
+    });
     await expect(page).toHaveURL(/\/profile\/taste/);
     await expect(page.getByTestId('taste-profile-manager')).toBeVisible();
 
@@ -235,6 +238,9 @@ test.describe('Spotify Taste Explorer & Preview E2E Flow', () => {
 
     // 9. Reload page and confirm synthetic demo was strictly isolated (NOT persisted to PostgreSQL database)
     await page.reload();
+    await page.waitForURL((url) => url.pathname === '/profile/taste', {
+      timeout: 15000,
+    });
     await expect(page).toHaveURL(/\/profile\/taste/);
     await expect(page.getByTestId('taste-profile-manager')).toBeVisible();
     await expect(page.getByTestId('empty-preferences-view')).toBeVisible();
