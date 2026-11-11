@@ -527,18 +527,69 @@ describe('Catalog RLS, Security & Canonicalization Atomicity', () => {
   it('proves seeded operational tables remain completely hidden from anon users', async () => {
     if (!isDbAvailable || !adminClient || !anonClient) return;
 
-    // Verify admin can see populated operational tables
-    const { data: adminCandidates } = await adminClient
-      .from('event_candidates')
-      .select('id')
-      .limit(5);
-    expect(adminCandidates && adminCandidates.length > 0).toBeTruthy();
+    const sourceId = 'a0000000-0000-0000-0000-000000000001';
+    const timestamp = Date.now();
 
-    // Query same table with anonClient: must return 0 rows (RLS blocks read)
-    const { data: anonCandidates, error: anonError } = await anonClient
+    // Ensure at least one candidate exists to prove operational table isolation
+    const { data: rawIngest, error: rawError } = await adminClient
+      .from('raw_ingests')
+      .insert({
+        source_id: sourceId,
+        source_url: `https://example.com/raw-${timestamp}`,
+        acquisition_method: 'api',
+        content_hash: `hash_${timestamp}`,
+        payload: { test: true },
+        http_status: 200,
+      })
+      .select('id')
+      .single();
+
+    if (rawError || !rawIngest) {
+      throw new Error(`Failed to insert test raw_ingest: ${rawError?.message}`);
+    }
+
+    const { data: candidate, error: candError } = await adminClient
       .from('event_candidates')
-      .select('id');
-    expect(anonError || anonCandidates?.length === 0).toBeTruthy();
+      .insert({
+        raw_ingest_id: rawIngest.id,
+        source_id: sourceId,
+        source_type: 'venue',
+        acquisition_method: 'structured_json',
+        source_url: `https://example.com/hidden-test-show-${timestamp}`,
+        title: 'Hidden Test Show',
+        venue_name: 'Hidden Test Venue',
+        timezone: 'America/Denver',
+        local_start_date: '2026-11-20',
+      })
+      .select('id')
+      .single();
+
+    if (candError || !candidate) {
+      await adminClient.from('raw_ingests').delete().eq('id', rawIngest.id);
+      throw new Error(`Failed to insert test candidate: ${candError?.message}`);
+    }
+
+    try {
+      // Verify admin can see populated operational tables
+      const { data: adminCandidates } = await adminClient
+        .from('event_candidates')
+        .select('id')
+        .eq('id', candidate.id);
+      expect(adminCandidates && adminCandidates.length > 0).toBeTruthy();
+
+      // Query same table with anonClient: must return 0 rows (RLS blocks read)
+      const { data: anonCandidates, error: anonError } = await anonClient
+        .from('event_candidates')
+        .select('id')
+        .eq('id', candidate.id);
+      expect(anonError || anonCandidates?.length === 0).toBeTruthy();
+    } finally {
+      await adminClient
+        .from('event_candidates')
+        .delete()
+        .eq('id', candidate.id);
+      await adminClient.from('raw_ingests').delete().eq('id', rawIngest.id);
+    }
   });
 
   it('rejects mapping the same upstream (source_id, source_event_id) to multiple canonical events (Invariant 4)', async () => {
