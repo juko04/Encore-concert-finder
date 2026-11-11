@@ -20,7 +20,8 @@
     "db:stop": "supabase stop",
     "ingest:ticketmaster": "vite-node --config vitest.config.ts scripts/ingest-ticketmaster.ts",
     "ingest:venue": "vite-node --config vitest.config.ts scripts/ingest-venue.ts",
-    "cleanup:synthetic": "vite-node --config vitest.config.ts scripts/cleanup-synthetic-data.ts"
+    "cleanup:synthetic": "vite-node --config vitest.config.ts scripts/cleanup-synthetic-data.ts",
+    "audit:synthetic": "vite-node --config vitest.config.ts scripts/cleanup-synthetic-data.ts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.5.2",

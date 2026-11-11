@@ -26,10 +26,32 @@ const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
 export function clearSpotifyAffinityCache(userId?: string): void {
   if (userId) {
-    affinityCache.delete(userId);
+    for (const key of affinityCache.keys()) {
+      if (key === userId || key.startsWith(`${userId}:`)) {
+        affinityCache.delete(key);
+      }
+    }
   } else {
     affinityCache.clear();
   }
+}
+
+export function getSpotifyAffinityCacheSize(): number {
+  return affinityCache.size;
+}
+
+/**
+ * Test-only utility to populate in-memory affinity cache entries.
+ */
+export function _setAffinityCacheForTesting(
+  userId: string,
+  timeRange: SpotifyTimeRange,
+  artists: SpotifyTopArtist[] = [],
+): void {
+  affinityCache.set(`${userId}:${timeRange}`, {
+    timestamp: Date.now(),
+    artists,
+  });
 }
 
 export async function getActiveSpotifyTopArtistsForUser(

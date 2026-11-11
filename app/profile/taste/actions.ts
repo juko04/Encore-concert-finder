@@ -28,6 +28,7 @@ import {
   getSyntheticTopArtists,
   isSyntheticPreviewAllowed,
 } from '@/lib/sources/spotify/synthetic-preview';
+import { clearSpotifyAffinityCache } from '@/lib/sources/spotify/affinity-service';
 
 export interface PreferenceActionResult {
   success?: boolean;
@@ -219,6 +220,9 @@ export async function disconnectSpotifyAction(): Promise<{
         error: 'Failed to verify Spotify credential deletion.',
       };
     }
+
+    // Evict cached listening affinities for user
+    clearSpotifyAffinityCache(user.id);
 
     revalidatePath('/profile/taste');
     return { success: true };

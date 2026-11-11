@@ -71,8 +71,13 @@ describe('Supabase Golden Path Integration: Full Ingestion & Canonicalization Pi
     rawIngestIds: new Set<string>(),
     candidateIds: new Set<string>(),
     eventIds: new Set<string>(),
+    artistIds: new Set<string>(),
+    venueIds: new Set<string>(),
     sourceIds: new Set<string>(),
   };
+
+  const preExistingArtistIds = new Set<string>();
+  const preExistingVenueIds = new Set<string>();
 
   function ensureDbAvailable(): boolean {
     if (!isDbAvailable || !adminClient) {
@@ -125,6 +130,25 @@ describe('Supabase Golden Path Integration: Full Ingestion & Canonicalization Pi
     candidateRepo = new SupabaseEventCandidateRepository(adminClient);
     catalogRepo = new SupabaseCatalogRepository(adminClient);
     coordinator = new CanonicalizationCoordinator(catalogRepo);
+
+    // Snapshot pre-existing artists and venues to protect against accidental teardown (Finding 2)
+    const { data: existingArtists, error: artErr } = await adminClient
+      .from('artists')
+      .select('id');
+    if (artErr)
+      throw new Error(`Failed to query existing artists: ${artErr.message}`);
+    for (const a of existingArtists || []) {
+      preExistingArtistIds.add(a.id);
+    }
+
+    const { data: existingVenues, error: venErr } = await adminClient
+      .from('venues')
+      .select('id');
+    if (venErr)
+      throw new Error(`Failed to query existing venues: ${venErr.message}`);
+    for (const v of existingVenues || []) {
+      preExistingVenueIds.add(v.id);
+    }
 
     await adminClient.from('sources').upsert(
       [
@@ -822,10 +846,7 @@ describe('Supabase Golden Path Integration: Full Ingestion & Canonicalization Pi
     const candidateIds = Array.from(trackedCreated.candidateIds);
     const rawIngestIds = Array.from(trackedCreated.rawIngestIds);
 
-    // Identify linked artists and venues before deleting canonical events
-    let linkedArtistIds: string[] = [];
-    let linkedVenueIds: string[] = [];
-
+    // Identify strictly newly created artists and venues for all tracked events before deletion
     if (eventIds.length > 0) {
       const { data: ea, error: eaErr } = await adminClient
         .from('event_artists')
@@ -836,8 +857,10 @@ describe('Supabase Golden Path Integration: Full Ingestion & Canonicalization Pi
           `Failed to query event_artists in cleanup: ${eaErr.message}`,
         );
       }
-      if (ea) {
-        linkedArtistIds = Array.from(new Set(ea.map((r) => r.artist_id)));
+      for (const r of ea || []) {
+        if (!preExistingArtistIds.has(r.artist_id)) {
+          trackedCreated.artistIds.add(r.artist_id);
+        }
       }
 
       const { data: ev, error: evErr } = await adminClient
@@ -849,14 +872,38 @@ describe('Supabase Golden Path Integration: Full Ingestion & Canonicalization Pi
           `Failed to query events for venue_ids in cleanup: ${evErr.message}`,
         );
       }
-      if (ev) {
-        linkedVenueIds = Array.from(
-          new Set(ev.map((r) => r.venue_id).filter(Boolean) as string[]),
+      for (const r of ev || []) {
+        if (r.venue_id && !preExistingVenueIds.has(r.venue_id)) {
+          trackedCreated.venueIds.add(r.venue_id);
+        }
+      }
+    }
+
+    // 1. Delete candidate_resolutions explicitly (Finding 2)
+    if (eventIds.length > 0) {
+      const { error: delCrEvErr } = await adminClient
+        .from('candidate_resolutions')
+        .delete()
+        .in('event_id', eventIds);
+      if (delCrEvErr) {
+        throw new Error(
+          `Failed to delete candidate_resolutions by event_id: ${delCrEvErr.message}`,
+        );
+      }
+    }
+    if (candidateIds.length > 0) {
+      const { error: delCrCandErr } = await adminClient
+        .from('candidate_resolutions')
+        .delete()
+        .in('event_candidate_id', candidateIds);
+      if (delCrCandErr) {
+        throw new Error(
+          `Failed to delete candidate_resolutions by event_candidate_id: ${delCrCandErr.message}`,
         );
       }
     }
 
-    // 1. Delete event_field_evidence by tracked event IDs or candidate IDs
+    // 2. Delete event_field_evidence by tracked event IDs or candidate IDs
     if (eventIds.length > 0) {
       const { error: delEvidenceErr } = await adminClient
         .from('event_field_evidence')
@@ -880,7 +927,7 @@ describe('Supabase Golden Path Integration: Full Ingestion & Canonicalization Pi
       }
     }
 
-    // 2. Delete event_ticket_links
+    // 3. Delete event_ticket_links
     if (eventIds.length > 0) {
       const { error: delTlErr } = await adminClient
         .from('event_ticket_links')
@@ -893,7 +940,7 @@ describe('Supabase Golden Path Integration: Full Ingestion & Canonicalization Pi
       }
     }
 
-    // 3. Delete event_artists
+    // 4. Delete event_artists
     if (eventIds.length > 0) {
       const { error: delEaErr } = await adminClient
         .from('event_artists')
@@ -904,7 +951,7 @@ describe('Supabase Golden Path Integration: Full Ingestion & Canonicalization Pi
       }
     }
 
-    // 4. Delete event_sources
+    // 5. Delete event_sources
     if (eventIds.length > 0) {
       const { error: delEsErr } = await adminClient
         .from('event_sources')
@@ -928,7 +975,7 @@ describe('Supabase Golden Path Integration: Full Ingestion & Canonicalization Pi
       }
     }
 
-    // 5. Delete events
+    // 6. Delete events
     if (eventIds.length > 0) {
       const { error: delEventsErr } = await adminClient
         .from('events')
@@ -939,7 +986,7 @@ describe('Supabase Golden Path Integration: Full Ingestion & Canonicalization Pi
       }
     }
 
-    // 6. Delete event_candidates
+    // 7. Delete event_candidates
     if (candidateIds.length > 0) {
       const { error: delCandErr } = await adminClient
         .from('event_candidates')
@@ -952,7 +999,7 @@ describe('Supabase Golden Path Integration: Full Ingestion & Canonicalization Pi
       }
     }
 
-    // 7. Delete raw_ingests
+    // 8. Delete raw_ingests
     if (rawIngestIds.length > 0) {
       const { error: delRawErr } = await adminClient
         .from('raw_ingests')
@@ -963,69 +1010,51 @@ describe('Supabase Golden Path Integration: Full Ingestion & Canonicalization Pi
       }
     }
 
-    // 8. Clean up orphaned test artists created by canonicalization
-    for (const artistId of linkedArtistIds) {
-      const { count: remainingEventCount, error: countErr } = await adminClient
-        .from('event_artists')
-        .select('id', { count: 'exact', head: true })
+    // 9. Clean up strictly test-created artists (never pre-existing artists!)
+    for (const artistId of trackedCreated.artistIds) {
+      if (preExistingArtistIds.has(artistId)) {
+        continue;
+      }
+
+      const { error: extErr } = await adminClient
+        .from('artist_external_ids')
+        .delete()
         .eq('artist_id', artistId);
-      if (countErr) {
+      if (extErr) {
         throw new Error(
-          `Failed to check remaining event_artists: ${countErr.message}`,
+          `Failed to delete artist_external_ids: ${extErr.message}`,
         );
       }
 
-      if (remainingEventCount === 0) {
-        const { error: extErr } = await adminClient
-          .from('artist_external_ids')
-          .delete()
-          .eq('artist_id', artistId);
-        if (extErr) {
-          throw new Error(
-            `Failed to delete artist_external_ids: ${extErr.message}`,
-          );
-        }
-
-        const { error: artErr } = await adminClient
-          .from('artists')
-          .delete()
-          .eq('id', artistId);
-        if (artErr) {
-          throw new Error(`Failed to delete artist: ${artErr.message}`);
-        }
+      const { error: artErr } = await adminClient
+        .from('artists')
+        .delete()
+        .eq('id', artistId);
+      if (artErr) {
+        throw new Error(`Failed to delete artist: ${artErr.message}`);
       }
     }
 
-    // 10. Clean up orphaned test venues created by canonicalization
-    for (const venueId of linkedVenueIds) {
-      const { count: remainingVenueCount, error: countErr } = await adminClient
-        .from('events')
-        .select('id', { count: 'exact', head: true })
-        .eq('venue_id', venueId);
-      if (countErr) {
-        throw new Error(
-          `Failed to check remaining events for venue: ${countErr.message}`,
-        );
+    // 10. Clean up strictly test-created venues (never pre-existing venues!)
+    for (const venueId of trackedCreated.venueIds) {
+      if (preExistingVenueIds.has(venueId)) {
+        continue;
       }
 
-      if (remainingVenueCount === 0) {
-        const { error: aliasErr } = await adminClient
-          .from('venue_aliases')
-          .delete()
-          .eq('venue_id', venueId);
-        if (aliasErr) {
-          throw new Error(
-            `Failed to delete venue_aliases: ${aliasErr.message}`,
-          );
-        }
+      const { error: aliasErr } = await adminClient
+        .from('venue_aliases')
+        .delete()
+        .eq('venue_id', venueId);
+      if (aliasErr) {
+        throw new Error(`Failed to delete venue_aliases: ${aliasErr.message}`);
+      }
 
-        const { error: venErr } = await adminClient
-          .from('venues')
-          .delete()
-          .eq('id', venueId);
-        if (venErr) {
-          throw new Error(`Failed to delete venue: ${venErr.message}`);
-        }
+      const { error: venErr } = await adminClient
+        .from('venues')
+        .delete()
+        .eq('id', venueId);
+      if (venErr) {
+        throw new Error(`Failed to delete venue: ${venErr.message}`);
       }
     }
   });

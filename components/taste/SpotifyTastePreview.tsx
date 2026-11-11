@@ -82,12 +82,12 @@ export function SpotifyTastePreview({
             )}
           </div>
           <p className="mt-0.5 text-xs text-zinc-400">
-            Your Spotify rotation automatically ranks concerts (scores 60–70).
-            Set an explicit preference to customize priority:
+            Spotify affinity scoring is ready to rank concerts (scores 60–70) as
+            verified Spotify artist IDs match in our catalog. Set an explicit
+            preference below to guarantee priority right away:
             <strong> ★ Favorite (100)</strong> or <strong>♥ Like (75)</strong>{' '}
-            elevates the artist above active rotation;{' '}
-            <strong>✦ Interested (55)</strong> sets a lower exploratory
-            priority.
+            immediately elevates the artist; <strong>✦ Interested (55)</strong>{' '}
+            sets a lower exploratory priority.
           </p>
         </div>
 
@@ -146,10 +146,11 @@ export function SpotifyTastePreview({
             <strong className="font-semibold text-indigo-100">
               Recency-Weighted Taste Hypothesis:
             </strong>{' '}
-            Your active Spotify rotation automatically informs concert
-            recommendation scores. You can optionally add any artist below to an
-            explicit preference tier (★ Favorite / ♥ Like) to give them
-            guaranteed priority over your general listening rotation.
+            Spotify listening affinity scoring is built in and will
+            automatically score concerts as verified Spotify artist IDs match in
+            our catalog. You can add any artist below to an explicit preference
+            tier (★ Favorite / ♥ Like) to give them immediate guaranteed
+            priority.
           </div>
         </div>
       </div>

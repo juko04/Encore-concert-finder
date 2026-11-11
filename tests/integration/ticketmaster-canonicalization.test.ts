@@ -83,7 +83,11 @@ describe('Supabase Integration: Ticketmaster Ingestion & Canonicalization', () =
     candidateIds: new Set<string>(),
     eventIds: new Set<string>(),
     artistIds: new Set<string>(),
+    venueIds: new Set<string>(),
   };
+
+  const preExistingArtistIds = new Set<string>();
+  const preExistingVenueIds = new Set<string>();
 
   function ensureDbAvailable(): boolean {
     if (!isDbAvailable || !adminClient) {
@@ -143,6 +147,25 @@ describe('Supabase Integration: Ticketmaster Ingestion & Canonicalization', () =
     rawIngestRepo = new SupabaseRawIngestRepository(adminClient);
     candidateRepo = new SupabaseEventCandidateRepository(adminClient);
     catalogRepo = new SupabaseCatalogRepository(adminClient);
+
+    // Snapshot pre-existing artists and venues to protect against accidental teardown (Finding 2)
+    const { data: existingArtists, error: artErr } = await adminClient
+      .from('artists')
+      .select('id');
+    if (artErr)
+      throw new Error(`Failed to query existing artists: ${artErr.message}`);
+    for (const a of existingArtists || []) {
+      preExistingArtistIds.add(a.id);
+    }
+
+    const { data: existingVenues, error: venErr } = await adminClient
+      .from('venues')
+      .select('id');
+    if (venErr)
+      throw new Error(`Failed to query existing venues: ${venErr.message}`);
+    for (const v of existingVenues || []) {
+      preExistingVenueIds.add(v.id);
+    }
   });
 
   it('enforces destination guard safety against non-local and spoofed database hosts', () => {
@@ -600,7 +623,31 @@ describe('Supabase Integration: Ticketmaster Ingestion & Canonicalization', () =
 
     const uniqueArtistIds = Array.from(new Set(linkedArtistIds));
 
-    // 1. Delete event_field_evidence
+    // 1. Delete candidate_resolutions explicitly (Finding 2)
+    if (uniqueEventIds.length > 0) {
+      const { error: delCrEvErr } = await adminClient
+        .from('candidate_resolutions')
+        .delete()
+        .in('event_id', uniqueEventIds);
+      if (delCrEvErr) {
+        throw new Error(
+          `Failed to delete candidate_resolutions by event_id: ${delCrEvErr.message}`,
+        );
+      }
+    }
+    if (uniqueCandidateIds.length > 0) {
+      const { error: delCrCandErr } = await adminClient
+        .from('candidate_resolutions')
+        .delete()
+        .in('event_candidate_id', uniqueCandidateIds);
+      if (delCrCandErr) {
+        throw new Error(
+          `Failed to delete candidate_resolutions by event_candidate_id: ${delCrCandErr.message}`,
+        );
+      }
+    }
+
+    // 2. Delete event_field_evidence
     if (uniqueEventIds.length > 0) {
       const { error: delEvidenceErr } = await adminClient
         .from('event_field_evidence')
@@ -624,7 +671,7 @@ describe('Supabase Integration: Ticketmaster Ingestion & Canonicalization', () =
       }
     }
 
-    // 2. Delete event_ticket_links
+    // 3. Delete event_ticket_links
     if (uniqueEventIds.length > 0) {
       const { error: delTlErr } = await adminClient
         .from('event_ticket_links')
@@ -637,7 +684,7 @@ describe('Supabase Integration: Ticketmaster Ingestion & Canonicalization', () =
       }
     }
 
-    // 3. Delete event_artists
+    // 4. Delete event_artists
     if (uniqueEventIds.length > 0) {
       const { error: delEaErr } = await adminClient
         .from('event_artists')
@@ -648,7 +695,7 @@ describe('Supabase Integration: Ticketmaster Ingestion & Canonicalization', () =
       }
     }
 
-    // 4. Delete event_sources
+    // 5. Delete event_sources
     if (uniqueEventIds.length > 0) {
       const { error: delEsErr } = await adminClient
         .from('event_sources')
@@ -672,7 +719,7 @@ describe('Supabase Integration: Ticketmaster Ingestion & Canonicalization', () =
       }
     }
 
-    // 5. Delete events
+    // 6. Delete events
     if (uniqueEventIds.length > 0) {
       const { error: delEventsErr } = await adminClient
         .from('events')
@@ -683,7 +730,7 @@ describe('Supabase Integration: Ticketmaster Ingestion & Canonicalization', () =
       }
     }
 
-    // 6. Delete event_candidates
+    // 7. Delete event_candidates
     if (uniqueCandidateIds.length > 0) {
       const { error: delCandErr } = await adminClient
         .from('event_candidates')
@@ -696,7 +743,7 @@ describe('Supabase Integration: Ticketmaster Ingestion & Canonicalization', () =
       }
     }
 
-    // 7. Delete raw_ingests
+    // 8. Delete raw_ingests
     if (uniqueRawIngestIds.length > 0) {
       const { error: delRawErr } = await adminClient
         .from('raw_ingests')
@@ -707,69 +754,51 @@ describe('Supabase Integration: Ticketmaster Ingestion & Canonicalization', () =
       }
     }
 
-    // 8. Delete test artists and their external IDs (strictly checking remaining references)
+    // 9. Delete test artists and their external IDs (strictly test-created, never pre-existing)
     for (const artistId of uniqueArtistIds) {
-      const { count: remainingEventCount, error: countErr } = await adminClient
-        .from('event_artists')
-        .select('id', { count: 'exact', head: true })
+      if (preExistingArtistIds.has(artistId)) {
+        continue;
+      }
+
+      const { error: extErr } = await adminClient
+        .from('artist_external_ids')
+        .delete()
         .eq('artist_id', artistId);
-      if (countErr) {
+      if (extErr) {
         throw new Error(
-          `Failed to check remaining event_artists: ${countErr.message}`,
+          `Failed to delete artist_external_ids: ${extErr.message}`,
         );
       }
 
-      if (remainingEventCount === 0) {
-        const { error: extErr } = await adminClient
-          .from('artist_external_ids')
-          .delete()
-          .eq('artist_id', artistId);
-        if (extErr) {
-          throw new Error(
-            `Failed to delete artist_external_ids: ${extErr.message}`,
-          );
-        }
-
-        const { error: artErr } = await adminClient
-          .from('artists')
-          .delete()
-          .eq('id', artistId);
-        if (artErr) {
-          throw new Error(`Failed to delete artist: ${artErr.message}`);
-        }
+      const { error: artErr } = await adminClient
+        .from('artists')
+        .delete()
+        .eq('id', artistId);
+      if (artErr) {
+        throw new Error(`Failed to delete artist: ${artErr.message}`);
       }
     }
 
-    // 9. Clean up test venues (if 0 remaining events)
-    for (const venueId of linkedVenueIds) {
-      const { count: remainingVenueCount, error: countErr } = await adminClient
-        .from('events')
-        .select('id', { count: 'exact', head: true })
-        .eq('venue_id', venueId);
-      if (countErr) {
-        throw new Error(
-          `Failed to check remaining events for venue: ${countErr.message}`,
-        );
+    // 10. Clean up test venues (strictly test-created, never pre-existing)
+    for (const venueId of trackedCreated.venueIds) {
+      if (preExistingVenueIds.has(venueId)) {
+        continue;
       }
 
-      if (remainingVenueCount === 0) {
-        const { error: aliasErr } = await adminClient
-          .from('venue_aliases')
-          .delete()
-          .eq('venue_id', venueId);
-        if (aliasErr) {
-          throw new Error(
-            `Failed to delete venue_aliases: ${aliasErr.message}`,
-          );
-        }
+      const { error: aliasErr } = await adminClient
+        .from('venue_aliases')
+        .delete()
+        .eq('venue_id', venueId);
+      if (aliasErr) {
+        throw new Error(`Failed to delete venue_aliases: ${aliasErr.message}`);
+      }
 
-        const { error: venErr } = await adminClient
-          .from('venues')
-          .delete()
-          .eq('id', venueId);
-        if (venErr) {
-          throw new Error(`Failed to delete venue: ${venErr.message}`);
-        }
+      const { error: venErr } = await adminClient
+        .from('venues')
+        .delete()
+        .eq('id', venueId);
+      if (venErr) {
+        throw new Error(`Failed to delete venue: ${venErr.message}`);
       }
     }
   });
