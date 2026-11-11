@@ -584,10 +584,7 @@ describe('Catalog RLS, Security & Canonicalization Atomicity', () => {
         .eq('id', candidate.id);
       expect(anonError || anonCandidates?.length === 0).toBeTruthy();
     } finally {
-      await adminClient
-        .from('event_candidates')
-        .delete()
-        .eq('id', candidate.id);
+      await adminClient.from('event_candidates').delete().eq('id', candidate.id);
       await adminClient.from('raw_ingests').delete().eq('id', rawIngest.id);
     }
   });
