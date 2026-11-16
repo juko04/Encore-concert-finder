@@ -1502,6 +1502,72 @@ describe('Production Recommendation Service (getPersonalizedDiscoverData)', () =
       expect(resB.isSpotifyConnected).toBe(false);
     });
 
+    it('incorporates Spotify top artists into recommendation scoring when connected without requiring manual preferences', async () => {
+      const userId = 'user-spotify-affinity-test';
+      await profileRepo.upsertProfile(userId, {});
+
+      seedEvent(catalogRepo, {
+        id: 'show-spotify-affinity-1',
+        title: 'Electric Rotation Band Live',
+        localStartDate: '2026-11-20',
+        startsAt: '2026-11-21T02:00:00Z',
+        timezone: 'America/Denver',
+        venueName: 'Cervantes Masterpiece Ballroom',
+        city: 'Denver',
+        region: 'CO',
+        minPrice: 30,
+        currency: 'USD',
+        artists: [
+          {
+            id: 'artist-spot-test',
+            name: 'Electric Rotation Band',
+            billingPosition: 'headliner',
+          },
+        ],
+      });
+
+      catalogRepo.artistExternalIds.set('ext-spot-test', {
+        id: 'ext-spot-test',
+        artistId: 'artist-spot-test',
+        provider: 'spotify',
+        externalId: 'spot-band-id-999',
+        createdAt: '2026-10-01T00:00:00Z',
+      });
+
+      // User has 0 manual preferences, but Spotify provides top artist
+      const res = await getPersonalizedDiscoverData({
+        userId,
+        catalogRepo,
+        profileRepo,
+        prefRepo,
+        spotifyRepo,
+        spotifyTopArtists: [
+          {
+            id: 'spot-band-id-999',
+            name: 'Electric Rotation Band',
+            rank: 1,
+            genres: ['electronic'],
+            imageUrl: null,
+            spotifyUrl: 'https://open.spotify.com/artist/spot-band-id-999',
+            popularity: 80,
+            trend: 'rising',
+            timeRange: 'medium_term',
+          },
+        ],
+        referenceDate: '2026-11-10',
+      });
+
+      expect(res.hasSpotifyAffinities).toBe(true);
+      expect(res.recommendations.length).toBeGreaterThanOrEqual(1);
+
+      const matchedRec = res.recommendations.find(
+        (r) => r.eventId === 'show-spotify-affinity-1',
+      );
+      expect(matchedRec).toBeDefined();
+      expect(matchedRec!.factors.artist.score).toBe(70); // Top 5 Spotify affinity
+      expect(matchedRec!.explanation).toContain('Spotify top artist (#1');
+    });
+
     it('pushes status scheduled down into database queries eliminating scan limit false negatives in production entry points (FIX 2)', async () => {
       const userId = 'user-scheduled-scan-test';
       await profileRepo.upsertProfile(userId, {});

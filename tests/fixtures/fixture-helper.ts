@@ -1,6 +1,43 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import type { SupabaseClient } from '@supabase/supabase-js';
 import type { EventCandidate } from '@/lib/domain/event-candidate';
+
+/**
+ * Paginates PostgREST queries to safely snapshot all IDs from a table without
+ * being truncated by the 1,000-row default limit.
+ */
+export async function fetchAllIdsPaginated(
+  client: SupabaseClient,
+  table: string,
+  pageSize = 1000,
+): Promise<Set<string>> {
+  const ids = new Set<string>();
+  let from = 0;
+  while (true) {
+    const to = from + pageSize - 1;
+    const { data, error } = await client
+      .from(table)
+      .select('id')
+      .range(from, to);
+    if (error) {
+      throw new Error(
+        `Failed to fetch paginated ids from ${table} (${from}-${to}): ${error.message}`,
+      );
+    }
+    if (!data || data.length === 0) {
+      break;
+    }
+    for (const row of data) {
+      ids.add(row.id);
+    }
+    if (data.length < pageSize) {
+      break;
+    }
+    from += pageSize;
+  }
+  return ids;
+}
 
 export type FixtureKey =
   | 'single_show'

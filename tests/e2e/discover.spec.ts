@@ -208,7 +208,7 @@ test.describe('Discover Page E2E Suite', () => {
     testVenueIdNear = venueRowNear.id;
 
     // 4. Seed Event A: Favorite Artist, Farther away, Expensive ($120)
-    const futureDateA = new Date(Date.now() + 20 * 86400 * 1000)
+    const futureDateA = new Date(Date.now() + 1 * 86400 * 1000)
       .toISOString()
       .split('T')[0];
 
@@ -256,7 +256,7 @@ test.describe('Discover Page E2E Suite', () => {
     });
 
     // 5. Seed Event B: Interested Artist, Nearby (0 mi), Affordable ($25)
-    const futureDateB = new Date(Date.now() + 21 * 86400 * 1000)
+    const futureDateB = new Date(Date.now() + 2 * 86400 * 1000)
       .toISOString()
       .split('T')[0];
 
@@ -443,7 +443,10 @@ test.describe('Discover Page E2E Suite', () => {
     await page.getByTestId('password-input').fill(testPassword);
     await page.getByTestId('auth-submit-btn').click();
 
-    // 2. Wait for navigation to /discover
+    // 2. Wait for navigation away from /login to /discover
+    await page.waitForURL((url) => url.pathname === '/discover', {
+      timeout: 15000,
+    });
     await expect(page).toHaveURL(/\/discover/);
 
     // 3. Confirm discover controls toolbar is visible

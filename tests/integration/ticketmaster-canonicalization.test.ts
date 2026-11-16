@@ -1,4 +1,4 @@
-import { beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { execSync } from 'node:child_process';
 import { SupabaseSourceRepository } from '@/lib/repositories/source-repository';
@@ -9,7 +9,10 @@ import { ensureTicketmasterSource } from '@/lib/sources/ticketmaster/source-regi
 import { runTicketmasterIngestion } from '@/lib/sources/ticketmaster/ingestion-pipeline';
 import { assertSafeDatabaseTarget } from '@/lib/supabase/destination-guard';
 import type { CanonicalizationPayload } from '@/lib/repositories/interfaces';
-import { buildIsolatedTicketmasterFixture } from '../fixtures/fixture-helper';
+import {
+  buildIsolatedTicketmasterFixture,
+  fetchAllIdsPaginated,
+} from '../fixtures/fixture-helper';
 
 interface LocalCredentials {
   url: string;
@@ -78,6 +81,20 @@ describe('Supabase Integration: Ticketmaster Ingestion & Canonicalization', () =
   let candidateRepo: SupabaseEventCandidateRepository;
   let catalogRepo: SupabaseCatalogRepository;
 
+  const trackedCreated = {
+    rawIngestIds: new Set<string>(),
+    candidateIds: new Set<string>(),
+    eventIds: new Set<string>(),
+    artistIds: new Set<string>(),
+    venueIds: new Set<string>(),
+    sourceIds: new Set<string>(),
+  };
+
+  const preExistingArtistIds = new Set<string>();
+  const preExistingVenueIds = new Set<string>();
+  const preExistingSourceIds = new Set<string>();
+  const preExistingEventIds = new Set<string>();
+
   function ensureDbAvailable(): boolean {
     if (!isDbAvailable || !adminClient) {
       if (process.env.CI) {
@@ -136,6 +153,20 @@ describe('Supabase Integration: Ticketmaster Ingestion & Canonicalization', () =
     rawIngestRepo = new SupabaseRawIngestRepository(adminClient);
     candidateRepo = new SupabaseEventCandidateRepository(adminClient);
     catalogRepo = new SupabaseCatalogRepository(adminClient);
+
+    // Snapshot all pre-existing entities using complete paginated queries to protect against teardown truncation
+    const [existingArtists, existingVenues, existingSources, existingEvents] =
+      await Promise.all([
+        fetchAllIdsPaginated(adminClient, 'artists'),
+        fetchAllIdsPaginated(adminClient, 'venues'),
+        fetchAllIdsPaginated(adminClient, 'sources'),
+        fetchAllIdsPaginated(adminClient, 'events'),
+      ]);
+
+    for (const a of existingArtists) preExistingArtistIds.add(a);
+    for (const v of existingVenues) preExistingVenueIds.add(v);
+    for (const s of existingSources) preExistingSourceIds.add(s);
+    for (const e of existingEvents) preExistingEventIds.add(e);
   });
 
   it('enforces destination guard safety against non-local and spoofed database hosts', () => {
@@ -173,6 +204,9 @@ describe('Supabase Integration: Ticketmaster Ingestion & Canonicalization', () =
 
     const source = await ensureTicketmasterSource(sourceRepo);
     expect(source.slug).toBe('ticketmaster-discovery');
+    if (!preExistingSourceIds.has(source.id)) {
+      trackedCreated.sourceIds.add(source.id);
+    }
 
     const result = await runTicketmasterIngestion({
       useFixture: true,
@@ -187,6 +221,21 @@ describe('Supabase Integration: Ticketmaster Ingestion & Canonicalization', () =
     expect(result.rawIngestsPersisted).toBeGreaterThan(0);
     expect(result.candidatesPersisted).toBeGreaterThan(0);
     expect(result.canonicalEventsCreated).toBeGreaterThan(0);
+
+    // Strictly track events proven to have been created by this test run (never matched or preexisting)
+    for (const id of result.createdEventIds) {
+      if (!preExistingEventIds.has(id)) {
+        trackedCreated.eventIds.add(id);
+      }
+    }
+    for (const cand of result.candidates) {
+      if (cand.id) {
+        trackedCreated.candidateIds.add(cand.id);
+      }
+      if (cand.rawIngestId) {
+        trackedCreated.rawIngestIds.add(cand.rawIngestId);
+      }
+    }
 
     // Verify canonical events are listed in catalog
     const events = await catalogRepo.listEvents({ limit: 10 });
@@ -246,6 +295,20 @@ describe('Supabase Integration: Ticketmaster Ingestion & Canonicalization', () =
     expect(reprocessRun.candidatesReused).toBeGreaterThan(0);
     expect(reprocessRun.canonicalEventsCreated).toBe(0);
     expect(reprocessRun.canonicalEventsMatched).toBeGreaterThan(0);
+
+    for (const id of reprocessRun.createdEventIds) {
+      if (!preExistingEventIds.has(id)) {
+        trackedCreated.eventIds.add(id);
+      }
+    }
+    for (const cand of reprocessRun.candidates) {
+      if (cand.id) {
+        trackedCreated.candidateIds.add(cand.id);
+      }
+      if (cand.rawIngestId) {
+        trackedCreated.rawIngestIds.add(cand.rawIngestId);
+      }
+    }
   });
 
   it('successfully enriches external IDs for matched artist in PostgreSQL stored procedure', async () => {
@@ -266,6 +329,7 @@ describe('Supabase Integration: Ticketmaster Ingestion & Canonicalization', () =
 
     expect(artistError).toBeNull();
     expect(artist?.id).toBeDefined();
+    trackedCreated.artistIds.add(artist!.id);
 
     // 2. Execute canonicalization transaction enriching the artist with a Ticketmaster external ID
     const externalId = `TM-ENRICH-${testNonce}`;
@@ -293,6 +357,13 @@ describe('Supabase Integration: Ticketmaster Ingestion & Canonicalization', () =
 
     const res = await catalogRepo.applyCanonicalization(payload);
     expect(res.eventId).toBeDefined();
+    if (
+      res.status === 'created' &&
+      res.eventId &&
+      !preExistingEventIds.has(res.eventId)
+    ) {
+      trackedCreated.eventIds.add(res.eventId);
+    }
 
     // 3. Verify external ID record was committed to artist_external_ids
     const { data: extRecords, error: extError } = await adminClient!
@@ -323,6 +394,7 @@ describe('Supabase Integration: Ticketmaster Ingestion & Canonicalization', () =
 
     expect(artistError).toBeNull();
     expect(artist?.id).toBeDefined();
+    trackedCreated.artistIds.add(artist!.id);
 
     const externalId = `TM-IDEM-${testNonce}`;
     const payload: CanonicalizationPayload = {
@@ -349,10 +421,24 @@ describe('Supabase Integration: Ticketmaster Ingestion & Canonicalization', () =
     // First application
     const res1 = await catalogRepo.applyCanonicalization(payload);
     expect(res1.eventId).toBeDefined();
+    if (
+      res1.status === 'created' &&
+      res1.eventId &&
+      !preExistingEventIds.has(res1.eventId)
+    ) {
+      trackedCreated.eventIds.add(res1.eventId);
+    }
 
     // Replay with identical (artist_id, provider, external_id)
     const res2 = await catalogRepo.applyCanonicalization(payload);
     expect(res2.eventId).toBeDefined();
+    if (
+      res2.status === 'created' &&
+      res2.eventId &&
+      !preExistingEventIds.has(res2.eventId)
+    ) {
+      trackedCreated.eventIds.add(res2.eventId);
+    }
 
     // Verify row count in artist_external_ids remains exactly 1
     const { data: extRecords } = await adminClient!
@@ -381,6 +467,7 @@ describe('Supabase Integration: Ticketmaster Ingestion & Canonicalization', () =
       .select('id')
       .single();
     expect(a1Error).toBeNull();
+    trackedCreated.artistIds.add(artist1!.id);
 
     const sharedExternalId = `TM-SHARED-${testNonce}`;
     const { error: ext1Error } = await adminClient!
@@ -402,6 +489,7 @@ describe('Supabase Integration: Ticketmaster Ingestion & Canonicalization', () =
       .select('id')
       .single();
     expect(a2Error).toBeNull();
+    trackedCreated.artistIds.add(artist2!.id);
 
     // 3. Attempt canonicalization transaction with a new event and venue, attempting to assign artist 1's external ID to artist 2
     const conflictingEventName = `Conflicting Concert ${testNonce}`;
@@ -468,5 +556,332 @@ describe('Supabase Integration: Ticketmaster Ingestion & Canonicalization', () =
       .eq('external_id', sharedExternalId);
     expect(artist1Ext?.length).toBe(1);
     expect(artist1Ext![0].artist_id).toBe(artist1!.id);
+  });
+
+  afterAll(async () => {
+    if (!adminClient || !isDbAvailable) return;
+
+    // Filter strictly to events proven to have been created by this test run (never preexisting!)
+    const eventIds = Array.from(trackedCreated.eventIds).filter(
+      (id) => !preExistingEventIds.has(id),
+    );
+    const candidateIds = Array.from(trackedCreated.candidateIds);
+    const rawIngestIds = Array.from(trackedCreated.rawIngestIds);
+    const trackedArtistIds = Array.from(trackedCreated.artistIds);
+
+    // Also include any events or candidates namespaced with this suite's unique nonce
+    const { data: nonceEvents, error: nonceEvErr } = await adminClient
+      .from('events')
+      .select('id')
+      .ilike('name', `%[${suiteNonce}]%`);
+    if (nonceEvErr) {
+      throw new Error(
+        `Failed to query nonce events in cleanup: ${nonceEvErr.message}`,
+      );
+    }
+    if (nonceEvents) {
+      for (const ne of nonceEvents) {
+        if (!preExistingEventIds.has(ne.id)) {
+          eventIds.push(ne.id);
+        }
+      }
+    }
+
+    const { data: nonceCandidates, error: nonceCandErr } = await adminClient
+      .from('event_candidates')
+      .select('id, raw_ingest_id')
+      .ilike('title', `%[${suiteNonce}]%`);
+    if (nonceCandErr) {
+      throw new Error(
+        `Failed to query nonce candidates in cleanup: ${nonceCandErr.message}`,
+      );
+    }
+    if (nonceCandidates) {
+      for (const nc of nonceCandidates) {
+        candidateIds.push(nc.id);
+        if (nc.raw_ingest_id) rawIngestIds.push(nc.raw_ingest_id);
+      }
+    }
+
+    const uniqueEventIds = Array.from(new Set(eventIds));
+    const uniqueCandidateIds = Array.from(new Set(candidateIds));
+    const uniqueRawIngestIds = Array.from(new Set(rawIngestIds));
+
+    // Identify linked artists and venues before deleting the canonical events
+    let linkedArtistIds = [...trackedArtistIds];
+
+    if (uniqueEventIds.length > 0) {
+      const { data: ea, error: eaErr } = await adminClient
+        .from('event_artists')
+        .select('artist_id')
+        .in('event_id', uniqueEventIds);
+      if (eaErr) {
+        throw new Error(
+          `Failed to query event_artists in cleanup: ${eaErr.message}`,
+        );
+      }
+      if (ea) {
+        for (const r of ea) {
+          if (!preExistingArtistIds.has(r.artist_id)) {
+            linkedArtistIds.push(r.artist_id);
+          }
+        }
+      }
+
+      const { data: ev, error: evErr } = await adminClient
+        .from('events')
+        .select('venue_id')
+        .in('id', uniqueEventIds);
+      if (evErr) {
+        throw new Error(
+          `Failed to query events for venue_ids in cleanup: ${evErr.message}`,
+        );
+      }
+      if (ev) {
+        for (const r of ev) {
+          if (r.venue_id && !preExistingVenueIds.has(r.venue_id)) {
+            trackedCreated.venueIds.add(r.venue_id);
+          }
+        }
+      }
+    }
+
+    // Also include any venues created with suiteNonce in their name
+    const { data: nonceVenues, error: nonceVenErr } = await adminClient
+      .from('venues')
+      .select('id')
+      .ilike('name', `%[${suiteNonce}]%`);
+    if (nonceVenErr) {
+      throw new Error(
+        `Failed to query nonce venues in cleanup: ${nonceVenErr.message}`,
+      );
+    }
+    if (nonceVenues) {
+      for (const nv of nonceVenues) {
+        if (!preExistingVenueIds.has(nv.id)) {
+          trackedCreated.venueIds.add(nv.id);
+        }
+      }
+    }
+
+    // Also include any artists created with suiteNonce in their name
+    const { data: nonceArtists, error: nonceArtErr } = await adminClient
+      .from('artists')
+      .select('id')
+      .ilike('name', `%[${suiteNonce}]%`);
+    if (nonceArtErr) {
+      throw new Error(
+        `Failed to query nonce artists in cleanup: ${nonceArtErr.message}`,
+      );
+    }
+    if (nonceArtists) {
+      for (const na of nonceArtists) {
+        if (!preExistingArtistIds.has(na.id)) {
+          linkedArtistIds.push(na.id);
+        }
+      }
+    }
+
+    const uniqueArtistIds = Array.from(new Set(linkedArtistIds)).filter(
+      (id) => !preExistingArtistIds.has(id),
+    );
+
+    // 1. Delete candidate_resolutions:
+    // Only delete resolutions by event_id for proven test-created events.
+    // For candidate observations, delete resolutions referencing candidateIds.
+    // Preexisting matched events retain resolutions from non-test candidates.
+    if (uniqueEventIds.length > 0) {
+      const { error: delCrEvErr } = await adminClient
+        .from('candidate_resolutions')
+        .delete()
+        .in('event_id', uniqueEventIds);
+      if (delCrEvErr) {
+        throw new Error(
+          `Failed to delete candidate_resolutions by event_id: ${delCrEvErr.message}`,
+        );
+      }
+    }
+    if (uniqueCandidateIds.length > 0) {
+      const { error: delCrCandErr } = await adminClient
+        .from('candidate_resolutions')
+        .delete()
+        .in('event_candidate_id', uniqueCandidateIds);
+      if (delCrCandErr) {
+        throw new Error(
+          `Failed to delete candidate_resolutions by event_candidate_id: ${delCrCandErr.message}`,
+        );
+      }
+    }
+
+    // 2. Delete event_field_evidence:
+    // Strictly delete by event_id only for proven test-created events!
+    // For matched preexisting events, only delete evidence authored by this test's candidate observations.
+    if (uniqueEventIds.length > 0) {
+      const { error: delEvidenceErr } = await adminClient
+        .from('event_field_evidence')
+        .delete()
+        .in('event_id', uniqueEventIds);
+      if (delEvidenceErr) {
+        throw new Error(
+          `Failed to delete event_field_evidence by event_id: ${delEvidenceErr.message}`,
+        );
+      }
+    }
+    if (uniqueCandidateIds.length > 0) {
+      const { error: delEvidenceCandErr } = await adminClient
+        .from('event_field_evidence')
+        .delete()
+        .in('candidate_id', uniqueCandidateIds);
+      if (delEvidenceCandErr) {
+        throw new Error(
+          `Failed to delete event_field_evidence by candidate_id: ${delEvidenceCandErr.message}`,
+        );
+      }
+    }
+
+    // 3. Delete event_ticket_links strictly for proven test-created events
+    if (uniqueEventIds.length > 0) {
+      const { error: delTlErr } = await adminClient
+        .from('event_ticket_links')
+        .delete()
+        .in('event_id', uniqueEventIds);
+      if (delTlErr) {
+        throw new Error(
+          `Failed to delete event_ticket_links: ${delTlErr.message}`,
+        );
+      }
+    }
+
+    // 4. Delete event_artists strictly for proven test-created events
+    if (uniqueEventIds.length > 0) {
+      const { error: delEaErr } = await adminClient
+        .from('event_artists')
+        .delete()
+        .in('event_id', uniqueEventIds);
+      if (delEaErr) {
+        throw new Error(`Failed to delete event_artists: ${delEaErr.message}`);
+      }
+    }
+
+    // 5. Delete event_sources strictly for proven test-created events or candidate observations
+    if (uniqueEventIds.length > 0) {
+      const { error: delEsErr } = await adminClient
+        .from('event_sources')
+        .delete()
+        .in('event_id', uniqueEventIds);
+      if (delEsErr) {
+        throw new Error(
+          `Failed to delete event_sources by event_id: ${delEsErr.message}`,
+        );
+      }
+    }
+    if (uniqueCandidateIds.length > 0) {
+      const { error: delEsCandErr } = await adminClient
+        .from('event_sources')
+        .delete()
+        .in('candidate_id', uniqueCandidateIds);
+      if (delEsCandErr) {
+        throw new Error(
+          `Failed to delete event_sources by candidate_id: ${delEsCandErr.message}`,
+        );
+      }
+    }
+
+    // 6. Delete events strictly for proven test-created events (never preexisting!)
+    if (uniqueEventIds.length > 0) {
+      const { error: delEventsErr } = await adminClient
+        .from('events')
+        .delete()
+        .in('id', uniqueEventIds);
+      if (delEventsErr) {
+        throw new Error(`Failed to delete events: ${delEventsErr.message}`);
+      }
+    }
+
+    // 7. Delete event_candidates
+    if (uniqueCandidateIds.length > 0) {
+      const { error: delCandErr } = await adminClient
+        .from('event_candidates')
+        .delete()
+        .in('id', uniqueCandidateIds);
+      if (delCandErr) {
+        throw new Error(
+          `Failed to delete event_candidates: ${delCandErr.message}`,
+        );
+      }
+    }
+
+    // 8. Delete raw_ingests
+    if (uniqueRawIngestIds.length > 0) {
+      const { error: delRawErr } = await adminClient
+        .from('raw_ingests')
+        .delete()
+        .in('id', uniqueRawIngestIds);
+      if (delRawErr) {
+        throw new Error(`Failed to delete raw_ingests: ${delRawErr.message}`);
+      }
+    }
+
+    // 9. Delete test artists and their external IDs (strictly test-created, never pre-existing)
+    for (const artistId of uniqueArtistIds) {
+      if (preExistingArtistIds.has(artistId)) {
+        continue;
+      }
+
+      const { error: extErr } = await adminClient
+        .from('artist_external_ids')
+        .delete()
+        .eq('artist_id', artistId);
+      if (extErr) {
+        throw new Error(
+          `Failed to delete artist_external_ids: ${extErr.message}`,
+        );
+      }
+
+      const { error: artErr } = await adminClient
+        .from('artists')
+        .delete()
+        .eq('id', artistId);
+      if (artErr) {
+        throw new Error(`Failed to delete artist: ${artErr.message}`);
+      }
+    }
+
+    // 10. Clean up test venues (strictly test-created, never pre-existing)
+    for (const venueId of trackedCreated.venueIds) {
+      if (preExistingVenueIds.has(venueId)) {
+        continue;
+      }
+
+      const { error: aliasErr } = await adminClient
+        .from('venue_aliases')
+        .delete()
+        .eq('venue_id', venueId);
+      if (aliasErr) {
+        throw new Error(`Failed to delete venue_aliases: ${aliasErr.message}`);
+      }
+
+      const { error: venErr } = await adminClient
+        .from('venues')
+        .delete()
+        .eq('id', venueId);
+      if (venErr) {
+        throw new Error(`Failed to delete venue: ${venErr.message}`);
+      }
+    }
+
+    // 11. Clean up test sources (strictly test-created, never pre-existing)
+    for (const sourceId of trackedCreated.sourceIds) {
+      if (preExistingSourceIds.has(sourceId)) {
+        continue;
+      }
+      const { error: srcErr } = await adminClient
+        .from('sources')
+        .delete()
+        .eq('id', sourceId);
+      if (srcErr) {
+        throw new Error(`Failed to delete source: ${srcErr.message}`);
+      }
+    }
   });
 });

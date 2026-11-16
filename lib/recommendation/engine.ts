@@ -67,6 +67,7 @@ export function scoreEvent(
   const artistResult = calculateArtistInterestFactor(
     event.artists,
     context.artistPreferences,
+    context.spotifyTopArtists,
   );
 
   const isFavorite = artistResult.matchedArtist?.isFavorite ?? false;

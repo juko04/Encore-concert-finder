@@ -359,6 +359,34 @@ describe('Catalog RLS, Security & Canonicalization Atomicity', () => {
       .select('id')
       .eq('normalized_name', `rollback artist ${rollbackSuffix}`);
     expect(orphanedArtist?.length).toBe(0);
+
+    // Teardown success data to maintain zero test pollution
+    if (successData?.eventId) {
+      await adminClient
+        .from('event_sources')
+        .delete()
+        .eq('event_id', successData.eventId);
+      await adminClient
+        .from('candidate_resolutions')
+        .delete()
+        .eq('event_id', successData.eventId);
+      await adminClient
+        .from('event_artists')
+        .delete()
+        .eq('event_id', successData.eventId);
+      await adminClient.from('events').delete().eq('id', successData.eventId);
+    }
+    if (successData?.venueId) {
+      await adminClient.from('venues').delete().eq('id', successData.venueId);
+    }
+    if (candData?.id) {
+      await adminClient.from('event_candidates').delete().eq('id', candData.id);
+    }
+    await adminClient.from('raw_ingests').delete().eq('id', rawIngestId);
+    await adminClient
+      .from('artists')
+      .delete()
+      .eq('name', `Success Artist ${timestamp}`);
   });
 
   it('enforces temporal database check constraints', async () => {
@@ -489,23 +517,79 @@ describe('Catalog RLS, Security & Canonicalization Atomicity', () => {
     expect(crossSourceError).not.toBeNull();
     // 23503 is foreign_key_violation in PostgreSQL
     expect(crossSourceError?.code).toBe('23503');
+
+    // Teardown raw ingest
+    if (rawA?.id) {
+      await adminClient.from('raw_ingests').delete().eq('id', rawA.id);
+    }
   });
 
   it('proves seeded operational tables remain completely hidden from anon users', async () => {
     if (!isDbAvailable || !adminClient || !anonClient) return;
 
-    // Verify admin can see populated operational tables
-    const { data: adminCandidates } = await adminClient
-      .from('event_candidates')
-      .select('id')
-      .limit(5);
-    expect(adminCandidates && adminCandidates.length > 0).toBeTruthy();
+    const sourceId = 'a0000000-0000-0000-0000-000000000001';
+    const timestamp = Date.now();
 
-    // Query same table with anonClient: must return 0 rows (RLS blocks read)
-    const { data: anonCandidates, error: anonError } = await anonClient
+    // Ensure at least one candidate exists to prove operational table isolation
+    const { data: rawIngest, error: rawError } = await adminClient
+      .from('raw_ingests')
+      .insert({
+        source_id: sourceId,
+        source_url: `https://example.com/raw-${timestamp}`,
+        acquisition_method: 'api',
+        content_hash: `hash_${timestamp}`,
+        payload: { test: true },
+        http_status: 200,
+      })
+      .select('id')
+      .single();
+
+    if (rawError || !rawIngest) {
+      throw new Error(`Failed to insert test raw_ingest: ${rawError?.message}`);
+    }
+
+    const { data: candidate, error: candError } = await adminClient
       .from('event_candidates')
-      .select('id');
-    expect(anonError || anonCandidates?.length === 0).toBeTruthy();
+      .insert({
+        raw_ingest_id: rawIngest.id,
+        source_id: sourceId,
+        source_type: 'venue',
+        acquisition_method: 'structured_json',
+        source_url: `https://example.com/hidden-test-show-${timestamp}`,
+        title: 'Hidden Test Show',
+        venue_name: 'Hidden Test Venue',
+        timezone: 'America/Denver',
+        local_start_date: '2026-11-20',
+      })
+      .select('id')
+      .single();
+
+    if (candError || !candidate) {
+      await adminClient.from('raw_ingests').delete().eq('id', rawIngest.id);
+      throw new Error(`Failed to insert test candidate: ${candError?.message}`);
+    }
+
+    try {
+      // Verify admin can see populated operational tables
+      const { data: adminCandidates } = await adminClient
+        .from('event_candidates')
+        .select('id')
+        .eq('id', candidate.id);
+      expect(adminCandidates && adminCandidates.length > 0).toBeTruthy();
+
+      // Query same table with anonClient: must return 0 rows (RLS blocks read)
+      const { data: anonCandidates, error: anonError } = await anonClient
+        .from('event_candidates')
+        .select('id')
+        .eq('id', candidate.id);
+      expect(anonError || anonCandidates?.length === 0).toBeTruthy();
+    } finally {
+      await adminClient
+        .from('event_candidates')
+        .delete()
+        .eq('id', candidate.id);
+      await adminClient.from('raw_ingests').delete().eq('id', rawIngest.id);
+    }
   });
 
   it('rejects mapping the same upstream (source_id, source_event_id) to multiple canonical events (Invariant 4)', async () => {
@@ -574,6 +658,22 @@ describe('Catalog RLS, Security & Canonicalization Atomicity', () => {
     expect(duplicateLinkError).not.toBeNull();
     // 23505 is unique_violation in PostgreSQL
     expect(duplicateLinkError?.code).toBe('23505');
+
+    // Teardown test events
+    if (event1?.id) {
+      await adminClient
+        .from('event_sources')
+        .delete()
+        .eq('event_id', event1.id);
+      await adminClient.from('events').delete().eq('id', event1.id);
+    }
+    if (event2?.id) {
+      await adminClient
+        .from('event_sources')
+        .delete()
+        .eq('event_id', event2.id);
+      await adminClient.from('events').delete().eq('id', event2.id);
+    }
   });
 
   it('verifies batched listEvents correctly joins source names, handles multiple/inactive sources, preserves artist/ticket ordering, and supports anon RLS reads', async () => {
@@ -831,6 +931,41 @@ describe('Catalog RLS, Security & Canonicalization Atomicity', () => {
     expect(
       anonEventSourcesError || anonEventSources?.length === 0,
     ).toBeTruthy();
+
+    // Teardown test entities to maintain zero pollution
+    if (event1?.id) {
+      await adminClient
+        .from('event_sources')
+        .delete()
+        .eq('event_id', event1.id);
+      await adminClient
+        .from('event_artists')
+        .delete()
+        .eq('event_id', event1.id);
+      await adminClient
+        .from('event_ticket_links')
+        .delete()
+        .eq('event_id', event1.id);
+      await adminClient.from('events').delete().eq('id', event1.id);
+    }
+    if (event2?.id) {
+      await adminClient.from('events').delete().eq('id', event2.id);
+    }
+    if (artist1?.id) {
+      await adminClient.from('artists').delete().eq('id', artist1.id);
+    }
+    if (artist2?.id) {
+      await adminClient.from('artists').delete().eq('id', artist2.id);
+    }
+    if (venue?.id) {
+      await adminClient.from('venues').delete().eq('id', venue.id);
+    }
+    if (sourceA?.id) {
+      await adminClient.from('sources').delete().eq('id', sourceA.id);
+    }
+    if (sourceB?.id) {
+      await adminClient.from('sources').delete().eq('id', sourceB.id);
+    }
   });
 
   it('validates production preferred-artist query completeness exceeding API row limit (>1000 event_artists rows)', async () => {

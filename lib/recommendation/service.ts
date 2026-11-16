@@ -39,6 +39,8 @@ import type {
 import { SupabaseProfileRepository } from '@/lib/repositories/profile-repository';
 import { SupabaseSpotifyConnectionRepository } from '@/lib/repositories/spotify-connection-repository';
 import { SupabaseUserPreferenceRepository } from '@/lib/repositories/user-preference-repository';
+import type { SpotifyTopArtist } from '@/lib/domain/spotify';
+import { getActiveSpotifyTopArtistsForUser } from '@/lib/sources/spotify/affinity-service';
 
 export interface PersonalizedDiscoverOptions {
   userId: string;
@@ -47,6 +49,7 @@ export interface PersonalizedDiscoverOptions {
   prefRepo?: IUserPreferenceRepository;
   catalogRepo?: ICatalogRepository;
   spotifyRepo?: ISpotifyConnectionRepository;
+  spotifyTopArtists?: SpotifyTopArtist[];
   presetOverride?: unknown;
   mode?: unknown;
   discoveryMode?: unknown;
@@ -69,6 +72,7 @@ export interface PersonalizedDiscoverResult {
   activeMode: DiscoveryMode;
   hasPreferences: boolean;
   isSpotifyConnected: boolean;
+  hasSpotifyAffinities?: boolean;
   isLocationConfigured: boolean;
   isEmptyCatalog: boolean;
 }
@@ -431,6 +435,18 @@ export async function getPersonalizedDiscoverData(
 
   const isSpotifyConnected = spotifyConnection?.status === 'connected';
 
+  // 1b. Retrieve Spotify top artists if connected (in-memory cached, fail-closed)
+  let spotifyTopArtists: SpotifyTopArtist[] = options.spotifyTopArtists ?? [];
+  if (spotifyTopArtists.length === 0 && isSpotifyConnected) {
+    try {
+      spotifyTopArtists = await getActiveSpotifyTopArtistsForUser(userId);
+    } catch {
+      spotifyTopArtists = [];
+    }
+  }
+
+  const hasSpotifyAffinities = spotifyTopArtists.length > 0;
+
   // 2. Resolve active scoring preset and discovery mode
   let activePreset: ScoringPreset = DEFAULT_PRESET;
   if (presetOverride !== undefined && presetOverride !== null) {
@@ -585,6 +601,26 @@ export async function getPersonalizedDiscoverData(
     );
   }
 
+  // Tier 1D: Spotify top artists listening affinities
+  if (spotifyTopArtists.length > 0) {
+    const spotifyArtistCatalogIds = await resolveArtistIdsForPreferences(
+      spotifyTopArtists.map((a) => ({ spotifyArtistId: a.id })),
+      catalogRepo,
+    );
+    if (spotifyArtistCatalogIds.length > 0) {
+      candidateQueries.push(
+        retrieveCandidatesWithLookback(
+          catalogRepo,
+          { ...commonFilters, artistIds: spotifyArtistCatalogIds },
+          LIKE_ARTIST_CANDIDATE_LIMIT,
+          referenceDate,
+          referenceInstant,
+          modeOptions,
+        ),
+      );
+    }
+  }
+
   // Tier 2: General upcoming catalog candidates (discovery pool)
   candidateQueries.push(
     retrieveCandidatesWithLookback(
@@ -650,6 +686,7 @@ export async function getPersonalizedDiscoverData(
       activeMode,
       hasPreferences,
       isSpotifyConnected,
+      hasSpotifyAffinities,
       isLocationConfigured,
       isEmptyCatalog:
         activeMode === 'all' &&
@@ -675,6 +712,7 @@ export async function getPersonalizedDiscoverData(
       updatedAt: new Date().toISOString(),
     },
     artistPreferences: userPreferences,
+    spotifyTopArtists,
     referenceDate,
     referenceInstant,
     presetOverride: activePreset,
@@ -698,6 +736,7 @@ export async function getPersonalizedDiscoverData(
     activeMode,
     hasPreferences,
     isSpotifyConnected,
+    hasSpotifyAffinities,
     isLocationConfigured,
     isEmptyCatalog: false,
   };
