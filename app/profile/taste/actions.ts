@@ -238,6 +238,34 @@ export interface SpotifyTopArtistsActionResult {
   error?: string;
 }
 
+/**
+ * Force a fresh Spotify sync, bypassing the in-memory affinity cache.
+ * Used for manual "Sync now" button and automatic staleness-triggered re-sync on return visits.
+ * Records sync timestamp via repo.recordSync so lastSyncedAt stays accurate.
+ */
+export async function syncSpotifyArtistsAction(
+  timeRange: SpotifyTimeRange = 'short_term',
+): Promise<SpotifyTopArtistsActionResult & { syncedAt?: string }> {
+  const user = await getAuthenticatedUser();
+  if (!user) {
+    return {
+      artists: [],
+      isSyntheticPreview: false,
+      error: 'You must be signed in to sync Spotify.',
+    };
+  }
+
+  // Evict cache for this user so the upcoming fetch is always live
+  clearSpotifyAffinityCache(user.id);
+
+  const result = await getSpotifyTopArtistsAction(timeRange, false);
+  if (!result.error) {
+    revalidatePath('/profile/taste');
+    return { ...result, syncedAt: new Date().toISOString() };
+  }
+  return result;
+}
+
 export async function getSpotifyTopArtistsAction(
   timeRange: SpotifyTimeRange = 'short_term',
   preview = false,

@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from 'next';
+import { PrototypesDevBadge } from '@/components/foundation/PrototypesDevBadge';
 import './globals.css';
 
 export const metadata: Metadata = {
@@ -27,6 +28,7 @@ export default function RootLayout({
     <html lang="en">
       <body className="min-h-screen bg-slate-950 font-sans text-slate-100 antialiased selection:bg-indigo-500 selection:text-white">
         {children}
+        <PrototypesDevBadge />
       </body>
     </html>
   );

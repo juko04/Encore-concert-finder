@@ -12,7 +12,9 @@ interface SpotifyConnectionCardProps {
   isSyntheticDemo: boolean;
   onToggleDemoMode: () => void;
   onDisconnect: () => void;
+  onSync?: () => void;
   isDisconnecting?: boolean;
+  isSyncing?: boolean;
 }
 
 export function SpotifyConnectionCard({
@@ -24,7 +26,9 @@ export function SpotifyConnectionCard({
   isSyntheticDemo,
   onToggleDemoMode,
   onDisconnect,
+  onSync,
   isDisconnecting = false,
+  isSyncing = false,
 }: SpotifyConnectionCardProps) {
   const [showConfirmDisconnect, setShowConfirmDisconnect] = useState(false);
 
@@ -142,6 +146,24 @@ export function SpotifyConnectionCard({
                 >
                   Reconnect Spotify
                 </a>
+              )}
+              {connected && onSync && (
+                <button
+                  type="button"
+                  data-testid="sync-spotify-btn"
+                  onClick={onSync}
+                  disabled={isSyncing || isDisconnecting}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-1.5 text-xs font-medium text-zinc-300 transition-colors hover:border-zinc-500 hover:text-white disabled:opacity-50"
+                >
+                  {isSyncing ? (
+                    <>
+                      <span className="h-3 w-3 animate-spin rounded-full border border-zinc-500 border-t-zinc-200" />
+                      Syncing…
+                    </>
+                  ) : (
+                    <>↻ Sync now</>
+                  )}
+                </button>
               )}
               <button
                 type="button"

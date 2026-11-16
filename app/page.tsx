@@ -30,14 +30,14 @@ export default function HomePage() {
           <Link
             href="/discover"
             data-testid="home-discover-btn"
-            className="rounded-xl bg-indigo-600 px-6 py-3 text-sm font-semibold text-white shadow-lg transition-colors hover:bg-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            className="rounded-xl bg-gradient-to-r from-indigo-500 to-cyan-500 px-7 py-3.5 text-sm font-bold text-white shadow-xl shadow-indigo-500/20 transition-all duration-150 hover:scale-[1.02] active:scale-[0.98] focus:outline-none focus:ring-2 focus:ring-indigo-500"
           >
-            Discover Live Music
+            Discover Live Music &rarr;
           </Link>
           <Link
             href="/profile/taste"
             data-testid="home-taste-btn"
-            className="rounded-xl border border-zinc-700 bg-zinc-900/80 px-6 py-3 text-sm font-semibold text-zinc-200 shadow transition-colors hover:border-indigo-500 hover:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            className="rounded-xl border border-zinc-700 bg-zinc-900/90 px-6 py-3.5 text-sm font-semibold text-zinc-100 shadow-md transition-all duration-150 hover:border-zinc-500 hover:bg-zinc-800 active:scale-[0.98]"
           >
             Music Taste Profile
           </Link>
@@ -58,7 +58,7 @@ export default function HomePage() {
             </div>
             <div className="rounded-lg border border-slate-800/80 bg-slate-950/50 p-4">
               <dt className="text-xs font-medium text-slate-400">
-                Database & Security
+                Database &amp; Security
               </dt>
               <dd className="mt-1 text-sm font-medium text-slate-200">
                 Supabase PostgreSQL · Profiles RLS

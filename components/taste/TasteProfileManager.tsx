@@ -19,6 +19,7 @@ import {
   disconnectSpotifyAction,
   getSpotifyTopArtistsAction,
   savePreferenceAction,
+  syncSpotifyArtistsAction,
   updatePreferenceLevelAction,
 } from '@/app/profile/taste/actions';
 
@@ -78,6 +79,49 @@ export function TasteProfileManager({
   const [spotifyPreviewError, setSpotifyPreviewError] = useState<string | null>(
     null,
   );
+
+  // Manual / auto sync
+  const [isSyncing, setIsSyncing] = useState<boolean>(false);
+
+  // Auto-sync: re-fetch from Spotify when user returns after > 3 days
+  const SYNC_STALE_MS = 3 * 24 * 60 * 60 * 1000; // 3 days
+  const SYNC_LS_KEY = 'encore_spotify_last_sync';
+
+  useEffect(() => {
+    if (!spotifyStatus.connected) return;
+
+    let stale = true;
+    try {
+      const stored = localStorage.getItem(SYNC_LS_KEY);
+      if (stored) {
+        const elapsed = Date.now() - Number(stored);
+        stale = elapsed > SYNC_STALE_MS;
+      }
+    } catch {
+      // localStorage unavailable — treat as stale
+    }
+
+    if (!stale) return;
+
+    // Trigger a background sync without blocking the UI
+    syncSpotifyArtistsAction(spotifyTimeRange)
+      .then((res) => {
+        if (!res.error && res.artists.length > 0) {
+          setSpotifyArtists(res.artists);
+          setIsSyntheticResult(false);
+          setSpotifyPreviewError(null);
+          if (res.syncedAt) {
+            setSpotifyStatus((prev) => ({ ...prev, lastSyncedAt: res.syncedAt ?? null }));
+          }
+          try {
+            localStorage.setItem(SYNC_LS_KEY, String(Date.now()));
+          } catch { /* ignore */ }
+        }
+      })
+      .catch(() => { /* silent — normal load will still show cached data */ });
+  // Only run once on mount when connected
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [spotifyStatus.connected]);
 
   // Load Spotify top artists whenever connected or demo mode changes
   useEffect(() => {
@@ -304,6 +348,33 @@ export function TasteProfileManager({
     });
   }
 
+  async function handleSync(): Promise<void> {
+    if (isSyncing || !spotifyStatus.connected) return;
+    setIsSyncing(true);
+    setError(null);
+    try {
+      const res = await syncSpotifyArtistsAction(spotifyTimeRange);
+      if (res.error) {
+        setError(res.error);
+        setSpotifyPreviewError(res.error);
+      } else {
+        setSpotifyArtists(res.artists);
+        setIsSyntheticResult(false);
+        setSpotifyPreviewError(null);
+        if (res.syncedAt) {
+          setSpotifyStatus((prev) => ({ ...prev, lastSyncedAt: res.syncedAt ?? null }));
+        }
+        try {
+          localStorage.setItem('encore_spotify_last_sync', String(Date.now()));
+        } catch { /* ignore */ }
+      }
+    } catch {
+      setError('Spotify sync failed. Please try again.');
+    } finally {
+      setIsSyncing(false);
+    }
+  }
+
   async function handleDisconnectSpotify(): Promise<void> {
     setIsDisconnecting(true);
     setError(null);
@@ -364,7 +435,9 @@ export function TasteProfileManager({
           isSyntheticDemo={isSyntheticDemo}
           onToggleDemoMode={handleToggleDemoMode}
           onDisconnect={handleDisconnectSpotify}
+          onSync={handleSync}
           isDisconnecting={isDisconnecting}
+          isSyncing={isSyncing}
         />
 
         {(spotifyStatus.connected || isSyntheticDemo) && (
