@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { execSync } from 'node:child_process';
 import { FakeVenueSourceAdapter } from '../fixtures/fake-source-adapter';
+import { fetchAllIdsPaginated } from '../fixtures/fixture-helper';
 import { SupabaseCatalogRepository } from '@/lib/repositories/catalog-repository';
 import { SupabaseRawIngestRepository } from '@/lib/repositories/raw-ingest-repository';
 import { SupabaseEventCandidateRepository } from '@/lib/repositories/event-candidate-repository';
@@ -78,6 +79,8 @@ describe('Supabase Golden Path Integration: Full Ingestion & Canonicalization Pi
 
   const preExistingArtistIds = new Set<string>();
   const preExistingVenueIds = new Set<string>();
+  const preExistingSourceIds = new Set<string>();
+  const preExistingEventIds = new Set<string>();
 
   function ensureDbAvailable(): boolean {
     if (!isDbAvailable || !adminClient) {
@@ -131,24 +134,19 @@ describe('Supabase Golden Path Integration: Full Ingestion & Canonicalization Pi
     catalogRepo = new SupabaseCatalogRepository(adminClient);
     coordinator = new CanonicalizationCoordinator(catalogRepo);
 
-    // Snapshot pre-existing artists and venues to protect against accidental teardown (Finding 2)
-    const { data: existingArtists, error: artErr } = await adminClient
-      .from('artists')
-      .select('id');
-    if (artErr)
-      throw new Error(`Failed to query existing artists: ${artErr.message}`);
-    for (const a of existingArtists || []) {
-      preExistingArtistIds.add(a.id);
-    }
+    // Snapshot all pre-existing entities using complete paginated queries to protect against teardown truncation
+    const [existingArtists, existingVenues, existingSources, existingEvents] =
+      await Promise.all([
+        fetchAllIdsPaginated(adminClient, 'artists'),
+        fetchAllIdsPaginated(adminClient, 'venues'),
+        fetchAllIdsPaginated(adminClient, 'sources'),
+        fetchAllIdsPaginated(adminClient, 'events'),
+      ]);
 
-    const { data: existingVenues, error: venErr } = await adminClient
-      .from('venues')
-      .select('id');
-    if (venErr)
-      throw new Error(`Failed to query existing venues: ${venErr.message}`);
-    for (const v of existingVenues || []) {
-      preExistingVenueIds.add(v.id);
-    }
+    for (const a of existingArtists) preExistingArtistIds.add(a);
+    for (const v of existingVenues) preExistingVenueIds.add(v);
+    for (const s of existingSources) preExistingSourceIds.add(s);
+    for (const e of existingEvents) preExistingEventIds.add(e);
 
     await adminClient.from('sources').upsert(
       [
@@ -166,6 +164,9 @@ describe('Supabase Golden Path Integration: Full Ingestion & Canonicalization Pi
       ],
       { onConflict: 'slug' },
     );
+    if (!preExistingSourceIds.has('a0000000-0000-0000-0000-000000000001')) {
+      trackedCreated.sourceIds.add('a0000000-0000-0000-0000-000000000001');
+    }
   });
 
   it('core golden path: end-to-end multi-event ingestion, canonicalization, artist external ID roundtrip, rescheduling update, evidence preservation, and reassignment conflict rejection', async () => {
@@ -228,8 +229,20 @@ describe('Supabase Golden Path Integration: Full Ingestion & Canonicalization Pi
     // 5. Canonicalize both candidates
     const resA = await coordinator.canonicalize(persistedCandA);
     const resB = await coordinator.canonicalize(persistedCandB);
-    if (resA.eventId) trackedCreated.eventIds.add(resA.eventId);
-    if (resB.eventId) trackedCreated.eventIds.add(resB.eventId);
+    if (
+      resA.status === 'created' &&
+      resA.eventId &&
+      !preExistingEventIds.has(resA.eventId)
+    ) {
+      trackedCreated.eventIds.add(resA.eventId);
+    }
+    if (
+      resB.status === 'created' &&
+      resB.eventId &&
+      !preExistingEventIds.has(resB.eventId)
+    ) {
+      trackedCreated.eventIds.add(resB.eventId);
+    }
 
     expect(resA.status).toBe('created');
     expect(resB.status).toBe('created');
@@ -365,9 +378,15 @@ describe('Supabase Golden Path Integration: Full Ingestion & Canonicalization Pi
     expect(candA_obs2.id).not.toBe(persistedCandA.id);
     expect(candA_obs2.rawIngestId).toBe(rawObs2.id);
 
-    // Canonicalize second candidate
+    // Canonicalize second candidate (must match, not create)
     const resA_obs2 = await coordinator.canonicalize(candA_obs2);
-    if (resA_obs2.eventId) trackedCreated.eventIds.add(resA_obs2.eventId);
+    if (
+      resA_obs2.status === 'created' &&
+      resA_obs2.eventId &&
+      !preExistingEventIds.has(resA_obs2.eventId)
+    ) {
+      trackedCreated.eventIds.add(resA_obs2.eventId);
+    }
 
     // Must resolve to existing canonical event, NOT create a duplicate
     expect(resA_obs2.status).toBe('matched');
@@ -500,7 +519,13 @@ describe('Supabase Golden Path Integration: Full Ingestion & Canonicalization Pi
     const resDateOnly = await coordinator.canonicalize(reloaded!);
     expect(resDateOnly.status).toBe('created');
     expect(resDateOnly.eventId).toBeDefined();
-    if (resDateOnly.eventId) trackedCreated.eventIds.add(resDateOnly.eventId);
+    if (
+      resDateOnly.status === 'created' &&
+      resDateOnly.eventId &&
+      !preExistingEventIds.has(resDateOnly.eventId)
+    ) {
+      trackedCreated.eventIds.add(resDateOnly.eventId);
+    }
 
     // 4. Verify canonical event in database
     const { data: dbEvent } = await adminClient!
@@ -575,7 +600,13 @@ describe('Supabase Golden Path Integration: Full Ingestion & Canonicalization Pi
     const resGhostA = await coordinator.canonicalize(candGhostA);
     expect(resGhostA.status).toBe('created');
     expect(resGhostA.eventId).toBeDefined();
-    if (resGhostA.eventId) trackedCreated.eventIds.add(resGhostA.eventId);
+    if (
+      resGhostA.status === 'created' &&
+      resGhostA.eventId &&
+      !preExistingEventIds.has(resGhostA.eventId)
+    ) {
+      trackedCreated.eventIds.add(resGhostA.eventId);
+    }
 
     // Show 2: Same venue, same local start date, same artist name "Ghost", but different external ID provider-1 / artist-B
     const candGhostB = await candidateRepo.create({
@@ -617,7 +648,13 @@ describe('Supabase Golden Path Integration: Full Ingestion & Canonicalization Pi
     trackedCreated.candidateIds.add(candGhostB.id);
 
     const resGhostB = await coordinator.canonicalize(candGhostB);
-    if (resGhostB.eventId) trackedCreated.eventIds.add(resGhostB.eventId);
+    if (
+      resGhostB.status === 'created' &&
+      resGhostB.eventId &&
+      !preExistingEventIds.has(resGhostB.eventId)
+    ) {
+      trackedCreated.eventIds.add(resGhostB.eventId);
+    }
     // Must NOT merge into Event A!
     expect(resGhostB.status).not.toBe('matched');
     expect(resGhostB.status).toBe('needs_review');
@@ -648,7 +685,9 @@ describe('Supabase Golden Path Integration: Full Ingestion & Canonicalization Pi
     expect(testEventError).toBeNull();
     expect(testEvent?.id).toBeDefined();
     const eventId = testEvent!.id;
-    trackedCreated.eventIds.add(eventId);
+    if (!preExistingEventIds.has(eventId)) {
+      trackedCreated.eventIds.add(eventId);
+    }
 
     // Raw Ingest 1
     const raw1 = await rawIngestRepo.create({
@@ -842,16 +881,19 @@ describe('Supabase Golden Path Integration: Full Ingestion & Canonicalization Pi
   afterAll(async () => {
     if (!adminClient || !isDbAvailable) return;
 
-    const eventIds = Array.from(trackedCreated.eventIds);
+    // Filter strictly to events proven to have been created by this test run (never preexisting!)
+    const provenCreatedEventIds = Array.from(trackedCreated.eventIds).filter(
+      (id) => !preExistingEventIds.has(id),
+    );
     const candidateIds = Array.from(trackedCreated.candidateIds);
     const rawIngestIds = Array.from(trackedCreated.rawIngestIds);
 
-    // Identify strictly newly created artists and venues for all tracked events before deletion
-    if (eventIds.length > 0) {
+    // Identify strictly newly created artists and venues for proven test-created events before deletion
+    if (provenCreatedEventIds.length > 0) {
       const { data: ea, error: eaErr } = await adminClient
         .from('event_artists')
         .select('artist_id')
-        .in('event_id', eventIds);
+        .in('event_id', provenCreatedEventIds);
       if (eaErr) {
         throw new Error(
           `Failed to query event_artists in cleanup: ${eaErr.message}`,
@@ -866,7 +908,7 @@ describe('Supabase Golden Path Integration: Full Ingestion & Canonicalization Pi
       const { data: ev, error: evErr } = await adminClient
         .from('events')
         .select('venue_id')
-        .in('id', eventIds);
+        .in('id', provenCreatedEventIds);
       if (evErr) {
         throw new Error(
           `Failed to query events for venue_ids in cleanup: ${evErr.message}`,
@@ -879,12 +921,15 @@ describe('Supabase Golden Path Integration: Full Ingestion & Canonicalization Pi
       }
     }
 
-    // 1. Delete candidate_resolutions explicitly (Finding 2)
-    if (eventIds.length > 0) {
+    // 1. Delete candidate_resolutions:
+    // Only delete resolutions by event_id for proven test-created events.
+    // For candidate observations, delete resolutions referencing candidateIds.
+    // Preexisting matched events retain resolutions from non-test candidates.
+    if (provenCreatedEventIds.length > 0) {
       const { error: delCrEvErr } = await adminClient
         .from('candidate_resolutions')
         .delete()
-        .in('event_id', eventIds);
+        .in('event_id', provenCreatedEventIds);
       if (delCrEvErr) {
         throw new Error(
           `Failed to delete candidate_resolutions by event_id: ${delCrEvErr.message}`,
@@ -903,12 +948,14 @@ describe('Supabase Golden Path Integration: Full Ingestion & Canonicalization Pi
       }
     }
 
-    // 2. Delete event_field_evidence by tracked event IDs or candidate IDs
-    if (eventIds.length > 0) {
+    // 2. Delete event_field_evidence:
+    // Strictly delete by event_id only for proven test-created events!
+    // For matched preexisting events, only delete evidence authored by this test's candidate observations.
+    if (provenCreatedEventIds.length > 0) {
       const { error: delEvidenceErr } = await adminClient
         .from('event_field_evidence')
         .delete()
-        .in('event_id', eventIds);
+        .in('event_id', provenCreatedEventIds);
       if (delEvidenceErr) {
         throw new Error(
           `Failed to delete event_field_evidence by event_id: ${delEvidenceErr.message}`,
@@ -927,12 +974,12 @@ describe('Supabase Golden Path Integration: Full Ingestion & Canonicalization Pi
       }
     }
 
-    // 3. Delete event_ticket_links
-    if (eventIds.length > 0) {
+    // 3. Delete event_ticket_links strictly for proven test-created events
+    if (provenCreatedEventIds.length > 0) {
       const { error: delTlErr } = await adminClient
         .from('event_ticket_links')
         .delete()
-        .in('event_id', eventIds);
+        .in('event_id', provenCreatedEventIds);
       if (delTlErr) {
         throw new Error(
           `Failed to delete event_ticket_links: ${delTlErr.message}`,
@@ -940,23 +987,23 @@ describe('Supabase Golden Path Integration: Full Ingestion & Canonicalization Pi
       }
     }
 
-    // 4. Delete event_artists
-    if (eventIds.length > 0) {
+    // 4. Delete event_artists strictly for proven test-created events
+    if (provenCreatedEventIds.length > 0) {
       const { error: delEaErr } = await adminClient
         .from('event_artists')
         .delete()
-        .in('event_id', eventIds);
+        .in('event_id', provenCreatedEventIds);
       if (delEaErr) {
         throw new Error(`Failed to delete event_artists: ${delEaErr.message}`);
       }
     }
 
-    // 5. Delete event_sources
-    if (eventIds.length > 0) {
+    // 5. Delete event_sources strictly for proven test-created events or candidate observations
+    if (provenCreatedEventIds.length > 0) {
       const { error: delEsErr } = await adminClient
         .from('event_sources')
         .delete()
-        .in('event_id', eventIds);
+        .in('event_id', provenCreatedEventIds);
       if (delEsErr) {
         throw new Error(
           `Failed to delete event_sources by event_id: ${delEsErr.message}`,
@@ -975,12 +1022,12 @@ describe('Supabase Golden Path Integration: Full Ingestion & Canonicalization Pi
       }
     }
 
-    // 6. Delete events
-    if (eventIds.length > 0) {
+    // 6. Delete events strictly for proven test-created events (never preexisting!)
+    if (provenCreatedEventIds.length > 0) {
       const { error: delEventsErr } = await adminClient
         .from('events')
         .delete()
-        .in('id', eventIds);
+        .in('id', provenCreatedEventIds);
       if (delEventsErr) {
         throw new Error(`Failed to delete events: ${delEventsErr.message}`);
       }
@@ -1055,6 +1102,20 @@ describe('Supabase Golden Path Integration: Full Ingestion & Canonicalization Pi
         .eq('id', venueId);
       if (venErr) {
         throw new Error(`Failed to delete venue: ${venErr.message}`);
+      }
+    }
+
+    // 11. Clean up strictly test-created sources (never pre-existing sources!)
+    for (const sourceId of trackedCreated.sourceIds) {
+      if (preExistingSourceIds.has(sourceId)) {
+        continue;
+      }
+      const { error: srcErr } = await adminClient
+        .from('sources')
+        .delete()
+        .eq('id', sourceId);
+      if (srcErr) {
+        throw new Error(`Failed to delete source: ${srcErr.message}`);
       }
     }
   });
