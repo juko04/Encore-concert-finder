@@ -30,7 +30,7 @@ export default function HomePage() {
           <Link
             href="/discover"
             data-testid="home-discover-btn"
-            className="rounded-xl bg-gradient-to-r from-indigo-500 to-cyan-500 px-7 py-3.5 text-sm font-bold text-white shadow-xl shadow-indigo-500/20 transition-all duration-150 hover:scale-[1.02] active:scale-[0.98] focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            className="rounded-xl bg-gradient-to-r from-indigo-500 to-cyan-500 px-7 py-3.5 text-sm font-bold text-white shadow-xl shadow-indigo-500/20 transition-all duration-150 hover:scale-[1.02] focus:outline-none focus:ring-2 focus:ring-indigo-500 active:scale-[0.98]"
           >
             Discover Live Music &rarr;
           </Link>

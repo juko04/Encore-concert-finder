@@ -111,16 +111,23 @@ export function TasteProfileManager({
           setIsSyntheticResult(false);
           setSpotifyPreviewError(null);
           if (res.syncedAt) {
-            setSpotifyStatus((prev) => ({ ...prev, lastSyncedAt: res.syncedAt ?? null }));
+            setSpotifyStatus((prev) => ({
+              ...prev,
+              lastSyncedAt: res.syncedAt ?? null,
+            }));
           }
           try {
             localStorage.setItem(SYNC_LS_KEY, String(Date.now()));
-          } catch { /* ignore */ }
+          } catch {
+            /* ignore */
+          }
         }
       })
-      .catch(() => { /* silent — normal load will still show cached data */ });
-  // Only run once on mount when connected
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+      .catch(() => {
+        /* silent — normal load will still show cached data */
+      });
+    // Only run once on mount when connected
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [spotifyStatus.connected]);
 
   // Load Spotify top artists whenever connected or demo mode changes
@@ -362,11 +369,16 @@ export function TasteProfileManager({
         setIsSyntheticResult(false);
         setSpotifyPreviewError(null);
         if (res.syncedAt) {
-          setSpotifyStatus((prev) => ({ ...prev, lastSyncedAt: res.syncedAt ?? null }));
+          setSpotifyStatus((prev) => ({
+            ...prev,
+            lastSyncedAt: res.syncedAt ?? null,
+          }));
         }
         try {
           localStorage.setItem('encore_spotify_last_sync', String(Date.now()));
-        } catch { /* ignore */ }
+        } catch {
+          /* ignore */
+        }
       }
     } catch {
       setError('Spotify sync failed. Please try again.');

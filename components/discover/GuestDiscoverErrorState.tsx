@@ -55,7 +55,8 @@ export function GuestDiscoverErrorState() {
 
         <div className="mt-8 rounded-xl border border-indigo-500/30 bg-indigo-950/40 p-4 text-center">
           <p className="text-xs text-indigo-200">
-            <strong>Looking for the design prototypes?</strong> Explore both working interactive concepts without needing a local database:
+            <strong>Looking for the design prototypes?</strong> Explore both
+            working interactive concepts without needing a local database:
           </p>
           <div className="mt-3 flex flex-wrap justify-center gap-3">
             <Link
