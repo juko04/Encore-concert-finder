@@ -52,6 +52,33 @@ export function GuestDiscoverErrorState() {
             Return Home
           </Link>
         </div>
+
+        <div className="mt-8 rounded-xl border border-indigo-500/30 bg-indigo-950/40 p-4 text-center">
+          <p className="text-xs text-indigo-200">
+            <strong>Looking for the design prototypes?</strong> Explore both
+            working interactive concepts without needing a local database:
+          </p>
+          <div className="mt-3 flex flex-wrap justify-center gap-3">
+            <Link
+              href="/prototypes"
+              className="rounded-lg bg-indigo-600 px-3.5 py-1.5 text-xs font-semibold text-white shadow hover:bg-indigo-500"
+            >
+              Open Prototypes Hub &rarr;
+            </Link>
+            <Link
+              href="/prototypes/index"
+              className="rounded-lg border border-zinc-700 bg-zinc-800 px-3.5 py-1.5 text-xs font-semibold text-zinc-200 hover:bg-zinc-700"
+            >
+              Encore Index
+            </Link>
+            <Link
+              href="/prototypes/signal"
+              className="rounded-lg border border-violet-700/50 bg-violet-950/60 px-3.5 py-1.5 text-xs font-semibold text-violet-200 hover:bg-violet-900"
+            >
+              Encore Signal
+            </Link>
+          </div>
+        </div>
       </div>
     </div>
   );
