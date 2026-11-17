@@ -15,6 +15,7 @@ Durable architecture records belong in [`docs/architecture/`](docs/architecture/
   2. Correct integration-test teardown to track created artist/venue IDs, preserve pre-existing entities regardless of remaining event count, and handle `candidate_resolutions`.
   3. Correct Spotify status messaging so UI does not promise active Spotify-based concert ranking until verified artist matches exist in the catalog, keep automatic scoring in place for when verified IDs become available, and fix `clearSpotifyAffinityCache(userId)` to invalidate all time-range entries.
   4. Explicitly document Ticketmaster API key availability, catalog Spotify coverage status, and future artist identity enrichment.
+  5. Paginate integration-test snapshots (artists, venues, sources, events) to eliminate PostgREST 1,000-row truncation risks, track strictly test-created events (never matched events), and clean up test sources/venues while preserving pre-existing matched records and their legitimate field evidence.
 
 - **Remediation Details:**
   1. *Finding 1 — Read-Only Diagnostic Audit Utility:*
@@ -38,6 +39,11 @@ Durable architecture records belong in [`docs/architecture/`](docs/architecture/
      - **Ticketmaster API Key:** Acknowledged that the Ticketmaster API key is now available to the user in `.env.local` for future live Ticketmaster ingestion runs.
      - **Spotify Infrastructure vs. Catalog Coverage:** The Spotify scoring infrastructure (OAuth, token refresh, in-memory affinity service, recommendation engine factor scoring with recency decay, and manual preference precedence) is completely implemented and tested. However, local catalog coverage currently contains 579 canonical artists across 244 genuine Colorado concerts with **0 verified Spotify artist IDs** (`artist_external_ids` with `provider = 'spotify'`), because Colorado venue scrapers (Velvet Elk, Roots Music Project, Cervantes, Larimer, Lost Lake, Globe Hall) extract from venue HTML/JSON-LD rather than Spotify metadata.
      - **Future Enrichment Task:** Automated Spotify artist identity enrichment (e.g. via MusicBrainz / Spotify Web API entity resolution during ingestion) remains a planned future task.
+  5. *Finding 5 — Paginated Snapshot & Strictly Test-Created Event Teardown:*
+     - **Paginated Pre-existing Snapshots:** Implemented `fetchAllIdsPaginated` in `tests/fixtures/fixture-helper.ts` and wired it into `beforeAll` for both `golden-path.test.ts` and `ticketmaster-canonicalization.test.ts`. All pre-existing artists, venues, sources, and events are completely snapshotted across pages, preventing truncation and accidental deletion when tables exceed the PostgREST 1,000-row limit.
+     - **Strict Test-Created Event Tracking:** Updated canonicalization result tracking to only add event IDs when `status === 'created'` and `!preExistingEventIds.has(id)`. Replays and matched observations never track matched event IDs in `trackedCreated.eventIds`. Added `createdEventIds` to `TicketmasterIngestionResult` to cleanly distinguish created vs. matched events in pipeline runs.
+     - **Preservation of Preexisting Matched Events & Evidence:** In `afterAll`, teardown deletes events, ticket links, and event_artists strictly for proven test-created events (`!preExistingEventIds.has(id)`). For matched preexisting events, only candidate-specific resolutions (`candidate_resolutions`), candidate-specific evidence (`event_field_evidence`), and candidate-specific sources (`event_sources`) are cleaned up by `candidate_id`/`event_candidate_id`. Preexisting events and their legitimate evidence from other sources remain completely untouched.
+     - **Test Source & Venue Teardown:** Verified that newly created test sources (`fake-venue-adapter`, `ticketmaster-discovery` if not preexisting) and newly created test venues are tracked and safely deleted in `afterAll` without touching any pre-existing records.
 
 ---
 

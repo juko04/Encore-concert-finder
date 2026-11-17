@@ -47,6 +47,7 @@ export interface TicketmasterIngestionResult {
   candidatesRejected: number;
   reviewReasons: Record<string, number>;
   persistedEventIds: string[];
+  createdEventIds: string[];
   candidates: EventCandidate[];
   durationMs: number;
   startedAt: string;
@@ -168,6 +169,7 @@ export async function runTicketmasterIngestion(
       candidatesRejected: 0,
       reviewReasons,
       persistedEventIds: [],
+      createdEventIds: [],
       candidates: parsedCandidates,
       startedAt,
       completedAt,
@@ -279,6 +281,7 @@ export async function runTicketmasterIngestion(
     let candidatesSkipped = 0;
     const reviewReasons: Record<string, number> = {};
     const persistedEventIds: string[] = [];
+    const createdEventIds: string[] = [];
 
     for (const cand of persistedCandidates) {
       // Check if candidate observation was already resolved in a prior run
@@ -310,7 +313,10 @@ export async function runTicketmasterIngestion(
 
       if (outcome.status === 'created') {
         canonicalEventsCreated++;
-        if (outcome.eventId) persistedEventIds.push(outcome.eventId);
+        if (outcome.eventId) {
+          persistedEventIds.push(outcome.eventId);
+          createdEventIds.push(outcome.eventId);
+        }
       } else if (outcome.status === 'matched') {
         canonicalEventsMatched++;
         if (outcome.eventId) persistedEventIds.push(outcome.eventId);
@@ -345,6 +351,7 @@ export async function runTicketmasterIngestion(
       candidatesRejected,
       reviewReasons,
       persistedEventIds,
+      createdEventIds,
       candidates,
       startedAt,
       completedAt,

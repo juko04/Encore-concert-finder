@@ -9,7 +9,10 @@ import { ensureTicketmasterSource } from '@/lib/sources/ticketmaster/source-regi
 import { runTicketmasterIngestion } from '@/lib/sources/ticketmaster/ingestion-pipeline';
 import { assertSafeDatabaseTarget } from '@/lib/supabase/destination-guard';
 import type { CanonicalizationPayload } from '@/lib/repositories/interfaces';
-import { buildIsolatedTicketmasterFixture } from '../fixtures/fixture-helper';
+import {
+  buildIsolatedTicketmasterFixture,
+  fetchAllIdsPaginated,
+} from '../fixtures/fixture-helper';
 
 interface LocalCredentials {
   url: string;
@@ -84,10 +87,13 @@ describe('Supabase Integration: Ticketmaster Ingestion & Canonicalization', () =
     eventIds: new Set<string>(),
     artistIds: new Set<string>(),
     venueIds: new Set<string>(),
+    sourceIds: new Set<string>(),
   };
 
   const preExistingArtistIds = new Set<string>();
   const preExistingVenueIds = new Set<string>();
+  const preExistingSourceIds = new Set<string>();
+  const preExistingEventIds = new Set<string>();
 
   function ensureDbAvailable(): boolean {
     if (!isDbAvailable || !adminClient) {
@@ -148,24 +154,19 @@ describe('Supabase Integration: Ticketmaster Ingestion & Canonicalization', () =
     candidateRepo = new SupabaseEventCandidateRepository(adminClient);
     catalogRepo = new SupabaseCatalogRepository(adminClient);
 
-    // Snapshot pre-existing artists and venues to protect against accidental teardown (Finding 2)
-    const { data: existingArtists, error: artErr } = await adminClient
-      .from('artists')
-      .select('id');
-    if (artErr)
-      throw new Error(`Failed to query existing artists: ${artErr.message}`);
-    for (const a of existingArtists || []) {
-      preExistingArtistIds.add(a.id);
-    }
+    // Snapshot all pre-existing entities using complete paginated queries to protect against teardown truncation
+    const [existingArtists, existingVenues, existingSources, existingEvents] =
+      await Promise.all([
+        fetchAllIdsPaginated(adminClient, 'artists'),
+        fetchAllIdsPaginated(adminClient, 'venues'),
+        fetchAllIdsPaginated(adminClient, 'sources'),
+        fetchAllIdsPaginated(adminClient, 'events'),
+      ]);
 
-    const { data: existingVenues, error: venErr } = await adminClient
-      .from('venues')
-      .select('id');
-    if (venErr)
-      throw new Error(`Failed to query existing venues: ${venErr.message}`);
-    for (const v of existingVenues || []) {
-      preExistingVenueIds.add(v.id);
-    }
+    for (const a of existingArtists) preExistingArtistIds.add(a);
+    for (const v of existingVenues) preExistingVenueIds.add(v);
+    for (const s of existingSources) preExistingSourceIds.add(s);
+    for (const e of existingEvents) preExistingEventIds.add(e);
   });
 
   it('enforces destination guard safety against non-local and spoofed database hosts', () => {
@@ -203,6 +204,9 @@ describe('Supabase Integration: Ticketmaster Ingestion & Canonicalization', () =
 
     const source = await ensureTicketmasterSource(sourceRepo);
     expect(source.slug).toBe('ticketmaster-discovery');
+    if (!preExistingSourceIds.has(source.id)) {
+      trackedCreated.sourceIds.add(source.id);
+    }
 
     const result = await runTicketmasterIngestion({
       useFixture: true,
@@ -218,8 +222,11 @@ describe('Supabase Integration: Ticketmaster Ingestion & Canonicalization', () =
     expect(result.candidatesPersisted).toBeGreaterThan(0);
     expect(result.canonicalEventsCreated).toBeGreaterThan(0);
 
-    for (const id of result.persistedEventIds) {
-      trackedCreated.eventIds.add(id);
+    // Strictly track events proven to have been created by this test run (never matched or preexisting)
+    for (const id of result.createdEventIds) {
+      if (!preExistingEventIds.has(id)) {
+        trackedCreated.eventIds.add(id);
+      }
     }
     for (const cand of result.candidates) {
       if (cand.id) {
@@ -289,8 +296,10 @@ describe('Supabase Integration: Ticketmaster Ingestion & Canonicalization', () =
     expect(reprocessRun.canonicalEventsCreated).toBe(0);
     expect(reprocessRun.canonicalEventsMatched).toBeGreaterThan(0);
 
-    for (const id of reprocessRun.persistedEventIds) {
-      trackedCreated.eventIds.add(id);
+    for (const id of reprocessRun.createdEventIds) {
+      if (!preExistingEventIds.has(id)) {
+        trackedCreated.eventIds.add(id);
+      }
     }
     for (const cand of reprocessRun.candidates) {
       if (cand.id) {
@@ -348,7 +357,13 @@ describe('Supabase Integration: Ticketmaster Ingestion & Canonicalization', () =
 
     const res = await catalogRepo.applyCanonicalization(payload);
     expect(res.eventId).toBeDefined();
-    if (res.eventId) trackedCreated.eventIds.add(res.eventId);
+    if (
+      res.status === 'created' &&
+      res.eventId &&
+      !preExistingEventIds.has(res.eventId)
+    ) {
+      trackedCreated.eventIds.add(res.eventId);
+    }
 
     // 3. Verify external ID record was committed to artist_external_ids
     const { data: extRecords, error: extError } = await adminClient!
@@ -406,12 +421,24 @@ describe('Supabase Integration: Ticketmaster Ingestion & Canonicalization', () =
     // First application
     const res1 = await catalogRepo.applyCanonicalization(payload);
     expect(res1.eventId).toBeDefined();
-    if (res1.eventId) trackedCreated.eventIds.add(res1.eventId);
+    if (
+      res1.status === 'created' &&
+      res1.eventId &&
+      !preExistingEventIds.has(res1.eventId)
+    ) {
+      trackedCreated.eventIds.add(res1.eventId);
+    }
 
     // Replay with identical (artist_id, provider, external_id)
     const res2 = await catalogRepo.applyCanonicalization(payload);
     expect(res2.eventId).toBeDefined();
-    if (res2.eventId) trackedCreated.eventIds.add(res2.eventId);
+    if (
+      res2.status === 'created' &&
+      res2.eventId &&
+      !preExistingEventIds.has(res2.eventId)
+    ) {
+      trackedCreated.eventIds.add(res2.eventId);
+    }
 
     // Verify row count in artist_external_ids remains exactly 1
     const { data: extRecords } = await adminClient!
@@ -534,7 +561,10 @@ describe('Supabase Integration: Ticketmaster Ingestion & Canonicalization', () =
   afterAll(async () => {
     if (!adminClient || !isDbAvailable) return;
 
-    const eventIds = Array.from(trackedCreated.eventIds);
+    // Filter strictly to events proven to have been created by this test run (never preexisting!)
+    const eventIds = Array.from(trackedCreated.eventIds).filter(
+      (id) => !preExistingEventIds.has(id),
+    );
     const candidateIds = Array.from(trackedCreated.candidateIds);
     const rawIngestIds = Array.from(trackedCreated.rawIngestIds);
     const trackedArtistIds = Array.from(trackedCreated.artistIds);
@@ -550,7 +580,11 @@ describe('Supabase Integration: Ticketmaster Ingestion & Canonicalization', () =
       );
     }
     if (nonceEvents) {
-      for (const ne of nonceEvents) eventIds.push(ne.id);
+      for (const ne of nonceEvents) {
+        if (!preExistingEventIds.has(ne.id)) {
+          eventIds.push(ne.id);
+        }
+      }
     }
 
     const { data: nonceCandidates, error: nonceCandErr } = await adminClient
@@ -575,7 +609,6 @@ describe('Supabase Integration: Ticketmaster Ingestion & Canonicalization', () =
 
     // Identify linked artists and venues before deleting the canonical events
     let linkedArtistIds = [...trackedArtistIds];
-    let linkedVenueIds: string[] = [];
 
     if (uniqueEventIds.length > 0) {
       const { data: ea, error: eaErr } = await adminClient
@@ -588,7 +621,11 @@ describe('Supabase Integration: Ticketmaster Ingestion & Canonicalization', () =
         );
       }
       if (ea) {
-        for (const r of ea) linkedArtistIds.push(r.artist_id);
+        for (const r of ea) {
+          if (!preExistingArtistIds.has(r.artist_id)) {
+            linkedArtistIds.push(r.artist_id);
+          }
+        }
       }
 
       const { data: ev, error: evErr } = await adminClient
@@ -601,9 +638,29 @@ describe('Supabase Integration: Ticketmaster Ingestion & Canonicalization', () =
         );
       }
       if (ev) {
-        linkedVenueIds = Array.from(
-          new Set(ev.map((r) => r.venue_id).filter(Boolean) as string[]),
-        );
+        for (const r of ev) {
+          if (r.venue_id && !preExistingVenueIds.has(r.venue_id)) {
+            trackedCreated.venueIds.add(r.venue_id);
+          }
+        }
+      }
+    }
+
+    // Also include any venues created with suiteNonce in their name
+    const { data: nonceVenues, error: nonceVenErr } = await adminClient
+      .from('venues')
+      .select('id')
+      .ilike('name', `%[${suiteNonce}]%`);
+    if (nonceVenErr) {
+      throw new Error(
+        `Failed to query nonce venues in cleanup: ${nonceVenErr.message}`,
+      );
+    }
+    if (nonceVenues) {
+      for (const nv of nonceVenues) {
+        if (!preExistingVenueIds.has(nv.id)) {
+          trackedCreated.venueIds.add(nv.id);
+        }
       }
     }
 
@@ -618,12 +675,21 @@ describe('Supabase Integration: Ticketmaster Ingestion & Canonicalization', () =
       );
     }
     if (nonceArtists) {
-      for (const na of nonceArtists) linkedArtistIds.push(na.id);
+      for (const na of nonceArtists) {
+        if (!preExistingArtistIds.has(na.id)) {
+          linkedArtistIds.push(na.id);
+        }
+      }
     }
 
-    const uniqueArtistIds = Array.from(new Set(linkedArtistIds));
+    const uniqueArtistIds = Array.from(new Set(linkedArtistIds)).filter(
+      (id) => !preExistingArtistIds.has(id),
+    );
 
-    // 1. Delete candidate_resolutions explicitly (Finding 2)
+    // 1. Delete candidate_resolutions:
+    // Only delete resolutions by event_id for proven test-created events.
+    // For candidate observations, delete resolutions referencing candidateIds.
+    // Preexisting matched events retain resolutions from non-test candidates.
     if (uniqueEventIds.length > 0) {
       const { error: delCrEvErr } = await adminClient
         .from('candidate_resolutions')
@@ -647,7 +713,9 @@ describe('Supabase Integration: Ticketmaster Ingestion & Canonicalization', () =
       }
     }
 
-    // 2. Delete event_field_evidence
+    // 2. Delete event_field_evidence:
+    // Strictly delete by event_id only for proven test-created events!
+    // For matched preexisting events, only delete evidence authored by this test's candidate observations.
     if (uniqueEventIds.length > 0) {
       const { error: delEvidenceErr } = await adminClient
         .from('event_field_evidence')
@@ -671,7 +739,7 @@ describe('Supabase Integration: Ticketmaster Ingestion & Canonicalization', () =
       }
     }
 
-    // 3. Delete event_ticket_links
+    // 3. Delete event_ticket_links strictly for proven test-created events
     if (uniqueEventIds.length > 0) {
       const { error: delTlErr } = await adminClient
         .from('event_ticket_links')
@@ -684,7 +752,7 @@ describe('Supabase Integration: Ticketmaster Ingestion & Canonicalization', () =
       }
     }
 
-    // 4. Delete event_artists
+    // 4. Delete event_artists strictly for proven test-created events
     if (uniqueEventIds.length > 0) {
       const { error: delEaErr } = await adminClient
         .from('event_artists')
@@ -695,7 +763,7 @@ describe('Supabase Integration: Ticketmaster Ingestion & Canonicalization', () =
       }
     }
 
-    // 5. Delete event_sources
+    // 5. Delete event_sources strictly for proven test-created events or candidate observations
     if (uniqueEventIds.length > 0) {
       const { error: delEsErr } = await adminClient
         .from('event_sources')
@@ -719,7 +787,7 @@ describe('Supabase Integration: Ticketmaster Ingestion & Canonicalization', () =
       }
     }
 
-    // 6. Delete events
+    // 6. Delete events strictly for proven test-created events (never preexisting!)
     if (uniqueEventIds.length > 0) {
       const { error: delEventsErr } = await adminClient
         .from('events')
@@ -799,6 +867,20 @@ describe('Supabase Integration: Ticketmaster Ingestion & Canonicalization', () =
         .eq('id', venueId);
       if (venErr) {
         throw new Error(`Failed to delete venue: ${venErr.message}`);
+      }
+    }
+
+    // 11. Clean up test sources (strictly test-created, never pre-existing)
+    for (const sourceId of trackedCreated.sourceIds) {
+      if (preExistingSourceIds.has(sourceId)) {
+        continue;
+      }
+      const { error: srcErr } = await adminClient
+        .from('sources')
+        .delete()
+        .eq('id', sourceId);
+      if (srcErr) {
+        throw new Error(`Failed to delete source: ${srcErr.message}`);
       }
     }
   });
