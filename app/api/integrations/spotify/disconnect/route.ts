@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { getAuthenticatedUser } from '@/lib/auth/session';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { SupabaseSpotifyConnectionRepository } from '@/lib/repositories/spotify-connection-repository';
+import { clearSpotifyAffinityCache } from '@/lib/sources/spotify/affinity-service';
 
 export const dynamic = 'force-dynamic';
 
@@ -24,6 +25,9 @@ export async function POST() {
         { status: 500 },
       );
     }
+
+    // Invalidate in-memory affinity cache for this user
+    clearSpotifyAffinityCache(user.id);
 
     return NextResponse.json({ success: true });
   } catch (err) {

@@ -374,6 +374,47 @@ describe('Recommendation Factors (Independent Factor Unit Tests)', () => {
       );
       expect(murphRes.factorScore.score).toBe(60);
       expect(murphRes.isExploratory).toBe(false);
+      expect(murphRes.factorScore.diagnostics?.spotifyAffinity).toBe(true);
+      expect(murphRes.factorScore.diagnostics?.spotifyRank).toBe(15);
+    });
+
+    it('matches Spotify top artists via canonicalArtistId when event artist lacks spotifyArtistId', () => {
+      const spotifyTopArtists: SpotifyTopArtist[] = [
+        {
+          id: 'spotify-summit-1',
+          canonicalArtistId: 'canon-summit-canonical-id',
+          name: 'John Summit',
+          rank: 2,
+          genres: ['tech house'],
+          imageUrl: null,
+          spotifyUrl: 'https://open.spotify.com/artist/spotify-summit-1',
+          popularity: 85,
+          trend: 'rising' as const,
+          timeRange: 'medium_term',
+        },
+      ];
+
+      // Event artist only has canonical ID 'canon-summit-canonical-id' and no spotifyArtistId
+      const res = calculateArtistInterestFactor(
+        [
+          {
+            id: 'canon-summit-canonical-id',
+            name: 'John Summit',
+            spotifyArtistId: null,
+          },
+        ],
+        [],
+        spotifyTopArtists,
+      );
+
+      expect(res.factorScore.score).toBe(70); // rank 2 -> 70
+      expect(res.factorScore.diagnostics?.spotifyAffinity).toBe(true);
+      expect(res.factorScore.diagnostics?.spotifyRank).toBe(2);
+      expect(res.factorScore.diagnostics?.matchedCanonicalArtistId).toBe(
+        'canon-summit-canonical-id',
+      );
+      expect(res.matchedArtist?.name).toBe('John Summit');
+      expect(res.matchedArtist?.isSpotifyAffinity).toBe(true);
     });
 
     it('enforces Invariant 11: explicit user preferences strictly override Spotify listening signals', () => {

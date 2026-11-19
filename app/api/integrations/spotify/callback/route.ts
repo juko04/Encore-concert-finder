@@ -7,12 +7,15 @@ import { SupabaseSpotifyConnectionRepository } from '@/lib/repositories/spotify-
 import { SpotifyApiClient } from '@/lib/sources/spotify/client';
 import {
   SpotifyAccountConflictError,
+  SpotifyAuthenticationError,
   SpotifyForbiddenError,
+  SpotifyRateLimitError,
 } from '@/lib/domain/spotify';
 import {
   SPOTIFY_OAUTH_BINDING_COOKIE,
   SPOTIFY_OAUTH_STATE_COOKIE,
   SPOTIFY_OAUTH_VERIFIER_COOKIE,
+  validateSpotifyRedirectUri,
   verifyOAuthHandshakeToken,
 } from '@/lib/sources/spotify/oauth';
 
@@ -68,6 +71,19 @@ export async function GET(request: Request) {
     !serverEnv.SPOTIFY_REDIRECT_URI ||
     !serverEnv.SPOTIFY_TOKEN_ENCRYPTION_KEY
   ) {
+    return NextResponse.redirect(
+      new URL('/profile/taste?spotify_error=not_configured', request.url),
+    );
+  }
+
+  const redirectValidation = validateSpotifyRedirectUri(
+    serverEnv.SPOTIFY_REDIRECT_URI,
+  );
+  if (!redirectValidation.isValid) {
+    console.warn(
+      '[Spotify Callback] Invalid redirect URI configuration:',
+      redirectValidation.error,
+    );
     return NextResponse.redirect(
       new URL('/profile/taste?spotify_error=not_configured', request.url),
     );
@@ -170,6 +186,21 @@ export async function GET(request: Request) {
       return NextResponse.redirect(
         new URL(
           '/profile/taste?spotify_error=developer_mode_restricted',
+          request.url,
+        ),
+      );
+    }
+
+    if (err instanceof SpotifyAuthenticationError) {
+      return NextResponse.redirect(
+        new URL('/profile/taste?spotify_error=auth_failed', request.url),
+      );
+    }
+
+    if (err instanceof SpotifyRateLimitError) {
+      return NextResponse.redirect(
+        new URL(
+          `/profile/taste?spotify_error=rate_limited&retry_after=${err.retryAfterSeconds}`,
           request.url,
         ),
       );

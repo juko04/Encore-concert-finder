@@ -28,7 +28,12 @@ import {
   getSyntheticTopArtists,
   isSyntheticPreviewAllowed,
 } from '@/lib/sources/spotify/synthetic-preview';
-import { clearSpotifyAffinityCache } from '@/lib/sources/spotify/affinity-service';
+import {
+  clearSpotifyAffinityCache,
+  syncSpotifyTopArtistsAcrossTimeRanges,
+} from '@/lib/sources/spotify/affinity-service';
+import { SupabaseCatalogRepository } from '@/lib/repositories/catalog-repository';
+import type { ICatalogRepository } from '@/lib/repositories/interfaces';
 
 export interface PreferenceActionResult {
   success?: boolean;
@@ -236,6 +241,82 @@ export interface SpotifyTopArtistsActionResult {
   artists: SpotifyTopArtist[];
   isSyntheticPreview: boolean;
   error?: string;
+}
+
+export interface SpotifySyncActionResult {
+  artists: SpotifyTopArtist[];
+  syncedAt?: string;
+  matchedCount?: number;
+  totalCount?: number;
+  isSyntheticPreview: boolean;
+  error?: string;
+}
+
+/**
+ * Force a fresh Spotify sync across listening windows, bypassing the in-memory affinity cache.
+ * Resolves Spotify artists to canonical Encore artist IDs and enriches catalog external IDs.
+ * Used for manual "Sync now" button and automatic staleness-triggered re-sync on return visits.
+ */
+export async function syncSpotifyArtistsAction(
+  timeRange?: SpotifyTimeRange,
+): Promise<SpotifySyncActionResult> {
+  const user = await getAuthenticatedUser();
+  if (!user) {
+    return {
+      artists: [],
+      isSyntheticPreview: false,
+      error: 'You must be signed in to sync Spotify.',
+    };
+  }
+
+  // Evict cache for this user so the upcoming fetch is always live
+  clearSpotifyAffinityCache(user.id);
+
+  try {
+    let catalogRepo: ICatalogRepository | undefined;
+    try {
+      const adminClient = createAdminClient();
+      catalogRepo = new SupabaseCatalogRepository(adminClient);
+    } catch {
+      // catalogRepo unavailable in some test environments
+    }
+
+    const artists = await syncSpotifyTopArtistsAcrossTimeRanges(user.id, {
+      catalogRepo,
+      allowEnrichment: true,
+    });
+
+    revalidatePath('/profile/taste');
+
+    const matchedCount = artists.filter((a) =>
+      Boolean(a.canonicalArtistId),
+    ).length;
+    const syncedAt = new Date().toISOString();
+
+    const returnedArtists =
+      timeRange && timeRange !== 'short_term'
+        ? artists.filter(
+            (a) =>
+              a.timeRange === timeRange ||
+              (a.ranksByRange && a.ranksByRange[timeRange] !== undefined),
+          )
+        : artists;
+
+    return {
+      artists: returnedArtists.length > 0 ? returnedArtists : artists,
+      syncedAt,
+      matchedCount,
+      totalCount: artists.length,
+      isSyntheticPreview: false,
+    };
+  } catch (err) {
+    console.error('[syncSpotifyArtistsAction error]:', err);
+    return {
+      artists: [],
+      isSyntheticPreview: false,
+      error: 'Failed to sync Spotify listening history. Please try again.',
+    };
+  }
 }
 
 export async function getSpotifyTopArtistsAction(

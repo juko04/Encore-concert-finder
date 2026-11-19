@@ -2,6 +2,7 @@ import 'server-only';
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { createClient } from '@/lib/supabase/server';
+import { createAdminClient } from '@/lib/supabase/admin';
 import type { CanonicalEventSummary } from '@/lib/domain/catalog';
 import type { UserProfile } from '@/lib/domain/profile';
 import { rankEvents } from '@/lib/recommendation/engine';
@@ -418,11 +419,17 @@ export async function getPersonalizedDiscoverData(
     injectedPrefRepo ?? new SupabaseUserPreferenceRepository(effectiveClient!);
   const catalogRepo =
     injectedCatalogRepo ?? new SupabaseCatalogRepository(effectiveClient);
-  const spotifyRepo =
-    injectedSpotifyRepo ??
-    (effectiveClient
-      ? new SupabaseSpotifyConnectionRepository(effectiveClient)
-      : undefined);
+  let spotifyRepo = injectedSpotifyRepo;
+  if (!spotifyRepo) {
+    try {
+      const adminClient = createAdminClient();
+      spotifyRepo = new SupabaseSpotifyConnectionRepository(adminClient);
+    } catch {
+      if (effectiveClient) {
+        spotifyRepo = new SupabaseSpotifyConnectionRepository(effectiveClient);
+      }
+    }
+  }
 
   // 1. Fetch user profile, explicit artist preferences, and Spotify connection in parallel
   const [userProfile, userPreferences, spotifyConnection] = await Promise.all([
@@ -439,7 +446,11 @@ export async function getPersonalizedDiscoverData(
   let spotifyTopArtists: SpotifyTopArtist[] = options.spotifyTopArtists ?? [];
   if (spotifyTopArtists.length === 0 && isSpotifyConnected) {
     try {
-      spotifyTopArtists = await getActiveSpotifyTopArtistsForUser(userId);
+      spotifyTopArtists = await getActiveSpotifyTopArtistsForUser(
+        userId,
+        'short_term',
+        { catalogRepo },
+      );
     } catch {
       spotifyTopArtists = [];
     }
@@ -603,15 +614,46 @@ export async function getPersonalizedDiscoverData(
 
   // Tier 1D: Spotify top artists listening affinities
   if (spotifyTopArtists.length > 0) {
-    const spotifyArtistCatalogIds = await resolveArtistIdsForPreferences(
-      spotifyTopArtists.map((a) => ({ spotifyArtistId: a.id })),
-      catalogRepo,
+    const unmappedSpotifyIds: string[] = [];
+    const directCanonicalIds: string[] = [];
+
+    for (const a of spotifyTopArtists) {
+      if (a.canonicalArtistId) {
+        directCanonicalIds.push(a.canonicalArtistId);
+      }
+      if (a.id) {
+        unmappedSpotifyIds.push(a.id);
+      }
+    }
+
+    let resolvedFromSpotify = new Map<string, string>();
+    if (
+      unmappedSpotifyIds.length > 0 &&
+      typeof catalogRepo.findArtistIdsByExternalIds === 'function'
+    ) {
+      resolvedFromSpotify = await catalogRepo.findArtistIdsByExternalIds(
+        'spotify',
+        unmappedSpotifyIds,
+      );
+      for (const a of spotifyTopArtists) {
+        if (!a.canonicalArtistId && a.id && resolvedFromSpotify.has(a.id)) {
+          a.canonicalArtistId = resolvedFromSpotify.get(a.id);
+        }
+      }
+    }
+
+    const allSpotifyCatalogIds = Array.from(
+      new Set([
+        ...directCanonicalIds,
+        ...Array.from(resolvedFromSpotify.values()),
+      ]),
     );
-    if (spotifyArtistCatalogIds.length > 0) {
+
+    if (allSpotifyCatalogIds.length > 0) {
       candidateQueries.push(
         retrieveCandidatesWithLookback(
           catalogRepo,
-          { ...commonFilters, artistIds: spotifyArtistCatalogIds },
+          { ...commonFilters, artistIds: allSpotifyCatalogIds },
           LIKE_ARTIST_CANDIDATE_LIMIT,
           referenceDate,
           referenceInstant,
