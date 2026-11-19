@@ -7,63 +7,37 @@ Durable architecture records belong in [`docs/architecture/`](docs/architecture/
 
 ## Current Status & Location
 
-- **Current Milestone:** **Local Data Cleanup & Spotify Personalization Verification (Final Review Remediation)**.
-- **Active Branch:** `fix/local-data-cleanup-spotify-verification`
-- **Active Implementing Agent:** Google Antigravity (Lead Agent Coordinator)
-- **Current Task:** Final remediation of review findings:
-  1. Convert cleanup script into a read-only diagnostic/audit utility with paginated queries.
-  2. Correct integration-test teardown to track created artist/venue IDs, preserve pre-existing entities regardless of remaining event count, and handle `candidate_resolutions`.
-  3. Correct Spotify status messaging so UI does not promise active Spotify-based concert ranking until verified artist matches exist in the catalog, keep automatic scoring in place for when verified IDs become available, and fix `clearSpotifyAffinityCache(userId)` to invalidate all time-range entries.
-  4. Explicitly document Ticketmaster API key availability, catalog Spotify coverage status, and future artist identity enrichment.
-  5. Paginate integration-test snapshots (artists, venues, sources, events) to eliminate PostgREST 1,000-row truncation risks, track strictly test-created events (never matched events), and clean up test sources/venues while preserving pre-existing matched records and their legitimate field evidence.
-
-- **Remediation Details:**
-  1. *Finding 1 — Read-Only Diagnostic Audit Utility:*
-     - Converted `scripts/cleanup-synthetic-data.ts` into a purely read-only audit and diagnostic utility (`runSyntheticAudit`).
-     - Removed destructive `--apply`, `--no-backup`, and all `delete()` queries and file-system backup writes.
-     - Added `fetchAllPaginated` helper using Supabase `.range(from, to)` to query all records safely without being capped at PostgREST's 1,000-row limit.
-     - Removed misleading claims of transaction safety or deletion capabilities.
-     - Preserved destination guard (`assertSafeDatabaseTarget` on `127.0.0.1` / `localhost`).
-  2. *Finding 2 — Scoped Integration Test Teardown:*
-     - In `tests/integration/golden-path.test.ts` and `tests/integration/ticketmaster-canonicalization.test.ts`, snapshotted `preExistingArtistIds` and `preExistingVenueIds` in `beforeAll`.
-     - Tracked exact IDs of artists and venues actually created by each test run in `trackedCreated.artistIds` and `trackedCreated.venueIds`.
-     - In `afterAll`, eliminated dangerous loops that deleted pre-existing artists or venues merely because they had 0 remaining events. Pre-existing entities are never deleted.
-     - Added explicit deletion of `candidate_resolutions` (by `event_id` and `event_candidate_id`) prior to deleting events and candidates, eliminating orphaned resolution rows.
-     - Preserved fail-loud error assertions throughout teardown.
-  3. *Finding 3 — Spotify Status Messaging & Cache Invalidation:*
-     - Fixed `clearSpotifyAffinityCache(userId)` in `lib/sources/spotify/affinity-service.ts` to iterate through all in-memory cache keys and invalidate all cached time-range entries (`${userId}:short_term`, `${userId}:medium_term`, `${userId}:long_term`) for the specified user, while preserving entries for other users.
-     - Added dedicated unit test suite in `tests/unit/spotify-affinity-service.test.ts` verifying time-range cache invalidation and isolation.
-     - Wired `clearSpotifyAffinityCache(user.id)` into `disconnectSpotifyAction` in `app/profile/taste/actions.ts`.
-     - Adjusted UI copy in `PersonalizedDiscoverContainer.tsx`, `SpotifyConnectionCard.tsx`, and `SpotifyTastePreview.tsx` to honestly communicate that Spotify account is connected and ready to inform rankings once verified Spotify artist IDs match in our catalog, while reminding users that setting explicit preferences in Music Taste guarantees immediate priority.
-  4. *Finding 4 — Ticketmaster API Key & Catalog Spotify Coverage Documentation:*
-     - **Ticketmaster API Key:** Acknowledged that the Ticketmaster API key is now available to the user in `.env.local` for future live Ticketmaster ingestion runs.
-     - **Spotify Infrastructure vs. Catalog Coverage:** The Spotify scoring infrastructure (OAuth, token refresh, in-memory affinity service, recommendation engine factor scoring with recency decay, and manual preference precedence) is completely implemented and tested. However, local catalog coverage currently contains 579 canonical artists across 244 genuine Colorado concerts with **0 verified Spotify artist IDs** (`artist_external_ids` with `provider = 'spotify'`), because Colorado venue scrapers (Velvet Elk, Roots Music Project, Cervantes, Larimer, Lost Lake, Globe Hall) extract from venue HTML/JSON-LD rather than Spotify metadata.
-     - **Future Enrichment Task:** Automated Spotify artist identity enrichment (e.g. via MusicBrainz / Spotify Web API entity resolution during ingestion) remains a planned future task.
-  5. *Finding 5 — Paginated Snapshot & Strictly Test-Created Event Teardown:*
-     - **Paginated Pre-existing Snapshots:** Implemented `fetchAllIdsPaginated` in `tests/fixtures/fixture-helper.ts` and wired it into `beforeAll` for both `golden-path.test.ts` and `ticketmaster-canonicalization.test.ts`. All pre-existing artists, venues, sources, and events are completely snapshotted across pages, preventing truncation and accidental deletion when tables exceed the PostgREST 1,000-row limit.
-     - **Strict Test-Created Event Tracking:** Updated canonicalization result tracking to only add event IDs when `status === 'created'` and `!preExistingEventIds.has(id)`. Replays and matched observations never track matched event IDs in `trackedCreated.eventIds`. Added `createdEventIds` to `TicketmasterIngestionResult` to cleanly distinguish created vs. matched events in pipeline runs.
-     - **Preservation of Preexisting Matched Events & Evidence:** In `afterAll`, teardown deletes events, ticket links, and event_artists strictly for proven test-created events (`!preExistingEventIds.has(id)`). For matched preexisting events, only candidate-specific resolutions (`candidate_resolutions`), candidate-specific evidence (`event_field_evidence`), and candidate-specific sources (`event_sources`) are cleaned up by `candidate_id`/`event_candidate_id`. Preexisting events and their legitimate evidence from other sources remain completely untouched.
-     - **Test Source & Venue Teardown:** Verified that newly created test sources (`fake-venue-adapter`, `ticketmaster-discovery` if not preexisting) and newly created test venues are tracked and safely deleted in `afterAll` without touching any pre-existing records.
+- **Current Milestone:** **Spotify Final Merge Gate (Independently Audited, Negative Auth Verified & Ready for Merge)**.
+- **Active Branch:** `feature/spotify-integration-repair`
+- **Active Implementing Agent:** Google Antigravity (Lead Agent Coordinator + Specialized Review Agents)
+- **Current Task:** Completed all 6 final merge gate checks:
+  1. **Admin Client & Negative Authorization Audit:** Inspected all `createAdminClient()` calls; verified authenticated user JWT scoping (anti-IDOR); added comprehensive negative authorization test suite `tests/unit/spotify-negative-authorization.test.ts` (8/8 passing).
+  2. **114 Spotify ID Mappings Corroboration:** Audited `scripts/audit-spotify-mappings.ts`; confirmed 100% (114/114) IDs are valid Base62 strings corroborated 1:1 against the live Spotify Web API with zero ambiguous collisions.
+  3. **John Summit E2E & Visual Verification:** Verified Playwright test and screenshots represent actual SSR database execution through `events` and `rankEvents()`, without mocked UI values.
+  4. **Fixture Isolation & Non-Destructive Teardown:** Verified `scripts/seed-john-summit-fixture.ts` and `cleanup-john-summit-fixture.ts` use unique source slug `synthetic_fixture_test_john_summit` and `assertSafeDatabaseTarget`; fixture completely torn down.
+  5. **PR Diff, Secrets & PII Review:** Sanitized personal emails and specific test handles; verified zero token fragments, credentials, or secrets in git diff, screenshots, or logs. Excluded 4 unrelated research/audit files from commit scope.
+  6. **Standard Verification Suite Execution:** 100% green across format, lint, strict typecheck, 726 unit tests, and production build.
 
 ---
 
 ## Verification Suite Results
 
-- `npm run format:check`: PASS (0 code style issues)
-- `npm run lint`: PASS (0 ESLint warnings, 0 errors)
-- `npm run typecheck`: PASS (`tsc --noEmit`, 0 TypeScript errors)
-- `npm test`: PASS (51/51 test files, 651/651 unit tests passed)
-- `npm run test:integration`: PASS (8/8 test files, 59/59 integration tests passed against local Supabase)
-- `npm run test:e2e`: PASS (4/4 test files, 11/11 browser smoke & authenticated tests passed)
-- `npm run audit:synthetic`: PASS (0 synthetic records; 244 genuine Colorado concerts, 579 artists, 17 venues preserved)
-- `npm run build`: PASS (Next.js production build clean, 9/9 routes compiled successfully)
+- `npm run format:check`: **PASS** (100% Prettier code style)
+- `npm run lint`: **PASS** (0 ESLint warnings, 0 errors)
+- `npm run typecheck`: **PASS** (`tsc --noEmit`, 0 TypeScript errors)
+- `npm test`: **PASS** (**55/55 test files, 726/726 unit tests passed**)
+- `npm run test:integration`: **PASS** (**13/13 test files, 104/104 integration tests passed**)
+- `npm run test:e2e`: **PASS** (**12/12 Playwright browser tests passed**)
+- `npm run build`: **PASS** (Next.js 15.5.27 production build clean, 9/9 routes compiled)
 
 ---
 
 ## Key Invariants Preserved
 
-1. **Safe Database Targets:** Audit utility and tests strictly enforce `assertSafeDatabaseTarget`; zero chance of targeting remote or production databases.
+1. **Safe Database Targets:** Tests and scripts strictly enforce local loopback targets (`127.0.0.1` / `localhost`) via `assertSafeDatabaseTarget`.
 2. **Invariant 3 (Immutable Observations):** `raw_ingests` and `event_candidates` remain immutable audit records.
-3. **Invariant 5 (Conservative Entity Resolution):** Disambiguate artists and external IDs strictly; never fabricate Spotify external IDs via name-only guessing.
-4. **Invariant 11 (Manual Preference Precedence):** Explicit user preferences (`favorite`=100, `like`=75, `interested`=55, `dislike`=0) strictly take precedence over inferred Spotify listening affinities.
-5. **No Synthetic Data Pollution:** All test suites clean up 100% of their test-created artifacts using exact tracked IDs without deleting pre-existing catalog entities.
+3. **Invariant 5 (Conservative Entity Resolution):** Disambiguate artists and external IDs strictly; ambiguous names or conflicting external IDs are never merged.
+4. **Invariant 10 (Timezones, Currencies & Prices):** Local calendar dates computed in venue IANA timezone; unverified prices score neutrally (50).
+5. **Invariant 11 (Manual Preference Precedence):** Explicit manual preferences strictly take precedence over inferred Spotify listening affinities. Disliked headliner unconditionally suppresses event.
+6. **Invariant 12 (Isolation & Cleanup of Synthetic Data):** Synthetic test concert cleanly isolated under `synthetic_fixture_test_john_summit` and completely torn down post-verification.
+7. **Security Boundary:** Raw tokens encrypted at rest with AES-256-GCM; zero client-side leakage; Zero-Client RLS preserved.

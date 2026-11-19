@@ -26,6 +26,12 @@ import type {
 import type { SpotifyTopArtist } from '@/lib/domain/spotify';
 import type { FactorScore, MatchedArtistInfo } from '../types';
 
+declare module '@/lib/domain/spotify' {
+  interface SpotifyTopArtist {
+    canonicalArtistId?: string | null;
+  }
+}
+
 export const ARTIST_PREFERENCE_SCORES: Record<PreferenceLevel, number> = {
   favorite: 100,
   like: 75,
@@ -332,25 +338,50 @@ export function calculateArtistInterestFactor(
 
   // If no explicit user preferences matched, check Spotify listening affinities
   if (spotifyTopArtists && spotifyTopArtists.length > 0) {
-    const spotifyMap = new Map<string, SpotifyTopArtist>();
+    const spotifyBySpotifyId = new Map<string, SpotifyTopArtist>();
+    const spotifyByCanonicalId = new Map<string, SpotifyTopArtist>();
+
     for (const sa of spotifyTopArtists) {
       if (sa.id) {
-        spotifyMap.set(sa.id, sa);
+        spotifyBySpotifyId.set(sa.id, sa);
+      }
+      if (sa.canonicalArtistId) {
+        spotifyByCanonicalId.set(sa.canonicalArtistId, sa);
       }
     }
 
     const spotifyMatches: Array<{
       artist: EventArtistInput;
       spotifyArtist: SpotifyTopArtist;
+      matchedCanonicalArtistId?: string;
       score: number;
     }> = [];
 
     for (const artist of eventArtists) {
-      if (artist.spotifyArtistId && spotifyMap.has(artist.spotifyArtistId)) {
-        const sa = spotifyMap.get(artist.spotifyArtistId)!;
+      let sa: SpotifyTopArtist | undefined;
+      let matchedCanonicalArtistId: string | undefined;
+
+      if (
+        artist.spotifyArtistId &&
+        spotifyBySpotifyId.has(artist.spotifyArtistId)
+      ) {
+        sa = spotifyBySpotifyId.get(artist.spotifyArtistId)!;
+        matchedCanonicalArtistId =
+          sa.canonicalArtistId ?? (artist.id || undefined);
+      } else if (artist.id && spotifyByCanonicalId.has(artist.id)) {
+        sa = spotifyByCanonicalId.get(artist.id)!;
+        matchedCanonicalArtistId = artist.id;
+      }
+
+      if (sa) {
         // Tiered listening affinity: top 5 -> 70, top 10 -> 65, top 20 -> 60
         const score = sa.rank <= 5 ? 70 : sa.rank <= 10 ? 65 : 60;
-        spotifyMatches.push({ artist, spotifyArtist: sa, score });
+        spotifyMatches.push({
+          artist,
+          spotifyArtist: sa,
+          matchedCanonicalArtistId,
+          score,
+        });
       }
     }
 
@@ -364,7 +395,7 @@ export function calculateArtistInterestFactor(
       }
 
       const matchedArtistInfo: MatchedArtistInfo = {
-        id: best.artist.id ?? undefined,
+        id: best.artist.id ?? best.matchedCanonicalArtistId ?? undefined,
         name: best.artist.name,
         preferenceLevel: 'like',
         score: best.score,
@@ -384,6 +415,7 @@ export function calculateArtistInterestFactor(
           diagnostics: {
             spotifyAffinity: true,
             spotifyRank: best.spotifyArtist.rank,
+            matchedCanonicalArtistId: best.matchedCanonicalArtistId,
             matchedCount: spotifyMatches.length,
             bestArtist: best.artist.name,
           },

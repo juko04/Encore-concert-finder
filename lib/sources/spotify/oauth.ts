@@ -15,6 +15,275 @@ export const SPOTIFY_TOKEN_ENDPOINT = 'https://accounts.spotify.com/api/token';
 
 export const DEFAULT_SPOTIFY_SCOPES = ['user-top-read'];
 
+export interface RedirectUriValidationResult {
+  isValid: boolean;
+  error?: string;
+  normalizedUri?: string;
+}
+
+/**
+ * Validates a Spotify OAuth redirect URI against RFC 6749 and Spotify 2026 Developer guidelines.
+ * Strict rules:
+ * - Must be non-empty and have no leading/trailing or internal whitespace.
+ * - Must be a valid URL with http: (loopback only) or https:.
+ * - Must specify a concrete path (not root '/' or empty).
+ * - Must not contain URL fragment identifiers (#).
+ */
+export function validateSpotifyRedirectUri(
+  redirectUri: unknown,
+): RedirectUriValidationResult {
+  if (typeof redirectUri !== 'string' || !redirectUri.trim()) {
+    return {
+      isValid: false,
+      error: 'Redirect URI is required and must be a non-empty string.',
+    };
+  }
+
+  if (redirectUri !== redirectUri.trim()) {
+    return {
+      isValid: false,
+      error:
+        'Redirect URI contains leading or trailing whitespace. Ensure no extra spaces or newlines exist in your environment configuration.',
+    };
+  }
+
+  if (/\s/.test(redirectUri)) {
+    return {
+      isValid: false,
+      error: 'Redirect URI contains internal whitespace characters.',
+    };
+  }
+
+  let parsed: URL;
+  try {
+    parsed = new URL(redirectUri);
+  } catch {
+    return {
+      isValid: false,
+      error: `Redirect URI is not a valid URL: "${redirectUri}".`,
+    };
+  }
+
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    return {
+      isValid: false,
+      error: `Redirect URI must use http: or https: protocol. Received: "${parsed.protocol}".`,
+    };
+  }
+
+  const isLoopback =
+    parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1';
+  if (parsed.protocol === 'http:' && !isLoopback) {
+    return {
+      isValid: false,
+      error: `Spotify requires HTTPS for all redirect URIs except localhost or 127.0.0.1. Received HTTP on "${parsed.hostname}".`,
+    };
+  }
+
+  if (parsed.hash) {
+    return {
+      isValid: false,
+      error:
+        'Spotify redirect URI must not include URL fragment identifiers (#).',
+    };
+  }
+
+  if (!parsed.pathname || parsed.pathname === '/') {
+    return {
+      isValid: false,
+      error: `Redirect URI is missing a specific callback path (e.g., /api/integrations/spotify/callback). Received root path: "${parsed.pathname}".`,
+    };
+  }
+
+  return {
+    isValid: true,
+    normalizedUri: parsed.toString(),
+  };
+}
+
+export interface RedirectUriComparisonResult {
+  matches: boolean;
+  reason?: string;
+}
+
+/**
+ * Compares configured redirect URI with an incoming redirect URI, providing clear diagnostics on mismatch.
+ */
+export function compareRedirectUris(
+  configuredUri: string,
+  incomingUri: string,
+): RedirectUriComparisonResult {
+  if (configuredUri === incomingUri) {
+    return { matches: true };
+  }
+
+  if (
+    configuredUri.trim() !== configuredUri ||
+    incomingUri.trim() !== incomingUri
+  ) {
+    return {
+      matches: false,
+      reason: 'Redirect URI mismatch due to leading or trailing whitespace.',
+    };
+  }
+
+  try {
+    const parsedConfigured = new URL(configuredUri);
+    const parsedIncoming = new URL(incomingUri);
+
+    if (parsedConfigured.origin !== parsedIncoming.origin) {
+      return {
+        matches: false,
+        reason: `Origin mismatch: expected "${parsedConfigured.origin}", received "${parsedIncoming.origin}".`,
+      };
+    }
+
+    if (parsedConfigured.pathname !== parsedIncoming.pathname) {
+      return {
+        matches: false,
+        reason: `Path mismatch: expected "${parsedConfigured.pathname}", received "${parsedIncoming.pathname}".`,
+      };
+    }
+
+    if (parsedConfigured.search !== parsedIncoming.search) {
+      return {
+        matches: false,
+        reason: `Query parameter mismatch: expected "${parsedConfigured.search}", received "${parsedIncoming.search}".`,
+      };
+    }
+  } catch {
+    // URL parsing failed
+  }
+
+  return {
+    matches: false,
+    reason: `Redirect URIs do not match exactly. Configured: "${configuredUri}", Received: "${incomingUri}".`,
+  };
+}
+
+export interface SpotifyOAuthConfigInput {
+  clientId?: string | null;
+  clientSecret?: string | null;
+  redirectUri?: string | null;
+  encryptionKey?: string | null;
+}
+
+export interface SpotifyOAuthConfigDiagnostic {
+  isValid: boolean;
+  issues: string[];
+  sanitizedConfig: {
+    clientIdConfigured: boolean;
+    clientSecretConfigured: boolean;
+    redirectUri: string | null;
+    redirectUriValid: boolean;
+    encryptionKeyConfigured: boolean;
+    encryptionKeyValidHex: boolean;
+    encryptionKeyLength: number;
+  };
+}
+
+/**
+ * Diagnostic helper that validates Spotify OAuth environment configuration
+ * (client ID, client secret, redirect URI, and encryption key) without leaking secrets.
+ */
+export function diagnoseSpotifyOAuthConfig(
+  config: SpotifyOAuthConfigInput,
+): SpotifyOAuthConfigDiagnostic {
+  const issues: string[] = [];
+
+  // 1. Client ID
+  const clientId = config.clientId;
+  const clientIdConfigured = Boolean(
+    clientId && typeof clientId === 'string' && clientId.trim().length > 0,
+  );
+  if (!clientIdConfigured) {
+    issues.push('SPOTIFY_CLIENT_ID is missing or empty.');
+  } else if (
+    typeof clientId === 'string' &&
+    (clientId !== clientId.trim() || /\s/.test(clientId))
+  ) {
+    issues.push('SPOTIFY_CLIENT_ID contains whitespace characters.');
+  }
+
+  // 2. Client Secret (never leak the secret value)
+  const clientSecret = config.clientSecret;
+  const clientSecretConfigured = Boolean(
+    clientSecret &&
+    typeof clientSecret === 'string' &&
+    clientSecret.trim().length > 0,
+  );
+  if (!clientSecretConfigured) {
+    issues.push('SPOTIFY_CLIENT_SECRET is missing or empty.');
+  } else if (
+    typeof clientSecret === 'string' &&
+    (clientSecret !== clientSecret.trim() || /\s/.test(clientSecret))
+  ) {
+    issues.push('SPOTIFY_CLIENT_SECRET contains whitespace characters.');
+  }
+
+  // 3. Redirect URI
+  const redirectUri = config.redirectUri;
+  let redirectUriValid = false;
+  let sanitizedRedirectUri: string | null = null;
+  if (!redirectUri || typeof redirectUri !== 'string' || !redirectUri.trim()) {
+    issues.push('SPOTIFY_REDIRECT_URI is missing or empty.');
+  } else {
+    sanitizedRedirectUri = redirectUri.trim();
+    const uriValidation = validateSpotifyRedirectUri(redirectUri);
+    redirectUriValid = uriValidation.isValid;
+    if (!uriValidation.isValid && uriValidation.error) {
+      issues.push(`SPOTIFY_REDIRECT_URI invalid: ${uriValidation.error}`);
+    }
+  }
+
+  // 4. Token Encryption Key (never leak the key value)
+  const encryptionKey = config.encryptionKey;
+  const encryptionKeyConfigured = Boolean(
+    encryptionKey &&
+    typeof encryptionKey === 'string' &&
+    encryptionKey.trim().length > 0,
+  );
+  let encryptionKeyValidHex = false;
+  let encryptionKeyLength = 0;
+
+  if (!encryptionKeyConfigured) {
+    issues.push('SPOTIFY_TOKEN_ENCRYPTION_KEY is missing or empty.');
+  } else if (typeof encryptionKey === 'string') {
+    const trimmedKey = encryptionKey.trim();
+    encryptionKeyLength = trimmedKey.length;
+    encryptionKeyValidHex = /^[0-9a-fA-F]{64}$/.test(trimmedKey);
+
+    if (encryptionKey !== trimmedKey) {
+      issues.push(
+        'SPOTIFY_TOKEN_ENCRYPTION_KEY contains leading or trailing whitespace.',
+      );
+    }
+    if (encryptionKeyLength !== 64) {
+      issues.push(
+        `SPOTIFY_TOKEN_ENCRYPTION_KEY must be exactly 64 hex characters (32 bytes AES-256). Received length: ${encryptionKeyLength}.`,
+      );
+    } else if (!encryptionKeyValidHex) {
+      issues.push(
+        'SPOTIFY_TOKEN_ENCRYPTION_KEY contains non-hexadecimal characters.',
+      );
+    }
+  }
+
+  return {
+    isValid: issues.length === 0,
+    issues,
+    sanitizedConfig: {
+      clientIdConfigured,
+      clientSecretConfigured,
+      redirectUri: sanitizedRedirectUri,
+      redirectUriValid,
+      encryptionKeyConfigured,
+      encryptionKeyValidHex,
+      encryptionKeyLength,
+    },
+  };
+}
+
 export interface OAuthHandshakePayload {
   state: string;
   codeVerifier: string;
@@ -160,6 +429,10 @@ export function buildSpotifyAuthorizeUrl(
   if (!redirectUri || !redirectUri.trim()) {
     throw new Error('Spotify redirect URI is required.');
   }
+  const uriValidation = validateSpotifyRedirectUri(redirectUri);
+  if (!uriValidation.isValid) {
+    throw new Error(`Invalid redirect URI: ${uriValidation.error}`);
+  }
   if (!state || !state.trim()) {
     throw new Error('OAuth state is required.');
   }
@@ -167,10 +440,15 @@ export function buildSpotifyAuthorizeUrl(
     throw new Error('PKCE code challenge is required.');
   }
 
+  // Ensure 'user-top-read' is always included per Spotify 2026 Developer guidelines
+  const effectiveScopes = Array.from(
+    new Set([...scopes, 'user-top-read']),
+  ).filter(Boolean);
+
   const url = new URL(SPOTIFY_AUTH_ENDPOINT);
   url.searchParams.set('response_type', 'code');
   url.searchParams.set('client_id', clientId.trim());
-  url.searchParams.set('scope', scopes.join(' '));
+  url.searchParams.set('scope', effectiveScopes.join(' '));
   url.searchParams.set('redirect_uri', redirectUri.trim());
   url.searchParams.set('state', state.trim());
   url.searchParams.set('code_challenge_method', 'S256');
