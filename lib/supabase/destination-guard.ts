@@ -171,7 +171,7 @@ export function validateDatabaseTarget(
 
   if (!isProd) {
     throw new Error(
-      `${context} aborted: Target database (${urlStr || 'unknown'}) is not a verified local or development instance, nor an approved production instance. ` +
+      `${context} aborted: Target database (${urlStr || 'unknown'}) is not a verified local or development instance, and not an approved local, development, or production instance. ` +
         'Remote destinations must be explicitly allowlisted in ENCORE_APPROVED_PROD_HOSTS or match ENCORE_PROD_PROJECT_REF.',
     );
   }
