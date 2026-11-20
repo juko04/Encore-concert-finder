@@ -107,6 +107,24 @@ describe('PostgreSQL Integration: John Summit Synthetic Fixture End-to-End Recom
       encryptionKey,
     );
 
+    // Ensure test user exists in auth.users and profiles so foreign key constraints hold
+    const { data: userRecord } =
+      await adminClient.auth.admin.getUserById(TARGET_USER_ID);
+    if (!userRecord?.user) {
+      await adminClient.auth.admin.createUser({
+        id: TARGET_USER_ID,
+        email: 'john_summit_test@encore.test',
+        password: 'TestPassword123!Secure',
+        email_confirm: true,
+      });
+      await adminClient.from('profiles').upsert({
+        id: TARGET_USER_ID,
+        home_city: 'Denver',
+        home_region: 'CO',
+        recommendation_preset: 'balanced',
+      });
+    }
+
     // Save original profile recommendation preset
     const { data: profile } = await adminClient
       .from('profiles')
