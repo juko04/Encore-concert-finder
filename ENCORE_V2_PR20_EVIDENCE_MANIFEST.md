@@ -12,12 +12,14 @@
 
 ### Base & Branch Comparison:
 - **Base Branch:** `origin/main` (`3adbf59a1e3e462e539d145e2c58947c8678b977`)
-- **Verified PR Head Branch:** `feature/encore-v2-index-ticketmaster`
-- **Verification Suites:** 100% Green locally (914 Unit, 108 Integration, 17 E2E)
+- **Verified PR Head Commit:** `f5962dc` (`feature/encore-v2-index-ticketmaster`)
+- **GitHub Actions Remote CI:** **PASS** (Run [44794056401](https://github.com/juko04/Encore-concert-finder/actions/runs/44794056401) completed 100% green in 5m39s on commit `f5962dc`)
+- **Verification Suites:** 100% Green locally & remote (914 Unit, 108 Integration, 17 E2E)
 
 ### Remediated Files in this Cycle:
 | File Path | Description of Changes | Finding Addressed |
 |---|---|---|
+| `tests/fixtures/traced-events-fixture.ts` | Idempotent fixture seeder ensuring the 3 traced live events exist in clean CI and ephemeral test databases before UI trace execution. | Finding 5 (High) |
 | `lib/sources/ticketmaster/quota-guard.ts` | Eliminated time-based lock stealing; added UUID `lockId` verification; required `killErr.code === 'ESRCH'` for dead PID reclamation; verified `meta.lockId === currentLockId` before unlinking in `finally`; verified lock ownership in `savePersistedState`; fail-closed corruption handling without resetting daily budget. | Finding 1 (Critical) |
 | `lib/sources/ticketmaster/errors.ts` | Added `TicketmasterQuotaLockError`, `TicketmasterQuotaCorruptionError`, `TicketmasterQuotaPersistenceError`, and `TicketmasterRunBudgetExceededError`. | Findings 1 & 2 |
 | `lib/sources/ticketmaster/run-budget.ts` | Implemented `RunRequestBudget` with atomic `reserveRequest()`, tracking consumed requests and remaining balance. | Finding 2 (High) |
