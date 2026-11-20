@@ -64,7 +64,7 @@ export class TicketmasterApiClient {
       }
     }
 
-    this.apiKey = resolvedKey || '';
+    this.apiKey = (resolvedKey || '').trim();
     this.baseUrl = (
       options?.baseUrl || 'https://app.ticketmaster.com/discovery/v2'
     ).replace(/\/+$/, '');
@@ -79,6 +79,22 @@ export class TicketmasterApiClient {
 
   getQuotaGuard(): TicketmasterQuotaGuard {
     return this.quotaGuard;
+  }
+
+  private syncHeaders(res: Response): void {
+    if (!res || !res.headers || typeof res.headers.get !== 'function') return;
+    const rateLimitHeader = res.headers.get('rate-limit');
+    const rateLimitAvailableHeader = res.headers.get('rate-limit-available');
+    const rateLimitResetHeader = res.headers.get('rate-limit-reset');
+    this.quotaGuard.syncFromHeaders({
+      limit: rateLimitHeader ? parseInt(rateLimitHeader, 10) : undefined,
+      available: rateLimitAvailableHeader
+        ? parseInt(rateLimitAvailableHeader, 10)
+        : undefined,
+      reset: rateLimitResetHeader
+        ? parseInt(rateLimitResetHeader, 10)
+        : undefined,
+    });
   }
 
   /**
@@ -147,15 +163,6 @@ export class TicketmasterApiClient {
     if (params.sort) {
       url.searchParams.set('sort', params.sort);
     }
-    if (params.allInclusivePricing !== undefined) {
-      url.searchParams.set(
-        'allInclusivePricing',
-        String(params.allInclusivePricing),
-      );
-    } else {
-      // Default to true when fetching concerts to comply with Colorado HB 24-1378 & FTC fee transparency rules
-      url.searchParams.set('allInclusivePricing', 'true');
-    }
 
     return url;
   }
@@ -206,6 +213,7 @@ export class TicketmasterApiClient {
           signal: init?.signal ?? controller.signal,
         });
         clearTimeout(timeoutId);
+        this.syncHeaders(res);
         return res;
       } catch (err) {
         clearTimeout(timeoutId);
@@ -299,6 +307,7 @@ export class TicketmasterApiClient {
         });
 
         clearTimeout(timeoutId);
+        this.syncHeaders(res);
 
         if (res.ok) {
           const rawText = await res.text();

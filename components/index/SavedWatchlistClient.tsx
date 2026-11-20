@@ -48,18 +48,6 @@ export function SavedWatchlistClient({
 
   const displayedEvents = activeTab === 'saved' ? savedEvents : alertEvents;
 
-  // Presale and low-inventory count metrics
-  const presaleAlertCount = useMemo(() => {
-    return alertEvents.filter(
-      (e) => Boolean(e.presaleDate) || e.inventoryStatus === 'low_inventory',
-    ).length;
-  }, [alertEvents]);
-
-  const lowInventoryCount = useMemo(() => {
-    return alertEvents.filter((e) => e.inventoryStatus === 'low_inventory')
-      .length;
-  }, [alertEvents]);
-
   return (
     <div className="space-y-8 pb-16">
       {/* Page Header */}
@@ -67,14 +55,15 @@ export function SavedWatchlistClient({
         <div>
           <div className="mb-2 inline-flex items-center gap-2 rounded-full border border-zinc-200 bg-zinc-50 px-3 py-1 text-xs font-medium text-zinc-700">
             <HeartIcon className="h-3.5 w-3.5 text-rose-500" filled />
-            <span>Personal Watchlist & Alert Desk</span>
+            <span>Local Watchlist & Saved Shows</span>
           </div>
           <h1 className="text-3xl font-extrabold tracking-tight text-zinc-900">
-            Saved Shows & Ticket Alerts
+            Saved Shows & Alert Bookmarks
           </h1>
           <p className="mt-1 max-w-xl text-xs text-zinc-500 sm:text-sm">
-            Track touring announcements, manage presale reminders, and keep tabs
-            on low-inventory events before prices jump.
+            Keep track of shows and bookmarks on this browser. Note: Saved items
+            are stored locally on this device and do not send external push
+            notifications.
           </p>
         </div>
 
@@ -90,7 +79,7 @@ export function SavedWatchlistClient({
             }`}
           >
             <HeartIcon className="h-3.5 w-3.5" filled={activeTab === 'saved'} />
-            <span>All Saved Shows ({savedEvents.length})</span>
+            <span>Saved Shows ({savedEvents.length})</span>
           </button>
 
           <button
@@ -103,68 +92,61 @@ export function SavedWatchlistClient({
             }`}
           >
             <BellIcon className="h-3.5 w-3.5" filled={activeTab === 'alerts'} />
-            <span>Active Alerts ({alertEvents.length})</span>
+            <span>Alert Bookmarks ({alertEvents.length})</span>
           </button>
         </div>
       </div>
 
-      {/* Metrics Banner */}
+      {/* Storage Information Banner */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
         <div className="shadow-xs rounded-2xl border border-zinc-200/90 bg-white p-4">
           <span className="text-xs font-semibold uppercase tracking-wider text-zinc-400">
-            Total Watchlisted
+            Saved Shows
           </span>
           <div className="mt-1 flex items-baseline gap-2">
             <span className="font-mono text-2xl font-bold tabular-nums text-zinc-900">
               {savedEvents.length}
             </span>
-            <span className="text-xs text-zinc-500">shows pinned</span>
+            <span className="text-xs text-zinc-500">bookmarked</span>
           </div>
         </div>
 
         <div className="shadow-xs rounded-2xl border border-zinc-200/90 bg-white p-4">
           <span className="text-xs font-semibold uppercase tracking-wider text-zinc-400">
-            Upcoming Presales
+            Alert Bookmarks
           </span>
           <div className="mt-1 flex items-baseline gap-2">
             <span className="font-mono text-2xl font-bold tabular-nums text-violet-700">
-              {presaleAlertCount}
+              {alertEvents.length}
             </span>
-            <span className="text-xs text-zinc-500">
-              with notifications active
-            </span>
+            <span className="text-xs text-zinc-500">monitored</span>
           </div>
         </div>
 
         <div className="shadow-xs rounded-2xl border border-zinc-200/90 bg-white p-4">
           <span className="text-xs font-semibold uppercase tracking-wider text-zinc-400">
-            Low Inventory Notices
+            Storage Scope
           </span>
           <div className="mt-1 flex items-baseline gap-2">
-            <span className="font-mono text-2xl font-bold tabular-nums text-amber-700">
-              {lowInventoryCount}
+            <span className="text-sm font-semibold text-zinc-800">
+              Local Browser
             </span>
-            <span className="text-xs text-zinc-500">
-              under 50 tickets remaining
-            </span>
+            <span className="text-xs text-zinc-400">(This device only)</span>
           </div>
         </div>
       </div>
 
       {/* Alert Notices Bar (when viewing alerts tab) */}
       {activeTab === 'alerts' && alertEvents.length > 0 && (
-        <div className="flex items-start gap-3 rounded-2xl border border-violet-200 bg-violet-50/60 p-4 text-xs text-violet-900">
-          <BellIcon
-            className="mt-0.5 h-4 w-4 shrink-0 text-violet-600"
-            filled
-          />
+        <div className="flex items-start gap-3 rounded-2xl border border-zinc-200 bg-zinc-50 p-4 text-xs text-zinc-700">
+          <BellIcon className="mt-0.5 h-4 w-4 shrink-0 text-zinc-600" filled />
           <div className="leading-relaxed">
-            <span className="font-semibold">
-              Automated Notification Status:{' '}
+            <span className="font-semibold text-zinc-900">
+              Local Bookmark Mode:{' '}
             </span>
-            You will receive push reminders 30 minutes before artist presales
-            launch and instant alerts if sold-out events release production
-            tickets or partner holds.
+            Alerts are pinned to this browser for quick review. Automated push
+            notifications, SMS alerts, and cross-device syncing are planned for
+            future backend integration.
           </div>
         </div>
       )}

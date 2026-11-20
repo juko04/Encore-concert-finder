@@ -78,13 +78,13 @@ test.describe('Encore V2 Index E2E Flow', () => {
     expect(response?.status()).toBe(200);
 
     await expect(
-      page.getByRole('heading', { name: /Saved Shows & Ticket Alerts/i }),
+      page.getByRole('heading', { name: /Saved Shows & Alert Bookmarks/i }),
     ).toBeVisible();
     await expect(
-      page.getByRole('button', { name: /All Saved Shows/i }),
+      page.getByRole('button', { name: /Saved Shows/i }),
     ).toBeVisible();
     await expect(
-      page.getByRole('button', { name: /Active Alerts/i }),
+      page.getByRole('button', { name: /Alert Bookmarks/i }),
     ).toBeVisible();
 
     // Capture screenshot

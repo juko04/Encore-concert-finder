@@ -266,7 +266,8 @@ describe('Spotify Live Activation & End-to-End Database Integration Audit', () =
         count,
       } = await supabase
         .from('artist_external_ids')
-        .select('*, artist:artists(id, name, image_url)', { count: 'exact' });
+        .select('*, artist:artists(id, name, image_url)', { count: 'exact' })
+        .eq('provider', 'spotify');
 
       expect(error).toBeNull();
       expect(count).toBeGreaterThanOrEqual(100);
@@ -278,7 +279,7 @@ describe('Spotify Live Activation & End-to-End Database Integration Audit', () =
         expect(typeof row.external_id).toBe('string');
         expect(row.external_id.length).toBeGreaterThan(0);
         expect(row.provider_url).toMatch(
-          /^https:\/\/open\.spotify\.com\/artist\//,
+          /^https?:\/\/open\.spotify\.com\/(intl-[a-z]{2}\/)?artist\//,
         );
         expect(row.artist).toBeDefined();
         expect(row.artist.name).toBeDefined();

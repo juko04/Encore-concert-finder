@@ -289,7 +289,7 @@ export class CanonicalizationCoordinator {
         ? candidate.artists
         : candidate.artistNames.map((name, idx) => ({
             name,
-            billingPosition: idx === 0 ? 'headliner' : 'support',
+            billingPosition: 'unknown',
             sortOrder: idx,
           }));
 
@@ -487,9 +487,7 @@ export class CanonicalizationCoordinator {
         };
       }
 
-      const billingPos =
-        candidateArtist.billingPosition ??
-        (index === 0 ? 'headliner' : 'support');
+      const billingPos = candidateArtist.billingPosition ?? 'unknown';
       const sortOrd = candidateArtist.sortOrder ?? index;
 
       if (resolved.status === 'matched') {

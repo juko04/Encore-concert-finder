@@ -21,6 +21,7 @@ export interface PartitionSummary {
   bisected: boolean;
   pagesFetched: number;
   depth: number;
+  isTruncated?: boolean;
 }
 
 export interface PartitionCoordinatorOptions {
@@ -34,7 +35,7 @@ export interface PartitionCoordinatorOptions {
   startDateTime?: string;
   endDateTime?: string;
   threshold?: number; // default: 950
-  minIntervalDays?: number; // default: 1
+  minIntervalDays?: number; // default: 1 (can be < 1 for sub-day bisection, e.g. 1/24 for 1 hour)
   maxDepth?: number; // default: 10
   pageSize?: number; // default: 200 (Ticketmaster max per page)
   isEssential?: boolean;
@@ -46,6 +47,8 @@ export interface PartitionCoordinatorResult {
   totalRequestsMade: number;
   partitionsProcessed: number;
   bisectionsCount: number;
+  hasIncompleteCoverage: boolean;
+  truncatedPartitions: PartitionSummary[];
   partitions: PartitionSummary[];
 }
 
@@ -225,7 +228,6 @@ export class TicketmasterPartitionCoordinator {
     const isEssential = options.isEssential ?? false;
     const baseParams: TicketmasterEventQueryParams = {
       ...(options.baseParams || {}),
-      allInclusivePricing: options.baseParams?.allInclusivePricing ?? true,
     };
 
     const startDateTime =
@@ -240,8 +242,10 @@ export class TicketmasterPartitionCoordinator {
     const executedRequests = new Set<string>();
     const page0Cache = new Map<string, TicketmasterEventsResponse>();
     const partitionsSummary: PartitionSummary[] = [];
+    const truncatedPartitions: PartitionSummary[] = [];
     let requestsMade = 0;
     let bisectionsCount = 0;
+    let hasIncompleteCoverage = false;
 
     const processInterval = async (
       start: string,
@@ -352,7 +356,15 @@ export class TicketmasterPartitionCoordinator {
         }
       }
 
-      partitionsSummary.push({
+      const isTruncated =
+        totalElements > 1000 ||
+        (totalPages > pagesFetched && totalElements > intervalFetched);
+
+      if (isTruncated) {
+        hasIncompleteCoverage = true;
+      }
+
+      const summaryItem: PartitionSummary = {
         startDateTime: start,
         endDateTime: end,
         totalElements,
@@ -360,7 +372,13 @@ export class TicketmasterPartitionCoordinator {
         bisected: false,
         pagesFetched,
         depth,
-      });
+        isTruncated,
+      };
+
+      partitionsSummary.push(summaryItem);
+      if (isTruncated) {
+        truncatedPartitions.push(summaryItem);
+      }
     };
 
     await processInterval(startDateTime, endDateTime, 0);
@@ -371,6 +389,8 @@ export class TicketmasterPartitionCoordinator {
       totalRequestsMade: requestsMade,
       partitionsProcessed: partitionsSummary.filter((p) => !p.bisected).length,
       bisectionsCount,
+      hasIncompleteCoverage,
+      truncatedPartitions,
       partitions: partitionsSummary,
     };
   }

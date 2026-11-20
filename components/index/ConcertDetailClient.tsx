@@ -273,9 +273,14 @@ export function ConcertDetailClient({
               <div className="rounded-xl border border-zinc-200 bg-zinc-100 p-3 text-center text-xs font-semibold text-zinc-500">
                 Event Cancelled
               </div>
-            ) : (
+            ) : event.eventKind === 'free_event' ||
+              (event.minPrice === 0 && event.maxPrice === 0) ? (
               <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-center text-xs font-semibold text-emerald-800">
-                Free Community Admission ($0) · No Ticket Required
+                Free Admission · No Advance Ticket Required
+              </div>
+            ) : (
+              <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 text-center text-xs font-semibold text-zinc-600">
+                Ticket Link Unavailable · Check Venue Door
               </div>
             )}
 
@@ -529,7 +534,9 @@ export function ConcertDetailClient({
                       <p className="mt-0.5 text-xs text-zinc-400">
                         {artist.billingPosition === 'headliner'
                           ? 'Primary performer / headliner'
-                          : 'Touring support act'}
+                          : artist.billingPosition === 'support'
+                            ? 'Touring support act'
+                            : 'Lineup performer'}
                       </p>
                     </div>
 

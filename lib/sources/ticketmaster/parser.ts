@@ -1,6 +1,7 @@
 import type {
   CandidateArtist,
   CandidateArtistExternalId,
+  CandidatePrice,
   EventCandidate,
   EventKind,
   StartTimePrecision,
@@ -81,7 +82,7 @@ export function parseTicketmasterEvent(
 
       artists.push({
         name: attr.name,
-        billingPosition: index === 0 ? 'headliner' : 'support',
+        billingPosition: 'unknown',
         sortOrder: index,
         externalIds,
       });
@@ -137,25 +138,15 @@ export function parseTicketmasterEvent(
   }
 
   // 6. Price & Fee Extraction
+  // Note: Discovery API v2 priceRanges contains min, max, currency, and type.
+  // Fee breakdowns are not provided at Discovery tier; fee status is tracked explicitly.
   const priceRange = event.priceRanges?.[0];
-  const estimatedFees =
-    priceRange?.estimatedFees ?? priceRange?.fee ?? undefined;
   const isFree =
     priceRange && priceRange.min === 0 && priceRange.max === 0
       ? true
       : undefined;
 
-  const price = priceRange
-    ? {
-        min: priceRange.min,
-        max: priceRange.max,
-        currency: priceRange.currency || undefined,
-        ...(estimatedFees !== undefined ? { estimatedFees } : {}),
-        ...(isFree !== undefined ? { isFree } : {}),
-      }
-    : undefined;
-
-  // Extract all-inclusive pricing flag if present
+  // Extract all-inclusive pricing flag if verified in provider payload
   let allInclusivePricing: boolean | undefined = undefined;
   if (typeof event.allInclusivePricing === 'boolean') {
     allInclusivePricing = event.allInclusivePricing;
@@ -174,6 +165,23 @@ export function parseTicketmasterEvent(
   ) {
     allInclusivePricing = event.ticketing.allInclusivePricing.enabled;
   }
+
+  const feeStatus: 'all_inclusive' | 'fees_excluded' | 'unknown' =
+    allInclusivePricing === true
+      ? 'all_inclusive'
+      : allInclusivePricing === false
+        ? 'fees_excluded'
+        : 'unknown';
+
+  const price: CandidatePrice | undefined = priceRange
+    ? {
+        min: priceRange.min,
+        max: priceRange.max,
+        currency: priceRange.currency || undefined,
+        feeStatus,
+        ...(isFree !== undefined ? { isFree } : {}),
+      }
+    : undefined;
 
   // Extract ticketing status if present
   let ticketingStatus: string | undefined = undefined;
@@ -277,7 +285,7 @@ export function parseTicketmasterEvent(
       ticketingStatus,
       ticketing: event.ticketing,
       priceRanges: event.priceRanges,
-      fees: estimatedFees !== undefined ? { estimatedFees } : undefined,
+      feeStatus,
     },
   };
 }

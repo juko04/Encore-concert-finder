@@ -21,6 +21,7 @@ export interface CandidatePrice {
   max?: number;
   currency?: string;
   isFree?: boolean;
+  feeStatus?: 'all_inclusive' | 'fees_excluded' | 'unknown';
   estimatedFees?: number;
 }
 

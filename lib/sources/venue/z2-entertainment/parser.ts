@@ -320,8 +320,11 @@ export function parseZ2RawEvents(html: string): Z2RawEvent[] {
 
   // Support Webflow collection items, custom cards, or event items
   const cardSelector =
-    '.c-event-card, .event-card, .event-item, .w-dyn-item:has(.c-event-card__title, .event-title, .venue, .event-venue)';
-  const cards = $(cardSelector);
+    '.events_item, .c-event-card, .event-card, .event-item, .w-dyn-item:has([fs-list-field="venue"], .c-event-card__title, .event-title, .venue, .event-venue)';
+  const cards = $(cardSelector).filter(
+    (_, el) =>
+      $(el).parents('.events_item, .c-event-card, .event-item').length === 0,
+  );
 
   cards.each((_, el) => {
     const $card = $(el);
@@ -329,7 +332,7 @@ export function parseZ2RawEvents(html: string): Z2RawEvent[] {
     // Title & Support
     const rawTitle = $card
       .find(
-        '.c-event-card__title, .event-title, h1, h2, h3, .title, .event-name',
+        '.c-event-card__title, .event-title, .heading-style-h5, h1, h2, h3, .title, .event-name',
       )
       .first()
       .text()
@@ -349,7 +352,7 @@ export function parseZ2RawEvents(html: string): Z2RawEvent[] {
     // Venue
     const rawVenueText = $card
       .find(
-        '.c-event-card__venue, .event-venue, .venue, .venue-name, .location',
+        '.c-event-card__venue, .event-venue, [fs-list-field="venue"], .venue, .venue-name, .location',
       )
       .first()
       .text()
@@ -361,20 +364,20 @@ export function parseZ2RawEvents(html: string): Z2RawEvent[] {
         : undefined;
 
     // Date & Time
-    const dateText =
-      $card.find('time').attr('datetime') ||
-      $card
-        .find('.c-event-card__date, .event-date, .date')
-        .first()
-        .text()
-        .trim();
-    const localStartDate = parseZ2Date(dateText);
-
-    const timeText = $card
-      .find('.c-event-card__time, .event-time, .time, .event-doors')
+    const dateElementText = $card
+      .find('.c-event-card__date, .event-date, .date, time')
       .first()
       .text()
       .trim();
+    const dateText = $card.find('time').attr('datetime') || dateElementText;
+    const localStartDate = parseZ2Date(dateText);
+
+    const timeText =
+      $card
+        .find('.c-event-card__time, .event-time, .time, .event-doors')
+        .first()
+        .text()
+        .trim() || dateElementText;
     const { showTime, doorTime } = parseTimeText(timeText);
 
     let startsAt: string | undefined;
@@ -430,23 +433,28 @@ export function parseZ2RawEvents(html: string): Z2RawEvent[] {
     // Links & Image
     const rawTicketUrl = $card
       .find(
-        'a[href*="axs.com"], a.ticket-btn, a.btn-tickets, a.c-event-card__tickets, a.tickets',
+        'a[href*="axs.com"], a[href*="ticket"], a.ticket-btn, a.btn-tickets, a.c-event-card__tickets, a.tickets',
       )
       .first()
       .attr('href');
     const rawEventUrl = $card
-      .find('a.event-link, a.c-event-card__link, a[href*="/events/"]')
+      .find(
+        'a.event-link, a.c-event-card__link, a[href*="/events/"], a.events_image-wrapper',
+      )
       .first()
       .attr('href');
     const rawImageUrl = $card
-      .find('img.c-event-card__image, img.event-image, img')
+      .find('img.c-event-card__image, img.events_image, img.event-image, img')
       .first()
       .attr('src');
 
     let ticketUrl: string | undefined;
     if (rawTicketUrl) {
       try {
-        ticketUrl = normalizeUrl(rawTicketUrl);
+        const abs = rawTicketUrl.startsWith('/')
+          ? `https://z2ent.com${rawTicketUrl}`
+          : rawTicketUrl;
+        ticketUrl = normalizeUrl(abs);
       } catch {
         ticketUrl = rawTicketUrl;
       }
@@ -455,7 +463,10 @@ export function parseZ2RawEvents(html: string): Z2RawEvent[] {
     let eventUrl: string | undefined;
     if (rawEventUrl) {
       try {
-        eventUrl = normalizeUrl(rawEventUrl);
+        const abs = rawEventUrl.startsWith('/')
+          ? `https://z2ent.com${rawEventUrl}`
+          : rawEventUrl;
+        eventUrl = normalizeUrl(abs);
       } catch {
         eventUrl = rawEventUrl;
       }

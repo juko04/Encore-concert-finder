@@ -32,3 +32,4 @@ scratch/
 .agents/local/
 *.pem
 *.key
+.ticketmaster-quota.json

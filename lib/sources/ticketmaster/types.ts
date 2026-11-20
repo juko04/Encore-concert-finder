@@ -124,6 +124,8 @@ export type TicketmasterVenue = z.infer<typeof TicketmasterVenueSchema>;
 
 /**
  * Ticketmaster Price Range Schema
+ * In Discovery API v2, priceRanges contains min, max, currency, and type.
+ * Granular fee breakdowns (charges/estimatedFees) are not part of Discovery API priceRanges.
  */
 export const TicketmasterPriceRangeSchema = z
   .object({
@@ -131,9 +133,6 @@ export const TicketmasterPriceRangeSchema = z
     currency: z.string().optional(),
     min: z.number().optional(),
     max: z.number().optional(),
-    fee: z.number().optional(),
-    estimatedFees: z.number().optional(),
-    includingFee: z.boolean().optional(),
   })
   .passthrough();
 
@@ -285,5 +284,4 @@ export interface TicketmasterEventQueryParams {
   size?: number;
   page?: number;
   sort?: string;
-  allInclusivePricing?: boolean;
 }

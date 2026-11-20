@@ -537,17 +537,19 @@ describe('Index Components Unit Tests', () => {
       render(<SavedWatchlistClient events={MOCK_INDEX_ITEMS} />);
 
       expect(
-        screen.getByText('Saved Shows & Ticket Alerts'),
+        screen.getByText('Saved Shows & Alert Bookmarks'),
       ).toBeInTheDocument();
-      expect(screen.getByText('Total Watchlisted')).toBeInTheDocument();
-      expect(screen.getByText('Upcoming Presales')).toBeInTheDocument();
-      expect(screen.getByText('Low Inventory Notices')).toBeInTheDocument();
+      expect(screen.getByText('Saved Shows')).toBeInTheDocument();
+      expect(screen.getByText('Alert Bookmarks')).toBeInTheDocument();
+      expect(screen.getByText('Storage Scope')).toBeInTheDocument();
 
       // Empty state verification when no shows are saved yet
       expect(screen.getByText('Your Watchlist is Empty')).toBeInTheDocument();
 
       // Switch to Alerts tab
-      const alertsTab = screen.getByRole('button', { name: /active alerts/i });
+      const alertsTab = screen.getByRole('button', {
+        name: /alert bookmarks/i,
+      });
       fireEvent.click(alertsTab);
       expect(screen.getByText('No Active Alerts')).toBeInTheDocument();
     });
