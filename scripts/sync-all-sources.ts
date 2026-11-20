@@ -40,6 +40,7 @@ import {
   TicketmasterDiscoveryAdapter,
   runTicketmasterIngestion,
   getGlobalTicketmasterQuotaGuard,
+  RunRequestBudget,
 } from '@/lib/sources/ticketmaster';
 import {
   CervantesVenueAdapter,
@@ -81,27 +82,36 @@ export interface SyncOptions {
   syncFestivals?: boolean;
   usePartitioner?: boolean;
   maxRequestsPerRun?: number;
+  silent?: boolean;
 }
 
 export interface SyncReport {
   sourceName: string;
   sourceType: 'aggregator' | 'venue';
-  status: 'success' | 'failed' | 'skipped';
+  status: 'success' | 'partial' | 'failed' | 'skipped';
   eventsFetched: number;
   candidatesExtracted: number;
   canonicalCreated: number;
   canonicalMatched: number;
   soldOutCount: number;
   durationMs: number;
+  hasIncompleteCoverage?: boolean;
   error?: string;
 }
 
 export interface MultiSourceSyncResult {
+  overallStatus: 'success' | 'partial' | 'failed';
+  exitCode: number;
   reports: SyncReport[];
   totalTimeMs: number;
   regionsCovered: string[];
   favoriteArtistsQueried: string[];
   festivalsQueried: boolean;
+  runBudgetStatus?: {
+    maxRequests: number;
+    consumed: number;
+    remaining: number;
+  };
 }
 
 export function calculateHorizonDates(horizon: SyncHorizon): {
@@ -139,6 +149,17 @@ export function calculateHorizonDates(horizon: SyncHorizon): {
 export async function runMultiSourceSync(
   options: SyncOptions,
 ): Promise<MultiSourceSyncResult> {
+  const log = (...args: unknown[]) => {
+    if (!options.silent) {
+      console.log(...args);
+    }
+  };
+  const warn = (...args: unknown[]) => {
+    if (!options.silent) {
+      console.warn(...args);
+    }
+  };
+
   const startTime = Date.now();
   const reports: SyncReport[] = [];
 
@@ -191,40 +212,55 @@ export async function runMultiSourceSync(
   let favoriteArtistsQueried: string[] = [];
   let festivalsQueried = false;
 
+  if (options.maxRequestsPerRun !== undefined) {
+    if (
+      !Number.isInteger(options.maxRequestsPerRun) ||
+      options.maxRequestsPerRun <= 0
+    ) {
+      throw new Error(
+        `Invalid maxRequestsPerRun: ${options.maxRequestsPerRun}. Must be a positive integer.`,
+      );
+    }
+  }
+
+  const runBudget =
+    options.maxRequestsPerRun !== undefined
+      ? new RunRequestBudget(options.maxRequestsPerRun)
+      : undefined;
+
   // 1. Ticketmaster Ingestion (Configurable Geographic Coverage & Nationwide)
   if (includeTm) {
     const tmAdapter = new TicketmasterDiscoveryAdapter({
       apiKey: options.live
         ? process.env.TICKETMASTER_API_KEY
         : 'fixture-test-key',
+      runBudget,
     });
 
     // 1A. Loop through specified regional states
     for (const state of states) {
-      if (
-        options.maxRequestsPerRun !== undefined &&
-        getGlobalTicketmasterQuotaGuard().getCount() >=
-          options.maxRequestsPerRun
-      ) {
-        console.warn(
+      if (runBudget && runBudget.isExhausted()) {
+        warn(
           `[SYNC BUDGET] Reached maximum requests per run budget (${options.maxRequestsPerRun}). Skipping region ${state}.`,
         );
         reports.push({
           sourceName: `Ticketmaster (${state} Region)`,
           sourceType: 'aggregator',
-          status: 'skipped',
+          status: 'partial',
           eventsFetched: 0,
           candidatesExtracted: 0,
           canonicalCreated: 0,
           canonicalMatched: 0,
           soldOutCount: 0,
           durationMs: 0,
+          hasIncompleteCoverage: true,
+          error: `Run request budget exhausted (${runBudget.getConsumed()}/${runBudget.getMaxRequests()})`,
         });
         continue;
       }
       const tmStart = Date.now();
       try {
-        console.log(
+        log(
           `\n[SYNC] Starting Ticketmaster sync for region: ${state} (${options.horizon}: ${startUtc} -> ${endUtc})...`,
         );
 
@@ -246,10 +282,12 @@ export async function runMultiSourceSync(
           persist: options.persist,
         });
 
+        const isPartial = Boolean(tmResult.hasIncompleteCoverage);
+
         reports.push({
           sourceName: `Ticketmaster (${state} Region)`,
           sourceType: 'aggregator',
-          status: 'success',
+          status: isPartial ? 'partial' : 'success',
           eventsFetched: tmResult.rawIngestsFetched,
           candidatesExtracted: tmResult.candidatesParsed,
           canonicalCreated: tmResult.canonicalEventsCreated,
@@ -258,6 +296,7 @@ export async function runMultiSourceSync(
             (c) => c.inventoryStatus === 'sold_out',
           ).length,
           durationMs: Date.now() - tmStart,
+          hasIncompleteCoverage: tmResult.hasIncompleteCoverage,
         });
       } catch (err) {
         console.error(
@@ -297,7 +336,7 @@ export async function runMultiSourceSync(
           ).filter((name): name is string => Boolean(name && name.length > 0));
         }
       } catch (err) {
-        console.warn(
+        warn(
           '[SYNC] Could not query user_artist_preferences for favorite artists:',
           err,
         );
@@ -308,11 +347,28 @@ export async function runMultiSourceSync(
     const shouldSyncFavorites = options.syncFavoriteArtists ?? true;
 
     if (shouldSyncFavorites && favoriteArtists.length > 0) {
-      console.log(
+      log(
         `\n[SYNC] Querying nationwide tour dates for ${favoriteArtists.length} verified favorite artist(s)...`,
       );
 
       for (const artistName of favoriteArtists) {
+        if (runBudget && runBudget.isExhausted()) {
+          reports.push({
+            sourceName: `Ticketmaster (Tour: ${artistName})`,
+            sourceType: 'aggregator',
+            status: 'partial',
+            eventsFetched: 0,
+            candidatesExtracted: 0,
+            canonicalCreated: 0,
+            canonicalMatched: 0,
+            soldOutCount: 0,
+            durationMs: 0,
+            hasIncompleteCoverage: true,
+            error: `Run request budget exhausted (${runBudget.getConsumed()}/${runBudget.getMaxRequests()})`,
+          });
+          continue;
+        }
+
         const faStart = Date.now();
         try {
           const tmFaResult = await runTicketmasterIngestion({
@@ -334,10 +390,12 @@ export async function runMultiSourceSync(
             persist: options.persist,
           });
 
+          const isPartial = Boolean(tmFaResult.hasIncompleteCoverage);
+
           reports.push({
             sourceName: `Ticketmaster (Tour: ${artistName})`,
             sourceType: 'aggregator',
-            status: 'success',
+            status: isPartial ? 'partial' : 'success',
             eventsFetched: tmFaResult.rawIngestsFetched,
             candidatesExtracted: tmFaResult.candidatesParsed,
             canonicalCreated: tmFaResult.canonicalEventsCreated,
@@ -346,6 +404,7 @@ export async function runMultiSourceSync(
               (c) => c.inventoryStatus === 'sold_out',
             ).length,
             durationMs: Date.now() - faStart,
+            hasIncompleteCoverage: tmFaResult.hasIncompleteCoverage,
           });
         } catch (err) {
           console.error(`[SYNC] Failed tour sync for ${artistName}:`, err);
@@ -369,57 +428,74 @@ export async function runMultiSourceSync(
     const shouldSyncFestivals = options.syncFestivals ?? true;
     if (shouldSyncFestivals) {
       festivalsQueried = true;
-      const festStart = Date.now();
-      try {
-        console.log(
-          `\n[SYNC] Querying major nationwide music festivals (US)...`,
-        );
-        const tmFestResult = await runTicketmasterIngestion({
-          adapter: tmAdapter,
-          rawIngestRepo,
-          candidateRepo,
-          catalogRepo,
-          sourceRepo,
-          queryParams: {
-            keyword: 'festival',
-            countryCode: 'US',
-            startDateTime: startUtc,
-            endDateTime: endUtc,
-            size: 50,
-            classificationName: 'Music',
-          },
-          usePartitioner: options.usePartitioner ?? true,
-          useFixture: !options.live,
-          persist: options.persist,
-        });
-
+      if (runBudget && runBudget.isExhausted()) {
         reports.push({
           sourceName: 'Ticketmaster (Nationwide Festivals)',
           sourceType: 'aggregator',
-          status: 'success',
-          eventsFetched: tmFestResult.rawIngestsFetched,
-          candidatesExtracted: tmFestResult.candidatesParsed,
-          canonicalCreated: tmFestResult.canonicalEventsCreated,
-          canonicalMatched: tmFestResult.canonicalEventsMatched,
-          soldOutCount: tmFestResult.candidates.filter(
-            (c) => c.inventoryStatus === 'sold_out',
-          ).length,
-          durationMs: Date.now() - festStart,
-        });
-      } catch (err) {
-        console.error('[SYNC] Failed nationwide festival sync:', err);
-        reports.push({
-          sourceName: 'Ticketmaster (Nationwide Festivals)',
-          sourceType: 'aggregator',
-          status: 'failed',
+          status: 'partial',
           eventsFetched: 0,
           candidatesExtracted: 0,
           canonicalCreated: 0,
           canonicalMatched: 0,
           soldOutCount: 0,
-          durationMs: Date.now() - festStart,
-          error: err instanceof Error ? err.message : String(err),
+          durationMs: 0,
+          hasIncompleteCoverage: true,
+          error: `Run request budget exhausted (${runBudget.getConsumed()}/${runBudget.getMaxRequests()})`,
         });
+      } else {
+        const festStart = Date.now();
+        try {
+          log(`\n[SYNC] Querying major nationwide music festivals (US)...`);
+          const tmFestResult = await runTicketmasterIngestion({
+            adapter: tmAdapter,
+            rawIngestRepo,
+            candidateRepo,
+            catalogRepo,
+            sourceRepo,
+            queryParams: {
+              keyword: 'festival',
+              countryCode: 'US',
+              startDateTime: startUtc,
+              endDateTime: endUtc,
+              size: 50,
+              classificationName: 'Music',
+            },
+            usePartitioner: options.usePartitioner ?? true,
+            useFixture: !options.live,
+            persist: options.persist,
+          });
+
+          const isPartial = Boolean(tmFestResult.hasIncompleteCoverage);
+
+          reports.push({
+            sourceName: 'Ticketmaster (Nationwide Festivals)',
+            sourceType: 'aggregator',
+            status: isPartial ? 'partial' : 'success',
+            eventsFetched: tmFestResult.rawIngestsFetched,
+            candidatesExtracted: tmFestResult.candidatesParsed,
+            canonicalCreated: tmFestResult.canonicalEventsCreated,
+            canonicalMatched: tmFestResult.canonicalEventsMatched,
+            soldOutCount: tmFestResult.candidates.filter(
+              (c) => c.inventoryStatus === 'sold_out',
+            ).length,
+            durationMs: Date.now() - festStart,
+            hasIncompleteCoverage: tmFestResult.hasIncompleteCoverage,
+          });
+        } catch (err) {
+          console.error('[SYNC] Failed nationwide festival sync:', err);
+          reports.push({
+            sourceName: 'Ticketmaster (Nationwide Festivals)',
+            sourceType: 'aggregator',
+            status: 'failed',
+            eventsFetched: 0,
+            candidatesExtracted: 0,
+            canonicalCreated: 0,
+            canonicalMatched: 0,
+            soldOutCount: 0,
+            durationMs: Date.now() - festStart,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
       }
     }
   }
@@ -470,7 +546,7 @@ export async function runMultiSourceSync(
     for (const v of venueConfigs) {
       const vStart = Date.now();
       try {
-        console.log(`[SYNC] Syncing venue: ${v.config.name}...`);
+        log(`[SYNC] Syncing venue: ${v.config.name}...`);
         const adapter = v.adapterFactory();
         const vResult = await runVenueIngestion({
           config: v.config,
@@ -520,12 +596,29 @@ export async function runMultiSourceSync(
   }
 
   const totalTimeMs = Date.now() - startTime;
+  const hasFailed = reports.some((r) => r.status === 'failed');
+  const hasPartial = reports.some(
+    (r) =>
+      r.status === 'partial' ||
+      r.status === 'skipped' ||
+      Boolean(r.hasIncompleteCoverage),
+  );
+  const overallStatus: 'success' | 'partial' | 'failed' = hasFailed
+    ? 'failed'
+    : hasPartial
+      ? 'partial'
+      : 'success';
+  const exitCode = hasFailed ? 1 : hasPartial ? 2 : 0;
+
   return {
+    overallStatus,
+    exitCode,
     reports,
     totalTimeMs,
     regionsCovered: states,
     favoriteArtistsQueried,
     festivalsQueried,
+    runBudgetStatus: runBudget?.getStatus(),
   };
 }
 
@@ -534,6 +627,7 @@ async function main() {
   const args = process.argv.slice(2);
   const isLive = args.includes('--live');
   const isPersist = args.includes('--persist');
+  const isJson = args.includes('--json');
   const allowProductionWrite = args.includes('--allow-production-write');
 
   if (allowProductionWrite && !isLive) {
@@ -558,29 +652,53 @@ async function main() {
   const maxRequestsArg = args
     .find((a) => a.startsWith('--max-requests='))
     ?.split('=')[1];
-  const maxRequestsPerRun = maxRequestsArg
-    ? parseInt(maxRequestsArg, 10)
-    : undefined;
+  let maxRequestsPerRun: number | undefined;
 
-  console.log('='.repeat(70));
-  console.log('ENCORE V2 — MULTI-SOURCE ROLLING SYNCHRONIZATION');
-  console.log('='.repeat(70));
-  console.log(
-    `Mode: ${isLive ? 'LIVE' : 'FIXTURE PREVIEW'} | Persist: ${isPersist} | Horizon: ${horizon}`,
-  );
-  console.log(`Regions: ${states.join(', ')}`);
-  if (maxRequestsPerRun !== undefined) {
-    console.log(`Run Request Budget: ${maxRequestsPerRun} max requests`);
+  if (maxRequestsArg !== undefined) {
+    const parsed = Number(maxRequestsArg);
+    if (!Number.isInteger(parsed) || parsed <= 0) {
+      const errMsg = `[CLI ERROR] Invalid --max-requests value "${maxRequestsArg}". Must be a positive integer greater than 0.`;
+      if (isJson) {
+        console.log(
+          JSON.stringify(
+            {
+              overallStatus: 'failed',
+              exitCode: 1,
+              error: errMsg,
+            },
+            null,
+            2,
+          ),
+        );
+      } else {
+        console.error(errMsg);
+      }
+      process.exit(1);
+    }
+    maxRequestsPerRun = parsed;
   }
-  console.log(
-    `Production Write Allowed: ${allowProductionWrite ? 'YES' : 'NO (Protected Local Only)'}`,
-  );
 
-  const quota = getGlobalTicketmasterQuotaGuard();
-  const quotaStatus = quota.getStatus();
-  console.log(
-    `Ticketmaster Daily Quota: ${quotaStatus.count}/${quotaStatus.dailyLimit} (Remaining: ${quotaStatus.remaining})`,
-  );
+  if (!isJson) {
+    console.log('='.repeat(70));
+    console.log('ENCORE V2 — MULTI-SOURCE ROLLING SYNCHRONIZATION');
+    console.log('='.repeat(70));
+    console.log(
+      `Mode: ${isLive ? 'LIVE' : 'FIXTURE PREVIEW'} | Persist: ${isPersist} | Horizon: ${horizon}`,
+    );
+    console.log(`Regions: ${states.join(', ')}`);
+    if (maxRequestsPerRun !== undefined) {
+      console.log(`Run Request Budget: ${maxRequestsPerRun} max requests`);
+    }
+    console.log(
+      `Production Write Allowed: ${allowProductionWrite ? 'YES' : 'NO (Protected Local Only)'}`,
+    );
+
+    const quota = getGlobalTicketmasterQuotaGuard();
+    const quotaStatus = quota.getStatus();
+    console.log(
+      `Ticketmaster Daily Quota: ${quotaStatus.count}/${quotaStatus.dailyLimit} (Remaining: ${quotaStatus.remaining})`,
+    );
+  }
 
   const result = await runMultiSourceSync({
     horizon,
@@ -590,24 +708,8 @@ async function main() {
     allowProductionWrite,
     usePartitioner: true,
     maxRequestsPerRun,
+    silent: isJson,
   });
-
-  console.log('\n' + '='.repeat(70));
-  console.log('SYNCHRONIZATION RESULTS SUMMARY');
-  console.log('='.repeat(70));
-  console.log(`Regions Covered:           ${result.regionsCovered.join(', ')}`);
-  console.log(`Horizon:                   ${horizon}`);
-  console.log(
-    `Favorite Artist Tours:     ${
-      result.favoriteArtistsQueried.length > 0
-        ? `${result.favoriteArtistsQueried.length} (${result.favoriteArtistsQueried.join(', ')})`
-        : '0 (None configured)'
-    }`,
-  );
-  console.log(
-    `Major Nationwide Festivals: ${result.festivalsQueried ? 'Queried (US nationwide)' : 'Skipped'}`,
-  );
-  console.log('-'.repeat(70));
 
   let totalFetched = 0;
   let totalCandidates = 0;
@@ -621,33 +723,104 @@ async function main() {
     totalCreated += r.canonicalCreated;
     totalMatched += r.canonicalMatched;
     totalSoldOut += r.soldOutCount;
-
-    const statusBadge = r.status === 'success' ? '✓ PASS' : '✗ FAIL';
-    console.log(
-      `${statusBadge.padEnd(8)} ${r.sourceName.padEnd(38)} ` +
-        `Fetched: ${String(r.eventsFetched).padStart(3)} | ` +
-        `Candidates: ${String(r.candidatesExtracted).padStart(3)} | ` +
-        `Canonical: +${String(r.canonicalCreated).padStart(3)} (Merged: ${String(r.canonicalMatched).padStart(2)}) | ` +
-        `Sold Out: ${String(r.soldOutCount).padStart(2)} | ` +
-        `Time: ${r.durationMs}ms`,
-    );
   }
 
-  console.log('-'.repeat(70));
-  console.log(
-    `TOTALS: ${result.reports.length} sync jobs | ` +
-      `Raw: ${totalFetched} | Candidates: ${totalCandidates} | ` +
-      `New Canonical: +${totalCreated} | Merged Duplicates: ${totalMatched} | ` +
-      `Sold Out: ${totalSoldOut} | Total Duration: ${(result.totalTimeMs / 1000).toFixed(2)}s`,
-  );
-  console.log('='.repeat(70) + '\n');
+  if (isJson) {
+    const jsonOutput = {
+      overallStatus: result.overallStatus,
+      exitCode: result.exitCode,
+      totalTimeMs: result.totalTimeMs,
+      regionsCovered: result.regionsCovered,
+      favoriteArtistsQueried: result.favoriteArtistsQueried,
+      festivalsQueried: result.festivalsQueried,
+      runBudgetStatus: result.runBudgetStatus,
+      totals: {
+        jobs: result.reports.length,
+        fetched: totalFetched,
+        candidates: totalCandidates,
+        canonicalCreated: totalCreated,
+        canonicalMatched: totalMatched,
+        soldOut: totalSoldOut,
+        failed: result.reports.filter((r) => r.status === 'failed').length,
+        partial: result.reports.filter((r) => r.status === 'partial').length,
+        skipped: result.reports.filter((r) => r.status === 'skipped').length,
+        success: result.reports.filter((r) => r.status === 'success').length,
+      },
+      reports: result.reports,
+    };
+    console.log(JSON.stringify(jsonOutput, null, 2));
+  } else {
+    console.log('\n' + '='.repeat(70));
+    console.log('SYNCHRONIZATION RESULTS SUMMARY');
+    console.log('='.repeat(70));
+    console.log(
+      `Overall Status:            ${result.overallStatus.toUpperCase()} (Exit Code: ${result.exitCode})`,
+    );
+    console.log(
+      `Regions Covered:           ${result.regionsCovered.join(', ')}`,
+    );
+    console.log(`Horizon:                   ${horizon}`);
+    console.log(
+      `Favorite Artist Tours:     ${
+        result.favoriteArtistsQueried.length > 0
+          ? `${result.favoriteArtistsQueried.length} (${result.favoriteArtistsQueried.join(', ')})`
+          : '0 (None configured)'
+      }`,
+    );
+    console.log(
+      `Major Nationwide Festivals: ${result.festivalsQueried ? 'Queried (US nationwide)' : 'Skipped'}`,
+    );
+    if (result.runBudgetStatus) {
+      console.log(
+        `Run Request Budget:        ${result.runBudgetStatus.consumed}/${result.runBudgetStatus.maxRequests} consumed (Remaining: ${result.runBudgetStatus.remaining})`,
+      );
+    }
+    console.log('-'.repeat(70));
+
+    for (const r of result.reports) {
+      const statusBadge =
+        r.status === 'success'
+          ? '✓ PASS'
+          : r.status === 'partial'
+            ? '⚠ PART'
+            : r.status === 'skipped'
+              ? '⊘ SKIP'
+              : '✗ FAIL';
+      console.log(
+        `${statusBadge.padEnd(8)} ${r.sourceName.padEnd(38)} ` +
+          `Fetched: ${String(r.eventsFetched).padStart(3)} | ` +
+          `Candidates: ${String(r.candidatesExtracted).padStart(3)} | ` +
+          `Canonical: +${String(r.canonicalCreated).padStart(3)} (Merged: ${String(r.canonicalMatched).padStart(2)}) | ` +
+          `Sold Out: ${String(r.soldOutCount).padStart(2)} | ` +
+          `Time: ${r.durationMs}ms`,
+      );
+    }
+
+    console.log('-'.repeat(70));
+    console.log(
+      `TOTALS: ${result.reports.length} sync jobs | ` +
+        `Raw: ${totalFetched} | Candidates: ${totalCandidates} | ` +
+        `New Canonical: +${totalCreated} | Merged Duplicates: ${totalMatched} | ` +
+        `Sold Out: ${totalSoldOut} | Total Duration: ${(result.totalTimeMs / 1000).toFixed(2)}s`,
+    );
+    console.log('='.repeat(70) + '\n');
+  }
+
+  if (result.exitCode !== 0) {
+    process.exit(result.exitCode);
+  }
 }
 
+const isTestRunner = Boolean(process.env.VITEST);
 const isDirectExecution =
-  typeof process !== 'undefined' &&
-  process.argv[1] &&
-  (process.argv[1].endsWith('sync-all-sources.ts') ||
-    process.argv[1].endsWith('sync-all-sources'));
+  !isTestRunner &&
+  (Boolean(process.env.npm_lifecycle_script?.includes('sync-all-sources')) ||
+    process.argv.some((arg) => arg.includes('sync-all-sources')) ||
+    (typeof process !== 'undefined' &&
+      process.argv[1] &&
+      (process.argv[1].endsWith('sync-all-sources.ts') ||
+        process.argv[1].endsWith('sync-all-sources') ||
+        process.argv[1].includes('vite-node'))));
 
 if (isDirectExecution) {
   main().catch((err) => {

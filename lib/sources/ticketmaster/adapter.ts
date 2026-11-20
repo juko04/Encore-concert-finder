@@ -34,6 +34,10 @@ export class TicketmasterDiscoveryAdapter implements EventSourceAdapter {
     this.client = new TicketmasterApiClient(options);
   }
 
+  getClient(): TicketmasterApiClient {
+    return this.client;
+  }
+
   /**
    * Fetches raw JSON page snapshots from Ticketmaster Discovery API.
    */

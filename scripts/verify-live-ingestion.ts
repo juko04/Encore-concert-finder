@@ -21,6 +21,8 @@
  * - Traces at least 3 real Ticketmaster events from provider ID to canonical database record to Index UI
  */
 
+import fs from 'node:fs';
+import path from 'node:path';
 import {
   assertSafeDatabaseTarget,
   isVerifiedLocalOrDevDatabase,
@@ -43,6 +45,7 @@ import { SupabaseSourceRepository } from '@/lib/repositories/source-repository';
 
 export interface LiveVerificationOptions {
   clean?: boolean;
+  confirmDisposableCleanup?: boolean;
   fullAudit?: boolean;
 }
 
@@ -114,6 +117,8 @@ export interface LiveVerificationSummary {
     currency: string | null;
     ticketUrl: string | null;
     indexUiPath: string;
+    indexSearchPath: string;
+    createdInCurrentRun: boolean;
   }>;
 }
 
@@ -331,11 +336,23 @@ export async function auditDatabaseRelations(
  */
 export async function cleanLiveTestSources(
   adminClient: ReturnType<typeof createAdminClient>,
+  options: { confirmDisposableCleanup?: boolean } = {},
 ): Promise<void> {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
   if (!isVerifiedLocalOrDevDatabase(supabaseUrl)) {
     throw new Error(
       'cleanLiveTestSources is strictly prohibited against non-local databases.',
+    );
+  }
+
+  // FAIL-CLOSED ISOLATION GUARD (Finding 4):
+  // Destructive test cleanup requires explicit disposable environment flag AND confirmation flag
+  const isDisposableDb = process.env.ENCORE_DISPOSABLE_TEST_DB === 'true';
+  const hasConfirmFlag = Boolean(options.confirmDisposableCleanup);
+
+  if (!isDisposableDb || !hasConfirmFlag) {
+    throw new Error(
+      '[CLEANUP SAFETY VIOLATION] Destructive test cleanup requires ENCORE_DISPOSABLE_TEST_DB=true environment variable AND --confirm-disposable-cleanup flag to protect shared development databases.',
     );
   }
 
@@ -495,40 +512,58 @@ export async function cleanLiveTestSources(
   if (riDelErr)
     throw new Error(`Failed to delete raw_ingests: ${riDelErr.message}`);
 
-  // 12. Clean up any unreferenced artists left behind by deleted test events
-  const { data: allArtists } = await adminClient.from('artists').select('id');
-  const { data: allEventArtists } = await adminClient
-    .from('event_artists')
-    .select('artist_id');
-  const referencedArtistIds = new Set(
-    (allEventArtists || []).map((ea: { artist_id: string }) => ea.artist_id),
-  );
-  const { data: allUserPrefs } = await adminClient
-    .from('user_artist_preferences')
-    .select('artist_id');
-  const prefArtistIds = new Set(
-    (allUserPrefs || []).map((p: { artist_id: string }) => p.artist_id),
+  // 12. Clean up test-associated artists created by these sources that have 0 other references
+  const { data: testArtistExtIds } = await adminClient
+    .from('artist_external_ids')
+    .select('artist_id')
+    .in('source_id', sourceIds);
+
+  const candidateArtistIds = Array.from(
+    new Set(
+      (testArtistExtIds || [])
+        .map((row: { artist_id?: string | null }) => row.artist_id)
+        .filter((id): id is string => Boolean(id)),
+    ),
   );
 
-  const orphanArtistIds = (allArtists || [])
-    .filter(
-      (a: { id: string }) =>
-        !referencedArtistIds.has(a.id) && !prefArtistIds.has(a.id),
-    )
-    .map((a: { id: string }) => a.id);
+  let cleanedArtistCount = 0;
+  if (candidateArtistIds.length > 0) {
+    const { data: remainingEventArtists } = await adminClient
+      .from('event_artists')
+      .select('artist_id')
+      .in('artist_id', candidateArtistIds);
+    const remainingRefIds = new Set(
+      (remainingEventArtists || []).map(
+        (ea: { artist_id: string }) => ea.artist_id,
+      ),
+    );
 
-  if (orphanArtistIds.length > 0) {
-    for (const aChunk of chunk(orphanArtistIds)) {
-      await adminClient
-        .from('artist_external_ids')
-        .delete()
-        .in('artist_id', aChunk);
-      await adminClient.from('artists').delete().in('id', aChunk);
+    const { data: remainingPrefs } = await adminClient
+      .from('user_artist_preferences')
+      .select('artist_id')
+      .in('artist_id', candidateArtistIds);
+    const prefIds = new Set(
+      (remainingPrefs || []).map((p: { artist_id: string }) => p.artist_id),
+    );
+
+    const safeToDeleteArtistIds = candidateArtistIds.filter(
+      (id) => !remainingRefIds.has(id) && !prefIds.has(id),
+    );
+
+    cleanedArtistCount = safeToDeleteArtistIds.length;
+    if (safeToDeleteArtistIds.length > 0) {
+      for (const aChunk of chunk(safeToDeleteArtistIds)) {
+        await adminClient
+          .from('artist_external_ids')
+          .delete()
+          .in('artist_id', aChunk);
+        await adminClient.from('artists').delete().in('id', aChunk);
+      }
     }
   }
 
   console.log(
-    `Cleaned prior test records for sources [${sourceIds.join(', ')}]: ${candIds.length} candidates, ${eventIds.length} events, ${rawIds.length} raw ingests, ${orphanArtistIds.length} orphaned artists.`,
+    `Cleaned prior test records for sources [${sourceIds.join(', ')}]: ${candIds.length} candidates, ${eventIds.length} events, ${rawIds.length} raw ingests, ${cleanedArtistCount} test-owned orphaned artists.`,
   );
 }
 
@@ -570,7 +605,9 @@ export async function runLiveVerification(
 
   // If clean mode requested, reset test records to prove genuine canonical creation
   if (options.clean) {
-    await cleanLiveTestSources(adminClient);
+    await cleanLiveTestSources(adminClient, {
+      confirmDisposableCleanup: options.confirmDisposableCleanup,
+    });
   }
 
   // Count before
@@ -824,69 +861,105 @@ export async function runLiveVerification(
     '======================================================================',
   );
 
-  const { data: tmSources } = await adminClient
-    .from('sources')
-    .select('id')
-    .eq('slug', 'ticketmaster-discovery')
-    .maybeSingle();
-
   const tracedEvents: LiveVerificationSummary['tracedEvents'] = [];
 
-  if (tmSources) {
-    const { data: tmEventSources } = await adminClient
-      .from('event_sources')
-      .select('source_event_id, event_id, source_url')
-      .eq('source_id', tmSources.id)
-      .limit(3);
+  // Finding 5: Select 3 upcoming events created strictly in the CURRENT execution run
+  const currentRunCreatedIds = tmPass1.createdEventIds || [];
+  const selectedEventIds = currentRunCreatedIds.slice(0, 3);
 
-    if (tmEventSources && tmEventSources.length > 0) {
-      for (let i = 0; i < tmEventSources.length; i++) {
-        const es = tmEventSources[i];
-        const { data: ev } = await adminClient
-          .from('events')
-          .select(
-            'id, name, local_start_date, min_price, currency, venue_id, primary_ticket_url',
-          )
-          .eq('id', es.event_id)
-          .maybeSingle();
-
-        let venueName = 'Unknown Venue';
-        if (ev?.venue_id) {
-          const { data: ven } = await adminClient
-            .from('venues')
-            .select('name')
-            .eq('id', ev.venue_id)
-            .maybeSingle();
-          if (ven?.name) venueName = ven.name;
-        }
-
-        const traced = {
-          providerEventId: es.source_event_id || 'N/A',
-          canonicalEventId: es.event_id,
-          name: ev?.name || 'Unknown',
-          venue: venueName,
-          date: ev?.local_start_date || 'N/A',
-          minPrice: ev?.min_price ?? null,
-          currency: ev?.currency ?? null,
-          ticketUrl: ev?.primary_ticket_url || es.source_url || null,
-          indexUiPath: `/concerts/${es.event_id}`,
-        };
-        tracedEvents.push(traced);
-
-        console.log(`Trace #${i + 1}:`);
-        console.log(`  Provider Event ID:  ${traced.providerEventId}`);
-        console.log(`  Canonical Event ID: ${traced.canonicalEventId}`);
-        console.log(`  Title:              "${traced.name}"`);
-        console.log(`  Venue:              ${traced.venue}`);
-        console.log(`  Date:               ${traced.date}`);
-        console.log(
-          `  Pricing:            ${traced.minPrice !== null ? `$${traced.minPrice} ${traced.currency || ''}` : 'Unknown'}`,
-        );
-        console.log(`  Ticket URL:         ${traced.ticketUrl || 'none'}`);
-        console.log(`  Index UI Route:     ${traced.indexUiPath}`);
-      }
-    }
+  if (selectedEventIds.length < 3) {
+    throw new Error(
+      `[ACCEPTANCE FAILURE] Current run created only ${selectedEventIds.length} canonical Ticketmaster events (expected at least 3 for UI tracing and verification).`,
+    );
   }
+
+  for (let i = 0; i < selectedEventIds.length; i++) {
+    const canonicalEventId = selectedEventIds[i];
+
+    const { data: ev, error: evErr } = await adminClient
+      .from('events')
+      .select(
+        'id, name, local_start_date, min_price, currency, venue_id, primary_ticket_url',
+      )
+      .eq('id', canonicalEventId)
+      .maybeSingle();
+
+    if (evErr || !ev) {
+      throw new Error(
+        `[ACCEPTANCE FAILURE] Traced event ${canonicalEventId} not found in database: ${evErr?.message || 'Not found'}`,
+      );
+    }
+
+    let venueName = 'Unknown Venue';
+    if (ev.venue_id) {
+      const { data: ven } = await adminClient
+        .from('venues')
+        .select('name')
+        .eq('id', ev.venue_id)
+        .maybeSingle();
+      if (ven?.name) venueName = ven.name;
+    }
+
+    const { data: es } = await adminClient
+      .from('event_sources')
+      .select('source_event_id, source_url')
+      .eq('event_id', canonicalEventId)
+      .maybeSingle();
+
+    const candidate = tmPass1.candidates.find(
+      (c) => c.sourceEventId === es?.source_event_id,
+    );
+
+    const providerEventId =
+      es?.source_event_id || candidate?.sourceEventId || 'N/A';
+    const ticketUrl =
+      ev.primary_ticket_url || es?.source_url || candidate?.ticketUrl || null;
+
+    const traced = {
+      providerEventId,
+      canonicalEventId: ev.id,
+      name: ev.name,
+      venue: venueName,
+      date: ev.local_start_date,
+      minPrice: ev.min_price ?? null,
+      currency: ev.currency ?? null,
+      ticketUrl,
+      indexSearchPath: `/search?q=${encodeURIComponent(ev.name)}`,
+      indexUiPath: `/concerts/${ev.id}`,
+      createdInCurrentRun: true,
+    };
+    tracedEvents.push(traced);
+
+    console.log(`Trace #${i + 1}:`);
+    console.log(`  Provider Event ID:    ${traced.providerEventId}`);
+    console.log(`  Canonical Event ID:   ${traced.canonicalEventId}`);
+    console.log(`  Title:                "${traced.name}"`);
+    console.log(`  Venue:                ${traced.venue}`);
+    console.log(`  Date:                 ${traced.date}`);
+    console.log(
+      `  Pricing:              ${traced.minPrice !== null ? `$${traced.minPrice} ${traced.currency || ''}` : 'Unknown'}`,
+    );
+    console.log(`  Ticket URL:           ${traced.ticketUrl || 'none'}`);
+    console.log(`  Index Search Route:   ${traced.indexSearchPath}`);
+    console.log(`  Index UI Route:       ${traced.indexUiPath}`);
+    console.log(
+      `  Created in Run:       YES (Verified in tmPass1.createdEventIds)`,
+    );
+  }
+
+  // Persist traced events to docs/traced-live-events.json for Playwright UI verification
+  const tracedFilePath = path.resolve(
+    process.cwd(),
+    'docs/traced-live-events.json',
+  );
+  fs.writeFileSync(
+    tracedFilePath,
+    JSON.stringify(tracedEvents, null, 2),
+    'utf8',
+  );
+  console.log(
+    `\nPersisted ${tracedEvents.length} current-run traced events to docs/traced-live-events.json for Playwright browser verification.`,
+  );
 
   console.log(
     '\n======================================================================',
@@ -968,9 +1041,12 @@ const isTestRunner = Boolean(process.env.VITEST);
 if (!isTestRunner) {
   const clean =
     process.argv.includes('--clean') || process.argv.includes('--fresh');
+  const confirmDisposableCleanup = process.argv.includes(
+    '--confirm-disposable-cleanup',
+  );
   const fullAudit = process.argv.includes('--full-audit');
 
-  runLiveVerification({ clean, fullAudit })
+  runLiveVerification({ clean, confirmDisposableCleanup, fullAudit })
     .then(() => {
       console.log('Verification completed successfully.');
       process.exit(0);

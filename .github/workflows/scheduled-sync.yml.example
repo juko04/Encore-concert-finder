@@ -1,14 +1,38 @@
-# Example: Production Multi-Horizon Scheduled Ingestion Workflow
+# Production Multi-Horizon Scheduled Ingestion Workflow (Template)
 #
-# ARCHITECTURAL INVARIANT (ISS-B):
+# ARCHITECTURAL MODEL & INVARIANTS:
 # Ticketmaster API has a strict 5,000 requests/day and 5 requests/sec account-wide limit.
 # Because independent cloud workers running in parallel without shared state would exhaust
-# rate limits and fail to coordinate quota consumption, production scheduled jobs MUST:
+# rate limits and fail to coordinate quota consumption, production scheduled jobs MUST enforce:
 #
-# 1. Be strictly serialized via a repository-wide concurrency group (`cancel-in-progress: false`).
-# 2. Bound requests per run (`--max-requests=250`).
-# 3. Use rolling horizons (near-term high frequency, mid/long-term low frequency).
-# 4. Enforce Destination Guard with approved production host environment variables.
+# 1. Strict Job Serialization:
+#    - Concurrency group `ticketmaster-ingestion` with `cancel-in-progress: false`.
+#    - Scheduled runs and manual dispatches are queued and executed strictly one at a time.
+#    - Eliminates concurrent worker race conditions and prevents split-brain quota exhaustion.
+#
+# 2. Ephemeral Quota Reconciliation:
+#    - Every ephemeral runner discovers real-time account usage directly from Ticketmaster
+#      response headers (`rate-limit`, `rate-limit-available`, `rate-limit-reset`) on the
+#      very first request, synchronizing `TicketmasterQuotaGuard` without external Redis/cache.
+#
+# 3. Bounded Request Budget per Run:
+#    - Near-term daily runs: bounded by `--max-requests=250` (~5% daily quota).
+#    - Mid-term bi-weekly runs: bounded by `--max-requests=500` (~10% daily quota).
+#    - Long-term weekly runs: bounded by `--max-requests=500` (~10% daily quota).
+#    - Unused daily headroom (>3,500 requests) remains safely reserved for user queries and live operations.
+#
+# 4. Strict Failure Detection & Machine-Readable Summary:
+#    - `sync-all-sources.ts` exits with code 0 on 100% complete success.
+#    - Exits with code 2 on partial coverage or budget exhaustion.
+#    - Exits with code 1 on source failure or fatal errors.
+#    - Emits machine-readable `--json` artifact uploaded for operational monitoring.
+#
+# 5. Production Pre-Activation Checklist:
+#    - Configure repository secret `SUPABASE_URL` (production instance).
+#    - Configure repository secret `SUPABASE_SERVICE_ROLE_KEY`.
+#    - Configure repository secret `TICKETMASTER_API_KEY`.
+#    - Configure repository secret `ENCORE_APPROVED_PROD_HOSTS` (e.g. "aws-0-us-west-1.pooler.supabase.com,your-project.supabase.co").
+#    - Configure repository secret `ENCORE_PROD_PROJECT_REF`.
 
 name: Scheduled Ingestion Sync
 
@@ -45,7 +69,7 @@ on:
 
 # CRITICAL CONCURRENCY GUARD:
 # Prevents multiple concurrent ingestion workers from executing simultaneously across
-# scheduled runs and manual triggers, guaranteeing serialized execution and preventing quota race conditions.
+# scheduled runs and manual triggers, guaranteeing serialized execution.
 concurrency:
   group: ticketmaster-ingestion
   cancel-in-progress: false
@@ -91,6 +115,7 @@ jobs:
           fi
 
       - name: Execute Synchronized Ingestion
+        id: sync
         env:
           NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
@@ -104,4 +129,14 @@ jobs:
             --allow-production-write \
             --horizon=${{ steps.horizon-selector.outputs.horizon }} \
             --states=${{ steps.horizon-selector.outputs.states }} \
-            --max-requests=${{ steps.horizon-selector.outputs.max_requests }}
+            --max-requests=${{ steps.horizon-selector.outputs.max_requests }} \
+            --json > sync-summary.json
+          cat sync-summary.json
+
+      - name: Upload Synchronization Summary Artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ingestion-summary-${{ steps.horizon-selector.outputs.horizon }}
+          path: sync-summary.json
+          retention-days: 14

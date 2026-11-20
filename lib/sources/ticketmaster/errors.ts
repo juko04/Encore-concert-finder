@@ -140,6 +140,35 @@ export class TicketmasterQuotaExceededError extends TicketmasterError {
 }
 
 /**
+ * Per-run request budget exceeded during sync execution.
+ * Halts further requests in this run and surfaces incomplete coverage.
+ */
+export class TicketmasterRunBudgetExceededError extends TicketmasterError {
+  readonly maxRequests: number;
+  readonly consumed: number;
+
+  constructor(
+    message: string,
+    options: {
+      maxRequests: number;
+      consumed: number;
+      sanitizedUrl?: string;
+      cause?: unknown;
+    },
+  ) {
+    super(message, {
+      category: 'rate_limit_exceeded',
+      statusCode: 429,
+      sanitizedUrl: options.sanitizedUrl,
+      cause: options.cause,
+    });
+    this.name = 'TicketmasterRunBudgetExceededError';
+    this.maxRequests = options.maxRequests;
+    this.consumed = options.consumed;
+  }
+}
+
+/**
  * Failed to acquire process-safe quota lock or filesystem error during coordination.
  * Fail-closed: operations must abort rather than executing uncoordinated.
  */

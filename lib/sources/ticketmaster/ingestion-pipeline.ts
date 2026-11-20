@@ -15,8 +15,10 @@ import { ensureTicketmasterSource } from './source-registry';
 import {
   PipelineDatabaseError,
   TicketmasterError,
+  TicketmasterRunBudgetExceededError,
   TicketmasterValidationError,
 } from './errors';
+import type { RunRequestBudget } from './run-budget';
 import type {
   PartitionCoordinatorOptions,
   PartitionSummary,
@@ -36,6 +38,7 @@ export interface TicketmasterIngestionOptions {
   reprocess?: boolean;
   usePartitioner?: boolean;
   partitionOptions?: Partial<PartitionCoordinatorOptions>;
+  runBudget?: RunRequestBudget;
 }
 
 export interface TicketmasterIngestionResult {
@@ -74,7 +77,11 @@ export async function runTicketmasterIngestion(
   const startedAt = new Date().toISOString();
   const startMs = Date.now();
 
-  const adapter = options.adapter ?? new TicketmasterDiscoveryAdapter();
+  const adapter =
+    options.adapter ??
+    new TicketmasterDiscoveryAdapter(
+      options.runBudget ? { runBudget: options.runBudget } : undefined,
+    );
   const source = await ensureTicketmasterSource(options.sourceRepo);
 
   // Link in-memory catalog repo with sourceRepo if supported
@@ -97,36 +104,56 @@ export async function runTicketmasterIngestion(
   let truncatedPartitions: PartitionSummary[] = [];
 
   if (useFixture) {
-    let rawJson = options.fixtureJson;
-    if (!rawJson) {
-      const fixturePath = path.resolve(
-        process.cwd(),
-        'tests/fixtures/ticketmaster-events-response.json',
-      );
-      rawJson = fs.readFileSync(fixturePath, 'utf-8');
+    const activeBudget =
+      options.runBudget ?? options.adapter?.getClient()?.getRunBudget();
+    let budgetExceeded = false;
+    if (activeBudget) {
+      try {
+        activeBudget.reserveRequest();
+      } catch (err) {
+        if (err instanceof TicketmasterRunBudgetExceededError) {
+          hasIncompleteCoverage = true;
+          budgetExceeded = true;
+        } else {
+          throw err;
+        }
+      }
     }
 
-    const contentHash = crypto
-      .createHash('sha256')
-      .update(rawJson)
-      .digest('hex');
+    if (budgetExceeded) {
+      rawIngests = [];
+    } else {
+      let rawJson = options.fixtureJson;
+      if (!rawJson) {
+        const fixturePath = path.resolve(
+          process.cwd(),
+          'tests/fixtures/ticketmaster-events-response.json',
+        );
+        rawJson = fs.readFileSync(fixturePath, 'utf-8');
+      }
 
-    const stateCode = options.queryParams?.stateCode ?? 'CO';
+      const contentHash = crypto
+        .createHash('sha256')
+        .update(rawJson)
+        .digest('hex');
 
-    rawIngests = [
-      {
-        id: crypto.randomUUID(),
-        sourceId: source.id,
-        sourceUrl: `https://app.ticketmaster.com/discovery/v2/events.json?classificationName=Music&stateCode=${stateCode}`,
-        acquisitionMethod: 'api',
-        fetchedAt: new Date().toISOString(),
-        contentHash,
-        contentType: 'application/json',
-        rawContent: rawJson,
-        httpStatus: 200,
-        parserVersion: adapter.parserVersion,
-      },
-    ];
+      const stateCode = options.queryParams?.stateCode ?? 'CO';
+
+      rawIngests = [
+        {
+          id: crypto.randomUUID(),
+          sourceId: source.id,
+          sourceUrl: `https://app.ticketmaster.com/discovery/v2/events.json?classificationName=Music&stateCode=${stateCode}`,
+          acquisitionMethod: 'api',
+          fetchedAt: new Date().toISOString(),
+          contentHash,
+          contentType: 'application/json',
+          rawContent: rawJson,
+          httpStatus: 200,
+          parserVersion: adapter.parserVersion,
+        },
+      ];
+    }
   } else if (usePartitioner) {
     try {
       rawIngests = await adapter.fetchPartitioned(
@@ -148,10 +175,14 @@ export async function runTicketmasterIngestion(
       truncatedPartitions =
         adapter.lastPartitionResult?.truncatedPartitions ?? [];
     } catch (fetchErr) {
-      if (persist) {
-        await options.sourceRepo.recordFailure(source.id).catch(() => {});
+      if (fetchErr instanceof TicketmasterRunBudgetExceededError) {
+        hasIncompleteCoverage = true;
+      } else {
+        if (persist) {
+          await options.sourceRepo.recordFailure(source.id).catch(() => {});
+        }
+        throw fetchErr;
       }
-      throw fetchErr;
     }
   } else {
     try {
@@ -164,10 +195,14 @@ export async function runTicketmasterIngestion(
         metadata: (options.queryParams ?? {}) as Record<string, unknown>,
       });
     } catch (fetchErr) {
-      if (persist) {
-        await options.sourceRepo.recordFailure(source.id).catch(() => {});
+      if (fetchErr instanceof TicketmasterRunBudgetExceededError) {
+        hasIncompleteCoverage = true;
+      } else {
+        if (persist) {
+          await options.sourceRepo.recordFailure(source.id).catch(() => {});
+        }
+        throw fetchErr;
       }
-      throw fetchErr;
     }
   }
 

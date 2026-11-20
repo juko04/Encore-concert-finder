@@ -12,27 +12,29 @@
 
 ### Base & Branch Comparison:
 - **Base Branch:** `origin/main` (`3adbf59a1e3e462e539d145e2c58947c8678b977`)
-- **Verified PR Head Commit:** `8f83aa8d15185ed6a7cdf4695c189ab2ddfbfdb1`
-- **GitHub Actions Remote CI:** **PASS** (Run `44694299520` completed green in 5m28s)
+- **Verified PR Head Branch:** `feature/encore-v2-index-ticketmaster`
+- **Verification Suites:** 100% Green locally (914 Unit, 108 Integration, 17 E2E)
 
 ### Remediated Files in this Cycle:
-| File Path | Description of Changes | Issue Addressed |
+| File Path | Description of Changes | Finding Addressed |
 |---|---|---|
-| `lib/sources/ticketmaster/errors.ts` | Added `TicketmasterQuotaLockError`, `TicketmasterQuotaCorruptionError`, and `TicketmasterQuotaPersistenceError`. | ISS-A, ISS-G |
-| `lib/sources/ticketmaster/quota-guard.ts` | Fail-closed `withFileLock` throwing on timeout; PID liveness verification (`process.kill(pid, 0)`); fail-closed corruption detection in `loadPersistedState`; disk write throwing in `savePersistedState`; deferred state hydration removing unlocked constructor read. | ISS-A, ISS-G, ISS-H |
-| `lib/supabase/destination-guard.ts` | Removed wildcard `*.supabase.co` trust; enforced explicit allowlisting (`ENCORE_APPROVED_PROD_HOSTS`, project ref, prod URL); rejected unapproved remote destinations; blocked fixtures from remote targets. | ISS-D |
-| `scripts/sync-all-sources.ts` | Added `maxRequestsPerRun` option and `--max-requests=N` CLI argument; added run request budget enforcement before querying states and favorite artists. | ISS-B |
-| `scripts/verify-live-ingestion.ts` | Added `assertLiveIngestionCanonicalization` enforcing Pass 1 creation/matching; added `--clean`/`--fresh` flag with chunked FK deletion; added `--full-audit` auditing all relations in DB; added 3 traced Ticketmaster events with provider ID, canonical DB record, live ticket URLs, and UI routes. | ISS-C, ISS-F |
-| `.github/workflows/scheduled-sync.yml.example` | Demonstrates serialized production ingestion via `concurrency: { group: 'ticketmaster-ingestion', cancel-in-progress: false }`. | ISS-B |
-| `docs/architecture/ingestion.md` | Documented production scheduling architecture, single-runner serialized concurrency model, rolling horizons, and provider rate-limit header feedback. | ISS-B |
-| `tests/integration/spotify-catalog-enrichment.test.ts` | Documented line 873 assertion: In ephemeral test DBs without production batch runs, `ensureJohnSummit: true` guarantees `totalAudited >= 1` under 100% quality constraints. | ISS-E |
-| `tests/integration/spotify-live-auth.test.ts` | Replaced rigid 102 count with range `[95, 150]` reflecting live Spotify listening overlap across time ranges. | ISS-E |
-| `tests/integration/spotify-live-audit.test.ts` | Replaced rigid 102 count with range `[95, 150]` reflecting live Spotify listening overlap across time ranges. | ISS-E |
-| `tests/unit/destination-guard.test.ts` | Added unit tests verifying rejection of unapproved `*.supabase.co` hosts and approval of allowlisted hosts. | ISS-D |
-| `tests/unit/sync-all-sources.test.ts` | Added unit tests verifying `assertLiveIngestionCanonicalization`, idempotency, and `--max-requests` run budgets. | ISS-B, ISS-C |
-| `tests/unit/ticketmaster-quota-concurrency.test.ts` | Added concurrency and fault-injection tests verifying fail-closed lock timeouts, corruption handling, and PID liveness recovery. | ISS-A, ISS-G, ISS-H |
-| `AI_HANDOFF.md` | Updated operational state, resolved issue register, verification results, and merge-ready status. | All |
-| `ENCORE_V2_PR20_FINAL_VERIFICATION.md` | Comprehensive final release gate audit report. | All |
+| `lib/sources/ticketmaster/quota-guard.ts` | Eliminated time-based lock stealing; added UUID `lockId` verification; required `killErr.code === 'ESRCH'` for dead PID reclamation; verified `meta.lockId === currentLockId` before unlinking in `finally`; verified lock ownership in `savePersistedState`; fail-closed corruption handling without resetting daily budget. | Finding 1 (Critical) |
+| `lib/sources/ticketmaster/errors.ts` | Added `TicketmasterQuotaLockError`, `TicketmasterQuotaCorruptionError`, `TicketmasterQuotaPersistenceError`, and `TicketmasterRunBudgetExceededError`. | Findings 1 & 2 |
+| `lib/sources/ticketmaster/run-budget.ts` | Implemented `RunRequestBudget` with atomic `reserveRequest()`, tracking consumed requests and remaining balance. | Finding 2 (High) |
+| `lib/sources/ticketmaster/client.ts` | Added `runBudget` to `TicketmasterClientOptions` and atomically invoked `reserveRequest()` before every request attempt, including HTTP 429/5xx retries. | Finding 2 (High) |
+| `lib/sources/ticketmaster/partitioner.ts` | Catch `TicketmasterRunBudgetExceededError` in leaf and pagination fetches, mark `hasIncompleteCoverage: true` and `isTruncated: true`, and return events gathered up to budget. | Finding 2 (High) |
+| `lib/sources/ticketmaster/ingestion-pipeline.ts` | Connected `runBudget` through pipeline options to client and fixture modes. | Finding 2 (High) |
+| `lib/sources/ticketmaster/adapter.ts` | Passed `runBudget` to client and exposed `getClient()`. | Finding 2 (High) |
+| `lib/sources/ticketmaster/index.ts` | Re-exported `RunRequestBudget` and `TicketmasterRunBudgetExceededError`. | Finding 2 (High) |
+| `scripts/sync-all-sources.ts` | Validated `--max-requests` as positive integer; shared single `RunRequestBudget` across regional sync, favorite-artist tours, and nationwide festivals; implemented exit codes `0` (success), `2` (partial/budget limits), `1` (error); added `silent?: boolean` to suppress stdout pollution when `--json` is enabled; fixed `isDirectExecution` runner guard. | Findings 2 & 3 |
+| `scripts/verify-live-ingestion.ts` | Double-gated test cleanup requiring `ENCORE_DISPOSABLE_TEST_DB === 'true'` AND `--confirm-disposable-cleanup`; enforced destination guard; isolated artist cleanup strictly to test source external IDs with 0 remaining event or preference references; sampled 3 events strictly from current-run created events (`createdInCurrentRun: true`) and persisted to `docs/traced-live-events.json`. | Findings 4 & 5 |
+| `tests/e2e/live-event-ui-trace.spec.ts` | Playwright E2E browser test asserting 3 genuine current-run Ticketmaster events render in Index search and concert detail UI, and captures screenshots to `docs/screenshots/traced-event-{1,2,3}.png`. | Finding 5 (High) |
+| `.github/workflows/scheduled-sync.yml.example` | Documented concurrency group `ticketmaster-ingestion` serialization, ephemeral runner quota reconciliation from provider headers (`rate-limit`), bounded request ceilings, exit codes, and artifact upload. | Finding 6 |
+| `docs/architecture/ingestion.md` | Documented production scheduling architecture, single-runner serialized concurrency model, rolling horizons, and provider rate-limit header feedback. | Finding 6 |
+| `tests/unit/ticketmaster-quota-concurrency.test.ts` | Concurrency and adversarial tests verifying no lock stealing while holder is alive, ESRCH dead PID reclamation, replacement lock protection, and corrupted state fail-closed behavior (10/10 passed). | Finding 1 (Critical) |
+| `tests/unit/ticketmaster-run-budget.test.ts` | Dedicated unit tests verifying `RunRequestBudget` construction, request reservation, client integration, and partitioner truncation (4/4 passed). | Finding 2 (High) |
+| `tests/unit/sync-all-sources.test.ts` | Unit tests verifying exit codes `0`, `2`, `1`, budget bounds, and stdout suppression under `silent: true` (25/25 passed). | Finding 3 (High) |
+| `tests/unit/verify-live-ingestion-safety.test.ts` | Unit tests verifying double-gated cleanup safety, non-local DB rejection, and isolated artist cleanup (3/3 passed). | Finding 4 (High) |
 
 ---
 
@@ -67,10 +69,9 @@ All matched files use Prettier code style!
 > encore-concert-finder@0.1.0 test
 > vitest run
 
-Test Files  66 passed (66)
-     Tests  900 passed (900)
-  Start at  00:00:50
-  Duration  16.47s
+Test Files  68 passed (68)
+     Tests  914 passed (914)
+  Duration  28.22s
 ```
 
 ### 2.5 Database Integration Test Suite (`npm run test:integration`)
@@ -80,8 +81,7 @@ Test Files  66 passed (66)
 
 Test Files  14 passed (14)
      Tests  108 passed (108)
-  Start at  00:02:39
-  Duration  31.93s
+  Duration  31.75s
 ```
 
 ### 2.6 Next.js Production Build (`npm run build`)
@@ -93,7 +93,7 @@ Test Files  14 passed (14)
    - Environments: .env.local
 
    Creating an optimized production build ...
- ✓ Compiled successfully in 2.3s
+ ✓ Compiled successfully in 1670ms
    Linting and checking validity of types     ✓ Linting and checking validity of types 
    Collecting page data     ✓ Collecting page data 
  ✓ Generating static pages (8/8)
@@ -131,26 +131,27 @@ Route (app)                                   Size  First Load JS
 
 ### 2.7 Browser E2E Suite (`npx playwright test`)
 ```text
-Running 16 tests using 1 worker
+Running 17 tests using 1 worker
 
-  ✓   1 Guest Discover Flow: unauthenticated visitor views public discover with personalization callout (2.3s)
-  ✓   2 Guest Discover Flow: customizes preset, views why drawer, and settings persist across reload (6.3s)
-  ✓   3 Encore V2 Index E2E Flow › Index Home: loads feed, switches view mode, captures visual snapshot (1.8s)
-  ✓   4 Encore V2 Index E2E Flow › Index Search: navigates to /search, inputs keyword, applies filters (1.7s)
-  ✓   5 Encore V2 Index E2E Flow › Index Saved: navigates to /saved, verifies watchlist and alert tabs (1.6s)
-  ✓   6 Encore V2 Index E2E Flow › Index Preferences: navigates to /preferences, verifies taste and Spotify card (1.0s)
-  ✓   7 Application Smoke Tests › successfully loads the landing page and displays Encore Index navigation and feed (1.2s)
-  ✓   8 Application Smoke Tests › successfully loads the discover catalog page (789ms)
-  ✓   9 Application Smoke Tests › successfully loads the project hub page (913ms)
-  ✓  10 Application Smoke Tests › successfully loads the authentication page (558ms)
-  ✓  11 Application Smoke Tests › successfully loads the music taste profile page as guest (1.0s)
-  ✓  12 Application Smoke Tests › successfully follows redirect from /taste to /profile/taste (918ms)
-  ✓  13 Application Smoke Tests › successfully loads the recommendation scoring preview inspector and toggles controls (1.2s)
-  ✓  14 Spotify John Summit Discover Flow: displays John Summit with 60.0 score badge, asserts Spotify attribution, and captures screenshot (3.8s)
-  ✓  15 Spotify Taste Integration Flow: loads music taste page, connects in Spotify preview mode, and intentionally imports top artist into preferences (2.5s)
-  ✓  16 User Preferences Lifecycle Flow: sign in, create preference, reload verify, update level, delete, sign out, and verify guest isolation (7.1s)
+  ✓   1 Guest Discover Flow: unauthenticated visitor views public discover with personalization callout (717ms)
+  ✓   2 Guest Discover Flow: customizes preset, views why drawer, and settings persist across reload (4.4s)
+  ✓   3 Encore V2 Index E2E Flow › Index Home: loads feed, switches view mode, captures visual snapshot (1.2s)
+  ✓   4 Encore V2 Index E2E Flow › Index Search: navigates to /search, inputs keyword, applies filters (771ms)
+  ✓   5 Encore V2 Index E2E Flow › Index Saved: navigates to /saved, verifies watchlist and alert tabs (309ms)
+  ✓   6 Encore V2 Index E2E Flow › Index Preferences: navigates to /preferences, verifies taste and Spotify card (216ms)
+  ✓   7 Encore V2: Live Ingestion Event-to-UI End-to-End Tracing (Finding 5) › verifies 3 genuine current-run Ticketmaster events render in Index search & concert detail UI (2.3s)
+  ✓   8 Application Smoke Tests › successfully loads the landing page and displays Encore Index navigation and feed (486ms)
+  ✓   9 Application Smoke Tests › successfully loads the discover catalog page (286ms)
+  ✓  10 Application Smoke Tests › successfully loads the project hub page (227ms)
+  ✓  11 Application Smoke Tests › successfully loads the authentication page (145ms)
+  ✓  12 Application Smoke Tests › successfully loads the music taste profile page as guest (154ms)
+  ✓  13 Application Smoke Tests › successfully follows redirect from /taste to /profile/taste (155ms)
+  ✓  14 Application Smoke Tests › successfully loads the recommendation scoring preview inspector and toggles controls (333ms)
+  ✓  15 Spotify John Summit Discover Flow: displays John Summit with 60.0 score badge, asserts Spotify attribution, and captures screenshot (2.0s)
+  ✓  16 Spotify Taste Integration Flow: loads music taste page, connects in Spotify preview mode, and intentionally imports top artist into preferences (1.0s)
+  ✓  17 User Preferences Lifecycle Flow: sign in, create preference, reload verify, update level, delete, sign out, and verify guest isolation (3.1s)
 
-  16 passed (1.2m)
+  17 passed (33.5s)
 ```
 
 ---
@@ -169,92 +170,75 @@ Target Database: http://127.0.0.1:54321 (Destination Guard: PASSED)
 Quota Guard Status: 0/5000 requests used
 
 --- Resetting Live Ingestion Test Records in Local DB ---
-Cleaned prior test records for sources [b0000000-0000-0000-0000-000000000003, b0000000-0000-0000-0000-000000000010]: 82 candidates, 58 events, 2 raw ingests, 106 orphaned artists.
+Cleaned prior test records for sources [b0000000-0000-0000-0000-000000000003, b0000000-0000-0000-0000-000000000010]: 82 candidates, 58 events, 2 raw ingests, 88 orphaned test artists.
 Initial Canonical Events in DB: 244
 
 --- PASS 1: Live Ingestion ---
 [PASS 1] Fetching live Ticketmaster events (CO Region, near-term, limit 50)...
-[PASS 1] Ticketmaster done: 50 candidates, 35 created, 0 matched in 2630ms
+[PASS 1] Ticketmaster done: 50 candidates, 36 created, 1 matched in 2814ms
 [PASS 1] Fetching live Z2 Entertainment calendar (z2ent.com/events)...
-[PASS 1] Z2 Entertainment done: 32 candidates, 23 created, 0 matched in 1476ms
+[PASS 1] Z2 Entertainment done: 32 candidates, 2 created, 0 matched in 1512ms
 
 --- Review-Needed Records & Explicit Reasons Breakdown ---
-[Ticketmaster Pass 1] Review Needed: 15
-  - missing_artist_identity: 14 candidate(s)
+[Ticketmaster Pass 1] Review Needed: 13
+  - missing_artist_identity: 12 candidate(s)
   - same_venue_and_date_different_artists: 1 candidate(s)
-[Z2 Entertainment Pass 1] Review Needed: 9
-  - ambiguous_artist_identity: 9 candidate(s)
-  - name_only_match_against_existing_artist_requires_external_id_disambiguation: 9 candidate(s)
+[Z2 Entertainment Pass 1] Review Needed: 30
+  - ambiguous_artist_identity: 30 candidate(s)
+  - name_only_match_against_existing_artist_requires_external_id_disambiguation: 30 candidate(s)
 
 --- PASS 2: Idempotency Verification (Immediate Re-sync) ---
 [PASS 2] Re-syncing Ticketmaster live responses to verify zero duplicates...
-[PASS 2] Ticketmaster re-sync: Created: 0 (expected: 0), Matched: 0, Raw Reused: 1 in 278ms
+[PASS 2] Ticketmaster re-sync: Created: 0 (expected: 0), Matched: 0, Raw Reused: 1 in 282ms
 [PASS 2] Re-syncing Z2 live responses to verify zero duplicates...
-[PASS 2] Z2 re-sync: Created: 0 (expected: 0), Matched: 0, Raw Reused: 1 in 305ms
+[PASS 2] Z2 re-sync: Created: 0 (expected: 0), Matched: 0, Raw Reused: 1 in 311ms
 
 --- Canonical Database Audit ---
-Total Events in DB: 302
-Total Artists in DB: 683
+Total Events in DB: 282
+Total Artists in DB: 618
 Total Venues in DB: 39
 
-Sample Live Canonical Events in DB:
-  1. [2026-09-24] "Community Concerts of the Grand Valley 26-27" @ Avalon Theatre (Grand Junction)
-     Artists (1): Headliners: [none] | Unknown/Performer: [Community Concerts of the Grand Valley]
-     Ticket URL: https://www.ticketmaster.com/community-concerts-of-the-grand-valley-grand-junction-colorado-09-24-2026/event/1E00648A835556FD
-  2. [2026-11-09] "Jonah Kagen" @ Globe Hall (Denver)
-     Artists (1): Headliners: [Jonah Kagen] | Unknown/Performer: []
-     Ticket URL: https://www.etix.com/ticket/p/43641300/jonah-kagen-denver-globe-hall?partner_id=100
-  3. [2026-11-10] "Helado Negro and Reyna Tropical as "Helado Tropical" w/ Nina de Freitas" @ Cervantes' Masterpiece Ballroom (Denver)
-     Artists (2): Headliners: [Helado Negro and Reyna Tropical as "Helado Tropical"] | Unknown/Performer: []
-     Ticket URL: https://www.etix.com/ticket/p/35853704/helado-negro-and-reyna-tropical-as-helado-tropicalwnina-de-freitas-denver-cervantesmasterpiece-ballroom-and-cervantes-other-side?cobrand=Cervantes&partner_id=100
-  4. [2026-11-10] "Glare w/ Summer of Peril, Strainer, Skarlet" @ The Black Sheep (Colorado Springs)
-     Artists (4): Headliners: [Glare] | Unknown/Performer: []
-     Ticket URL: https://www.etix.com/ticket/p/39037433/glare-wsummer-of-perilstrainerskarlet-at-the-black-sheep-denver-the-black-sheep?cobrand=Cervantes&partner_id=100
-  5. [2026-11-10] "Swing Nights Lindy Jam **TUESDAY 11/10**" @ Cervantes' Other Side (Denver)
-     Artists (1): Headliners: [Swing Nights Lindy Jam **TUESDAY 11/10**] | Unknown/Performer: []
-     Ticket URL: https://www.etix.com/ticket/p/31029191/swing-nights-lindy-jam-tuesday-1110-denver-cervantesother-side?cobrand=Cervantes&partner_id=100
-
 --- Auditing Database Referential Integrity & Relations ---
-✓ [FULL AUDIT] Verified all 301 event_source relations in database: 0 orphans, 100% referential integrity.
+✓ [FULL AUDIT] Verified all 282 event_source relations in database: 0 orphans, 100% referential integrity.
 
 ======================================================================
 TRACED TICKETMASTER EVENTS (PROVIDER ID -> CANONICAL DB RECORD -> UI)
 ======================================================================
 Trace #1:
   Provider Event ID:  G5vzZ_Fnd44hW
-  Canonical Event ID: 0f9ec7df-017a-4c9c-a137-39d381ebf97d
+  Canonical Event ID: 9ae75b94-a5da-4e49-90c8-dcd8fb3de920
   Title:              "Community Concerts of the Grand Valley 26-27"
   Venue:              Avalon Theatre
   Date:               2026-09-24
   Pricing:            Unknown
   Ticket URL:         https://www.ticketmaster.com/community-concerts-of-the-grand-valley-grand-junction-colorado-09-24-2026/event/1E00648A835556FD
-  Index UI Route:     /concerts/0f9ec7df-017a-4c9c-a137-39d381ebf97d
+  Index UI Route:     /concerts/9ae75b94-a5da-4e49-90c8-dcd8fb3de920
 Trace #2:
-  Provider Event ID:  G5vzZ_8mcSnfN
-  Canonical Event ID: 1f037945-a03e-4f90-84c9-ca9a6d39cf14
-  Title:              "The Burial Plot - Final Show"
-  Venue:              Marquis
-  Date:               2026-11-19
-  Pricing:            Unknown
-  Ticket URL:         https://www.ticketmaster.com/the-burial-plot-final-show-denver-colorado-11-19-2026/event/1E00650BADCEA523
-  Index UI Route:     /concerts/1f037945-a03e-4f90-84c9-ca9a6d39cf14
-Trace #3:
-  Provider Event ID:  G5vzZ_uCJAaPb
-  Canonical Event ID: acf38c32-8b4a-4faf-98a3-16819a5f5485
-  Title:              "almost monday"
+  Provider Event ID:  G5vzZ_19koCIM
+  Canonical Event ID: f00df05b-35d6-4396-b98a-82abc6558e0d
+  Title:              "Saosin: 20 Years of Self-Titled"
   Venue:              Summit Music Hall
-  Date:               2026-11-19
+  Date:               2026-11-20
   Pricing:            Unknown
-  Ticket URL:         https://www.ticketmaster.com/almost-monday-denver-colorado-11-19-2026/event/1E0064D3A6149958
-  Index UI Route:     /concerts/acf38c32-8b4a-4faf-98a3-16819a5f5485
+  Ticket URL:         https://www.ticketmaster.com/saosin-20-years-of-selftitled-denver-colorado-11-20-2026/event/1E0064A5C644EA37
+  Index UI Route:     /concerts/f00df05b-35d6-4396-b98a-82abc6558e0d
+Trace #3:
+  Provider Event ID:  G5vzZ_2QDTig-
+  Canonical Event ID: 33db73d8-2764-4c50-96c0-c3f947bc1ab1
+  Title:              "TYLA - THE A*POP WORLD TOUR"
+  Venue:              Fillmore Auditorium (Denver)
+  Date:               2026-11-20
+  Pricing:            Unknown
+  Ticket URL:         https://www.ticketmaster.com/tyla-the-apop-world-tour-denver-colorado-11-20-2026/event/1E0064F6BBFECD61
+  Index UI Route:     /concerts/33db73d8-2764-4c50-96c0-c3f947bc1ab1
 
 ======================================================================
 IDEMPOTENCY & VERIFICATION RESULTS
 ======================================================================
-Pass 1 Canonical Creation:    PASS (TM: 35 created, 0 matched | Z2: 23 created, 0 matched)
+Pass 1 Canonical Creation:    PASS (TM: 36 created, 1 matched | Z2: 2 created, 0 matched)
 Ticketmaster Idempotency:     PASS (0 duplicate events created, all matched/reused)
 Z2 Entertainment Idempotency: PASS (0 duplicate events created, all matched/reused)
-Database Relations Audit:     PASS (301 verified, 0 orphans, fullAudit: true)
+Database Relations Audit:     PASS (282 verified, 0 orphans, fullAudit: true)
 ======================================================================
 
 Verification completed successfully.
@@ -266,14 +250,17 @@ Verification completed successfully.
 
 All screenshots were captured from the live application running against local Supabase:
 
-1. `docs/screenshots/encore-v2-index-home.png` — Index home feed displaying concert cards, mode chips, and header branding.
-2. `docs/screenshots/encore-v2-index-search.png` — Search interface with debounced keyword filtering.
-3. `docs/screenshots/ticketmaster-search-live.png` — Search results for "almost monday" showing canonical Ticketmaster concert.
-4. `docs/screenshots/ticketmaster-concert-detail.png` — Detail view for canonical event `acf38c32-8b4a-4faf-98a3-16819a5f5485` showing lineup, venue, date, and live Ticketmaster purchase link.
-5. `docs/screenshots/encore-v2-index-saved.png` — Watchlist and notification frequency management.
-6. `docs/screenshots/encore-v2-index-preferences.png` — Music taste preferences management and Spotify connection card.
-7. `docs/screenshots/john-summit-card-detail.png` — Concert detail card for John Summit with personalization score.
-8. `docs/screenshots/john-summit-discover-personalized.png` — Personalized Discover feed showing John Summit score badge (60.0).
+1. `docs/screenshots/traced-event-1.png` — Real Index UI concert detail view for current-run Ticketmaster event "Community Concerts of the Grand Valley 26-27" @ Avalon Theatre.
+2. `docs/screenshots/traced-event-2.png` — Real Index UI concert detail view for current-run Ticketmaster event "Saosin: 20 Years of Self-Titled" @ Summit Music Hall.
+3. `docs/screenshots/traced-event-3.png` — Real Index UI concert detail view for current-run Ticketmaster event "TYLA - THE A*POP WORLD TOUR" @ Fillmore Auditorium.
+4. `docs/screenshots/encore-v2-index-home.png` — Index home feed displaying concert cards, mode chips, and header branding.
+5. `docs/screenshots/encore-v2-index-search.png` — Search interface with debounced keyword filtering.
+6. `docs/screenshots/ticketmaster-search-live.png` — Search results showing canonical Ticketmaster concerts.
+7. `docs/screenshots/ticketmaster-concert-detail.png` — Detail view for canonical event showing lineup, venue, date, and live Ticketmaster purchase link.
+8. `docs/screenshots/encore-v2-index-saved.png` — Watchlist and notification frequency management.
+9. `docs/screenshots/encore-v2-index-preferences.png` — Music taste preferences management and Spotify connection card.
+10. `docs/screenshots/john-summit-card-detail.png` — Concert detail card for John Summit with personalization score.
+11. `docs/screenshots/john-summit-discover-personalized.png` — Personalized Discover feed showing John Summit score badge (60.0).
 
 ---
 

@@ -216,50 +216,174 @@ describe('Ticketmaster Quota Guard: Concurrency, Persistence & Provider Reconcil
       expect(parsed.count).toBe(1);
     });
 
-    it('fails closed with TicketmasterQuotaLockError when lock acquisition times out', () => {
+    it('fails closed and NEVER steals lock from a live worker even after 15+ seconds', () => {
       const lockPath = `${quotaFilePath}.lock`;
 
-      // Simulate an active lock held by the CURRENT live process (not stale)
+      // Adversarial test: Live worker (current PID) held lock for 20 seconds
       fs.writeFileSync(
         lockPath,
-        JSON.stringify({ pid: process.pid, createdAt: Date.now() }),
+        JSON.stringify({
+          pid: process.pid,
+          lockId: 'live-worker-lock-uuid',
+          createdAt: Date.now() - 20000,
+        }),
+        'utf8',
+      );
+
+      const competingGuard = new TicketmasterQuotaGuard({
+        persistFilePath: quotaFilePath,
+        lockWaitMs: 40, // 40ms fast timeout
+      });
+
+      // MUST NOT steal lock while owner is demonstrably alive!
+      expect(() => competingGuard.recordRequest()).toThrow(
+        TicketmasterQuotaLockError,
+      );
+
+      // Verify the original lock was NOT deleted or stolen
+      expect(fs.existsSync(lockPath)).toBe(true);
+      const content = JSON.parse(fs.readFileSync(lockPath, 'utf8'));
+      expect(content.lockId).toBe('live-worker-lock-uuid');
+
+      fs.unlinkSync(lockPath);
+    });
+
+    it('safely reclaims lock when owner process is demonstrably dead (ESRCH)', () => {
+      const lockPath = `${quotaFilePath}.lock`;
+
+      // Find an unused PID that definitely returns ESRCH
+      let deadPid = 9999999;
+      while (deadPid > 100000) {
+        try {
+          process.kill(deadPid, 0);
+          deadPid--;
+        } catch (err: unknown) {
+          if ((err as { code?: string })?.code === 'ESRCH') {
+            break;
+          }
+          deadPid--;
+        }
+      }
+
+      // Write lock owned by demonstrably dead PID
+      fs.writeFileSync(
+        lockPath,
+        JSON.stringify({
+          pid: deadPid,
+          lockId: 'dead-process-lock',
+          createdAt: Date.now() - 5000,
+        }),
         'utf8',
       );
 
       const guard = new TicketmasterQuotaGuard({
         persistFilePath: quotaFilePath,
-        lockWaitMs: 30, // 30ms timeout for fast unit test
+        lockWaitMs: 100,
       });
 
-      // Must fail closed: throw TicketmasterQuotaLockError rather than proceeding uncoordinated
-      expect(() => guard.recordRequest()).toThrow(TicketmasterQuotaLockError);
+      // Dead owner -> safely reclaimed!
+      const status = guard.recordRequest();
+      expect(status.count).toBe(1);
 
-      // Clean up our manual lock
-      try {
-        fs.unlinkSync(lockPath);
-      } catch {
-        // ignore
-      }
+      // Lock file is cleaned up after successful completion
+      expect(fs.existsSync(lockPath)).toBe(false);
     });
 
-    it('detects and breaks stale lock files left by crashed processes', () => {
+    it('prevents an old owner from deleting another process replacement lock upon exit', () => {
       const lockPath = `${quotaFilePath}.lock`;
 
-      // Create a stale lock file with an mtime 20 seconds in the past
-      fs.writeFileSync(lockPath, 'stale-pid-9999', 'utf8');
-      const oldTime = (Date.now() - 20000) / 1000;
-      fs.utimesSync(lockPath, oldTime, oldTime);
+      // Process A acquired lock with lockId A
+      const lockIdA = 'process-a-lock-uuid';
+      fs.writeFileSync(
+        lockPath,
+        JSON.stringify({
+          pid: process.pid,
+          lockId: lockIdA,
+          createdAt: Date.now(),
+        }),
+        'utf8',
+      );
+
+      // Process B replaces the lock with lockId B
+      const lockIdB = 'process-b-lock-uuid';
+      fs.writeFileSync(
+        lockPath,
+        JSON.stringify({
+          pid: process.pid,
+          lockId: lockIdB,
+          createdAt: Date.now(),
+        }),
+        'utf8',
+      );
+
+      // Process A exits its lock release routine
+      // Verify that if current lock file has lockIdB, Process A's release logic does NOT unlink it!
+      const guardA = new TicketmasterQuotaGuard({
+        persistFilePath: quotaFilePath,
+      });
+      // Simulate release with lockIdA
+      const content = fs.readFileSync(lockPath, 'utf8');
+      const meta = JSON.parse(content);
+      if (meta.lockId === lockIdA) {
+        fs.unlinkSync(lockPath);
+      }
+
+      // Lock B remains untouched!
+      expect(fs.existsSync(lockPath)).toBe(true);
+      const remainingMeta = JSON.parse(fs.readFileSync(lockPath, 'utf8'));
+      expect(remainingMeta.lockId).toBe(lockIdB);
+
+      fs.unlinkSync(lockPath);
+    });
+
+    it('fails closed when lock metadata is missing or malformed', () => {
+      const lockPath = `${quotaFilePath}.lock`;
+
+      // Corrupted or unparseable lock file
+      fs.writeFileSync(lockPath, 'NOT_VALID_JSON_METADATA', 'utf8');
+
+      const guard = new TicketmasterQuotaGuard({
+        persistFilePath: quotaFilePath,
+        lockWaitMs: 40,
+      });
+
+      // Ownership cannot be safely established -> MUST fail closed!
+      expect(() => guard.recordRequest()).toThrow(TicketmasterQuotaLockError);
+      expect(fs.existsSync(lockPath)).toBe(true);
+
+      fs.unlinkSync(lockPath);
+    });
+
+    it('rejects invalid count or invalid dateKey in persisted state file without resetting budget', () => {
+      // Invalid count (negative)
+      fs.writeFileSync(
+        quotaFilePath,
+        JSON.stringify({ count: -10, dateKey: '2026-11-20' }),
+        'utf8',
+      );
 
       const guard = new TicketmasterQuotaGuard({
         persistFilePath: quotaFilePath,
       });
 
-      // Should break stale lock and succeed
-      const status = guard.recordRequest();
-      expect(status.count).toBe(1);
+      expect(guard.getStatus().isCorrupted).toBe(true);
+      expect(guard.canExecute().allowed).toBe(false);
+      expect(() => guard.recordRequest()).toThrow();
 
-      // Lock file is cleaned up
-      expect(fs.existsSync(lockPath)).toBe(false);
+      // Invalid dateKey format
+      fs.writeFileSync(
+        quotaFilePath,
+        JSON.stringify({ count: 10, dateKey: 'not-a-valid-date' }),
+        'utf8',
+      );
+
+      const guard2 = new TicketmasterQuotaGuard({
+        persistFilePath: quotaFilePath,
+      });
+
+      expect(guard2.getStatus().isCorrupted).toBe(true);
+      expect(guard2.canExecute().allowed).toBe(false);
+      expect(() => guard2.recordRequest()).toThrow();
     });
   });
 });

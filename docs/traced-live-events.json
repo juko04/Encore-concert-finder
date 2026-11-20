@@ -1,0 +1,41 @@
+[
+  {
+    "providerEventId": "G5vzZ_Fnd44hW",
+    "canonicalEventId": "9ae75b94-a5da-4e49-90c8-dcd8fb3de920",
+    "name": "Community Concerts of the Grand Valley 26-27",
+    "venue": "Avalon Theatre",
+    "date": "2026-09-24",
+    "minPrice": null,
+    "currency": null,
+    "ticketUrl": "https://www.ticketmaster.com/community-concerts-of-the-grand-valley-grand-junction-colorado-09-24-2026/event/1E00648A835556FD",
+    "indexSearchPath": "/search?q=Community%20Concerts%20of%20the%20Grand%20Valley%2026-27",
+    "indexUiPath": "/concerts/9ae75b94-a5da-4e49-90c8-dcd8fb3de920",
+    "createdInCurrentRun": true
+  },
+  {
+    "providerEventId": "G5vzZ_19koCIM",
+    "canonicalEventId": "f00df05b-35d6-4396-b98a-82abc6558e0d",
+    "name": "Saosin: 20 Years of Self-Titled",
+    "venue": "Summit Music Hall",
+    "date": "2026-11-20",
+    "minPrice": null,
+    "currency": null,
+    "ticketUrl": "https://www.ticketmaster.com/saosin-20-years-of-selftitled-denver-colorado-11-20-2026/event/1E0064A5C644EA37",
+    "indexSearchPath": "/search?q=Saosin%3A%2020%20Years%20of%20Self-Titled",
+    "indexUiPath": "/concerts/f00df05b-35d6-4396-b98a-82abc6558e0d",
+    "createdInCurrentRun": true
+  },
+  {
+    "providerEventId": "G5vzZ_2QDTig-",
+    "canonicalEventId": "33db73d8-2764-4c50-96c0-c3f947bc1ab1",
+    "name": "TYLA - THE A*POP WORLD TOUR",
+    "venue": "Fillmore Auditorium (Denver)",
+    "date": "2026-11-20",
+    "minPrice": null,
+    "currency": null,
+    "ticketUrl": "https://www.ticketmaster.com/tyla-the-apop-world-tour-denver-colorado-11-20-2026/event/1E0064F6BBFECD61",
+    "indexSearchPath": "/search?q=TYLA%20-%20THE%20A*POP%20WORLD%20TOUR",
+    "indexUiPath": "/concerts/33db73d8-2764-4c50-96c0-c3f947bc1ab1",
+    "createdInCurrentRun": true
+  }
+]

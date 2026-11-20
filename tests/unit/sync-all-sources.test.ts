@@ -529,4 +529,81 @@ describe('Sync All Sources & Live Verification (PR #20 Remediations)', () => {
       );
     });
   });
+
+  describe('Exit Codes & Machine-Readable Reporting (Finding 3)', () => {
+    it('returns overallStatus: success and exitCode: 0 when all jobs complete successfully', async () => {
+      const result = await runMultiSourceSync({
+        horizon: 'near-term',
+        live: false,
+        persist: false,
+        sources: ['ticketmaster'],
+        syncFavoriteArtists: false,
+        syncFestivals: false,
+      });
+
+      expect(result.overallStatus).toBe('success');
+      expect(result.exitCode).toBe(0);
+      expect(result.reports.every((r) => r.status === 'success')).toBe(true);
+    });
+
+    it('returns overallStatus: partial and exitCode: 2 when request budget limits execution', async () => {
+      const result = await runMultiSourceSync({
+        horizon: 'near-term',
+        live: false,
+        persist: false,
+        sources: ['ticketmaster'],
+        states: ['CO', 'UT'],
+        syncFavoriteArtists: false,
+        syncFestivals: false,
+        maxRequestsPerRun: 1, // Only 1 request allowed; 2nd region will be partial/skipped
+      });
+
+      expect(result.overallStatus).toBe('partial');
+      expect(result.exitCode).toBe(2);
+      expect(result.reports[0].status).toBe('success');
+      expect(result.reports[1].status).toBe('partial');
+      expect(result.reports[1].hasIncompleteCoverage).toBe(true);
+    });
+
+    it('rejects invalid maxRequestsPerRun (<= 0, non-integer)', async () => {
+      await expect(
+        runMultiSourceSync({
+          horizon: 'near-term',
+          live: false,
+          persist: false,
+          maxRequestsPerRun: 0,
+        }),
+      ).rejects.toThrow(/positive integer/i);
+
+      await expect(
+        runMultiSourceSync({
+          horizon: 'near-term',
+          live: false,
+          persist: false,
+          maxRequestsPerRun: -10,
+        }),
+      ).rejects.toThrow(/positive integer/i);
+    });
+
+    it('suppresses stdout completely when silent: true is provided', async () => {
+      const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+      try {
+        const result = await runMultiSourceSync({
+          horizon: 'near-term',
+          live: false,
+          persist: false,
+          sources: ['ticketmaster', 'venues'],
+          states: ['CO'],
+          syncFavoriteArtists: false,
+          syncFestivals: false,
+          silent: true,
+        });
+
+        expect(result.overallStatus).toBe('success');
+        expect(logSpy).not.toHaveBeenCalled();
+      } finally {
+        logSpy.mockRestore();
+      }
+    });
+  });
 });

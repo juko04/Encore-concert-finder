@@ -1,6 +1,7 @@
 export * from './types';
 export * from './errors';
 export * from './quota-guard';
+export * from './run-budget';
 export * from './partitioner';
 export * from './client';
 export * from './parser';

@@ -209,19 +209,58 @@ Examples:
 ### Ticketmaster Quota Constraints
 Ticketmaster Discovery API v2 enforces strict account-wide rate limits:
 - **Daily Quota:** 5,000 requests per 24-hour UTC window.
-- **Burst Rate:** 5 requests per second.
+- **Burst Rate:** 5 requests per second (Encore defaults conservatively to 2 req/sec with 500ms spacing).
 
-### Single-Runner Serialized Execution Architecture
+### Production Single-Runner Serialized Execution Model
 Independent serverless or cloud runners cannot coordinate local filesystem state without centralized locking. To prevent race conditions, uncoordinated quota exhaustion, and 429 penalties in production:
 
-1. **Serialized Workflow Concurrency:** Scheduled jobs in CI/CD (e.g. GitHub Actions) MUST configure a repository-wide concurrency group (`concurrency: { group: 'ticketmaster-ingestion', cancel-in-progress: false }`). Only one ingestion runner executes at any moment.
-2. **Rolling Temporal Horizons:** Rather than requesting 365 days across all geographies daily:
-   - **Near-term (0–14 days):** Daily sync (high frequency, small page yield, bounded request budget).
-   - **Mid-term (15–60 days):** Bi-weekly sync (Wednesdays/Sundays).
-   - **Long-term (61–365 days):** Weekly sync (Saturdays).
-3. **Bounded Request Budgets (`--max-requests=N`):** Every scheduled ingestion run specifies an explicit upper request ceiling (e.g. 250 requests for near-term, 500 for full baseline). Once reached, further regions or tour searches are gracefully deferred to subsequent runs.
-4. **Fail-Closed Quota Guard (`TicketmasterQuotaGuard`):**
-   - File locks use PID-based liveness verification (`process.kill(pid, 0)`). Dead process locks are reclaimed; active processes are respected.
-   - Lock acquisition timeouts, corrupt storage files, and persistence failures strictly fail closed, throwing typed errors (`TicketmasterQuotaLockError`, `TicketmasterQuotaCorruptionError`, `TicketmasterQuotaPersistenceError`).
-   - The budget never silently resets to zero on storage corruption.
-5. **Provider Rate Limit Header Feedback:** Ingestion monitors `rate-limit-available` and `rate-limit-reset` headers from Ticketmaster API responses to adjust inter-request delays dynamically and avoid burst rate limit violations.
+1. **Serialized Workflow Concurrency:**
+   Scheduled jobs in CI/CD (e.g. GitHub Actions) MUST configure a repository-wide concurrency group:
+   ```yaml
+   concurrency:
+     group: ticketmaster-ingestion
+     cancel-in-progress: false
+   ```
+   This guarantees that scheduled runs and manual triggers are queued and executed strictly one at a time, completely eliminating parallel execution race conditions.
+
+2. **Ephemeral Quota Reconciliation via Response Headers:**
+   When an ephemeral cloud runner (e.g. GitHub Actions container) starts up, it does not require a persistent external cache (like Redis) to discover account-wide usage. On its very first request, the Ticketmaster Discovery API returns authoritative usage headers:
+   - `rate-limit`: e.g. 5000 (daily allocation)
+   - `rate-limit-available`: e.g. 4820 (remaining requests in window)
+   - `rate-limit-reset`: UTC timestamp in milliseconds when daily quota refreshes
+   The client immediately synchronizes these values into `TicketmasterQuotaGuard`, discovering current account-wide consumption.
+
+3. **Atomic Per-Run Request Budget (`RunRequestBudget`):**
+   Every execution is bounded by an atomic per-run request budget (e.g. `--max-requests=250` for daily near-term, `--max-requests=500` for weekly long-term):
+   - Checked atomically before dispatching any HTTP request across regional queries, partition bisections, pagination pages, retries, favorite artist tours, and festival searches.
+   - When exhausted, throws `TicketmasterRunBudgetExceededError`, which is caught gracefully by the partition coordinator and ingestion pipeline to mark `hasIncompleteCoverage: true` and report status `'partial'`.
+   - Never exceeds the allocated run budget.
+
+4. **Rolling Temporal Horizons:**
+   Rather than requesting 365 days across all geographies daily:
+   - **Near-term (0–14 days):** Daily sync at 06:00 UTC (high frequency, small page yield, bounded request budget of 250 requests).
+   - **Mid-term (15–60 days):** Bi-weekly sync on Wednesdays/Sundays at 08:00 UTC (bounded by 500 requests).
+   - **Long-term (61–365 days):** Weekly sync on Saturdays at 10:00 UTC (bounded by 500 requests).
+   - Unused daily headroom (>3,500 requests) remains safely reserved for user queries and live operations.
+
+5. **Strict Failure Detection & Exit Codes:**
+   `scripts/sync-all-sources.ts` returns:
+   - `exit 0`: ONLY when all configured sources succeed with 100% complete coverage.
+   - `exit 2`: When one or more sources have partial coverage or budget exhaustion (`status === 'partial'`).
+   - `exit 1`: When any source fails completely (`status === 'failed'`) or a fatal error occurs.
+   - `--json`: Outputs machine-readable run statistics uploaded as build artifacts.
+
+6. **Fail-Closed Quota Guard (`TicketmasterQuotaGuard`):**
+   - File locks use unique UUID tokens (`lockId`) and PID liveness verification (`process.kill(pid, 0)`).
+   - A lock is NEVER stolen or reclaimed if the holding process is demonstrably alive, even after 15+ seconds.
+   - Replaced locks cannot be deleted by old delayed owners upon exit.
+   - State corruption, lock timeouts, and filesystem write failures strictly fail closed.
+
+7. **Production Pre-Activation Checklist:**
+   Before activating scheduled cron triggers in production:
+   - Set GitHub repository secret `SUPABASE_URL` to production database instance.
+   - Set GitHub repository secret `SUPABASE_SERVICE_ROLE_KEY`.
+   - Set GitHub repository secret `TICKETMASTER_API_KEY`.
+   - Set GitHub repository secret `ENCORE_APPROVED_PROD_HOSTS` matching approved production hostnames.
+   - Set GitHub repository secret `ENCORE_PROD_PROJECT_REF`.
+   - Verify workflow template `.github/workflows/scheduled-sync.yml.example` is copied to `.github/workflows/scheduled-sync.yml`.

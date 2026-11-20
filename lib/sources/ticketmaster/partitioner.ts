@@ -1,5 +1,8 @@
 import { TicketmasterApiClient } from './client';
-import { TicketmasterValidationError } from './errors';
+import {
+  TicketmasterRunBudgetExceededError,
+  TicketmasterValidationError,
+} from './errors';
 import type {
   TicketmasterEvent,
   TicketmasterEventQueryParams,
@@ -276,17 +279,38 @@ export class TicketmasterPartitionCoordinator {
       if (!cached0) {
         const reqKey0 = `${intervalKey}__0`;
         executedRequests.add(reqKey0);
-        const result0 = await this.executeFetch(
-          {
-            ...baseParams,
-            startDateTime: start,
-            endDateTime: end,
-            page: 0,
-            size: pageSize,
-          },
-          isEssential,
-        );
-        requestsMade++;
+        let result0;
+        try {
+          result0 = await this.executeFetch(
+            {
+              ...baseParams,
+              startDateTime: start,
+              endDateTime: end,
+              page: 0,
+              size: pageSize,
+            },
+            isEssential,
+          );
+          requestsMade++;
+        } catch (err) {
+          if (err instanceof TicketmasterRunBudgetExceededError) {
+            hasIncompleteCoverage = true;
+            const summaryItem: PartitionSummary = {
+              startDateTime: start,
+              endDateTime: end,
+              totalElements: 0,
+              fetchedEventsCount: 0,
+              bisected: false,
+              pagesFetched: 0,
+              depth,
+              isTruncated: true,
+            };
+            partitionsSummary.push(summaryItem);
+            truncatedPartitions.push(summaryItem);
+            return;
+          }
+          throw err;
+        }
         cached0 = {
           response: result0.response,
           rawJson: result0.rawJson || JSON.stringify(result0.response),
@@ -367,18 +391,27 @@ export class TicketmasterPartitionCoordinator {
         }
         executedRequests.add(pageKey);
 
-        const pageResult = await this.executeFetch(
-          {
-            ...baseParams,
-            startDateTime: start,
-            endDateTime: end,
-            page: p,
-            size: pageSize,
-          },
-          isEssential,
-        );
-        requestsMade++;
-        pagesFetched++;
+        let pageResult;
+        try {
+          pageResult = await this.executeFetch(
+            {
+              ...baseParams,
+              startDateTime: start,
+              endDateTime: end,
+              page: p,
+              size: pageSize,
+            },
+            isEssential,
+          );
+          requestsMade++;
+          pagesFetched++;
+        } catch (err) {
+          if (err instanceof TicketmasterRunBudgetExceededError) {
+            hasIncompleteCoverage = true;
+            break;
+          }
+          throw err;
+        }
 
         rawPages.push({
           url: pageResult.url || '',
