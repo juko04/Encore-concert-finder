@@ -21,9 +21,18 @@ test.describe('Encore V2 Index E2E Flow', () => {
     await expect(page.getByText('// INDEX')).toBeVisible();
 
     // Verify mode chips
-    const allShowsButton = page.getByRole('button', { name: 'All Shows' });
-    const weekendButton = page.getByRole('button', { name: 'This Weekend' });
-    const freeButton = page.getByRole('button', { name: 'Free ($0)' });
+    const allShowsButton = page.getByRole('button', {
+      name: 'All Shows',
+      exact: true,
+    });
+    const weekendButton = page.getByRole('button', {
+      name: 'This Weekend',
+      exact: true,
+    });
+    const freeButton = page.getByRole('button', {
+      name: 'Free ($0)',
+      exact: true,
+    });
 
     await expect(allShowsButton).toBeVisible();
     await expect(weekendButton).toBeVisible();

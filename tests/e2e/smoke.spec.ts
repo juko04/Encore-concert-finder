@@ -23,11 +23,15 @@ test.describe('Application Smoke Tests', () => {
     await expect(page.getByRole('link', { name: 'Preferences' })).toBeVisible();
 
     // Verify mode selector chips
-    await expect(page.getByRole('button', { name: 'All Shows' })).toBeVisible();
     await expect(
-      page.getByRole('button', { name: 'This Weekend' }),
+      page.getByRole('button', { name: 'All Shows', exact: true }),
     ).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Free ($0)' })).toBeVisible();
+    await expect(
+      page.getByRole('button', { name: 'This Weekend', exact: true }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole('button', { name: 'Free ($0)', exact: true }),
+    ).toBeVisible();
   });
 
   test('successfully loads the discover catalog page', async ({ page }) => {
