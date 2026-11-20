@@ -28,9 +28,11 @@ Durable architecture records belong in [`docs/architecture/`](docs/architecture/
 - `npm run lint`: **PASS** (0 ESLint warnings, 0 errors)
 - `npm run typecheck`: **PASS** (`tsc --noEmit`, 0 TypeScript errors)
 - `npm test`: **PASS** (**63/63 test files, 858/858 unit tests passed in 6.34s**)
-- `npx playwright test`: **PASS** (**12/12 Playwright browser tests passed in 8.8s + 9.3s**)
+- `npx playwright test`: **PASS** (**16/16 Playwright browser tests passed in 33.7s**)
+- `npm run test:integration`: **PASS** (**13/13 test files, 104/104 database integration tests passed in 30.5s**)
 - `npm run build`: **PASS** (Next.js 15.5.27 production build clean, 18/18 routes compiled)
 - `npm run sync:all -- --fixture`: **PASS** (8 sources synced in 0.60s, 282 candidates extracted, 256 canonical events created, 12 sold-out events detected)
+- **GitHub Actions CI:** **PASS** (Run `44653236261`, 15/15 workflow steps green on Ubuntu 24.04 LTS runner)
 
 ---
 
@@ -47,8 +49,8 @@ Durable architecture records belong in [`docs/architecture/`](docs/architecture/
 
 ---
 
-## Next Steps for Merge & Review
+## Pull Request & Next Steps
 
-1. Create GitHub Pull Request from `feature/encore-v2-index-ticketmaster` against `main`.
-2. Review final report: `ENCORE_V2_COMBINED_IMPLEMENTATION_REPORT.md`.
-3. Obtain independent code review and signoff before merge.
+1. **Pull Request:** Open at [#20](https://github.com/juko04/Encore-concert-finder/pull/20) (`feature/encore-v2-index-ticketmaster` $\to$ `main`).
+2. **Implementation Report:** [`ENCORE_V2_COMBINED_IMPLEMENTATION_REPORT.md`](ENCORE_V2_COMBINED_IMPLEMENTATION_REPORT.md).
+3. **CI Status:** Green (0 failing, 1 successful check). Ready for peer review and user signoff before merge.
