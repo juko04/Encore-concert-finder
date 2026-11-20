@@ -3,7 +3,7 @@
 **Pull Request:** [#20](https://github.com/juko04/Encore-concert-finder/pull/20)  
 **Title:** `feat(v2): Encore V2 Unified Index UI, Ticketmaster V2 Engine & Colorado Venue Coverage`  
 **Base Branch:** `main` (commit `3adbf59`)  
-**Feature Branch:** `feature/encore-v2-index-ticketmaster` (latest commit `a1eda0d`)  
+**Feature Branch:** `feature/encore-v2-index-ticketmaster` (latest commit `f18047d`)  
 **Incorporated Baseline:** `feature/spotify-integration-repair` (commit `4009277`)  
 **Repository:** `juko04/Encore-concert-finder`  
 
@@ -15,32 +15,33 @@ This Pull Request delivers **Encore V2** by integrating three coordinated system
 1. **Index Visual Design & Production Route Migration:** Promotes the approved editorial Index prototype into the real production application across `/`, `/concerts/[id]`, `/search`, `/saved`, and `/preferences`, wired to live Supabase database events.
 2. **Ticketmaster V2 Discovery Engine:** Enterprise-grade ingestion client with dynamic recursive temporal date bisection (<950 events threshold, sub-day bisection support), header-synchronized 5,000 req/day quota guard with atomic file locking and circuit breaker at 4,750, response-derived fee status, and elimination of unsupported query parameters.
 3. **Colorado Venue Coverage (Z2 Entertainment Shared Adapter):** Multi-venue scraping adapter onboarding Boulder Theater, Fox Theatre, Aggie Theatre (Fort Collins), and Chautauqua Auditorium with live Webflow extraction, relative URL resolution, and sold-out inventory preservation.
-4. **Merge-Blocking Audit Remediations (Findings 1–6):**
-   - Connected partition coordinator to real ingestion pipeline with per-page raw ingest persistence and candidate deduplication.
-   - Secure authorized production ingestion path (`--allow-production-write`) with strict rejection of synthetic fixtures.
-   - Database pricing rollups migration (`20261120000000_add_event_pricing_and_search_indexes.sql`) enabling database-side price filtering, global price sorting, and debounced server pagination (>520 events verified).
-   - Atomic process-safe quota coordination (`.lock` files, exponential backoff, future reset window protection).
-   - Strict assertions and non-zero exit codes in live verification script with referential integrity audit.
-   - Configurable geographic coverage (`--states=CO,UT,WY,NM`), nationwide favorite artist tour lookups, and nationwide music festivals.
+4. **Merge-Blocking Audit Remediations (Findings 1–7):**
+   - Live quota lock stealing eliminated: UUID `lockId` generation, strict `ESRCH` dead process check, and replacement lock protection.
+   - Atomic per-run request budget (`RunRequestBudget`) enforced across regional syncs, bisections, retries, favorite-artist tours, and festivals.
+   - Clean exit codes (`0` success, `2` partial/budget limits, `1` error) and pure machine-readable `--json` output without stdout pollution.
+   - Fail-closed test cleanup double gate (`ENCORE_DISPOSABLE_TEST_DB=true` + `--confirm-disposable-cleanup`) and scoped artist isolation.
+   - Real current-run live event tracing to Index UI with Playwright screenshots and CI database fixture support.
+   - Production scheduling architecture documented in `.github/workflows/scheduled-sync.yml.example` and `docs/architecture/ingestion.md`.
+   - Independent adversarial review passed 100% across all subsystems.
 
 ### Summary Metrics
 
 ```
 ========================================================================================
-PERSPECTIVE A: Incremental Encore V2 Implementation (on top of Spotify baseline 4009277)
+FULL PR #20 DIFF AGAINST origin/main (including Spotify foundation & V2 Engine)
 ========================================================================================
-Files Changed:     90 files
-Insertions (+):    17,825 lines
-Deletions (-):     260 lines
-Net Delta:         +17,565 lines
+Files Changed:     137 files
+Insertions (+):    33,787 lines
+Deletions (-):     364 lines
+Net Delta:         +33,423 lines
 
 ========================================================================================
-PERSPECTIVE B: Full PR #20 Diff against origin/main (including Spotify foundation)
+LATEST SOURCE-VERIFIED CORRECTIONS SPRINT (8f83aa8 -> f18047d)
 ========================================================================================
-Files Changed:     120 files
-Insertions (+):    30,575 lines
-Deletions (-):     324 lines
-Net Delta:         +30,251 lines
+Files Changed:     31 files
+Insertions (+):    2,084 lines
+Deletions (-):     558 lines
+Net Delta:         +1,526 lines
 ========================================================================================
 ```
 
@@ -60,6 +61,11 @@ Net Delta:         +30,251 lines
 | `58b3a8c` | `docs(research)` | persist 134-entry Colorado venue source inventory registry | Stores full Colorado venue registry (`encore_colorado_venue_source_inventory.json`) for future expansion |
 | `a1eda0d` | `fix(pr20-remediation)` | resolve partitioner connection, production destination guard, database search pagination, atomic quota locks, and strict verification assertions | Complete remediation of merge-blocking Findings 1–6 |
 | `9106122` | `fix(types)` | resolve events title type mismatch in verify-live-ingestion | Corrects TypeScript schema error where events name column was referenced as title; green GitHub CI run 44677461105 |
+| `fe5750d` | `fix(ingestion)` | resolve ISS-A through ISS-H for PR #20 release gate | Quota locking fail-closed, PID liveness, single-runner architecture, destination guard |
+| `8f83aa8` | `test(guard)` | ensure destination guard error message satisfies both unit and integration assertions | Error message consistency for destination guard |
+| `998a7de` | `fix(ingestion)` | resolve live quota lock stealing, enforce run budgets, and verify current-run live trace to Index UI | Eliminates lock stealing, adds `RunRequestBudget`, standardizes exit codes, clean JSON, double-gated cleanup, and live UI tracing |
+| `f5962dc` | `test(e2e)` | ensure traced events exist in fresh CI database before running UI trace | Adds idempotent fixture seeder for fresh CI runner databases; achieves 100% green remote CI |
+| `f18047d` | `docs` | record verified green remote CI run 44794056401 on commit f5962dc | Updates evidence manifest and handoff with CI run 44794056401 |
 
 ---
 
