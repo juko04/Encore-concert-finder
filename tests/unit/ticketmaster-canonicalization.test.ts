@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
 import crypto from 'node:crypto';
-import type { EventCandidate } from '@/lib/domain/event-candidate';
 import type { RawIngest } from '@/lib/domain/source';
 import { CanonicalizationCoordinator } from '@/lib/entity-resolution/canonicalization-coordinator';
 import {

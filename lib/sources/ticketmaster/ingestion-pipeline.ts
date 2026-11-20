@@ -17,6 +17,10 @@ import {
   TicketmasterError,
   TicketmasterValidationError,
 } from './errors';
+import type {
+  PartitionCoordinatorOptions,
+  PartitionSummary,
+} from './partitioner';
 import type { TicketmasterEventQueryParams } from './types';
 
 export interface TicketmasterIngestionOptions {
@@ -30,6 +34,8 @@ export interface TicketmasterIngestionOptions {
   fixtureJson?: string;
   persist?: boolean;
   reprocess?: boolean;
+  usePartitioner?: boolean;
+  partitionOptions?: Partial<PartitionCoordinatorOptions>;
 }
 
 export interface TicketmasterIngestionResult {
@@ -52,6 +58,10 @@ export interface TicketmasterIngestionResult {
   durationMs: number;
   startedAt: string;
   completedAt: string;
+  hasIncompleteCoverage?: boolean;
+  partitionsProcessed?: number;
+  bisectionsCount?: number;
+  truncatedPartitions?: PartitionSummary[];
 }
 
 /**
@@ -78,8 +88,13 @@ export async function runTicketmasterIngestion(
 
   const persist = Boolean(options.persist);
   const useFixture = Boolean(options.useFixture);
+  const usePartitioner = Boolean(options.usePartitioner);
 
   let rawIngests: RawIngest[] = [];
+  let hasIncompleteCoverage = false;
+  let partitionsProcessed = 0;
+  let bisectionsCount = 0;
+  let truncatedPartitions: PartitionSummary[] = [];
 
   if (useFixture) {
     let rawJson = options.fixtureJson;
@@ -112,6 +127,32 @@ export async function runTicketmasterIngestion(
         parserVersion: adapter.parserVersion,
       },
     ];
+  } else if (usePartitioner) {
+    try {
+      rawIngests = await adapter.fetchPartitioned(
+        {
+          sourceId: source.id,
+          sourceType: adapter.sourceType,
+          acquisitionMethod: adapter.acquisitionMethod,
+          targetUrl: 'https://app.ticketmaster.com/discovery/v2/events.json',
+          crawlStartedAt: new Date().toISOString(),
+          metadata: (options.queryParams ?? {}) as Record<string, unknown>,
+        },
+        options.partitionOptions,
+      );
+      hasIncompleteCoverage =
+        adapter.lastPartitionResult?.hasIncompleteCoverage ?? false;
+      partitionsProcessed =
+        adapter.lastPartitionResult?.partitionsProcessed ?? 0;
+      bisectionsCount = adapter.lastPartitionResult?.bisectionsCount ?? 0;
+      truncatedPartitions =
+        adapter.lastPartitionResult?.truncatedPartitions ?? [];
+    } catch (fetchErr) {
+      if (persist) {
+        await options.sourceRepo.recordFailure(source.id).catch(() => {});
+      }
+      throw fetchErr;
+    }
   } else {
     try {
       rawIngests = await adapter.fetch({
@@ -132,7 +173,20 @@ export async function runTicketmasterIngestion(
 
   // 1. Dry-run mode: parse in memory without writing to database
   if (!persist) {
-    const parsedCandidates = await adapter.parse(rawIngests);
+    const allParsedCandidates = await adapter.parse(rawIngests);
+    const parsedCandidates: EventCandidate[] = [];
+    const seenEventIds = new Set<string>();
+
+    for (const cand of allParsedCandidates) {
+      if (cand.sourceEventId) {
+        if (seenEventIds.has(cand.sourceEventId)) {
+          continue;
+        }
+        seenEventIds.add(cand.sourceEventId);
+      }
+      parsedCandidates.push(cand);
+    }
+
     const reviewReasons: Record<string, number> = {};
 
     for (const cand of parsedCandidates) {
@@ -174,6 +228,10 @@ export async function runTicketmasterIngestion(
       startedAt,
       completedAt,
       durationMs: Math.max(1, Date.now() - startMs),
+      hasIncompleteCoverage,
+      partitionsProcessed,
+      bisectionsCount,
+      truncatedPartitions,
     };
   }
 
@@ -214,7 +272,19 @@ export async function runTicketmasterIngestion(
     // Parse candidates using the actually persisted raw ingest rows so IDs match
     let candidates: EventCandidate[];
     try {
-      candidates = await adapter.parse(persistedRawIngests);
+      const allParsed = await adapter.parse(persistedRawIngests);
+      const deduplicated: EventCandidate[] = [];
+      const seenEventIds = new Set<string>();
+      for (const cand of allParsed) {
+        if (cand.sourceEventId) {
+          if (seenEventIds.has(cand.sourceEventId)) {
+            continue;
+          }
+          seenEventIds.add(cand.sourceEventId);
+        }
+        deduplicated.push(cand);
+      }
+      candidates = deduplicated;
     } catch (parseErr) {
       if (parseErr instanceof TicketmasterError) {
         throw parseErr;
@@ -356,6 +426,10 @@ export async function runTicketmasterIngestion(
       startedAt,
       completedAt,
       durationMs: Math.max(1, Date.now() - startMs),
+      hasIncompleteCoverage,
+      partitionsProcessed,
+      bisectionsCount,
+      truncatedPartitions,
     };
   } catch (err) {
     await options.sourceRepo.recordFailure(source.id).catch(() => {});

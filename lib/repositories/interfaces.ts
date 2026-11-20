@@ -42,7 +42,13 @@ import type {
   UserProfileUpdateInput,
 } from '@/lib/domain/profile';
 
-export type EventSortOption = 'date_asc' | 'price_asc' | 'score_desc';
+export type EventSortOption =
+  | 'price_asc'
+  | 'price_desc'
+  | 'date_asc'
+  | 'date_desc'
+  | 'title_asc'
+  | 'score_desc';
 
 export interface EventListFilters {
   fromDate?: string;
@@ -56,6 +62,7 @@ export interface EventListFilters {
   searchQuery?: string;
   minPrice?: number;
   maxPrice?: number;
+  includeUnknownPrice?: boolean;
   freeOnly?: boolean;
   sortBy?: EventSortOption;
   limit?: number;
@@ -66,6 +73,7 @@ export interface ICatalogRepository {
   // Read operations (public catalog)
   getEventById(id: string): Promise<CanonicalEventDetail | null>;
   listEvents(filters?: EventListFilters): Promise<CanonicalEventSummary[]>;
+  countEvents(filters?: EventListFilters): Promise<number>;
   listCities(): Promise<string[]>;
   getArtistById(id: string): Promise<Artist | null>;
   searchArtists(query: string, limit?: number): Promise<Artist[]>;

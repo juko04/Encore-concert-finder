@@ -24,6 +24,17 @@ export interface PartitionSummary {
   isTruncated?: boolean;
 }
 
+export interface PartitionRawPage {
+  url: string;
+  rawJson: string;
+  httpStatus: number;
+  startDateTime: string;
+  endDateTime: string;
+  page: number;
+  size: number;
+  fetchedAt: string;
+}
+
 export interface PartitionCoordinatorOptions {
   client?: TicketmasterApiClient;
   fetchFn?: (params: TicketmasterEventQueryParams) => Promise<{
@@ -50,6 +61,7 @@ export interface PartitionCoordinatorResult {
   hasIncompleteCoverage: boolean;
   truncatedPartitions: PartitionSummary[];
   partitions: PartitionSummary[];
+  rawPages: PartitionRawPage[];
 }
 
 /**
@@ -240,9 +252,15 @@ export class TicketmasterPartitionCoordinator {
     const seenEventIds = new Set<string>();
     const uniqueEvents: TicketmasterEvent[] = [];
     const executedRequests = new Set<string>();
-    const page0Cache = new Map<string, TicketmasterEventsResponse>();
+    interface CachedPage0 {
+      response: TicketmasterEventsResponse;
+      rawJson: string;
+      url: string;
+    }
+    const page0Cache = new Map<string, CachedPage0>();
     const partitionsSummary: PartitionSummary[] = [];
     const truncatedPartitions: PartitionSummary[] = [];
+    const rawPages: PartitionRawPage[] = [];
     let requestsMade = 0;
     let bisectionsCount = 0;
     let hasIncompleteCoverage = false;
@@ -253,9 +271,9 @@ export class TicketmasterPartitionCoordinator {
       depth: number,
     ): Promise<void> => {
       const intervalKey = `${start}__${end}`;
-      let page0Response = page0Cache.get(intervalKey);
+      let cached0 = page0Cache.get(intervalKey);
 
-      if (!page0Response) {
+      if (!cached0) {
         const reqKey0 = `${intervalKey}__0`;
         executedRequests.add(reqKey0);
         const result0 = await this.executeFetch(
@@ -269,11 +287,15 @@ export class TicketmasterPartitionCoordinator {
           isEssential,
         );
         requestsMade++;
-        page0Response = result0.response;
-        page0Cache.set(intervalKey, page0Response);
+        cached0 = {
+          response: result0.response,
+          rawJson: result0.rawJson || JSON.stringify(result0.response),
+          url: result0.url || '',
+        };
+        page0Cache.set(intervalKey, cached0);
       }
 
-      const totalElements = page0Response.page.totalElements;
+      const totalElements = cached0.response.page.totalElements;
       const shouldBisect = totalElements >= threshold;
 
       if (shouldBisect && depth < maxDepth) {
@@ -306,8 +328,20 @@ export class TicketmasterPartitionCoordinator {
       }
 
       // Interval is either small enough (< threshold), reached minIntervalDays, or hit maxDepth.
+      // Retain leaf raw page 0
+      rawPages.push({
+        url: cached0.url,
+        rawJson: cached0.rawJson,
+        httpStatus: 200,
+        startDateTime: start,
+        endDateTime: end,
+        page: 0,
+        size: pageSize,
+        fetchedAt: new Date().toISOString(),
+      });
+
       // Collect events from page 0
-      const page0Events = page0Response._embedded?.events || [];
+      const page0Events = cached0.response._embedded?.events || [];
       let intervalFetched = 0;
       for (const ev of page0Events) {
         if (!seenEventIds.has(ev.id)) {
@@ -318,7 +352,7 @@ export class TicketmasterPartitionCoordinator {
       }
 
       // Paginate remaining pages while page * size < 1000
-      const totalPages = page0Response.page.totalPages;
+      const totalPages = cached0.response.page.totalPages;
       let pagesFetched = 1;
 
       for (let p = 1; p < totalPages; p++) {
@@ -345,6 +379,17 @@ export class TicketmasterPartitionCoordinator {
         );
         requestsMade++;
         pagesFetched++;
+
+        rawPages.push({
+          url: pageResult.url || '',
+          rawJson: pageResult.rawJson || JSON.stringify(pageResult.response),
+          httpStatus: 200,
+          startDateTime: start,
+          endDateTime: end,
+          page: p,
+          size: pageSize,
+          fetchedAt: new Date().toISOString(),
+        });
 
         const events = pageResult.response._embedded?.events || [];
         for (const ev of events) {
@@ -392,6 +437,7 @@ export class TicketmasterPartitionCoordinator {
       hasIncompleteCoverage,
       truncatedPartitions,
       partitions: partitionsSummary,
+      rawPages,
     };
   }
 }

@@ -605,4 +605,127 @@ describe('SupabaseCatalogRepository - Search with Pagination and Punctuation (MU
     expect(venueInMatches).toHaveLength(6);
     expect(capturedOrClause).toContain('venue-1049');
   });
+
+  describe('MemoryCatalogRepository - Price Filtering, includeUnknownPrice & Sorting', () => {
+    it('supports includeUnknownPrice, price sorting, and countEvents in MemoryCatalogRepository', async () => {
+      const { MemoryCatalogRepository } =
+        await import('@/lib/repositories/memory-repositories');
+      const repo = new MemoryCatalogRepository();
+
+      // Event 1: Free event ($0)
+      const ev1 = await repo.createEvent({
+        name: 'Free Community Show',
+        normalizedName: 'free community show',
+        eventKind: 'free_event',
+        status: 'scheduled',
+        venueId: null,
+        timezone: 'America/Denver',
+        localStartDate: '2026-07-01',
+        startTimePrecision: 'date_only',
+        isMultiDay: false,
+      });
+
+      // Event 2: Paid event $50
+      const ev2 = await repo.createEvent({
+        name: 'Indie Rock Concert',
+        normalizedName: 'indie rock concert',
+        eventKind: 'concert',
+        status: 'scheduled',
+        venueId: null,
+        timezone: 'America/Denver',
+        localStartDate: '2026-07-02',
+        startTimePrecision: 'date_only',
+        isMultiDay: false,
+      });
+      await repo.linkTicketUrl({
+        eventId: ev2.id,
+        url: 'https://tickets.example.com/indie',
+        normalizedUrl: 'https://tickets.example.com/indie',
+        minPrice: 50,
+        maxPrice: 80,
+      });
+
+      // Event 3: Paid event $15
+      const ev3 = await repo.createEvent({
+        name: 'Acoustic Morning Set',
+        normalizedName: 'acoustic morning set',
+        eventKind: 'concert',
+        status: 'scheduled',
+        venueId: null,
+        timezone: 'America/Denver',
+        localStartDate: '2026-07-03',
+        startTimePrecision: 'date_only',
+        isMultiDay: false,
+      });
+      await repo.linkTicketUrl({
+        eventId: ev3.id,
+        url: 'https://tickets.example.com/acoustic',
+        normalizedUrl: 'https://tickets.example.com/acoustic',
+        minPrice: 15,
+        maxPrice: 25,
+      });
+
+      // Event 4: Unknown price event (no ticket links)
+      const ev4 = await repo.createEvent({
+        name: 'Unannounced Price Show',
+        normalizedName: 'unannounced price show',
+        eventKind: 'concert',
+        status: 'scheduled',
+        venueId: null,
+        timezone: 'America/Denver',
+        localStartDate: '2026-07-04',
+        startTimePrecision: 'date_only',
+        isMultiDay: false,
+      });
+
+      // 1. countEvents total
+      const totalCount = await repo.countEvents();
+      expect(totalCount).toBe(4);
+
+      // 2. maxPrice: 30 with includeUnknownPrice: true (default)
+      const withUnknown = await repo.listEvents({
+        maxPrice: 30,
+        includeUnknownPrice: true,
+      });
+      expect(withUnknown.map((e) => e.id)).toContain(ev1.id); // Free event (minPrice 0)
+      expect(withUnknown.map((e) => e.id)).toContain(ev3.id); // $15 event
+      expect(withUnknown.map((e) => e.id)).toContain(ev4.id); // Unknown price event
+      expect(withUnknown.map((e) => e.id)).not.toContain(ev2.id); // $50 event excluded
+
+      // 3. maxPrice: 30 with includeUnknownPrice: false
+      const withoutUnknown = await repo.listEvents({
+        maxPrice: 30,
+        includeUnknownPrice: false,
+      });
+      expect(withoutUnknown.map((e) => e.id)).toContain(ev1.id);
+      expect(withoutUnknown.map((e) => e.id)).toContain(ev3.id);
+      expect(withoutUnknown.map((e) => e.id)).not.toContain(ev4.id); // Unknown excluded
+      expect(withoutUnknown.map((e) => e.id)).not.toContain(ev2.id);
+
+      // 4. countEvents with filters
+      const countFiltered = await repo.countEvents({
+        maxPrice: 30,
+        includeUnknownPrice: false,
+      });
+      expect(countFiltered).toBe(2);
+
+      // 5. Global price_asc sorting
+      const priceAsc = await repo.listEvents({ sortBy: 'price_asc' });
+      expect(priceAsc[0].id).toBe(ev1.id); // $0
+      expect(priceAsc[1].id).toBe(ev3.id); // $15
+      expect(priceAsc[2].id).toBe(ev2.id); // $50
+      expect(priceAsc[3].id).toBe(ev4.id); // nulls last
+
+      // 6. Global price_desc sorting
+      const priceDesc = await repo.listEvents({ sortBy: 'price_desc' });
+      expect(priceDesc[0].id).toBe(ev2.id); // $50
+      expect(priceDesc[1].id).toBe(ev3.id); // $15
+      expect(priceDesc[2].id).toBe(ev1.id); // $0
+
+      // 7. title_asc sorting
+      const titleAsc = await repo.listEvents({ sortBy: 'title_asc' });
+      expect(titleAsc[0].id).toBe(ev3.id); // 'Acoustic...'
+      expect(titleAsc[1].id).toBe(ev1.id); // 'Free...'
+    });
+  });
 });

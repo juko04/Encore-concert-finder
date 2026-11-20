@@ -1,6 +1,12 @@
 'use client';
 
-import React, { useState, useMemo } from 'react';
+import React, {
+  useState,
+  useMemo,
+  useEffect,
+  useRef,
+  useCallback,
+} from 'react';
 import type {
   IndexEventItem,
   IndexSortBy,
@@ -24,7 +30,9 @@ import {
 } from './icons';
 
 export interface SearchClientProps {
-  events: Array<CanonicalEventSummary | ScoredEvent | IndexEventItem>;
+  events?: Array<CanonicalEventSummary | ScoredEvent | IndexEventItem>;
+  initialEvents?: Array<CanonicalEventSummary | ScoredEvent | IndexEventItem>;
+  totalCount?: number;
   initialQuery?: string;
   initialSortBy?: IndexSortBy;
   referenceDate?: string;
@@ -32,13 +40,41 @@ export interface SearchClientProps {
 
 export function SearchClient({
   events: rawEvents,
+  initialEvents: rawInitialEvents,
+  totalCount,
   initialQuery = '',
   initialSortBy = 'date_asc',
   referenceDate,
 }: SearchClientProps) {
-  const normalizedEvents = useMemo(() => {
-    return rawEvents.map(toIndexEventItem);
-  }, [rawEvents]);
+  const baseRaw = rawInitialEvents ?? rawEvents ?? [];
+  const [eventsList, setEventsList] = useState<IndexEventItem[]>(() =>
+    baseRaw.map(toIndexEventItem),
+  );
+  const [serverTotalCount, setServerTotalCount] = useState<number>(
+    totalCount ?? baseRaw.length,
+  );
+  const [currentPage, setCurrentPage] = useState<number>(1);
+  const [hasMore, setHasMore] = useState<boolean>(() => {
+    if (totalCount !== undefined) {
+      return baseRaw.length < totalCount;
+    }
+    return baseRaw.length >= 50;
+  });
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const [isServerSearching, setIsServerSearching] = useState(false);
+  const isInitialMount = useRef(true);
+
+  useEffect(() => {
+    const list = (rawInitialEvents ?? rawEvents ?? []).map(toIndexEventItem);
+    setEventsList(list);
+    setServerTotalCount(totalCount ?? list.length);
+    setHasMore(
+      totalCount !== undefined ? list.length < totalCount : list.length >= 50,
+    );
+    setCurrentPage(1);
+  }, [rawEvents, rawInitialEvents, totalCount]);
+
+  const normalizedEvents = eventsList;
 
   const { isSaved, hasAlert, toggleSave, toggleAlert, undoStack, undo } =
     useWatchlist();
@@ -125,6 +161,157 @@ export function SearchClient({
     setSelectedGenre('all');
     setStatusFilter('all');
     setSortBy('date_asc');
+  };
+
+  const buildSearchParams = useCallback(
+    (pageNumber: number) => {
+      const params = new URLSearchParams();
+      if (query.trim()) params.set('q', query.trim());
+      if (selectedVenue !== 'all') params.set('venueId', selectedVenue);
+      if (selectedCity !== 'all') params.set('city', selectedCity);
+
+      const ref = referenceDate
+        ? new Date(`${referenceDate}T12:00:00Z`)
+        : new Date();
+      const refIso = ref.toISOString().split('T')[0];
+
+      if (dateFilter === 'today') {
+        params.set('startDate', refIso);
+        params.set('endDate', refIso);
+      } else if (dateFilter === 'this_weekend') {
+        try {
+          const [y, m, d] = refIso.split('-').map(Number);
+          const dt = new Date(Date.UTC(y, m - 1, d, 12, 0, 0));
+          const dow = dt.getUTCDay();
+          const diffToFriday = (5 - dow + 7) % 7;
+          const friday = new Date(dt.getTime() + diffToFriday * 86400000);
+          const sunday = new Date(friday.getTime() + 2 * 86400000);
+          params.set('startDate', friday.toISOString().split('T')[0]);
+          params.set('endDate', sunday.toISOString().split('T')[0]);
+        } catch {
+          // ignore
+        }
+      } else if (dateFilter === 'next_7_days') {
+        params.set('startDate', refIso);
+        const maxDate = new Date(ref.getTime() + 7 * 86400000)
+          .toISOString()
+          .split('T')[0];
+        params.set('endDate', maxDate);
+      } else if (dateFilter === 'custom') {
+        if (customStartDate) params.set('startDate', customStartDate);
+        if (customEndDate) params.set('endDate', customEndDate);
+      }
+
+      if (pricePreset === 'free') {
+        params.set('freeOnly', 'true');
+      } else if (pricePreset === 'under_25') {
+        params.set('maxPrice', '25');
+      } else if (pricePreset === 'under_50') {
+        params.set('maxPrice', '50');
+      } else if (pricePreset === 'under_100') {
+        params.set('maxPrice', '100');
+      }
+
+      if (!outsideBudgetAllowed) {
+        params.set('maxPrice', String(maxPriceBudget));
+      }
+
+      if (sortBy) {
+        params.set('sort', sortBy);
+      }
+
+      params.set('limit', '50');
+      params.set('page', String(pageNumber));
+
+      return params;
+    },
+    [
+      query,
+      selectedVenue,
+      selectedCity,
+      dateFilter,
+      customStartDate,
+      customEndDate,
+      pricePreset,
+      outsideBudgetAllowed,
+      maxPriceBudget,
+      sortBy,
+      referenceDate,
+    ],
+  );
+
+  useEffect(() => {
+    if (isInitialMount.current) {
+      isInitialMount.current = false;
+      return;
+    }
+
+    if (typeof fetch !== 'function') return;
+
+    const timer = setTimeout(async () => {
+      try {
+        setIsServerSearching(true);
+        const params = buildSearchParams(1);
+        const res = await fetch(`/api/catalog/search?${params.toString()}`);
+        if (res.ok) {
+          const data = await res.json();
+          const items: Array<CanonicalEventSummary | IndexEventItem> =
+            Array.isArray(data) ? data : data.events || [];
+          const pagination = Array.isArray(data) ? null : data.pagination;
+
+          setEventsList(items.map(toIndexEventItem));
+          setCurrentPage(1);
+          if (pagination) {
+            setServerTotalCount(pagination.totalCount);
+            setHasMore(pagination.hasMore);
+          } else {
+            setServerTotalCount(items.length);
+            setHasMore(items.length >= 50);
+          }
+        }
+      } catch (err) {
+        console.error('[SearchClient] Error searching events:', err);
+      } finally {
+        setIsServerSearching(false);
+      }
+    }, 250);
+
+    return () => clearTimeout(timer);
+  }, [buildSearchParams]);
+
+  const handleLoadMore = async () => {
+    if (isLoadingMore || !hasMore || typeof fetch !== 'function') return;
+    setIsLoadingMore(true);
+
+    try {
+      const nextPage = currentPage + 1;
+      const params = buildSearchParams(nextPage);
+      const res = await fetch(`/api/catalog/search?${params.toString()}`);
+      if (res.ok) {
+        const data = await res.json();
+        const items: Array<CanonicalEventSummary | IndexEventItem> =
+          Array.isArray(data) ? data : data.events || [];
+        const pagination = Array.isArray(data) ? null : data.pagination;
+        const normalized = items.map(toIndexEventItem);
+
+        setEventsList((prev) => {
+          const seen = new Set(prev.map((e) => e.id));
+          const unique = normalized.filter((e) => !seen.has(e.id));
+          return [...prev, ...unique];
+        });
+        setCurrentPage(nextPage);
+        if (pagination) {
+          setServerTotalCount(pagination.totalCount);
+          setHasMore(pagination.hasMore);
+        } else {
+          setHasMore(normalized.length >= 50);
+        }
+      }
+    } catch (err) {
+      console.error('[SearchClient] Error loading more events:', err);
+    } finally {
+      setIsLoadingMore(false);
+    }
   };
 
   // Filter and sort engine
@@ -572,11 +759,30 @@ export function SearchClient({
           {/* Controls Bar: Results Count + Sort Dropdown */}
           <div className="shadow-2xs flex flex-wrap items-center justify-between gap-3 rounded-xl border border-zinc-200/90 bg-white px-4 py-2.5">
             <span className="text-xs text-zinc-600">
-              Found{' '}
-              <span className="font-semibold text-zinc-900">
-                {sortedEvents.length}
-              </span>{' '}
-              concerts
+              {serverTotalCount > sortedEvents.length ? (
+                <>
+                  Showing{' '}
+                  <span className="font-semibold text-zinc-900">
+                    {sortedEvents.length}
+                  </span>{' '}
+                  of{' '}
+                  <span className="font-semibold text-zinc-900">
+                    {serverTotalCount}
+                  </span>{' '}
+                  concerts
+                </>
+              ) : (
+                <>
+                  Found{' '}
+                  <span className="font-semibold text-zinc-900">
+                    {sortedEvents.length}
+                  </span>{' '}
+                  concerts
+                </>
+              )}
+              {isServerSearching && (
+                <span className="ml-2 inline-block h-2 w-2 animate-ping rounded-full bg-zinc-400" />
+              )}
             </span>
 
             <div className="flex items-center gap-2">
@@ -643,6 +849,31 @@ export function SearchClient({
                   onToggleAlert={toggleAlert}
                 />
               ))}
+            </div>
+          )}
+
+          {hasMore && (
+            <div className="flex justify-center pb-4 pt-6">
+              <button
+                type="button"
+                onClick={handleLoadMore}
+                disabled={isLoadingMore}
+                className="shadow-xs inline-flex items-center gap-2 rounded-xl border border-zinc-300 bg-white px-5 py-2.5 text-xs font-semibold text-zinc-800 transition-colors hover:border-zinc-400 hover:bg-zinc-50 disabled:opacity-50"
+              >
+                {isLoadingMore ? (
+                  <>
+                    <span className="h-3 w-3 animate-spin rounded-full border-2 border-zinc-400 border-t-zinc-900" />
+                    <span>Loading more concerts...</span>
+                  </>
+                ) : (
+                  <>
+                    <span>Load More Concerts</span>
+                    <span className="font-normal text-zinc-500">
+                      ({sortedEvents.length} of {serverTotalCount})
+                    </span>
+                  </>
+                )}
+              </button>
             </div>
           )}
         </main>

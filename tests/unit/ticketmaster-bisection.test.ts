@@ -6,6 +6,16 @@ import {
   fetchPartitionedEvents,
 } from '@/lib/sources/ticketmaster/partitioner';
 import { TicketmasterValidationError } from '@/lib/sources/ticketmaster/errors';
+import {
+  MemoryCatalogRepository,
+  MemoryEventCandidateRepository,
+  MemoryRawIngestRepository,
+  MemorySourceRepository,
+} from '@/lib/repositories/memory-repositories';
+import {
+  TicketmasterDiscoveryAdapter,
+  runTicketmasterIngestion,
+} from '@/lib/sources/ticketmaster';
 import type {
   TicketmasterEvent,
   TicketmasterEventsResponse,
@@ -29,6 +39,23 @@ function createMockEvent(id: string, date: string): TicketmasterEvent {
       status: { code: 'onsale' },
     },
     priceRanges: [{ min: 30, max: 80, currency: 'USD' }],
+    _embedded: {
+      venues: [
+        {
+          id: 'venue-1',
+          name: 'Red Rocks Amphitheatre',
+          city: { name: 'Morrison' },
+          state: { stateCode: 'CO' },
+          timezone: 'America/Denver',
+        },
+      ],
+      attractions: [
+        {
+          id: `artist-${id}`,
+          name: `Artist ${id}`,
+        },
+      ],
+    },
   };
 }
 
@@ -433,6 +460,169 @@ describe('Ticketmaster Dynamic Temporal Partitioning (Date Bisection)', () => {
       // Every requested URL/key should be unique
       const uniqueRequested = new Set(requestedUrls);
       expect(requestedUrls.length).toBe(uniqueRequested.size);
+    });
+  });
+
+  describe('Ticketmaster Ingestion Pipeline Partitioning Integration', () => {
+    it('integrates partitioned fetching into runTicketmasterIngestion, persisting partitions and deduplicating boundary events', async () => {
+      const sourceRepo = new MemorySourceRepository();
+      const rawIngestRepo = new MemoryRawIngestRepository();
+      const candidateRepo = new MemoryEventCandidateRepository();
+      const catalogRepo = new MemoryCatalogRepository();
+
+      const evLeft = createMockEvent('ev-pipe-1', '2026-10-02');
+      const evShared = createMockEvent('ev-pipe-shared', '2026-10-06');
+      const evRight = createMockEvent('ev-pipe-2', '2026-10-08');
+
+      const mockFetchFn = vi.fn().mockImplementation(async (params) => {
+        const { startDateTime, endDateTime } = params;
+        if (
+          startDateTime === '2026-10-01T00:00:00Z' &&
+          endDateTime === '2026-10-11T00:00:00Z'
+        ) {
+          return {
+            response: createMockResponse([], 1400, 0, 200),
+            rawJson: JSON.stringify(createMockResponse([], 1400, 0, 200)),
+            url: `https://app.ticketmaster.com/discovery/v2/events.json?startDateTime=${startDateTime}&endDateTime=${endDateTime}&page=0`,
+          };
+        }
+        if (startDateTime === '2026-10-01T00:00:00Z') {
+          return {
+            response: createMockResponse([evLeft, evShared], 2, 0, 200),
+            rawJson: JSON.stringify(
+              createMockResponse([evLeft, evShared], 2, 0, 200),
+            ),
+            url: `https://app.ticketmaster.com/discovery/v2/events.json?startDateTime=${startDateTime}&endDateTime=${endDateTime}&page=0`,
+          };
+        }
+        return {
+          response: createMockResponse([evShared, evRight], 2, 0, 200),
+          rawJson: JSON.stringify(
+            createMockResponse([evShared, evRight], 2, 0, 200),
+          ),
+          url: `https://app.ticketmaster.com/discovery/v2/events.json?startDateTime=${startDateTime}&endDateTime=${endDateTime}&page=0`,
+        };
+      });
+
+      const adapter = new TicketmasterDiscoveryAdapter();
+      const result = await runTicketmasterIngestion({
+        sourceRepo,
+        rawIngestRepo,
+        candidateRepo,
+        catalogRepo,
+        adapter,
+        usePartitioner: true,
+        persist: true,
+        queryParams: {
+          startDateTime: '2026-10-01T00:00:00Z',
+          endDateTime: '2026-10-11T00:00:00Z',
+        },
+        partitionOptions: {
+          fetchFn: mockFetchFn,
+          threshold: 950,
+        },
+      });
+
+      // Partitions processed
+      expect(result.bisectionsCount).toBe(1);
+      expect(result.partitionsProcessed).toBe(2);
+      expect(result.hasIncompleteCoverage).toBe(false);
+
+      // Raw ingests persisted for each leaf partition page
+      expect(result.rawIngestsFetched).toBe(2);
+      expect(result.rawIngestsPersisted).toBe(2);
+
+      // Deduplication: 3 unique events (ev-pipe-1, ev-pipe-shared, ev-pipe-2), NOT 4
+      expect(result.candidatesParsed).toBe(3);
+      expect(result.candidatesPersisted).toBe(3);
+      expect(result.canonicalEventsCreated).toBe(3);
+
+      // Verify raw ingests in repo have correct sourceId and content
+      const persistedIngests = await rawIngestRepo.listBySource(
+        result.source.id,
+      );
+      expect(persistedIngests.length).toBe(2);
+      expect(persistedIngests[0].contentType).toBe('application/json');
+      expect(persistedIngests[0].contentHash).toBeDefined();
+
+      // Verify candidates in repo preserve provenance
+      const candShared = await candidateRepo.listBySourceEventId(
+        result.source.id,
+        'ev-pipe-shared',
+      );
+      expect(candShared.length).toBe(1);
+      expect(candShared[0].rawIngestId).toBeDefined();
+
+      const candLeft = await candidateRepo.listBySourceEventId(
+        result.source.id,
+        'ev-pipe-1',
+      );
+      expect(candLeft.length).toBe(1);
+
+      const candRight = await candidateRepo.listBySourceEventId(
+        result.source.id,
+        'ev-pipe-2',
+      );
+      expect(candRight.length).toBe(1);
+    });
+
+    it('detects incomplete coverage when a partition reaches 1-day minimum interval with >1,000 events', async () => {
+      const sourceRepo = new MemorySourceRepository();
+      const rawIngestRepo = new MemoryRawIngestRepository();
+      const candidateRepo = new MemoryEventCandidateRepository();
+      const catalogRepo = new MemoryCatalogRepository();
+
+      const denseEvents = Array.from({ length: 5 }, (_, i) =>
+        createMockEvent(`dense-ev-${i}`, '2026-10-01'),
+      );
+
+      // Simulate 1,500 events on a 1-day interval
+      const mockFetchFn = vi.fn().mockImplementation(async (params) => {
+        return {
+          response: createMockResponse(
+            denseEvents,
+            1500,
+            params.page ?? 0,
+            200,
+          ),
+          rawJson: JSON.stringify(
+            createMockResponse(denseEvents, 1500, params.page ?? 0, 200),
+          ),
+          url: `https://app.ticketmaster.com/discovery/v2/events.json?page=${params.page ?? 0}`,
+        };
+      });
+
+      const adapter = new TicketmasterDiscoveryAdapter();
+      const result = await runTicketmasterIngestion({
+        sourceRepo,
+        rawIngestRepo,
+        candidateRepo,
+        catalogRepo,
+        adapter,
+        usePartitioner: true,
+        persist: true,
+        queryParams: {
+          startDateTime: '2026-10-01T00:00:00Z',
+          endDateTime: '2026-10-02T00:00:00Z', // 1 day
+        },
+        partitionOptions: {
+          fetchFn: mockFetchFn,
+          threshold: 950,
+          minIntervalDays: 1,
+          pageSize: 200,
+        },
+      });
+
+      // Bisection not possible because interval is 1 day <= minIntervalDays
+      expect(result.bisectionsCount).toBe(0);
+      expect(result.partitionsProcessed).toBe(1);
+
+      // Truncation detected! (1500 total elements > 1000 items paginated)
+      expect(result.hasIncompleteCoverage).toBe(true);
+      expect(result.truncatedPartitions).toBeDefined();
+      expect(result.truncatedPartitions?.length).toBe(1);
+      expect(result.truncatedPartitions?.[0].totalElements).toBe(1500);
+      expect(result.truncatedPartitions?.[0].isTruncated).toBe(true);
     });
   });
 });

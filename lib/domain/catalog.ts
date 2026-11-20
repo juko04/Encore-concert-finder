@@ -109,6 +109,9 @@ export interface Event {
   isMultiDay: boolean;
   officialUrl?: string | null;
   primaryTicketUrl?: string | null;
+  minPrice?: number | null;
+  maxPrice?: number | null;
+  currency?: string | null;
   announcedAt?: string | null;
   createdAt?: string;
   updatedAt?: string;

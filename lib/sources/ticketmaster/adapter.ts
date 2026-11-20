@@ -10,6 +10,11 @@ import type { EventCandidate } from '@/lib/domain/event-candidate';
 import { TicketmasterApiClient, TicketmasterClientOptions } from './client';
 import { parseTicketmasterEvent } from './parser';
 import {
+  TicketmasterPartitionCoordinator,
+  PartitionCoordinatorOptions,
+  PartitionCoordinatorResult,
+} from './partitioner';
+import {
   TicketmasterEventQueryParams,
   TicketmasterEventsResponseSchema,
 } from './types';
@@ -23,6 +28,7 @@ export class TicketmasterDiscoveryAdapter implements EventSourceAdapter {
   readonly parserVersion = '1.0.0';
 
   private readonly client: TicketmasterApiClient;
+  lastPartitionResult?: PartitionCoordinatorResult;
 
   constructor(options?: TicketmasterClientOptions) {
     this.client = new TicketmasterApiClient(options);
@@ -69,6 +75,71 @@ export class TicketmasterDiscoveryAdapter implements EventSourceAdapter {
     };
 
     return [rawIngest];
+  }
+
+  /**
+   * Fetches raw JSON page snapshots across recursively partitioned sub-intervals
+   * when result sizes approach or exceed Ticketmaster's 1,000-item pagination limit.
+   * Returns RawIngest[] for all partitioned pages with accurate contentHash, sourceUrl, and timestamps.
+   */
+  async fetchPartitioned(
+    context: CrawlContext,
+    coordinatorOptions?: Partial<PartitionCoordinatorOptions>,
+  ): Promise<RawIngest[]> {
+    const metadata = (context.metadata || {}) as TicketmasterEventQueryParams;
+    const queryParams: TicketmasterEventQueryParams = {
+      stateCode: metadata.stateCode,
+      marketId: metadata.marketId,
+      city: metadata.city,
+      keyword: metadata.keyword,
+      attractionId: metadata.attractionId,
+      venueId: metadata.venueId,
+      startDateTime: metadata.startDateTime,
+      endDateTime: metadata.endDateTime,
+      classificationName: metadata.classificationName ?? 'Music',
+      size: metadata.size ?? 200,
+      sort: metadata.sort ?? 'date,asc',
+    };
+
+    const coordinator = new TicketmasterPartitionCoordinator({
+      client: this.client,
+      baseParams: queryParams,
+      startDateTime: queryParams.startDateTime,
+      endDateTime: queryParams.endDateTime,
+      ...coordinatorOptions,
+    });
+
+    const result = await coordinator.fetchEvents({
+      baseParams: queryParams,
+      startDateTime: queryParams.startDateTime,
+      endDateTime: queryParams.endDateTime,
+      ...coordinatorOptions,
+    });
+
+    this.lastPartitionResult = result;
+
+    const rawIngests: RawIngest[] = [];
+    for (const page of result.rawPages) {
+      const contentHash = crypto
+        .createHash('sha256')
+        .update(page.rawJson)
+        .digest('hex');
+
+      rawIngests.push({
+        id: crypto.randomUUID(),
+        sourceId: context.sourceId || this.id,
+        sourceUrl: page.url,
+        acquisitionMethod: this.acquisitionMethod,
+        fetchedAt: page.fetchedAt || context.crawlStartedAt,
+        contentHash,
+        contentType: 'application/json',
+        rawContent: page.rawJson,
+        httpStatus: page.httpStatus || 200,
+        parserVersion: this.parserVersion,
+      });
+    }
+
+    return rawIngests;
   }
 
   /**

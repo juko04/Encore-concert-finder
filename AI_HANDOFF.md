@@ -7,17 +7,17 @@ Durable architecture records belong in [`docs/architecture/`](docs/architecture/
 
 ## Current Status & Location
 
-- **Current Milestone:** **Encore V2 — Final Implementation Audit & Remediation (Completed & Verified)**.
+- **Current Milestone:** **Encore PR #20 — Merge-Blocking Remediations & Final Review (Completed & Verified)**.
 - **Active Branch:** `feature/encore-v2-index-ticketmaster`
 - **Base Commit:** `4009277a03a21bd2631107d9b964021884e7889c` (`feature/spotify-integration-repair`)
 - **Active Implementing Team:** Google Antigravity (Lead Coordinator + Specialized Review Team)
-- **Remediation Deliverables:**
-  1. **Ticketmaster API Request Correctness:** Stripped undocumented `allInclusivePricing=true` from request query params; removed non-existent `estimatedFees` fields; accurately parsed `allInclusivePricing.enabled` from response `event.ticketing`; eliminated unsupported regulatory compliance claims.
-  2. **Proven Live Ingestion & 100% Idempotency:** Executed live network queries against Ticketmaster and live HTML scrape against Z2 Entertainment (`z2ent.com/events`) into local Supabase (`127.0.0.1:54321`). Pass 1 ingested 36 live Ticketmaster + 23 live Z2 shows (catalog grew from 244 to 303 canonical events). Pass 2 proved 100% idempotency with 0 duplicate events created and 100% raw ingest reuse.
-  3. **Temporal Bisection & Quota Safety:** Sub-day interval bisection (< 1 day), explicit truncation tracking (`isTruncated: true`, `hasIncompleteCoverage: true`, `truncatedPartitions`), provider header synchronization (`rate-limit-available`, `rate-limit-reset`), and cross-process file-based quota coordination.
-  4. **Artist Role Integrity:** Eliminated speculative headliner/opener inferences; attractions lacking explicit billing metadata strictly retain `billingPosition: 'unknown'` while preserving list order.
-  5. **Truth in Advertising on Index UI:** Removed fake presale badges, synthetic low-inventory counters, and automated push notification claims from watchlists; documented local browser storage scope; gracefully handled missing ticket links.
-  6. **Comprehensive Verification:** 100% passing across formatting, linting, strict TypeScript typechecking, unit tests (858/858), PostgreSQL integration tests (104/104), Playwright browser tests (16/16), and Next.js production build.
+- **Remediations Summary (Findings 1–6):**
+  1. **Finding 1 (Partitioner Pipeline Connection):** Connected the temporal date bisection coordinator to `runTicketmasterIngestion`. Raw responses across all partition pages are preserved with provenance and content hashing. Candidates are deduplicated across partition boundaries, and incomplete coverage states are surfaced.
+  2. **Finding 2 (Production Ingestion Authorization):** Refactored `destination-guard.ts` to implement a secure, opt-in execution path for authorized production ingestion via `--allow-production-write`, while enforcing a strict invariant that rejects synthetic fixtures from targeting remote/production databases under all conditions.
+  3. **Finding 3 (Database-Side Filtering, Global Sorting, & Pagination):** Added a PostgreSQL rollup migration (`20261120000000_add_event_pricing_and_search_indexes.sql`) maintaining `min_price`, `max_price`, and `currency` via triggers on `event_ticket_links`. Moved price bounds, `freeOnly`, and global price sorting (`price_asc`, `price_desc`) directly into PostgreSQL before pagination. Refactored the search route handler and `SearchClient.tsx` to support debounced, responsive server-side pagination across datasets larger than 500 events without truncation.
+  4. **Finding 4 (Process-Safe Atomic Quota Coordination):** Implemented atomic file locking (`.lock` files via `fs.openSync` flag `'wx'`) and exponential backoff in `TicketmasterQuotaGuard`. Added future reset window protection so local midnight crossing never resets counters while the provider is still throttling.
+  5. **Finding 5 (Strict Live Verification Assertions & Exit Codes):** Updated `scripts/verify-live-ingestion.ts` to assert that Pass 2 produces 0 duplicate canonical events (`canonicalEventsCreated === 0`) and all source events correspond to valid canonical records. Ensured failure of any assertion exits with a non-zero exit code (`process.exit(1)`).
+  6. **Finding 6 (Configurable Geographic Coverage & Nationwide Tours):** Extended `scripts/sync-all-sources.ts` to support multi-state scheduling (`--states=CO,UT,WY,NM`), multi-horizon schedules (`near-term`, `mid-term`, `long-term`, `full`), nationwide tour lookups for verified favorite artists (`preference_level = 'favorite'`), and nationwide festival tracking.
 
 ---
 
@@ -26,11 +26,11 @@ Durable architecture records belong in [`docs/architecture/`](docs/architecture/
 - `npm run format:check`: **PASS** (100% Prettier code style)
 - `npm run lint`: **PASS** (0 ESLint warnings, 0 errors)
 - `npm run typecheck`: **PASS** (`tsc --noEmit`, 0 TypeScript errors)
-- `npm test`: **PASS** (**63/63 test files, 858/858 unit tests passed in 5.85s**)
-- `npm run test:integration`: **PASS** (**13/13 test files, 104/104 database integration tests passed in 21.11s**)
-- `npx playwright test`: **PASS** (**16/16 Playwright browser tests passed in 21.3s**)
-- `npm run build`: **PASS** (Next.js 15.5.27 production build clean, 18/18 routes compiled)
-- `npx tsx scripts/verify-live-ingestion.ts`: **PASS** (303 canonical events in DB; Pass 2 100% idempotent with 0 duplicates)
+- `npm test`: **PASS** (**66/66 test files, 892/892 unit tests passed**)
+- `npm run test:integration`: **PASS** (**14/14 test files, 108/108 database integration tests passed**)
+- `npx playwright test`: **PASS** (**16/16 Playwright browser tests passed**)
+- `npm run build`: **PASS** (Next.js 15.5.27 production build clean, 19/19 routes compiled)
+- `scripts/verify-live-ingestion.ts`: **PASS** (306 canonical events in DB; Pass 2 100% idempotent with 0 duplicates; 10 event_sources relations verified with 0 orphans)
 
 ---
 
@@ -50,5 +50,5 @@ Durable architecture records belong in [`docs/architecture/`](docs/architecture/
 ## Pull Request & Deliverables
 
 1. **Pull Request:** Open at [#20](https://github.com/juko04/Encore-concert-finder/pull/20) (`feature/encore-v2-index-ticketmaster` $\to$ `main`).
-2. **Remediation Report:** [`ENCORE_V2_FINAL_REMEDIATION_REPORT.md`](ENCORE_V2_FINAL_REMEDIATION_REPORT.md).
+2. **Remediation Report:** [`ENCORE_V2_PR20_FINAL_REVIEW.md`](ENCORE_V2_PR20_FINAL_REVIEW.md).
 3. **Recommendation:** **GO (Approved for Merge)**.

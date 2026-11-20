@@ -1,5 +1,4 @@
 // @vitest-environment jsdom
-import React from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 
@@ -63,6 +62,10 @@ vi.mock('@/lib/supabase/server', () => ({
 vi.mock('@/lib/repositories/catalog-repository', () => ({
   SupabaseCatalogRepository: vi.fn().mockImplementation(() => ({
     listEvents: (...args: unknown[]) => mockListEvents(...args),
+    countEvents: (...args: unknown[]) =>
+      Promise.resolve(mockListEvents(...args)).then((r) =>
+        Array.isArray(r) ? r.length : 1,
+      ),
     getEventById: (...args: unknown[]) => mockGetEventById(...args),
   })),
 }));
@@ -451,9 +454,18 @@ describe('App Router Catalog Integration Routes', () => {
       const data = await res.json();
 
       expect(res.status).toBe(200);
-      expect(Array.isArray(data)).toBe(true);
-      expect(data).toHaveLength(1);
-      expect(data[0].id).toBe('event-cheap');
+      expect(Array.isArray(data.events)).toBe(true);
+      expect(data.events).toHaveLength(1);
+      expect(data.events[0].id).toBe('event-cheap');
+      expect(data.pagination).toEqual(
+        expect.objectContaining({
+          page: 1,
+          limit: 50,
+          totalCount: expect.any(Number),
+          totalPages: expect.any(Number),
+          hasMore: expect.any(Boolean),
+        }),
+      );
     });
 
     it('returns 500 when repository throws an error', async () => {
