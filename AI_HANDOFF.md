@@ -61,6 +61,7 @@ Durable architecture records belong in [`docs/architecture/`](docs/architecture/
 - `npm run build`: **PASS** (Next.js 15.5.27 production build clean, 19/19 routes compiled)
 - `npx playwright test`: **PASS** (**16/16 Playwright browser tests passed**)
 - `scripts/verify-live-ingestion.ts --clean --full-audit`: **PASS** (Ticketmaster: 35 created, Z2: 23 created; Pass 2: 0 duplicates; 301 relations audited with 0 orphans)
+- **GitHub Actions Remote CI:** **PASS** (Run `44694299520` on commit `8f83aa8` completed 100% green in 5m28s)
 
 ---
 
