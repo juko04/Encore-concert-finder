@@ -149,7 +149,7 @@ export async function runSyntheticAudit(): Promise<SyntheticAuditReport> {
   }
 
   // 1. Destination Safety Guard: strictly reject non-local hosts
-  assertSafeDatabaseTarget(url, false, 'Synthetic Catalog Audit');
+  assertSafeDatabaseTarget(url, false, 'Synthetic Catalog Audit', true);
 
   const parsedUrl = new URL(url);
   if (

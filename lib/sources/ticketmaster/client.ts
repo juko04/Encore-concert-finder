@@ -6,6 +6,11 @@ import {
   TicketmasterEventsResponseSchema,
 } from './types';
 import { getServerEnv } from '@/lib/env/server';
+import {
+  TicketmasterQuotaGuard,
+  getGlobalTicketmasterQuotaGuard,
+} from './quota-guard';
+import { RunRequestBudget } from './run-budget';
 
 export interface TicketmasterClientOptions {
   apiKey?: string;
@@ -13,6 +18,8 @@ export interface TicketmasterClientOptions {
   requestsPerSecond?: number;
   maxRetries?: number;
   timeoutMs?: number;
+  quotaGuard?: TicketmasterQuotaGuard;
+  runBudget?: RunRequestBudget;
 }
 
 import {
@@ -20,7 +27,9 @@ import {
   TicketmasterAuthError,
   TicketmasterError,
   TicketmasterNetworkError,
+  TicketmasterQuotaExceededError,
   TicketmasterRateLimitError,
+  TicketmasterRunBudgetExceededError,
   TicketmasterValidationError,
 } from './errors';
 
@@ -29,8 +38,13 @@ export {
   TicketmasterAuthError,
   TicketmasterError,
   TicketmasterNetworkError,
+  TicketmasterQuotaExceededError,
   TicketmasterRateLimitError,
+  TicketmasterRunBudgetExceededError,
   TicketmasterValidationError,
+  TicketmasterQuotaGuard,
+  getGlobalTicketmasterQuotaGuard,
+  RunRequestBudget,
 };
 
 export class TicketmasterApiClient {
@@ -39,6 +53,8 @@ export class TicketmasterApiClient {
   private readonly minIntervalMs: number;
   private readonly maxRetries: number;
   private readonly timeoutMs: number;
+  private readonly quotaGuard: TicketmasterQuotaGuard;
+  private readonly runBudget?: RunRequestBudget;
   private lastRequestTime = 0;
   private rateLimitQueue: Promise<void> = Promise.resolve();
 
@@ -54,7 +70,7 @@ export class TicketmasterApiClient {
       }
     }
 
-    this.apiKey = resolvedKey || '';
+    this.apiKey = (resolvedKey || '').trim();
     this.baseUrl = (
       options?.baseUrl || 'https://app.ticketmaster.com/discovery/v2'
     ).replace(/\/+$/, '');
@@ -64,6 +80,32 @@ export class TicketmasterApiClient {
     this.minIntervalMs = Math.max(100, Math.ceil(1000 / rps));
     this.maxRetries = options?.maxRetries ?? 3;
     this.timeoutMs = options?.timeoutMs ?? 10000;
+    this.quotaGuard = options?.quotaGuard ?? getGlobalTicketmasterQuotaGuard();
+    this.runBudget = options?.runBudget;
+  }
+
+  getQuotaGuard(): TicketmasterQuotaGuard {
+    return this.quotaGuard;
+  }
+
+  getRunBudget(): RunRequestBudget | undefined {
+    return this.runBudget;
+  }
+
+  private syncHeaders(res: Response): void {
+    if (!res || !res.headers || typeof res.headers.get !== 'function') return;
+    const rateLimitHeader = res.headers.get('rate-limit');
+    const rateLimitAvailableHeader = res.headers.get('rate-limit-available');
+    const rateLimitResetHeader = res.headers.get('rate-limit-reset');
+    this.quotaGuard.syncFromHeaders({
+      limit: rateLimitHeader ? parseInt(rateLimitHeader, 10) : undefined,
+      available: rateLimitAvailableHeader
+        ? parseInt(rateLimitAvailableHeader, 10)
+        : undefined,
+      reset: rateLimitResetHeader
+        ? parseInt(rateLimitResetHeader, 10)
+        : undefined,
+    });
   }
 
   /**
@@ -137,9 +179,83 @@ export class TicketmasterApiClient {
   }
 
   /**
+   * Dispatches a request using either query parameters (with validation, rate limiting, and response parsing)
+   * or a raw URL/RequestInit, enforcing daily quota budget on every call.
+   */
+  async request(
+    params: TicketmasterEventQueryParams,
+    options?: { isEssential?: boolean },
+  ): Promise<{
+    response: TicketmasterEventsResponse;
+    rawJson: string;
+    url: string;
+  }>;
+  async request(
+    url: string | URL,
+    init?: RequestInit,
+    options?: { isEssential?: boolean },
+  ): Promise<Response>;
+  async request(
+    paramOrUrl: TicketmasterEventQueryParams | string | URL,
+    initOrOptions?: RequestInit | { isEssential?: boolean },
+    maybeOptions?: { isEssential?: boolean },
+  ): Promise<
+    | Response
+    | {
+        response: TicketmasterEventsResponse;
+        rawJson: string;
+        url: string;
+      }
+  > {
+    if (typeof paramOrUrl === 'string' || paramOrUrl instanceof URL) {
+      const url = paramOrUrl.toString();
+      const sanitizedUrl = redactSensitiveUrl(url);
+      const isEssential = maybeOptions?.isEssential ?? false;
+
+      if (this.runBudget) {
+        this.runBudget.reserveRequest();
+      }
+      this.quotaGuard.recordRequest({ isEssential });
+      await this.enforceRateLimit();
+
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), this.timeoutMs);
+      try {
+        const init = initOrOptions as RequestInit | undefined;
+        const res = await fetch(url, {
+          ...init,
+          signal: init?.signal ?? controller.signal,
+        });
+        clearTimeout(timeoutId);
+        this.syncHeaders(res);
+        return res;
+      } catch (err) {
+        clearTimeout(timeoutId);
+        if (err instanceof TicketmasterError) {
+          err.message = redactSensitiveString(err.message, this.apiKey);
+          throw err;
+        }
+        const rawMessage = err instanceof Error ? err.message : String(err);
+        throw new TicketmasterNetworkError(
+          redactSensitiveString(rawMessage, this.apiKey),
+          { sanitizedUrl, cause: err },
+        );
+      }
+    }
+
+    const params = paramOrUrl as TicketmasterEventQueryParams;
+    const isEssential = (initOrOptions as { isEssential?: boolean } | undefined)
+      ?.isEssential;
+    return this.fetchEvents(params, { isEssential });
+  }
+
+  /**
    * Fetches events with rate limiting, retries on 429/5xx, and credential redaction.
    */
-  async fetchEvents(params: TicketmasterEventQueryParams = {}): Promise<{
+  async fetchEvents(
+    params: TicketmasterEventQueryParams = {},
+    options?: { isEssential?: boolean },
+  ): Promise<{
     response: TicketmasterEventsResponse;
     rawJson: string;
     url: string;
@@ -189,6 +305,10 @@ export class TicketmasterApiClient {
 
     let attempt = 0;
     while (attempt <= this.maxRetries) {
+      if (this.runBudget) {
+        this.runBudget.reserveRequest();
+      }
+      this.quotaGuard.recordRequest({ isEssential: options?.isEssential });
       await this.enforceRateLimit();
 
       try {
@@ -204,6 +324,7 @@ export class TicketmasterApiClient {
         });
 
         clearTimeout(timeoutId);
+        this.syncHeaders(res);
 
         if (res.ok) {
           const rawText = await res.text();
@@ -299,8 +420,11 @@ export class TicketmasterApiClient {
           { statusCode: res.status, sanitizedUrl },
         );
       } catch (err) {
-        if (err instanceof NonRetryableError) {
-          // Non-retryable error: fail immediately without executing retry loop
+        if (
+          err instanceof NonRetryableError ||
+          err instanceof TicketmasterQuotaExceededError
+        ) {
+          // Non-retryable error / quota exceeded: fail immediately without executing retry loop
           err.message = redactSensitiveString(err.message, this.apiKey);
           throw err;
         }

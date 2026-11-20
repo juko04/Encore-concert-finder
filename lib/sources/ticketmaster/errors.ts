@@ -109,6 +109,147 @@ export class TicketmasterRateLimitError extends TicketmasterError {
 }
 
 /**
+ * Daily quota exceeded or circuit breaker tripped.
+ */
+export class TicketmasterQuotaExceededError extends TicketmasterError {
+  readonly isCircuitBreaker: boolean;
+  readonly quotaCount?: number;
+  readonly dailyLimit?: number;
+
+  constructor(
+    message: string,
+    options: {
+      isCircuitBreaker?: boolean;
+      quotaCount?: number;
+      dailyLimit?: number;
+      sanitizedUrl?: string;
+      cause?: unknown;
+    } = {},
+  ) {
+    super(message, {
+      category: 'rate_limit_exceeded',
+      statusCode: 429,
+      sanitizedUrl: options.sanitizedUrl,
+      cause: options.cause,
+    });
+    this.name = 'TicketmasterQuotaExceededError';
+    this.isCircuitBreaker = options.isCircuitBreaker ?? false;
+    this.quotaCount = options.quotaCount;
+    this.dailyLimit = options.dailyLimit;
+  }
+}
+
+/**
+ * Per-run request budget exceeded during sync execution.
+ * Halts further requests in this run and surfaces incomplete coverage.
+ */
+export class TicketmasterRunBudgetExceededError extends TicketmasterError {
+  readonly maxRequests: number;
+  readonly consumed: number;
+
+  constructor(
+    message: string,
+    options: {
+      maxRequests: number;
+      consumed: number;
+      sanitizedUrl?: string;
+      cause?: unknown;
+    },
+  ) {
+    super(message, {
+      category: 'rate_limit_exceeded',
+      statusCode: 429,
+      sanitizedUrl: options.sanitizedUrl,
+      cause: options.cause,
+    });
+    this.name = 'TicketmasterRunBudgetExceededError';
+    this.maxRequests = options.maxRequests;
+    this.consumed = options.consumed;
+  }
+}
+
+/**
+ * Failed to acquire process-safe quota lock or filesystem error during coordination.
+ * Fail-closed: operations must abort rather than executing uncoordinated.
+ */
+export class TicketmasterQuotaLockError extends TicketmasterError {
+  readonly lockPath?: string;
+  readonly waitMs?: number;
+
+  constructor(
+    message: string,
+    options: {
+      lockPath?: string;
+      waitMs?: number;
+      sanitizedUrl?: string;
+      cause?: unknown;
+    } = {},
+  ) {
+    super(message, {
+      category: 'rate_limit_exceeded',
+      statusCode: 503,
+      sanitizedUrl: options.sanitizedUrl,
+      cause: options.cause,
+    });
+    this.name = 'TicketmasterQuotaLockError';
+    this.lockPath = options.lockPath;
+    this.waitMs = options.waitMs;
+  }
+}
+
+/**
+ * Persisted quota state file is corrupt or unreadable.
+ * Fail-closed: operations must abort rather than resetting to a full budget.
+ */
+export class TicketmasterQuotaCorruptionError extends TicketmasterError {
+  readonly filePath?: string;
+
+  constructor(
+    message: string,
+    options: {
+      filePath?: string;
+      sanitizedUrl?: string;
+      cause?: unknown;
+    } = {},
+  ) {
+    super(message, {
+      category: 'validation_error',
+      statusCode: 500,
+      sanitizedUrl: options.sanitizedUrl,
+      cause: options.cause,
+    });
+    this.name = 'TicketmasterQuotaCorruptionError';
+    this.filePath = options.filePath;
+  }
+}
+
+/**
+ * Failed to persist updated quota count to disk.
+ * Fail-closed: operations must abort rather than losing track of API consumption.
+ */
+export class TicketmasterQuotaPersistenceError extends TicketmasterError {
+  readonly filePath?: string;
+
+  constructor(
+    message: string,
+    options: {
+      filePath?: string;
+      sanitizedUrl?: string;
+      cause?: unknown;
+    } = {},
+  ) {
+    super(message, {
+      category: 'database_error',
+      statusCode: 500,
+      sanitizedUrl: options.sanitizedUrl,
+      cause: options.cause,
+    });
+    this.name = 'TicketmasterQuotaPersistenceError';
+    this.filePath = options.filePath;
+  }
+}
+
+/**
  * Network failure, connection abort, or timeout when retries are exhausted.
  */
 export class TicketmasterNetworkError extends TicketmasterError {

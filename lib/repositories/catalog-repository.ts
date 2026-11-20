@@ -83,6 +83,9 @@ interface EventRow {
   is_multi_day: boolean;
   official_url: string | null;
   primary_ticket_url: string | null;
+  min_price?: number | null;
+  max_price?: number | null;
+  currency?: string | null;
   announced_at: string | null;
   created_at: string;
   updated_at: string;
@@ -230,6 +233,19 @@ function mapEventRow(row: EventRow): Event {
     isMultiDay: row.is_multi_day,
     officialUrl: row.official_url,
     primaryTicketUrl: row.primary_ticket_url,
+    minPrice:
+      row.min_price !== undefined
+        ? row.min_price !== null
+          ? Number(row.min_price)
+          : null
+        : undefined,
+    maxPrice:
+      row.max_price !== undefined
+        ? row.max_price !== null
+          ? Number(row.max_price)
+          : null
+        : undefined,
+    currency: row.currency,
     announcedAt: row.announced_at,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -451,11 +467,20 @@ export class SupabaseCatalogRepository implements ICatalogRepository {
         }
       }
       const allMerged = Array.from(mergedMap.values());
-      allMerged.sort(
-        (a, b) =>
-          a.localStartDate.localeCompare(b.localStartDate) ||
-          a.id.localeCompare(b.id),
-      );
+      if (filters?.sortBy === 'price_asc') {
+        allMerged.sort(
+          (a, b) =>
+            (a.minPrice ?? Infinity) - (b.minPrice ?? Infinity) ||
+            a.localStartDate.localeCompare(b.localStartDate) ||
+            a.id.localeCompare(b.id),
+        );
+      } else {
+        allMerged.sort(
+          (a, b) =>
+            a.localStartDate.localeCompare(b.localStartDate) ||
+            a.id.localeCompare(b.id),
+        );
+      }
       const limit = globalLimit !== undefined ? globalLimit : allMerged.length;
       return allMerged.slice(globalOffset, globalOffset + limit);
     }
@@ -587,10 +612,6 @@ export class SupabaseCatalogRepository implements ICatalogRepository {
       query = query.or(orClauses.join(','));
     }
 
-    query = query
-      .order('local_start_date', { ascending: true })
-      .order('id', { ascending: true });
-
     if (filters?.fromDate) {
       query = query.gte('local_start_date', filters.fromDate);
     }
@@ -605,6 +626,54 @@ export class SupabaseCatalogRepository implements ICatalogRepository {
     }
     if (filters?.region) {
       query = query.eq('region', filters.region);
+    }
+
+    // Database-level price filtering BEFORE pagination
+    if (filters?.freeOnly) {
+      query = query.or('event_kind.eq.free_event,min_price.eq.0');
+    }
+    if (filters?.minPrice !== undefined) {
+      query = query.gte('min_price', filters.minPrice);
+    }
+    if (filters?.maxPrice !== undefined) {
+      const includeUnknown = filters.includeUnknownPrice ?? true;
+      if (includeUnknown) {
+        query = query.or(
+          `min_price.is.null,min_price.lte.${filters.maxPrice},event_kind.eq.free_event`,
+        );
+      } else {
+        query = query.or(
+          `min_price.lte.${filters.maxPrice},event_kind.eq.free_event`,
+        );
+      }
+    }
+
+    // Database-level sorting BEFORE pagination
+    const sortBy = filters?.sortBy ?? 'date_asc';
+    if (sortBy === 'price_asc') {
+      query = query
+        .order('min_price', { ascending: true, nullsFirst: false })
+        .order('local_start_date', { ascending: true })
+        .order('id', { ascending: true });
+    } else if (sortBy === 'price_desc') {
+      query = query
+        .order('min_price', { ascending: false, nullsFirst: false })
+        .order('local_start_date', { ascending: true })
+        .order('id', { ascending: true });
+    } else if (sortBy === 'date_desc') {
+      query = query
+        .order('local_start_date', { ascending: false })
+        .order('id', { ascending: true });
+    } else if (sortBy === 'title_asc') {
+      query = query
+        .order('name', { ascending: true })
+        .order('local_start_date', { ascending: true })
+        .order('id', { ascending: true });
+    } else {
+      // date_asc (default)
+      query = query
+        .order('local_start_date', { ascending: true })
+        .order('id', { ascending: true });
     }
 
     if (filters?.offset !== undefined && filters.offset > 0) {
@@ -636,43 +705,58 @@ export class SupabaseCatalogRepository implements ICatalogRepository {
     }
 
     const eventIds = rows.map((r) => r.id);
-
-    // Batch-fetch artists for all returned events (1 query, ordered by sort_order)
-    const { data: allArtistLinks, error: artistError } = await this.client
-      .from('event_artists')
-      .select('*, artists(*, artist_external_ids(provider, external_id))')
-      .in('event_id', eventIds)
-      .order('sort_order', { ascending: true });
-
-    if (artistError) {
-      throw new Error(
-        `Failed to batch-fetch event artists: ${artistError.message}`,
-      );
+    if (eventIds.length === 0) {
+      return [];
     }
 
-    // Batch-fetch ticket links for all returned events (1 query)
-    const { data: allTicketLinks, error: ticketError } = await this.client
-      .from('event_ticket_links')
-      .select('*')
-      .in('event_id', eventIds);
+    // Chunk eventIds in batches of 25 to prevent PostgREST URI buffer overflow (HTTP 414 URI Too Long)
+    const BATCH_CHUNK_SIZE = 25;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const allArtistLinks: any[] = [];
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const allTicketLinks: any[] = [];
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const allSourceLinks: any[] = [];
 
-    if (ticketError) {
-      throw new Error(
-        `Failed to batch-fetch event ticket links: ${ticketError.message}`,
-      );
-    }
+    for (let i = 0; i < eventIds.length; i += BATCH_CHUNK_SIZE) {
+      const chunk = eventIds.slice(i, i + BATCH_CHUNK_SIZE);
 
-    // Batch-fetch event sources with joined source registry relation for all returned events (1 query)
-    const { data: allSourceLinks, error: sourceError } = await this.client
-      .from('event_sources')
-      .select('event_id, source_id, source_url, is_current, sources(*)')
-      .in('event_id', eventIds)
-      .eq('is_current', true);
+      const [artistRes, ticketRes, sourceRes] = await Promise.all([
+        this.client
+          .from('event_artists')
+          .select('*, artists(*, artist_external_ids(provider, external_id))')
+          .in('event_id', chunk)
+          .order('sort_order', { ascending: true }),
+        this.client
+          .from('event_ticket_links')
+          .select('*')
+          .in('event_id', chunk),
+        this.client
+          .from('event_sources')
+          .select('event_id, source_id, source_url, is_current, sources(*)')
+          .in('event_id', chunk)
+          .eq('is_current', true),
+      ]);
 
-    if (sourceError) {
-      throw new Error(
-        `Failed to batch-fetch event sources: ${sourceError.message}`,
-      );
+      if (artistRes.error) {
+        throw new Error(
+          `Failed to batch-fetch event artists: ${artistRes.error.message}`,
+        );
+      }
+      if (ticketRes.error) {
+        throw new Error(
+          `Failed to batch-fetch event ticket links: ${ticketRes.error.message}`,
+        );
+      }
+      if (sourceRes.error) {
+        throw new Error(
+          `Failed to batch-fetch event sources: ${sourceRes.error.message}`,
+        );
+      }
+
+      if (artistRes.data) allArtistLinks.push(...artistRes.data);
+      if (ticketRes.data) allTicketLinks.push(...ticketRes.data);
+      if (sourceRes.data) allSourceLinks.push(...sourceRes.data);
     }
 
     // Group relations in-memory by event_id
@@ -752,10 +836,14 @@ export class SupabaseCatalogRepository implements ICatalogRepository {
       const ticketLinks = ticketLinksByEventId.get(event.id) || [];
       const sources = sourcesByEventId.get(event.id) || [];
 
-      const minPrice = ticketLinks.reduce<number | null>((min, tl) => {
+      let minPrice = ticketLinks.reduce<number | null>((min, tl) => {
         if (tl.minPrice === null || tl.minPrice === undefined) return min;
         return min === null ? tl.minPrice : Math.min(min, tl.minPrice);
       }, null);
+
+      if (minPrice === null && event.eventKind === 'free_event') {
+        minPrice = 0;
+      }
 
       const maxPrice = ticketLinks.reduce<number | null>((max, tl) => {
         if (tl.maxPrice === null || tl.maxPrice === undefined) return max;
@@ -769,6 +857,7 @@ export class SupabaseCatalogRepository implements ICatalogRepository {
         title: event.name,
         venueName: venue?.name ?? 'Venue TBA',
         venueId: event.venueId,
+        venue,
         city: venue?.city ?? event.city ?? undefined,
         region: venue?.region ?? event.region ?? undefined,
         lat: venue?.lat ?? event.lat ?? null,
@@ -786,10 +875,200 @@ export class SupabaseCatalogRepository implements ICatalogRepository {
         currency,
         sourceName: sources.length > 0 ? sources[0].name : undefined,
         sources,
+        ticketLinks,
       });
     }
 
     return summaries;
+  }
+
+  async countEvents(filters?: EventListFilters): Promise<number> {
+    const CHUNK_SIZE = 50;
+    if (filters?.artistIds && filters.artistIds.length > CHUNK_SIZE) {
+      const chunks: string[][] = [];
+      for (let i = 0; i < filters.artistIds.length; i += CHUNK_SIZE) {
+        chunks.push(filters.artistIds.slice(i, i + CHUNK_SIZE));
+      }
+      const chunkPromises = chunks.map((chunk) =>
+        this.listEvents({
+          ...filters,
+          artistIds: chunk,
+          offset: undefined,
+          limit: undefined,
+        }),
+      );
+      const chunkResults = await Promise.all(chunkPromises);
+      const seen = new Set<string>();
+      for (const res of chunkResults) {
+        for (const ev of res) {
+          seen.add(ev.id);
+        }
+      }
+      return seen.size;
+    }
+
+    let selectString = 'id';
+    if (
+      (filters?.artistIds && filters.artistIds.length > 0) ||
+      filters?.artistId
+    ) {
+      selectString = 'id, event_artists!inner(artist_id)';
+    }
+
+    let query = this.client
+      .from('events')
+      .select(selectString, { count: 'exact', head: true });
+
+    if (filters?.status) {
+      if (Array.isArray(filters.status)) {
+        query = query.in('status', filters.status);
+      } else {
+        query = query.eq('status', filters.status);
+      }
+    }
+
+    if (filters?.artistIds && filters.artistIds.length > 0) {
+      query = query.in('event_artists.artist_id', filters.artistIds);
+    } else if (filters?.artistId) {
+      query = query.eq('event_artists.artist_id', filters.artistId);
+    }
+
+    if (filters?.searchQuery?.trim()) {
+      const trimmedSearch = filters.searchQuery.trim();
+      const escaped = escapeLikePattern(trimmedSearch);
+      const quotedEscaped = escaped.replace(/"/g, '""');
+      const orClauses: string[] = [`name.ilike."%${quotedEscaped}%"`];
+
+      // Query matching venues
+      const matchedVenueIds: string[] = [];
+      const VENUE_BATCH = 1000;
+      let venueOffset = 0;
+      while (true) {
+        const { data: venuesData, error: venueError } = await this.client
+          .from('venues')
+          .select('id')
+          .ilike('name', `%${escaped}%`)
+          .order('id', { ascending: true })
+          .range(venueOffset, venueOffset + VENUE_BATCH - 1);
+        if (venueError) {
+          throw new Error(
+            `Failed to query venues for search: ${venueError.message}`,
+          );
+        }
+        if (!venuesData || venuesData.length === 0) break;
+        for (const v of venuesData) {
+          matchedVenueIds.push(v.id);
+        }
+        if (venuesData.length < VENUE_BATCH) break;
+        venueOffset += VENUE_BATCH;
+      }
+      for (let i = 0; i < matchedVenueIds.length; i += 200) {
+        const chunk = matchedVenueIds.slice(i, i + 200);
+        orClauses.push(`venue_id.in.(${chunk.join(',')})`);
+      }
+
+      // Query matching artists
+      const matchedArtistIds: string[] = [];
+      const ARTIST_BATCH = 1000;
+      let artistOffset = 0;
+      while (true) {
+        const { data: artistsData, error: artistError } = await this.client
+          .from('artists')
+          .select('id')
+          .ilike('name', `%${escaped}%`)
+          .order('id', { ascending: true })
+          .range(artistOffset, artistOffset + ARTIST_BATCH - 1);
+        if (artistError) {
+          throw new Error(
+            `Failed to query artists for search: ${artistError.message}`,
+          );
+        }
+        if (!artistsData || artistsData.length === 0) break;
+        for (const a of artistsData) {
+          matchedArtistIds.push(a.id);
+        }
+        if (artistsData.length < ARTIST_BATCH) break;
+        artistOffset += ARTIST_BATCH;
+      }
+
+      if (matchedArtistIds.length > 0) {
+        const matchedEventIds: string[] = [];
+        const seenEventIds = new Set<string>();
+        const EA_BATCH = 1000;
+        let eaOffset = 0;
+        while (true) {
+          const { data: eaData, error: eaError } = await this.client
+            .from('event_artists')
+            .select('event_id')
+            .in('artist_id', matchedArtistIds)
+            .order('event_id', { ascending: true })
+            .range(eaOffset, eaOffset + EA_BATCH - 1);
+          if (eaError) {
+            throw new Error(
+              `Failed to query event_artists for search: ${eaError.message}`,
+            );
+          }
+          if (!eaData || eaData.length === 0) break;
+          for (const ea of eaData) {
+            if (!seenEventIds.has(ea.event_id)) {
+              seenEventIds.add(ea.event_id);
+              matchedEventIds.push(ea.event_id);
+            }
+          }
+          if (eaData.length < EA_BATCH) break;
+          eaOffset += EA_BATCH;
+        }
+
+        for (let i = 0; i < matchedEventIds.length; i += 200) {
+          const chunk = matchedEventIds.slice(i, i + 200);
+          orClauses.push(`id.in.(${chunk.join(',')})`);
+        }
+      }
+
+      query = query.or(orClauses.join(','));
+    }
+
+    if (filters?.fromDate) {
+      query = query.gte('local_start_date', filters.fromDate);
+    }
+    if (filters?.toDate) {
+      query = query.lte('local_start_date', filters.toDate);
+    }
+    if (filters?.venueId) {
+      query = query.eq('venue_id', filters.venueId);
+    }
+    if (filters?.city) {
+      query = query.ilike('city', `%${filters.city}%`);
+    }
+    if (filters?.region) {
+      query = query.eq('region', filters.region);
+    }
+
+    if (filters?.freeOnly) {
+      query = query.or('event_kind.eq.free_event,min_price.eq.0');
+    }
+    if (filters?.minPrice !== undefined) {
+      query = query.gte('min_price', filters.minPrice);
+    }
+    if (filters?.maxPrice !== undefined) {
+      const includeUnknown = filters.includeUnknownPrice ?? true;
+      if (includeUnknown) {
+        query = query.or(
+          `min_price.is.null,min_price.lte.${filters.maxPrice},event_kind.eq.free_event`,
+        );
+      } else {
+        query = query.or(
+          `min_price.lte.${filters.maxPrice},event_kind.eq.free_event`,
+        );
+      }
+    }
+
+    const { count, error } = await query;
+    if (error) {
+      throw new Error(`Failed to count events: ${error.message}`);
+    }
+
+    return count ?? 0;
   }
 
   async listCities(): Promise<string[]> {

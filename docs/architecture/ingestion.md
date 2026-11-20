@@ -201,3 +201,72 @@ Examples:
 - rescheduled date
 - canceled show
 - changed lineup
+
+---
+
+## Production Scheduling & Quota Governance (ISS-B & ISS-A)
+
+### Ticketmaster Quota Constraints
+Ticketmaster Discovery API v2 enforces strict account-wide rate limits:
+- **Daily Quota:** 5,000 requests per 24-hour UTC window.
+- **Burst Rate:** 5 requests per second (Encore defaults conservatively to 2 req/sec with 500ms spacing).
+
+### Production Single-Runner Serialized Execution Model
+Independent serverless or cloud runners cannot coordinate local filesystem state without centralized locking. To prevent race conditions, uncoordinated quota exhaustion, and 429 penalties in production:
+
+1. **Serialized Workflow Concurrency & GitHub Actions Queue Semantics:**
+   Scheduled jobs in CI/CD (e.g. GitHub Actions) MUST configure a repository-wide concurrency group:
+   ```yaml
+   concurrency:
+     group: ticketmaster-ingestion
+     cancel-in-progress: false
+   ```
+   - **Concurrency Semantics & Queue Depth:** GitHub Actions enforces a maximum queue depth of **1 pending run** when `cancel-in-progress: false` is used. If multiple scheduled triggers or manual dispatches arrive while a job is running, GitHub Actions replaces and cancels previously queued pending jobs in favor of the newest run.
+   - **Durable Missed-Run Recovery:** To ensure intermediate horizons (such as bi-weekly mid-term or weekly long-term syncs) cannot be silently lost or starved if a scheduled trigger is delayed or canceled by GitHub Actions queue replacement, `sync-all-sources.ts` implements durable missed-run recovery:
+     - Maintains immutable synchronization checkpoints in `raw_ingests` (`source_url: 'encore://sync-checkpoint/ticketmaster/<horizon>'`).
+     - Defines explicit horizon SLAs: **near-term** (24h SLA), **mid-term** (96h SLA), and **long-term** (192h SLA).
+     - Every scheduled run detects overdue horizons and automatically cascades to recover missed synchronization windows within the bounded per-run request budget (`--max-requests`).
+     - Operators can also invoke `--horizon=auto` to automatically synchronize all overdue horizons.
+
+2. **Ephemeral Quota Reconciliation via Response Headers:**
+   When an ephemeral cloud runner (e.g. GitHub Actions container) starts up, it does not require a persistent external cache (like Redis) to discover account-wide usage. On its very first request, the Ticketmaster Discovery API returns authoritative usage headers:
+   - `rate-limit`: e.g. 5000 (daily allocation)
+   - `rate-limit-available`: e.g. 4820 (remaining requests in window)
+   - `rate-limit-reset`: UTC timestamp in milliseconds when daily quota refreshes
+   The client immediately synchronizes these values into `TicketmasterQuotaGuard`, discovering current account-wide consumption.
+
+3. **Atomic Per-Run Request Budget (`RunRequestBudget`):**
+   Every execution is bounded by an atomic per-run request budget (e.g. `--max-requests=250` for daily near-term, `--max-requests=500` for weekly long-term):
+   - Checked atomically before dispatching any HTTP request across regional queries, partition bisections, pagination pages, retries, favorite artist tours, and festival searches.
+   - When exhausted, throws `TicketmasterRunBudgetExceededError`, which is caught gracefully by the partition coordinator and ingestion pipeline to mark `hasIncompleteCoverage: true` and report status `'partial'`.
+   - Never exceeds the allocated run budget.
+
+4. **Rolling Temporal Horizons:**
+   Rather than requesting 365 days across all geographies daily:
+   - **Near-term (0–14 days):** Daily sync at 06:00 UTC (high frequency, small page yield, bounded request budget of 250 requests).
+   - **Mid-term (15–60 days):** Bi-weekly sync on Wednesdays/Sundays at 08:00 UTC (bounded by 500 requests).
+   - **Long-term (61–365 days):** Weekly sync on Saturdays at 10:00 UTC (bounded by 500 requests).
+   - Unused daily headroom (>3,500 requests) remains safely reserved for user queries and live operations.
+
+5. **Strict Failure Detection & Exit Codes:**
+   `scripts/sync-all-sources.ts` returns:
+   - `exit 0`: ONLY when all configured sources succeed with 100% complete coverage.
+   - `exit 2`: When one or more sources have partial coverage or budget exhaustion (`status === 'partial'`).
+   - `exit 1`: When any source fails completely (`status === 'failed'`) or a fatal error occurs.
+   - `--json`: Outputs machine-readable run statistics uploaded as build artifacts.
+
+6. **Fail-Closed Quota Guard & Safe Atomic Lock Reclamation (`TicketmasterQuotaGuard`):**
+   - File locks use unique UUID tokens (`lockId`) and PID liveness verification (`process.kill(pid, 0)`).
+   - A lock is NEVER stolen or reclaimed if the holding process is demonstrably alive, even after 15+ seconds.
+   - **Atomic Reclamation Protocol (`<lockPath>.<deadLockId>.reclaim`):** When multiple concurrent workers simultaneously observe an abandoned lock from a dead process, only the worker that successfully acquires an exclusive atomic reclamation token file via `open(O_CREAT | O_EXCL)` is permitted to reclaim the lock. The reclaimer verifies that the file on disk still contains the matching `deadLockId` before unlinking, completely eliminating the race where a delayed worker deletes another process's newly acquired replacement lock.
+   - Replaced locks cannot be deleted by old delayed owners upon exit (UUID ownership checks on release).
+   - State corruption, lock timeouts, and filesystem write failures strictly fail closed.
+
+7. **Production Pre-Activation Checklist:**
+   Before activating scheduled cron triggers in production:
+   - Set GitHub repository secret `SUPABASE_URL` to production database instance.
+   - Set GitHub repository secret `SUPABASE_SERVICE_ROLE_KEY`.
+   - Set GitHub repository secret `TICKETMASTER_API_KEY`.
+   - Set GitHub repository secret `ENCORE_APPROVED_PROD_HOSTS` matching approved production hostnames.
+   - Set GitHub repository secret `ENCORE_PROD_PROJECT_REF`.
+   - Verify workflow template `.github/workflows/scheduled-sync.yml.example` is copied to `.github/workflows/scheduled-sync.yml`.

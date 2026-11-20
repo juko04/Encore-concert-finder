@@ -1,11 +1,13 @@
 import type { EventCandidate } from '@/lib/domain/event-candidate';
-import type { Source } from '@/lib/domain/source';
+import type { EventSourceAdapter, Source } from '@/lib/domain/source';
 import type {
   ICatalogRepository,
   IEventCandidateRepository,
   IRawIngestRepository,
   ISourceRepository,
 } from '@/lib/repositories/interfaces';
+
+export type IVenueSourceAdapter = EventSourceAdapter;
 
 export interface VenueSourceConfig {
   id?: string;

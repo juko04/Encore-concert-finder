@@ -12,6 +12,7 @@ import {
   SPOTIFY_OAUTH_BINDING_COOKIE,
   SPOTIFY_OAUTH_STATE_COOKIE,
   SPOTIFY_OAUTH_VERIFIER_COOKIE,
+  validateSpotifyRedirectUri,
 } from '@/lib/sources/spotify/oauth';
 
 export const dynamic = 'force-dynamic';
@@ -41,6 +42,19 @@ export async function GET(request: Request) {
     !serverEnv.SPOTIFY_REDIRECT_URI ||
     !serverEnv.SPOTIFY_TOKEN_ENCRYPTION_KEY
   ) {
+    return NextResponse.redirect(
+      new URL('/profile/taste?spotify_error=not_configured', request.url),
+    );
+  }
+
+  const redirectValidation = validateSpotifyRedirectUri(
+    serverEnv.SPOTIFY_REDIRECT_URI,
+  );
+  if (!redirectValidation.isValid) {
+    console.warn(
+      '[Spotify Connect] Invalid redirect URI configuration:',
+      redirectValidation.error,
+    );
     return NextResponse.redirect(
       new URL('/profile/taste?spotify_error=not_configured', request.url),
     );

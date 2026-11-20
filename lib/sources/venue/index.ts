@@ -8,3 +8,4 @@ export * from './cervantes';
 export * from './independent-venue-group';
 export * from './velvet-elk';
 export * from './roots-music-project';
+export * from './z2-entertainment';

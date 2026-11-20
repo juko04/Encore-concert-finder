@@ -7,7 +7,13 @@ import {
   SpotifyRateLimitError,
   VALID_SPOTIFY_TIME_RANGES,
 } from '@/lib/domain/spotify';
-import { SPOTIFY_TOKEN_ENDPOINT } from './oauth';
+import {
+  diagnoseSpotifyOAuthConfig,
+  SPOTIFY_TOKEN_ENDPOINT,
+  validateSpotifyRedirectUri,
+} from './oauth';
+
+export { diagnoseSpotifyOAuthConfig, validateSpotifyRedirectUri };
 
 export const SPOTIFY_API_BASE_URL = 'https://api.spotify.com/v1';
 
@@ -50,6 +56,13 @@ export class SpotifyApiClient {
       throw new Error('SpotifyApiClient requires a valid redirectUri.');
     }
 
+    const redirectValidation = validateSpotifyRedirectUri(config.redirectUri);
+    if (!redirectValidation.isValid) {
+      throw new Error(
+        `SpotifyApiClient invalid redirectUri: ${redirectValidation.error}`,
+      );
+    }
+
     this.clientId = config.clientId.trim();
     this.clientSecret = config.clientSecret.trim();
     this.redirectUri = config.redirectUri.trim();
@@ -90,24 +103,42 @@ export class SpotifyApiClient {
       code_verifier: codeVerifier.trim(),
     });
 
-    const response = await this.fetchFn(SPOTIFY_TOKEN_ENDPOINT, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
-        Authorization: this.getBasicAuthHeader(),
-      },
-      body: bodyParams.toString(),
-    });
+    let response: Response;
+    try {
+      response = await this.fetchFn(SPOTIFY_TOKEN_ENDPOINT, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          Authorization: this.getBasicAuthHeader(),
+        },
+        body: bodyParams.toString(),
+      });
+    } catch (fetchErr) {
+      throw new Error(
+        `Spotify token exchange network request failed: ${fetchErr instanceof Error ? fetchErr.message : String(fetchErr)}`,
+      );
+    }
 
     if (!response.ok) {
-      if (response.status === 401) {
+      if (response.status === 400 || response.status === 401) {
         throw new SpotifyAuthenticationError(
           'Failed to exchange Spotify authorization code: invalid client credentials or expired code.',
+        );
+      }
+      if (response.status === 403) {
+        throw new SpotifyForbiddenError(
+          'Access to the Spotify application is restricted in Development Mode.',
         );
       }
       if (response.status === 429) {
         const retryAfter = this.parseRetryAfter(response);
         throw new SpotifyRateLimitError(retryAfter);
+      }
+      if (response.status >= 500) {
+        const errText = await response.text().catch(() => '');
+        throw new Error(
+          `Spotify token exchange service unavailable (${response.status}): ${errText}`,
+        );
       }
       const errText = await response.text().catch(() => '');
       throw new Error(
@@ -155,24 +186,42 @@ export class SpotifyApiClient {
       client_id: this.clientId,
     });
 
-    const response = await this.fetchFn(SPOTIFY_TOKEN_ENDPOINT, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
-        Authorization: this.getBasicAuthHeader(),
-      },
-      body: bodyParams.toString(),
-    });
+    let response: Response;
+    try {
+      response = await this.fetchFn(SPOTIFY_TOKEN_ENDPOINT, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          Authorization: this.getBasicAuthHeader(),
+        },
+        body: bodyParams.toString(),
+      });
+    } catch (fetchErr) {
+      throw new Error(
+        `Spotify token refresh network request failed: ${fetchErr instanceof Error ? fetchErr.message : String(fetchErr)}`,
+      );
+    }
 
     if (!response.ok) {
       if (response.status === 400 || response.status === 401) {
         throw new SpotifyAuthenticationError(
-          'Spotify refresh token is revoked or invalid. User reauthorization required.',
+          'Spotify authorization expired or is invalid. User reauthorization required.',
+        );
+      }
+      if (response.status === 403) {
+        throw new SpotifyForbiddenError(
+          'Access to the Spotify application is restricted in Development Mode.',
         );
       }
       if (response.status === 429) {
         const retryAfter = this.parseRetryAfter(response);
         throw new SpotifyRateLimitError(retryAfter);
+      }
+      if (response.status >= 500) {
+        const errText = await response.text().catch(() => '');
+        throw new Error(
+          `Spotify token refresh service unavailable (${response.status}): ${errText}`,
+        );
       }
       const errText = await response.text().catch(() => '');
       throw new Error(
@@ -207,15 +256,24 @@ export class SpotifyApiClient {
       throw new Error('Access token is required.');
     }
 
-    const response = await this.fetchFn(`${SPOTIFY_API_BASE_URL}/me`, {
-      headers: {
-        Authorization: `Bearer ${accessToken.trim()}`,
-      },
-    });
+    let response: Response;
+    try {
+      response = await this.fetchFn(`${SPOTIFY_API_BASE_URL}/me`, {
+        headers: {
+          Authorization: `Bearer ${accessToken.trim()}`,
+        },
+      });
+    } catch (fetchErr) {
+      throw new Error(
+        `Spotify user profile network request failed: ${fetchErr instanceof Error ? fetchErr.message : String(fetchErr)}`,
+      );
+    }
 
     if (!response.ok) {
       if (response.status === 401) {
-        throw new SpotifyAuthenticationError();
+        throw new SpotifyAuthenticationError(
+          'Spotify authorization expired or is invalid. User reauthorization required.',
+        );
       }
       if (response.status === 403) {
         throw new SpotifyForbiddenError();
@@ -223,6 +281,12 @@ export class SpotifyApiClient {
       if (response.status === 429) {
         const retryAfter = this.parseRetryAfter(response);
         throw new SpotifyRateLimitError(retryAfter);
+      }
+      if (response.status >= 500) {
+        const errText = await response.text().catch(() => '');
+        throw new Error(
+          `Spotify user profile service unavailable (${response.status}): ${errText}`,
+        );
       }
       const errText = await response.text().catch(() => '');
       throw new Error(
@@ -270,15 +334,24 @@ export class SpotifyApiClient {
     url.searchParams.set('time_range', timeRange);
     url.searchParams.set('limit', clampedLimit.toString());
 
-    const response = await this.fetchFn(url.toString(), {
-      headers: {
-        Authorization: `Bearer ${accessToken.trim()}`,
-      },
-    });
+    let response: Response;
+    try {
+      response = await this.fetchFn(url.toString(), {
+        headers: {
+          Authorization: `Bearer ${accessToken.trim()}`,
+        },
+      });
+    } catch (fetchErr) {
+      throw new Error(
+        `Spotify top artists network request failed: ${fetchErr instanceof Error ? fetchErr.message : String(fetchErr)}`,
+      );
+    }
 
     if (!response.ok) {
       if (response.status === 401) {
-        throw new SpotifyAuthenticationError();
+        throw new SpotifyAuthenticationError(
+          'Spotify authorization expired or is invalid. User reauthorization required.',
+        );
       }
       if (response.status === 403) {
         throw new SpotifyForbiddenError();
@@ -286,6 +359,12 @@ export class SpotifyApiClient {
       if (response.status === 429) {
         const retryAfter = this.parseRetryAfter(response);
         throw new SpotifyRateLimitError(retryAfter);
+      }
+      if (response.status >= 500) {
+        const errText = await response.text().catch(() => '');
+        throw new Error(
+          `Spotify top artists service unavailable (${response.status}): ${errText}`,
+        );
       }
       const errText = await response.text().catch(() => '');
       throw new Error(

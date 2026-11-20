@@ -1,6 +1,7 @@
 import type {
   CandidateArtist,
   CandidateArtistExternalId,
+  CandidatePrice,
   EventCandidate,
   EventKind,
   StartTimePrecision,
@@ -81,7 +82,7 @@ export function parseTicketmasterEvent(
 
       artists.push({
         name: attr.name,
-        billingPosition: index === 0 ? 'headliner' : 'support',
+        billingPosition: 'unknown',
         sortOrder: index,
         externalIds,
       });
@@ -136,15 +137,63 @@ export function parseTicketmasterEvent(
     status = 'rescheduled';
   }
 
-  // 6. Price Extraction
+  // 6. Price & Fee Extraction
+  // Note: Discovery API v2 priceRanges contains min, max, currency, and type.
+  // Fee breakdowns are not provided at Discovery tier; fee status is tracked explicitly.
   const priceRange = event.priceRanges?.[0];
-  const price = priceRange
+  const isFree =
+    priceRange && priceRange.min === 0 && priceRange.max === 0
+      ? true
+      : undefined;
+
+  // Extract all-inclusive pricing flag if verified in provider payload
+  let allInclusivePricing: boolean | undefined = undefined;
+  if (typeof event.allInclusivePricing === 'boolean') {
+    allInclusivePricing = event.allInclusivePricing;
+  } else if (
+    typeof event.allInclusivePricing === 'object' &&
+    event.allInclusivePricing !== null &&
+    typeof event.allInclusivePricing.enabled === 'boolean'
+  ) {
+    allInclusivePricing = event.allInclusivePricing.enabled;
+  } else if (typeof event.ticketing?.allInclusivePricing === 'boolean') {
+    allInclusivePricing = event.ticketing.allInclusivePricing;
+  } else if (
+    typeof event.ticketing?.allInclusivePricing === 'object' &&
+    event.ticketing.allInclusivePricing !== null &&
+    typeof event.ticketing.allInclusivePricing.enabled === 'boolean'
+  ) {
+    allInclusivePricing = event.ticketing.allInclusivePricing.enabled;
+  }
+
+  const feeStatus: 'all_inclusive' | 'fees_excluded' | 'unknown' =
+    allInclusivePricing === true
+      ? 'all_inclusive'
+      : allInclusivePricing === false
+        ? 'fees_excluded'
+        : 'unknown';
+
+  const price: CandidatePrice | undefined = priceRange
     ? {
         min: priceRange.min,
         max: priceRange.max,
         currency: priceRange.currency || undefined,
+        feeStatus,
+        ...(isFree !== undefined ? { isFree } : {}),
       }
     : undefined;
+
+  // Extract ticketing status if present
+  let ticketingStatus: string | undefined = undefined;
+  if (typeof event.ticketing?.status === 'string') {
+    ticketingStatus = event.ticketing.status;
+  } else if (
+    typeof event.ticketing?.status === 'object' &&
+    event.ticketing.status !== null &&
+    typeof event.ticketing.status.code === 'string'
+  ) {
+    ticketingStatus = event.ticketing.status.code;
+  }
 
   // 7. Event Kind & Festival Detection
   const isMultiDay = Boolean(
@@ -232,6 +281,11 @@ export function parseTicketmasterEvent(
       status,
       providerStatus: event.dates.status?.code,
       reviewReasons: reviewReasons.length > 0 ? reviewReasons : undefined,
+      allInclusivePricing,
+      ticketingStatus,
+      ticketing: event.ticketing,
+      priceRanges: event.priceRanges,
+      feeStatus,
     },
   };
 }

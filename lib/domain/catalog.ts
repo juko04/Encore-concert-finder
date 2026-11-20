@@ -109,6 +109,9 @@ export interface Event {
   isMultiDay: boolean;
   officialUrl?: string | null;
   primaryTicketUrl?: string | null;
+  minPrice?: number | null;
+  maxPrice?: number | null;
+  currency?: string | null;
   announcedAt?: string | null;
   createdAt?: string;
   updatedAt?: string;
@@ -206,6 +209,7 @@ export interface CanonicalEventSummary {
   title: string;
   venueName: string;
   venueId?: string | null;
+  venue?: Venue | null;
   city?: string;
   region?: string;
   lat?: number | null;
@@ -228,6 +232,8 @@ export interface CanonicalEventSummary {
   currency?: string | null;
   sourceName?: string;
   sources?: CanonicalEventSourceSummary[];
+  ticketLinks?: EventTicketLink[];
+  inventoryStatus?: TicketInventoryStatus;
 }
 
 export interface CanonicalEventDetail extends Event {

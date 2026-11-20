@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test';
 
 test.describe('Application Smoke Tests', () => {
-  test('successfully loads the landing page and displays title and status', async ({
+  test('successfully loads the landing page and displays Encore Index navigation and feed', async ({
     page,
   }) => {
     const response = await page.goto('/');
@@ -9,18 +9,29 @@ test.describe('Application Smoke Tests', () => {
     // Check HTTP status
     expect(response?.status()).toBe(200);
 
-    // Verify main landing title
-    const heading = page.getByTestId('landing-title');
-    await expect(heading).toBeVisible();
-    await expect(heading).toContainText('Encore');
-    await expect(heading).toContainText('Concert Finder');
+    // Verify Encore Index branding
+    await expect(page.getByRole('link', { name: /ENCORE/ })).toBeVisible();
+    await expect(page.getByText('// INDEX')).toBeVisible();
+    await expect(
+      page.locator('header').getByText('Curated Live Music'),
+    ).toBeVisible();
 
-    // Verify PWA Shell and Foundations badge
-    await expect(page.getByText('Phase 0: Foundations')).toBeVisible();
-    await expect(page.getByText('PWA Shell')).toBeVisible();
+    // Verify navigation tabs
+    await expect(page.getByRole('link', { name: 'Shows' })).toBeVisible();
+    await expect(page.getByRole('link', { name: 'Search' })).toBeVisible();
+    await expect(page.getByRole('link', { name: /Saved/ })).toBeVisible();
+    await expect(page.getByRole('link', { name: 'Preferences' })).toBeVisible();
 
-    // Verify system foundation section
-    await expect(page.getByText('System Foundation Status')).toBeVisible();
+    // Verify mode selector chips
+    await expect(
+      page.getByRole('button', { name: 'All Shows', exact: true }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole('button', { name: 'This Weekend', exact: true }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole('button', { name: 'Free ($0)', exact: true }),
+    ).toBeVisible();
   });
 
   test('successfully loads the discover catalog page', async ({ page }) => {

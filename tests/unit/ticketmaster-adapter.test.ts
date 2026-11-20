@@ -54,7 +54,7 @@ describe('Ticketmaster Ingestion Foundation', () => {
       expect(candidate.title).toBe('The Black Keys - Dropout Boogie Tour');
       expect(candidate.artistNames).toEqual(['The Black Keys']);
       expect(candidate.artists?.[0].name).toBe('The Black Keys');
-      expect(candidate.artists?.[0].billingPosition).toBe('headliner');
+      expect(candidate.artists?.[0].billingPosition).toBe('unknown');
 
       // External IDs: Ticketmaster + Spotify
       const extIds = candidate.artists?.[0].externalIds || [];
@@ -109,14 +109,14 @@ describe('Ticketmaster Ingestion Foundation', () => {
       expect(candidate.artistNames).toEqual(['Khruangbin', 'Men I Trust']);
       expect(candidate.artists?.length).toBe(2);
 
-      const [headliner, support] = candidate.artists!;
-      expect(headliner.name).toBe('Khruangbin');
-      expect(headliner.billingPosition).toBe('headliner');
-      expect(headliner.sortOrder).toBe(0);
+      const [act1, act2] = candidate.artists!;
+      expect(act1.name).toBe('Khruangbin');
+      expect(act1.billingPosition).toBe('unknown');
+      expect(act1.sortOrder).toBe(0);
 
-      expect(support.name).toBe('Men I Trust');
-      expect(support.billingPosition).toBe('support');
-      expect(support.sortOrder).toBe(1);
+      expect(act2.name).toBe('Men I Trust');
+      expect(act2.billingPosition).toBe('unknown');
+      expect(act2.sortOrder).toBe(1);
 
       expect(candidate.venueName).toBe('Mission Ballroom');
       expect(candidate.city).toBe('Denver');
@@ -332,6 +332,39 @@ describe('Ticketmaster Ingestion Foundation', () => {
         'missing_artist_identity',
       );
       expect(candidate.confidence).toBe(0.5);
+    });
+
+    it('extracts fee details, all-inclusive pricing, and ticketing status when present', () => {
+      const baseEvt = events[0];
+      const evtWithFees: TicketmasterEvent = {
+        ...baseEvt,
+        id: 'tm-evt-with-fees',
+        priceRanges: [
+          {
+            type: 'standard',
+            currency: 'USD',
+            min: 65.0,
+            max: 120.0,
+            estimatedFees: 18.5,
+          },
+        ],
+        allInclusivePricing: true,
+        ticketing: {
+          allInclusivePricing: { enabled: true },
+          status: { code: 'onsale' },
+        },
+      };
+
+      const candidate = parseTicketmasterEvent(evtWithFees, dummyContext);
+
+      expect(candidate.price?.min).toBe(65.0);
+      expect(candidate.price?.max).toBe(120.0);
+      expect(candidate.price?.currency).toBe('USD');
+      expect(candidate.price?.feeStatus).toBe('all_inclusive');
+
+      expect(candidate.rawPayload?.allInclusivePricing).toBe(true);
+      expect(candidate.rawPayload?.ticketingStatus).toBe('onsale');
+      expect(candidate.rawPayload?.feeStatus).toBe('all_inclusive');
     });
   });
 
@@ -725,6 +758,20 @@ describe('Ticketmaster Ingestion Foundation', () => {
 
       // 3 serial requests with 200ms spacing should take at least ~350ms
       expect(elapsed).toBeGreaterThanOrEqual(350);
+    });
+
+    it('builds request URL without unsupported allInclusivePricing query parameter', () => {
+      const client = new TicketmasterApiClient({ apiKey: 'test-key' });
+      const url = client.buildRequestUrl({});
+      expect(url.searchParams.get('allInclusivePricing')).toBeNull();
+      expect(url.searchParams.get('classificationName')).toBe('Music');
+      expect(url.searchParams.get('apikey')).toBe('test-key');
+    });
+
+    it('trims whitespace from API key to prevent 401 unauthorized errors', () => {
+      const client = new TicketmasterApiClient({ apiKey: '  test-key  ' });
+      const url = client.buildRequestUrl({});
+      expect(url.searchParams.get('apikey')).toBe('test-key');
     });
   });
 });

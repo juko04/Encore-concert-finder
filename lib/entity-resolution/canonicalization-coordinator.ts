@@ -289,7 +289,7 @@ export class CanonicalizationCoordinator {
         ? candidate.artists
         : candidate.artistNames.map((name, idx) => ({
             name,
-            billingPosition: idx === 0 ? 'headliner' : 'support',
+            billingPosition: 'unknown',
             sortOrder: idx,
           }));
 
@@ -487,9 +487,7 @@ export class CanonicalizationCoordinator {
         };
       }
 
-      const billingPos =
-        candidateArtist.billingPosition ??
-        (index === 0 ? 'headliner' : 'support');
+      const billingPos = candidateArtist.billingPosition ?? 'unknown';
       const sortOrd = candidateArtist.sortOrder ?? index;
 
       if (resolved.status === 'matched') {
@@ -561,6 +559,11 @@ export class CanonicalizationCoordinator {
     const ticketProviderSourceId = isTicketingSource
       ? candidate.sourceId
       : null;
+
+    const inventoryStatus:
+      'available' | 'low_inventory' | 'sold_out' | 'cancelled' | 'unknown' =
+      candidate.inventoryStatus ||
+      (candidate.rawPayload?.isSoldOut === true ? 'sold_out' : 'available');
 
     // 7. Assemble Atomic Transaction Payload (zero upfront writes)
     let payload: CanonicalizationPayload;
@@ -679,7 +682,7 @@ export class CanonicalizationCoordinator {
                 min_price: candidate.price?.min ?? null,
                 max_price: candidate.price?.max ?? null,
                 currency: candidate.price?.currency ?? null,
-                inventory_status: 'available',
+                inventory_status: inventoryStatus,
                 verified_at: new Date().toISOString(),
               },
             ]
@@ -725,7 +728,7 @@ export class CanonicalizationCoordinator {
                 min_price: candidate.price?.min ?? null,
                 max_price: candidate.price?.max ?? null,
                 currency: candidate.price?.currency ?? null,
-                inventory_status: 'available',
+                inventory_status: inventoryStatus,
                 verified_at: new Date().toISOString(),
               },
             ]
