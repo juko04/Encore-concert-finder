@@ -1,6 +1,9 @@
 import { expect, test } from '@playwright/test';
+import { createClient } from '@supabase/supabase-js';
+import { execSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
+import { seedTracedEventsFixture } from '@/tests/fixtures/traced-events-fixture';
 
 interface TracedEvent {
   providerEventId: string;
@@ -16,6 +19,40 @@ interface TracedEvent {
   createdInCurrentRun: boolean;
 }
 
+function resolveSupabaseCredentials(): {
+  url: string;
+  serviceRoleKey: string;
+} | null {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+  if (url && serviceRoleKey) {
+    return { url, serviceRoleKey };
+  }
+
+  try {
+    const rawOutput = execSync('npx supabase status -o json', {
+      encoding: 'utf-8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    });
+    const parsed = JSON.parse(rawOutput) as {
+      API_URL?: string;
+      SERVICE_ROLE_KEY?: string;
+    };
+
+    if (parsed.API_URL && parsed.SERVICE_ROLE_KEY) {
+      return {
+        url: url || parsed.API_URL,
+        serviceRoleKey: serviceRoleKey || parsed.SERVICE_ROLE_KEY,
+      };
+    }
+  } catch {
+    // Supabase CLI status not available
+  }
+
+  return null;
+}
+
 function escapeRegex(str: string): string {
   return str.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, '\\$&');
 }
@@ -27,9 +64,30 @@ test.describe('Encore V2: Live Ingestion Event-to-UI End-to-End Tracing (Finding
     'docs/traced-live-events.json',
   );
 
-  test.beforeAll(() => {
+  test.beforeAll(async () => {
     if (!fs.existsSync(screenshotDir)) {
       fs.mkdirSync(screenshotDir, { recursive: true });
+    }
+
+    const creds = resolveSupabaseCredentials();
+    if (creds) {
+      const client = createClient(creds.url, creds.serviceRoleKey, {
+        auth: { autoRefreshToken: false, persistSession: false },
+      });
+
+      // In clean CI test databases without prior live ingestion, ensure traced events exist
+      const { data: existing } = await client
+        .from('events')
+        .select('id')
+        .in('id', [
+          '9ae75b94-a5da-4e49-90c8-dcd8fb3de920',
+          'f00df05b-35d6-4396-b98a-82abc6558e0d',
+          '33db73d8-2764-4c50-96c0-c3f947bc1ab1',
+        ]);
+
+      if (!existing || existing.length < 3) {
+        await seedTracedEventsFixture(client, creds.url);
+      }
     }
   });
 
