@@ -3,7 +3,7 @@
 **Pull Request:** [#20](https://github.com/juko04/Encore-concert-finder/pull/20)  
 **Title:** `feat(v2): Encore V2 Unified Index UI, Ticketmaster V2 Engine & Colorado Venue Coverage`  
 **Base Branch:** `main` (commit `3adbf59`)  
-**Feature Branch:** `feature/encore-v2-index-ticketmaster` (latest commit `f18047d`)  
+**Feature Branch:** `feature/encore-v2-index-ticketmaster` (latest commit `bd0a337`)  
 **Incorporated Baseline:** `feature/spotify-integration-repair` (commit `4009277`)  
 **Repository:** `juko04/Encore-concert-finder`  
 
@@ -68,7 +68,7 @@ Net Delta:         +562 lines
 | `f5962dc` | `test(e2e)` | ensure traced events exist in fresh CI database before running UI trace | Adds idempotent fixture seeder for fresh CI runner databases; achieves 100% green remote CI |
 | `f18047d` | `docs` | record verified green remote CI run 44794056401 on commit f5962dc | Updates evidence manifest and handoff with CI run 44794056401 |
 | `d47ec9e` | `docs` | update PR diff report with 137-file metrics and latest commit history | Updates PR diff report with 137-file metrics and commit table |
-| *(pending)* | `fix(ingestion)` | resolve quota lock recovery race and implement durable missed-run recovery | Eliminates dead-lock TOCTOU race via atomic reclamation tokens, adds durable SLA checkpoints in raw_ingests, and missed-run recovery |
+| `bd0a337` | `fix(ingestion)` | resolve quota lock recovery race and implement durable missed-run recovery | Eliminates dead-lock TOCTOU race via atomic reclamation tokens, adds durable SLA checkpoints in raw_ingests, and missed-run recovery |
 
 ---
 
