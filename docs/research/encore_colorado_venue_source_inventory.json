@@ -1,0 +1,1248 @@
+{
+  "research_date": "2026-11-19",
+  "purpose": "Starter registry for Encore V2 Colorado concert ingestion. NOT a proof of complete statewide coverage.",
+  "definitions": {
+    "source_status": {
+      "verified": "Evidence found for shared/group or linked official site",
+      "mixed": "Group contains inspected sites and uninspected candidates",
+      "candidate": "Promising listing; needs site/source verification"
+    },
+    "source_group": "Source-adapter recommendation, NOT proof of ownership or ticket processor. One event or venue may have multiple sources.",
+    "calendar_url": "Seed for manual validation. Missing value means not checked, not no calendar."
+  },
+  "primary_references": [
+    "https://www.z2ent.com/",
+    "https://www.aegsev.com/venues/regions/index.php?region=co",
+    "https://www.livenation.com/venues",
+    "https://bohemianlivemusic.org/",
+    "https://www.coclubs.com/event-calendar",
+    "https://civassoc.com/home",
+    "https://coloradobarmusic.com/venues",
+    "https://developer.ticketmaster.com/products-and-docs/apis/discovery-api/v2/",
+    "https://help.artists.bandsintown.com/en/articles/7053475-what-is-the-bandsintown-api",
+    "https://data.jambase.com/products",
+    "https://data.jambase.com/api/docs/getting-started",
+    "https://www.songkick.com/developer/",
+    "https://www.coclubs.com/event-calendar"
+  ],
+  "venues_and_related_sources": [
+    {
+      "venue_name": "Mission Ballroom",
+      "city": "Denver",
+      "state": "CO",
+      "source_group": "axs_aeg_primary",
+      "calendar_url": "https://www.axs.com/",
+      "source_status": "verified",
+      "integration_notes": "AEG Colorado roster; verify each event vendor and canonical official URL."
+    },
+    {
+      "venue_name": "Ogden Theatre",
+      "city": "Denver",
+      "state": "CO",
+      "source_group": "axs_aeg_primary",
+      "calendar_url": "https://www.axs.com/",
+      "source_status": "verified",
+      "integration_notes": "AEG Colorado roster; verify each event vendor and canonical official URL."
+    },
+    {
+      "venue_name": "Bluebird Theater",
+      "city": "Denver",
+      "state": "CO",
+      "source_group": "axs_aeg_primary",
+      "calendar_url": "https://www.axs.com/",
+      "source_status": "verified",
+      "integration_notes": "AEG Colorado roster; verify each event vendor and canonical official URL."
+    },
+    {
+      "venue_name": "Gothic Theatre",
+      "city": "Englewood",
+      "state": "CO",
+      "source_group": "axs_aeg_primary",
+      "calendar_url": "https://www.axs.com/venues/2274/gothic-theatre-englewood-tickets",
+      "source_status": "verified",
+      "integration_notes": ""
+    },
+    {
+      "venue_name": "Fiddler's Green Amphitheatre",
+      "city": "Greenwood Village",
+      "state": "CO",
+      "source_group": "axs_aeg_primary",
+      "calendar_url": null,
+      "source_status": "verified",
+      "integration_notes": ""
+    },
+    {
+      "venue_name": "Ford Amphitheater",
+      "city": "Colorado Springs",
+      "state": "CO",
+      "source_group": "axs_aeg_primary",
+      "calendar_url": "https://www.fordamphitheater.live/your-visit/tickets-box-office/",
+      "source_status": "verified",
+      "integration_notes": ""
+    },
+    {
+      "venue_name": "Red Rocks Amphitheatre",
+      "city": "Morrison",
+      "state": "CO",
+      "source_group": "axs_aeg_primary",
+      "calendar_url": "https://www.redrocksonline.com/events/",
+      "source_status": "verified",
+      "integration_notes": "Official calendar with AXS ticketing; add city event types filter (concert/film/fitness)."
+    },
+    {
+      "venue_name": "ReelWorks Denver",
+      "city": "Denver",
+      "state": "CO",
+      "source_group": "axs_overlap_validate",
+      "calendar_url": "https://reelworksdenver.com/events/",
+      "source_status": "verified",
+      "integration_notes": "AXS venue listings exist; official site and event-by-event primary ticket links may use other vendor (Ophelia cites Ticketmaster)."
+    },
+    {
+      "venue_name": "Ophelia's Electric Soapbox",
+      "city": "Denver",
+      "state": "CO",
+      "source_group": "axs_overlap_validate",
+      "calendar_url": "https://opheliasdenver.com/calendar/",
+      "source_status": "verified",
+      "integration_notes": "AXS venue listings exist; official site and event-by-event primary ticket links may use other vendor (Ophelia cites Ticketmaster)."
+    },
+    {
+      "venue_name": "Globe Hall",
+      "city": "Denver",
+      "state": "CO",
+      "source_group": "axs_overlap_validate",
+      "calendar_url": "https://globehall.com/events/",
+      "source_status": "verified",
+      "integration_notes": "AXS venue listings exist; official site and event-by-event primary ticket links may use other vendor (Ophelia cites Ticketmaster)."
+    },
+    {
+      "venue_name": "Belly Up Aspen",
+      "city": "Aspen",
+      "state": "CO",
+      "source_group": "axs_overlap_validate",
+      "calendar_url": "https://bellyupaspen.com/events/",
+      "source_status": "verified",
+      "integration_notes": "AXS has venue listings, but own calendar/ticketing exists: treat as secondary/discovery unless verified primary."
+    },
+    {
+      "venue_name": "Mesa Theater",
+      "city": "Grand Junction",
+      "state": "CO",
+      "source_group": "axs_overlap_validate",
+      "calendar_url": "https://www.axs.com/venues/126719/mesa-theater-grand-junction-tickets",
+      "source_status": "verified",
+      "integration_notes": "AXS venue listing available; cross-check official venue calendar for completeness."
+    },
+    {
+      "venue_name": "Dillon Amphitheater",
+      "city": "Dillon",
+      "state": "CO",
+      "source_group": "axs_overlap_validate",
+      "calendar_url": null,
+      "source_status": "candidate",
+      "integration_notes": "AEG promotes some dates; municipal amphitheater with additional independent calendars."
+    },
+    {
+      "venue_name": "Gerald R. Ford Amphitheater",
+      "city": "Vail",
+      "state": "CO",
+      "source_group": "axs_overlap_validate",
+      "calendar_url": "https://grfavail.com/",
+      "source_status": "verified",
+      "integration_notes": "Multi-presenter venue; summer concert series uses separate ticketsvail.com among others."
+    },
+    {
+      "venue_name": "Fillmore Auditorium",
+      "city": "Denver",
+      "state": "CO",
+      "source_group": "livenation_ticketmaster",
+      "calendar_url": "https://www.livenation.com/venue/KovZpZAE6eJA/fillmore-auditorium-denver-events",
+      "source_status": "verified",
+      "integration_notes": "Live Nation venue grouping; use TM Discovery records only where populated and validate subvenue/room."
+    },
+    {
+      "venue_name": "Summit Music Hall",
+      "city": "Denver",
+      "state": "CO",
+      "source_group": "livenation_ticketmaster",
+      "calendar_url": "https://www.livenation.com/venue/KovZpZAFFt1A/summit-music-hall-events",
+      "source_status": "verified",
+      "integration_notes": "Live Nation venue grouping; use TM Discovery records only where populated and validate subvenue/room."
+    },
+    {
+      "venue_name": "Moon Room at Summit",
+      "city": "Denver",
+      "state": "CO",
+      "source_group": "livenation_ticketmaster",
+      "calendar_url": null,
+      "source_status": "verified",
+      "integration_notes": "Live Nation venue grouping; use TM Discovery records only where populated and validate subvenue/room."
+    },
+    {
+      "venue_name": "Marquis Theater",
+      "city": "Denver",
+      "state": "CO",
+      "source_group": "livenation_ticketmaster",
+      "calendar_url": null,
+      "source_status": "verified",
+      "integration_notes": "Live Nation venue grouping; use TM Discovery records only where populated and validate subvenue/room."
+    },
+    {
+      "venue_name": "The JunkYard",
+      "city": "Denver",
+      "state": "CO",
+      "source_group": "livenation_ticketmaster",
+      "calendar_url": null,
+      "source_status": "verified",
+      "integration_notes": "Live Nation venue grouping; use TM Discovery records only where populated and validate subvenue/room."
+    },
+    {
+      "venue_name": "Boulder Theater",
+      "city": "Boulder",
+      "state": "CO",
+      "source_group": "z2_shared_calendar",
+      "calendar_url": "https://www.z2ent.com/",
+      "source_status": "verified",
+      "integration_notes": "Z2 main five-venue calendar; most Tixr but some AXS; Chautauqua has additional direct event calendar."
+    },
+    {
+      "venue_name": "Fox Theatre",
+      "city": "Boulder",
+      "state": "CO",
+      "source_group": "z2_shared_calendar",
+      "calendar_url": "https://www.z2ent.com/",
+      "source_status": "verified",
+      "integration_notes": "Z2 main five-venue calendar; most Tixr but some AXS; Chautauqua has additional direct event calendar."
+    },
+    {
+      "venue_name": "Chautauqua Auditorium",
+      "city": "Boulder",
+      "state": "CO",
+      "source_group": "z2_shared_calendar",
+      "calendar_url": "https://www.z2ent.com/",
+      "source_status": "verified",
+      "integration_notes": "Z2 main five-venue calendar; most Tixr but some AXS; Chautauqua has additional direct event calendar."
+    },
+    {
+      "venue_name": "Aggie Theatre",
+      "city": "Fort Collins",
+      "state": "CO",
+      "source_group": "z2_shared_calendar",
+      "calendar_url": "https://www.z2ent.com/",
+      "source_status": "verified",
+      "integration_notes": ""
+    },
+    {
+      "venue_name": "10 Mile Music Hall",
+      "city": "Frisco",
+      "state": "CO",
+      "source_group": "z2_shared_calendar",
+      "calendar_url": "https://www.z2ent.com/",
+      "source_status": "verified",
+      "integration_notes": "Z2 plus own The Events Calendar-style listings; reconcile free/local shows."
+    },
+    {
+      "venue_name": "Strings Music Pavilion",
+      "city": "Steamboat Springs",
+      "state": "CO",
+      "source_group": "z2_secondary_bookings",
+      "calendar_url": "https://www.stringsmusicfestival.com/",
+      "source_status": "verified",
+      "integration_notes": "Z2 books selected gigs; venue is an independent calendar too."
+    },
+    {
+      "venue_name": "Agave Avon",
+      "city": "Avon",
+      "state": "CO",
+      "source_group": "z2_secondary_bookings",
+      "calendar_url": null,
+      "source_status": "candidate",
+      "integration_notes": "Selected Z2 events, not comprehensive venue feed."
+    },
+    {
+      "venue_name": "Public House",
+      "city": "Crested Butte",
+      "state": "CO",
+      "source_group": "z2_secondary_bookings",
+      "calendar_url": "https://publichousecb.com/",
+      "source_status": "verified",
+      "integration_notes": "Selected Z2 events; verify own venue calendar for additional dates."
+    },
+    {
+      "venue_name": "Washington's",
+      "city": "Fort Collins",
+      "state": "CO",
+      "source_group": "bohemian_shared_calendar",
+      "calendar_url": "https://bohemianlivemusic.org/",
+      "source_status": "verified",
+      "integration_notes": "Central Bohemian Live Music calendar uses tribe/The Events Calendar patterns; filter by venue. Armory approx 200 capacity but material touring acts."
+    },
+    {
+      "venue_name": "The Armory",
+      "city": "Fort Collins",
+      "state": "CO",
+      "source_group": "bohemian_shared_calendar",
+      "calendar_url": "https://bohemianlivemusic.org/",
+      "source_status": "verified",
+      "integration_notes": "Central Bohemian Live Music calendar uses tribe/The Events Calendar patterns; filter by venue. Armory approx 200 capacity but material touring acts."
+    },
+    {
+      "venue_name": "Cervantes' Masterpiece Ballroom",
+      "city": "Denver",
+      "state": "CO",
+      "source_group": "independent_list_etix_candidate",
+      "calendar_url": "https://cervantesmasterpiece.com/events/",
+      "source_status": "verified",
+      "integration_notes": "Official calendar pages have list/grid dates and Etix links for many shows. Do not infer shared backend without inspecting markup."
+    },
+    {
+      "venue_name": "Cervantes' Other Side",
+      "city": "Denver",
+      "state": "CO",
+      "source_group": "independent_list_etix_candidate",
+      "calendar_url": "https://cervantesmasterpiece.com/events/",
+      "source_status": "verified",
+      "integration_notes": "Official calendar pages have list/grid dates and Etix links for many shows. Do not infer shared backend without inspecting markup."
+    },
+    {
+      "venue_name": "Larimer Lounge",
+      "city": "Denver",
+      "state": "CO",
+      "source_group": "independent_list_etix_candidate",
+      "calendar_url": "https://larimerlounge.com/events/",
+      "source_status": "verified",
+      "integration_notes": "Official calendar pages have list/grid dates and Etix links for many shows. Do not infer shared backend without inspecting markup."
+    },
+    {
+      "venue_name": "The Campground",
+      "city": "Denver",
+      "state": "CO",
+      "source_group": "independent_list_etix_candidate",
+      "calendar_url": "https://larimerlounge.com/events/",
+      "source_status": "verified",
+      "integration_notes": "Official calendar pages have list/grid dates and Etix links for many shows. Do not infer shared backend without inspecting markup."
+    },
+    {
+      "venue_name": "The Treehouse",
+      "city": "Denver",
+      "state": "CO",
+      "source_group": "independent_list_etix_candidate",
+      "calendar_url": "https://larimerlounge.com/events/",
+      "source_status": "verified",
+      "integration_notes": "Official calendar pages have list/grid dates and Etix links for many shows. Do not infer shared backend without inspecting markup."
+    },
+    {
+      "venue_name": "Lost Lake Lounge",
+      "city": "Denver",
+      "state": "CO",
+      "source_group": "independent_list_etix_candidate",
+      "calendar_url": "https://lost-lake.com/events/",
+      "source_status": "verified",
+      "integration_notes": "Official calendar pages have list/grid dates and Etix links for many shows. Do not infer shared backend without inspecting markup."
+    },
+    {
+      "venue_name": "The Church Nightclub",
+      "city": "Denver",
+      "state": "CO",
+      "source_group": "coclubs_shared_calendar",
+      "calendar_url": "https://www.coclubs.com/event-calendar",
+      "source_status": "verified",
+      "integration_notes": "One CoClubs organization calendar, multiple clubs and separate rooms; ticket checkout often Tixr."
+    },
+    {
+      "venue_name": "Club Vinyl",
+      "city": "Denver",
+      "state": "CO",
+      "source_group": "coclubs_shared_calendar",
+      "calendar_url": "https://www.coclubs.com/event-calendar",
+      "source_status": "verified",
+      "integration_notes": "One CoClubs organization calendar, multiple clubs and separate rooms; ticket checkout often Tixr."
+    },
+    {
+      "venue_name": "Bar Standard",
+      "city": "Denver",
+      "state": "CO",
+      "source_group": "coclubs_shared_calendar",
+      "calendar_url": "https://www.coclubs.com/event-calendar",
+      "source_status": "verified",
+      "integration_notes": "One CoClubs organization calendar, multiple clubs and separate rooms; ticket checkout often Tixr."
+    },
+    {
+      "venue_name": "1134 Broadway",
+      "city": "Denver",
+      "state": "CO",
+      "source_group": "coclubs_shared_calendar",
+      "calendar_url": "https://www.coclubs.com/event-calendar",
+      "source_status": "verified",
+      "integration_notes": "One CoClubs organization calendar, multiple clubs and separate rooms; ticket checkout often Tixr."
+    },
+    {
+      "venue_name": "Milk Bar",
+      "city": "Denver",
+      "state": "CO",
+      "source_group": "coclubs_shared_calendar",
+      "calendar_url": "https://www.coclubs.com/event-calendar",
+      "source_status": "verified",
+      "integration_notes": "One CoClubs organization calendar, multiple clubs and separate rooms; ticket checkout often Tixr."
+    },
+    {
+      "venue_name": "TACAW",
+      "city": "Basalt",
+      "state": "CO",
+      "source_group": "wp_events_calendar_family",
+      "calendar_url": "https://tacaw.org/calendar/category/music/",
+      "source_status": "verified",
+      "integration_notes": "The Events Calendar-style UI with Music category; test anonymous read-only /wp-json/tribe/events/v1/events where supported."
+    },
+    {
+      "venue_name": "Chautauqua community/other concerts",
+      "city": "Boulder",
+      "state": "CO",
+      "source_group": "wp_events_calendar_family",
+      "calendar_url": "https://www.chautauqua.com/events/category/concerts/",
+      "source_status": "verified",
+      "integration_notes": "Auxiliary events from Chautauqua site beyond Z2 listings; avoid duplicate venue with Chautauqua Auditorium."
+    },
+    {
+      "venue_name": "10 Mile Music Hall own events",
+      "city": "Frisco",
+      "state": "CO",
+      "source_group": "wp_events_calendar_family",
+      "calendar_url": "https://10milemusic.com/show/",
+      "source_status": "verified",
+      "integration_notes": "Supplemental source for Z2 primary venue record; not a separate venue."
+    },
+    {
+      "venue_name": "Sheridan Opera House",
+      "city": "Telluride",
+      "state": "CO",
+      "source_group": "wp_events_calendar_family",
+      "calendar_url": "https://sheridanoperahouse.com/events/",
+      "source_status": "verified",
+      "integration_notes": "WordPress event listing/month grid; ticketing through third party such as Ludus."
+    },
+    {
+      "venue_name": "The Oriental Theater",
+      "city": "Denver",
+      "state": "CO",
+      "source_group": "official_local_calendar",
+      "calendar_url": "https://www.theorientaltheater.com/events",
+      "source_status": "mixed",
+      "integration_notes": "Venue-specific or seasonal sources; verify actual calendar/ticket processor by page. Jazz residencies require multiple set times, Meow Wolf has category=Music."
+    },
+    {
+      "venue_name": "The Black Box",
+      "city": "Denver",
+      "state": "CO",
+      "source_group": "official_local_calendar",
+      "calendar_url": "https://blackboxdenver.co/",
+      "source_status": "mixed",
+      "integration_notes": "Venue-specific or seasonal sources; verify actual calendar/ticket processor by page. Jazz residencies require multiple set times, Meow Wolf has category=Music."
+    },
+    {
+      "venue_name": "Hi-Dive",
+      "city": "Denver",
+      "state": "CO",
+      "source_group": "official_local_calendar",
+      "calendar_url": "https://hi-dive.com/events/",
+      "source_status": "mixed",
+      "integration_notes": "Venue-specific or seasonal sources; verify actual calendar/ticket processor by page. Jazz residencies require multiple set times, Meow Wolf has category=Music."
+    },
+    {
+      "venue_name": "HQ",
+      "city": "Denver",
+      "state": "CO",
+      "source_group": "official_local_calendar",
+      "calendar_url": "https://coloradobarmusic.com/venues",
+      "source_status": "mixed",
+      "integration_notes": "Venue-specific or seasonal sources; verify actual calendar/ticket processor by page. Jazz residencies require multiple set times, Meow Wolf has category=Music."
+    },
+    {
+      "venue_name": "Federal Theatre",
+      "city": "Denver",
+      "state": "CO",
+      "source_group": "official_local_calendar",
+      "calendar_url": "https://coloradobarmusic.com/venues",
+      "source_status": "mixed",
+      "integration_notes": "Venue-specific or seasonal sources; verify actual calendar/ticket processor by page. Jazz residencies require multiple set times, Meow Wolf has category=Music."
+    },
+    {
+      "venue_name": "The Roxy Theatre",
+      "city": "Denver",
+      "state": "CO",
+      "source_group": "official_local_calendar",
+      "calendar_url": "https://coloradobarmusic.com/venues",
+      "source_status": "mixed",
+      "integration_notes": "Venue-specific or seasonal sources; verify actual calendar/ticket processor by page. Jazz residencies require multiple set times, Meow Wolf has category=Music."
+    },
+    {
+      "venue_name": "Swallow Hill Music / Daniels Hall",
+      "city": "Denver",
+      "state": "CO",
+      "source_group": "official_local_calendar",
+      "calendar_url": "https://swallowhillmusic.org/concerts/",
+      "source_status": "mixed",
+      "integration_notes": "Venue-specific or seasonal sources; verify actual calendar/ticket processor by page. Jazz residencies require multiple set times, Meow Wolf has category=Music."
+    },
+    {
+      "venue_name": "Swallow Hill Music / Tuft Theatre",
+      "city": "Denver",
+      "state": "CO",
+      "source_group": "official_local_calendar",
+      "calendar_url": "https://swallowhillmusic.org/concerts/",
+      "source_status": "mixed",
+      "integration_notes": "Venue-specific or seasonal sources; verify actual calendar/ticket processor by page. Jazz residencies require multiple set times, Meow Wolf has category=Music."
+    },
+    {
+      "venue_name": "Dazzle",
+      "city": "Denver",
+      "state": "CO",
+      "source_group": "official_local_calendar",
+      "calendar_url": "https://www.dazzledenver.com/",
+      "source_status": "mixed",
+      "integration_notes": "Venue-specific or seasonal sources; verify actual calendar/ticket processor by page. Jazz residencies require multiple set times, Meow Wolf has category=Music."
+    },
+    {
+      "venue_name": "Nocturne Jazz & Supper Club",
+      "city": "Denver",
+      "state": "CO",
+      "source_group": "official_local_calendar",
+      "calendar_url": "https://nocturnejazz.com/music",
+      "source_status": "mixed",
+      "integration_notes": "Venue-specific or seasonal sources; verify actual calendar/ticket processor by page. Jazz residencies require multiple set times, Meow Wolf has category=Music."
+    },
+    {
+      "venue_name": "Meow Wolf: Perplexiplex",
+      "city": "Denver",
+      "state": "CO",
+      "source_group": "official_local_calendar",
+      "calendar_url": "https://tickets.meowwolf.com/denver/events/",
+      "source_status": "mixed",
+      "integration_notes": "Venue-specific or seasonal sources; verify actual calendar/ticket processor by page. Jazz residencies require multiple set times, Meow Wolf has category=Music."
+    },
+    {
+      "venue_name": "Levitt Pavilion Denver",
+      "city": "Denver",
+      "state": "CO",
+      "source_group": "official_local_calendar",
+      "calendar_url": "https://www.levittdenver.org/free-concert-series",
+      "source_status": "mixed",
+      "integration_notes": "Venue-specific or seasonal sources; verify actual calendar/ticket processor by page. Jazz residencies require multiple set times, Meow Wolf has category=Music."
+    },
+    {
+      "venue_name": "The Grizzly Rose",
+      "city": "Denver",
+      "state": "CO",
+      "source_group": "official_local_calendar",
+      "calendar_url": "https://coloradobarmusic.com/venues",
+      "source_status": "mixed",
+      "integration_notes": "Venue-specific or seasonal sources; verify actual calendar/ticket processor by page. Jazz residencies require multiple set times, Meow Wolf has category=Music."
+    },
+    {
+      "venue_name": "Soiled Dove Underground",
+      "city": "Denver",
+      "state": "CO",
+      "source_group": "official_local_calendar",
+      "calendar_url": null,
+      "source_status": "mixed",
+      "integration_notes": "Venue-specific or seasonal sources; verify actual calendar/ticket processor by page. Jazz residencies require multiple set times, Meow Wolf has category=Music."
+    },
+    {
+      "venue_name": "Temple Denver",
+      "city": "Denver",
+      "state": "CO",
+      "source_group": "official_local_calendar",
+      "calendar_url": null,
+      "source_status": "mixed",
+      "integration_notes": "Venue-specific or seasonal sources; verify actual calendar/ticket processor by page. Jazz residencies require multiple set times, Meow Wolf has category=Music."
+    },
+    {
+      "venue_name": "Tracks",
+      "city": "Denver",
+      "state": "CO",
+      "source_group": "official_local_calendar",
+      "calendar_url": null,
+      "source_status": "mixed",
+      "integration_notes": "Venue-specific or seasonal sources; verify actual calendar/ticket processor by page. Jazz residencies require multiple set times, Meow Wolf has category=Music."
+    },
+    {
+      "venue_name": "EXDO Event Center",
+      "city": "Denver",
+      "state": "CO",
+      "source_group": "official_local_calendar",
+      "calendar_url": null,
+      "source_status": "mixed",
+      "integration_notes": "Venue-specific or seasonal sources; verify actual calendar/ticket processor by page. Jazz residencies require multiple set times, Meow Wolf has category=Music."
+    },
+    {
+      "venue_name": "Your Mom's House",
+      "city": "Denver",
+      "state": "CO",
+      "source_group": "official_local_calendar",
+      "calendar_url": null,
+      "source_status": "mixed",
+      "integration_notes": "Venue-specific or seasonal sources; verify actual calendar/ticket processor by page. Jazz residencies require multiple set times, Meow Wolf has category=Music."
+    },
+    {
+      "venue_name": "Walnut Room",
+      "city": "Denver",
+      "state": "CO",
+      "source_group": "official_local_calendar",
+      "calendar_url": null,
+      "source_status": "mixed",
+      "integration_notes": "Venue-specific or seasonal sources; verify actual calendar/ticket processor by page. Jazz residencies require multiple set times, Meow Wolf has category=Music."
+    },
+    {
+      "venue_name": "Stampede",
+      "city": "Aurora",
+      "state": "CO",
+      "source_group": "official_local_calendar",
+      "calendar_url": null,
+      "source_status": "candidate",
+      "integration_notes": "Country/dance venue, ensure actual concerts versus regular club nights."
+    },
+    {
+      "venue_name": "Buffalo Rose",
+      "city": "Golden",
+      "state": "CO",
+      "source_group": "official_local_calendar",
+      "calendar_url": null,
+      "source_status": "verified",
+      "integration_notes": ""
+    },
+    {
+      "venue_name": "Little Bear Saloon",
+      "city": "Evergreen",
+      "state": "CO",
+      "source_group": "official_local_calendar",
+      "calendar_url": null,
+      "source_status": "verified",
+      "integration_notes": ""
+    },
+    {
+      "venue_name": "The Caribou Room",
+      "city": "Nederland",
+      "state": "CO",
+      "source_group": "official_local_calendar",
+      "calendar_url": null,
+      "source_status": "verified",
+      "integration_notes": ""
+    },
+    {
+      "venue_name": "Macky Auditorium",
+      "city": "Boulder",
+      "state": "CO",
+      "source_group": "official_local_calendar",
+      "calendar_url": "https://calendar.colorado.edu/macky_auditorium_509",
+      "source_status": "verified",
+      "integration_notes": "CU Boulder events calendar is stronger for campus concerts and includes free events; filter campus calendar by physical room."
+    },
+    {
+      "venue_name": "eTown Hall",
+      "city": "Boulder",
+      "state": "CO",
+      "source_group": "official_local_calendar",
+      "calendar_url": "https://etown.org/",
+      "source_status": "verified",
+      "integration_notes": "CU Boulder events calendar is stronger for campus concerts and includes free events; filter campus calendar by physical room."
+    },
+    {
+      "venue_name": "Roots Music Project",
+      "city": "Boulder",
+      "state": "CO",
+      "source_group": "official_local_calendar",
+      "calendar_url": "https://coloradobarmusic.com/venues",
+      "source_status": "verified",
+      "integration_notes": "CU Boulder events calendar is stronger for campus concerts and includes free events; filter campus calendar by physical room."
+    },
+    {
+      "venue_name": "Velvet Elk Lounge",
+      "city": "Boulder",
+      "state": "CO",
+      "source_group": "official_local_calendar",
+      "calendar_url": "https://coloradobarmusic.com/venues",
+      "source_status": "verified",
+      "integration_notes": "CU Boulder events calendar is stronger for campus concerts and includes free events; filter campus calendar by physical room."
+    },
+    {
+      "venue_name": "Imig Music Building / Grusin Music Hall",
+      "city": "Boulder",
+      "state": "CO",
+      "source_group": "official_local_calendar",
+      "calendar_url": "https://calendar.colorado.edu/group/cu_presents",
+      "source_status": "verified",
+      "integration_notes": "CU Boulder events calendar is stronger for campus concerts and includes free events; filter campus calendar by physical room."
+    },
+    {
+      "venue_name": "Mishawaka Amphitheatre / Indoor",
+      "city": "Fort Collins",
+      "state": "CO",
+      "source_group": "official_local_calendar",
+      "calendar_url": "https://www.themishawaka.com/",
+      "source_status": "verified",
+      "integration_notes": "Mishawaka presents shows at other locations too: preserve actual venue."
+    },
+    {
+      "venue_name": "Magic Rat Live Music",
+      "city": "Fort Collins",
+      "state": "CO",
+      "source_group": "official_local_calendar",
+      "calendar_url": null,
+      "source_status": "verified",
+      "integration_notes": "Mishawaka presents shows at other locations too: preserve actual venue."
+    },
+    {
+      "venue_name": "Sound Bar",
+      "city": "Fort Collins",
+      "state": "CO",
+      "source_group": "official_local_calendar",
+      "calendar_url": null,
+      "source_status": "verified",
+      "integration_notes": "Mishawaka presents shows at other locations too: preserve actual venue."
+    },
+    {
+      "venue_name": "Lincoln Center",
+      "city": "Fort Collins",
+      "state": "CO",
+      "source_group": "official_local_calendar",
+      "calendar_url": null,
+      "source_status": "verified",
+      "integration_notes": "Mishawaka presents shows at other locations too: preserve actual venue."
+    },
+    {
+      "venue_name": "Rialto Theater Center",
+      "city": "Loveland",
+      "state": "CO",
+      "source_group": "official_local_calendar",
+      "calendar_url": "https://www.rialtotheatercenter.org/",
+      "source_status": "verified",
+      "integration_notes": "Municipal venue, 478 seats; third-party aggregator reports automated access blockers."
+    },
+    {
+      "venue_name": "Moxi Theater",
+      "city": "Greeley",
+      "state": "CO",
+      "source_group": "official_local_calendar",
+      "calendar_url": "https://moxitheater.com/events",
+      "source_status": "verified",
+      "integration_notes": "Moxi website aggregates shows at other venues; preserve actual venue field."
+    },
+    {
+      "venue_name": "Union Colony Civic Center",
+      "city": "Greeley",
+      "state": "CO",
+      "source_group": "official_local_calendar",
+      "calendar_url": null,
+      "source_status": "verified",
+      "integration_notes": "Moxi website aggregates shows at other venues; preserve actual venue field."
+    },
+    {
+      "venue_name": "The Black Sheep",
+      "city": "Colorado Springs",
+      "state": "CO",
+      "source_group": "official_local_calendar",
+      "calendar_url": null,
+      "source_status": "verified",
+      "integration_notes": "Concert calendars custom and regional; inspect each separately, then group any shared template."
+    },
+    {
+      "venue_name": "Sunshine Studios Live",
+      "city": "Colorado Springs",
+      "state": "CO",
+      "source_group": "official_local_calendar",
+      "calendar_url": null,
+      "source_status": "verified",
+      "integration_notes": "Concert calendars custom and regional; inspect each separately, then group any shared template."
+    },
+    {
+      "venue_name": "Lulu's Downtown",
+      "city": "Colorado Springs",
+      "state": "CO",
+      "source_group": "official_local_calendar",
+      "calendar_url": "https://www.lulusmusic.co/",
+      "source_status": "verified",
+      "integration_notes": "Concert calendars custom and regional; inspect each separately, then group any shared template."
+    },
+    {
+      "venue_name": "Stargazers Theatre & Event Center",
+      "city": "Colorado Springs",
+      "state": "CO",
+      "source_group": "official_local_calendar",
+      "calendar_url": null,
+      "source_status": "verified",
+      "integration_notes": "Concert calendars custom and regional; inspect each separately, then group any shared template."
+    },
+    {
+      "venue_name": "Phil Long Music Hall",
+      "city": "Colorado Springs",
+      "state": "CO",
+      "source_group": "official_local_calendar",
+      "calendar_url": null,
+      "source_status": "verified",
+      "integration_notes": "Concert calendars custom and regional; inspect each separately, then group any shared template."
+    },
+    {
+      "venue_name": "Vultures",
+      "city": "Colorado Springs",
+      "state": "CO",
+      "source_group": "official_local_calendar",
+      "calendar_url": null,
+      "source_status": "verified",
+      "integration_notes": "Concert calendars custom and regional; inspect each separately, then group any shared template."
+    },
+    {
+      "venue_name": "Pueblo Memorial Hall",
+      "city": "Pueblo",
+      "state": "CO",
+      "source_group": "official_local_calendar",
+      "calendar_url": null,
+      "source_status": "verified",
+      "integration_notes": ""
+    },
+    {
+      "venue_name": "Wheeler Opera House",
+      "city": "Aspen",
+      "state": "CO",
+      "source_group": "official_local_calendar",
+      "calendar_url": null,
+      "source_status": "verified",
+      "integration_notes": ""
+    },
+    {
+      "venue_name": "Vilar Performing Arts Center",
+      "city": "Beaver Creek",
+      "state": "CO",
+      "source_group": "official_local_calendar",
+      "calendar_url": "https://vilarpac.org/CONCERTS/",
+      "source_status": "verified",
+      "integration_notes": ""
+    },
+    {
+      "venue_name": "Chief Theater",
+      "city": "Steamboat Springs",
+      "state": "CO",
+      "source_group": "official_local_calendar",
+      "calendar_url": null,
+      "source_status": "verified",
+      "integration_notes": ""
+    },
+    {
+      "venue_name": "Center for the Arts Crested Butte",
+      "city": "Crested Butte",
+      "state": "CO",
+      "source_group": "official_local_calendar",
+      "calendar_url": null,
+      "source_status": "verified",
+      "integration_notes": ""
+    },
+    {
+      "venue_name": "The Lariat",
+      "city": "Buena Vista",
+      "state": "CO",
+      "source_group": "official_local_calendar",
+      "calendar_url": null,
+      "source_status": "verified",
+      "integration_notes": ""
+    },
+    {
+      "venue_name": "Surf Hotel / Ivy Ballroom",
+      "city": "Buena Vista",
+      "state": "CO",
+      "source_group": "official_local_calendar",
+      "calendar_url": null,
+      "source_status": "verified",
+      "integration_notes": ""
+    },
+    {
+      "venue_name": "Animas City Theatre",
+      "city": "Durango",
+      "state": "CO",
+      "source_group": "official_local_calendar",
+      "calendar_url": "https://animascitytheatre.com/",
+      "source_status": "verified",
+      "integration_notes": ""
+    },
+    {
+      "venue_name": "Community Concert Hall / Fort Lewis College",
+      "city": "Durango",
+      "state": "CO",
+      "source_group": "official_local_calendar",
+      "calendar_url": null,
+      "source_status": "verified",
+      "integration_notes": ""
+    },
+    {
+      "venue_name": "Avalon Theatre",
+      "city": "Grand Junction",
+      "state": "CO",
+      "source_group": "official_local_calendar",
+      "calendar_url": null,
+      "source_status": "verified",
+      "integration_notes": ""
+    },
+    {
+      "venue_name": "Las Colonias Amphitheater",
+      "city": "Grand Junction",
+      "state": "CO",
+      "source_group": "official_local_calendar",
+      "calendar_url": null,
+      "source_status": "verified",
+      "integration_notes": ""
+    },
+    {
+      "venue_name": "Ute Theater",
+      "city": "Rifle",
+      "state": "CO",
+      "source_group": "official_local_calendar",
+      "calendar_url": null,
+      "source_status": "verified",
+      "integration_notes": ""
+    },
+    {
+      "venue_name": "SteamPlant Event Center",
+      "city": "Salida",
+      "state": "CO",
+      "source_group": "official_local_calendar",
+      "calendar_url": null,
+      "source_status": "verified",
+      "integration_notes": ""
+    },
+    {
+      "venue_name": "Sherbino Theater",
+      "city": "Ridgway",
+      "state": "CO",
+      "source_group": "official_local_calendar",
+      "calendar_url": null,
+      "source_status": "verified",
+      "integration_notes": ""
+    },
+    {
+      "venue_name": "Wright Opera House",
+      "city": "Ouray",
+      "state": "CO",
+      "source_group": "official_local_calendar",
+      "calendar_url": null,
+      "source_status": "verified",
+      "integration_notes": ""
+    },
+    {
+      "venue_name": "Sunflower Theatre",
+      "city": "Cortez",
+      "state": "CO",
+      "source_group": "official_local_calendar",
+      "calendar_url": null,
+      "source_status": "verified",
+      "integration_notes": ""
+    },
+    {
+      "venue_name": "Mancos Opera House",
+      "city": "Mancos",
+      "state": "CO",
+      "source_group": "official_local_calendar",
+      "calendar_url": null,
+      "source_status": "verified",
+      "integration_notes": ""
+    },
+    {
+      "venue_name": "Society Hall",
+      "city": "Alamosa",
+      "state": "CO",
+      "source_group": "official_local_calendar",
+      "calendar_url": null,
+      "source_status": "verified",
+      "integration_notes": ""
+    },
+    {
+      "venue_name": "Tabor Opera House",
+      "city": "Leadville",
+      "state": "CO",
+      "source_group": "official_local_calendar",
+      "calendar_url": null,
+      "source_status": "verified",
+      "integration_notes": ""
+    },
+    {
+      "venue_name": "Paradise Theatre",
+      "city": "Paonia",
+      "state": "CO",
+      "source_group": "official_local_calendar",
+      "calendar_url": null,
+      "source_status": "verified",
+      "integration_notes": ""
+    },
+    {
+      "venue_name": "I Bar Ranch",
+      "city": "Gunnison",
+      "state": "CO",
+      "source_group": "official_local_calendar",
+      "calendar_url": null,
+      "source_status": "verified",
+      "integration_notes": ""
+    },
+    {
+      "venue_name": "Hudson Gardens",
+      "city": "Littleton",
+      "state": "CO",
+      "source_group": "official_local_calendar",
+      "calendar_url": null,
+      "source_status": "verified",
+      "integration_notes": ""
+    },
+    {
+      "venue_name": "Stanley Hotel",
+      "city": "Estes Park",
+      "state": "CO",
+      "source_group": "official_local_calendar",
+      "calendar_url": null,
+      "source_status": "verified",
+      "integration_notes": ""
+    },
+    {
+      "venue_name": "Dickens Opera House",
+      "city": "Longmont",
+      "state": "CO",
+      "source_group": "official_local_calendar",
+      "calendar_url": null,
+      "source_status": "candidate",
+      "integration_notes": "Aggregators report access issues; independently verify current event calendar and suitability."
+    },
+    {
+      "venue_name": "Steve's Guitars",
+      "city": "Carbondale",
+      "state": "CO",
+      "source_group": "official_local_calendar",
+      "calendar_url": null,
+      "source_status": "candidate",
+      "integration_notes": ""
+    },
+    {
+      "venue_name": "Ball Arena",
+      "city": "Denver",
+      "state": "CO",
+      "source_group": "multipurpose_venue_cross_ticket",
+      "calendar_url": null,
+      "source_status": "verified",
+      "integration_notes": "Music is a subset of sports/conventions/performing arts; primary sale may vary by event and organizer. Ingest through TM/AXS if present plus official venue schedule."
+    },
+    {
+      "venue_name": "Bellco Theatre",
+      "city": "Denver",
+      "state": "CO",
+      "source_group": "multipurpose_venue_cross_ticket",
+      "calendar_url": null,
+      "source_status": "verified",
+      "integration_notes": "Music is a subset of sports/conventions/performing arts; primary sale may vary by event and organizer. Ingest through TM/AXS if present plus official venue schedule."
+    },
+    {
+      "venue_name": "Paramount Theatre",
+      "city": "Denver",
+      "state": "CO",
+      "source_group": "multipurpose_venue_cross_ticket",
+      "calendar_url": null,
+      "source_status": "verified",
+      "integration_notes": "Music is a subset of sports/conventions/performing arts; primary sale may vary by event and organizer. Ingest through TM/AXS if present plus official venue schedule."
+    },
+    {
+      "venue_name": "Coors Field",
+      "city": "Denver",
+      "state": "CO",
+      "source_group": "multipurpose_venue_cross_ticket",
+      "calendar_url": null,
+      "source_status": "verified",
+      "integration_notes": "Music is a subset of sports/conventions/performing arts; primary sale may vary by event and organizer. Ingest through TM/AXS if present plus official venue schedule."
+    },
+    {
+      "venue_name": "Empower Field at Mile High",
+      "city": "Denver",
+      "state": "CO",
+      "source_group": "multipurpose_venue_cross_ticket",
+      "calendar_url": null,
+      "source_status": "verified",
+      "integration_notes": "Music is a subset of sports/conventions/performing arts; primary sale may vary by event and organizer. Ingest through TM/AXS if present plus official venue schedule."
+    },
+    {
+      "venue_name": "Denver Coliseum",
+      "city": "Denver",
+      "state": "CO",
+      "source_group": "multipurpose_venue_cross_ticket",
+      "calendar_url": null,
+      "source_status": "verified",
+      "integration_notes": "Music is a subset of sports/conventions/performing arts; primary sale may vary by event and organizer. Ingest through TM/AXS if present plus official venue schedule."
+    },
+    {
+      "venue_name": "Denver Botanic Gardens (Chatfield/Blossoms)",
+      "city": "Denver",
+      "state": "CO",
+      "source_group": "multipurpose_venue_cross_ticket",
+      "calendar_url": null,
+      "source_status": "verified",
+      "integration_notes": "Music is a subset of sports/conventions/performing arts; primary sale may vary by event and organizer. Ingest through TM/AXS if present plus official venue schedule."
+    },
+    {
+      "venue_name": "Civic Center Park",
+      "city": "Denver",
+      "state": "CO",
+      "source_group": "multipurpose_venue_cross_ticket",
+      "calendar_url": null,
+      "source_status": "verified",
+      "integration_notes": "Music is a subset of sports/conventions/performing arts; primary sale may vary by event and organizer. Ingest through TM/AXS if present plus official venue schedule."
+    },
+    {
+      "venue_name": "Folsom Field",
+      "city": "Boulder",
+      "state": "CO",
+      "source_group": "multipurpose_venue_cross_ticket",
+      "calendar_url": null,
+      "source_status": "verified",
+      "integration_notes": ""
+    },
+    {
+      "venue_name": "CU Events Center",
+      "city": "Boulder",
+      "state": "CO",
+      "source_group": "multipurpose_venue_cross_ticket",
+      "calendar_url": null,
+      "source_status": "verified",
+      "integration_notes": ""
+    },
+    {
+      "venue_name": "Dick's Sporting Goods Park",
+      "city": "Commerce City",
+      "state": "CO",
+      "source_group": "multipurpose_venue_cross_ticket",
+      "calendar_url": null,
+      "source_status": "verified",
+      "integration_notes": ""
+    },
+    {
+      "venue_name": "Blue FCU Arena",
+      "city": "Loveland",
+      "state": "CO",
+      "source_group": "multipurpose_venue_cross_ticket",
+      "calendar_url": null,
+      "source_status": "verified",
+      "integration_notes": "Aliases: Blue Arena, formerly Budweiser Events Center."
+    },
+    {
+      "venue_name": "Broadmoor World Arena",
+      "city": "Colorado Springs",
+      "state": "CO",
+      "source_group": "multipurpose_venue_cross_ticket",
+      "calendar_url": "https://www.broadmoorworldarena.com/events-tickets/calendar-of-events",
+      "source_status": "verified",
+      "integration_notes": "Shared World Arena/Pikes Peak calendar for first two; music subset."
+    },
+    {
+      "venue_name": "Pikes Peak Center",
+      "city": "Colorado Springs",
+      "state": "CO",
+      "source_group": "multipurpose_venue_cross_ticket",
+      "calendar_url": "https://www.broadmoorworldarena.com/events-tickets/calendar-of-events",
+      "source_status": "verified",
+      "integration_notes": "Shared World Arena/Pikes Peak calendar for first two; music subset."
+    },
+    {
+      "venue_name": "Falcon Stadium",
+      "city": "Colorado Springs",
+      "state": "CO",
+      "source_group": "multipurpose_venue_cross_ticket",
+      "calendar_url": null,
+      "source_status": "verified",
+      "integration_notes": "Shared World Arena/Pikes Peak calendar for first two; music subset."
+    },
+    {
+      "venue_name": "Colorado State Fairgrounds",
+      "city": "Pueblo",
+      "state": "CO",
+      "source_group": "multipurpose_venue_cross_ticket",
+      "calendar_url": null,
+      "source_status": "verified",
+      "integration_notes": ""
+    },
+    {
+      "venue_name": "Planet Bluegrass Ranch",
+      "city": "Lyons",
+      "state": "CO",
+      "source_group": "seasonal_festival_organizer",
+      "calendar_url": "https://bluegrass.com/planet/what-we-do/festivals-and-concerts",
+      "source_status": "verified",
+      "integration_notes": "RockyGrass/Rocky Mountain Folks Fest; seasonal event ingestion."
+    },
+    {
+      "venue_name": "Telluride Town Park",
+      "city": "Telluride",
+      "state": "CO",
+      "source_group": "seasonal_festival_organizer",
+      "calendar_url": "https://bluegrass.com/planet/what-we-do/festivals-and-concerts",
+      "source_status": "verified",
+      "integration_notes": "Telluride Bluegrass and other distinct festivals: organizers must be joined to actual venue; do not duplicate venue."
+    },
+    {
+      "venue_name": "Snowmass Town Park",
+      "city": "Snowmass Village",
+      "state": "CO",
+      "source_group": "seasonal_festival_organizer",
+      "calendar_url": null,
+      "source_status": "verified",
+      "integration_notes": ""
+    },
+    {
+      "venue_name": "Rio Grande Park",
+      "city": "Aspen",
+      "state": "CO",
+      "source_group": "seasonal_festival_organizer",
+      "calendar_url": null,
+      "source_status": "verified",
+      "integration_notes": ""
+    },
+    {
+      "venue_name": "Ford Amphitheater summer series",
+      "city": "Vail",
+      "state": "CO",
+      "source_group": "seasonal_festival_organizer",
+      "calendar_url": null,
+      "source_status": "verified",
+      "integration_notes": "Not a distinct venue: organizer-series context to enrich canonical Ford Amphitheater."
+    },
+    {
+      "venue_name": "Dillon Amphitheater town series",
+      "city": "Dillon",
+      "state": "CO",
+      "source_group": "seasonal_festival_organizer",
+      "calendar_url": null,
+      "source_status": "verified",
+      "integration_notes": "Not a distinct venue: town calendar supplement to canonical Dillon Amphitheater."
+    },
+    {
+      "venue_name": "Bohemian Nights / Thursday Night Live",
+      "city": "Fort Collins",
+      "state": "CO",
+      "source_group": "seasonal_festival_organizer",
+      "calendar_url": null,
+      "source_status": "verified",
+      "integration_notes": "Organizer and free series; preserve actual park/venue."
+    },
+    {
+      "venue_name": "Underground Music Showcase",
+      "city": "Denver",
+      "state": "CO",
+      "source_group": "seasonal_festival_organizer",
+      "calendar_url": null,
+      "source_status": "verified",
+      "integration_notes": "Multi-venue festival; model festival-event and many-to-many stages/performers."
+    }
+  ],
+  "api_landscape": {
+    "ticketmaster_discovery": "Public developer API; supports CO state, music filter, 12-month window, default quota 5000/day, 5/s.",
+    "axs": "Broad AEG and additional venue listings; public general-purpose discovery API not verified. Treat official tickets and AXS aggregator independently.",
+    "z2": "Central multi-venue public event calendar; ticket vendors may include Tixr or AXS.",
+    "bohemian": "Central Washingtons and Armory calendar; WordPress The Events Calendar-style pages.",
+    "jambase": "Commercial event discovery API with artist, venue and ticket crosswalks, 6-month free non-commercial developer tier; 12-month+ commercial is paid (~500/mo annual or ~600 month-to-month at research date).",
+    "bandsintown": "Multi-artist platforms need approval; no educational/personal approvals according to provider.",
+    "songkick": "API licensed for commercial use, no educational/hobbyist approvals; official page says starting $500/month.",
+    "tixr": "Official venue/partner API options; access and commercial rights must be negotiated.",
+    "eventim_seetickets": "Affiliate event feeds require account, API key and affiliate approval.",
+    "wp_events_calendar": "Test public GET /wp-json/tribe/events/v1/events on sites running this plugin; may be disabled by site operator."
+  }
+}
