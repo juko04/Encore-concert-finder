@@ -202,6 +202,7 @@ async function main(): Promise<void> {
       supabaseUrl,
       args.allowProductionWrite,
       'Venue Ingestion CLI Runner',
+      args.useFixture,
     );
   }
 

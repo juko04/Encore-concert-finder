@@ -30,17 +30,17 @@ This Pull Request delivers **Encore V2** by integrating three coordinated system
 PERSPECTIVE A: Incremental Encore V2 Implementation (on top of Spotify baseline 4009277)
 ========================================================================================
 Files Changed:     90 files
-Insertions (+):    17,788 lines
+Insertions (+):    17,825 lines
 Deletions (-):     260 lines
-Net Delta:         +17,528 lines
+Net Delta:         +17,565 lines
 
 ========================================================================================
 PERSPECTIVE B: Full PR #20 Diff against origin/main (including Spotify foundation)
 ========================================================================================
 Files Changed:     120 files
-Insertions (+):    30,538 lines
+Insertions (+):    30,575 lines
 Deletions (-):     324 lines
-Net Delta:         +30,214 lines
+Net Delta:         +30,251 lines
 ========================================================================================
 ```
 
@@ -59,6 +59,7 @@ Net Delta:         +30,214 lines
 | `0eb3e06` | `docs` | add comprehensive pull request diff and architecture report | Documents Milestone 0–6 diff architecture and subsystems |
 | `58b3a8c` | `docs(research)` | persist 134-entry Colorado venue source inventory registry | Stores full Colorado venue registry (`encore_colorado_venue_source_inventory.json`) for future expansion |
 | `a1eda0d` | `fix(pr20-remediation)` | resolve partitioner connection, production destination guard, database search pagination, atomic quota locks, and strict verification assertions | Complete remediation of merge-blocking Findings 1–6 |
+| `9106122` | `fix(types)` | resolve events title type mismatch in verify-live-ingestion | Corrects TypeScript schema error where events name column was referenced as title; green GitHub CI run 44677461105 |
 
 ---
 
@@ -273,7 +274,7 @@ Below is the complete file listing comparing `feature/encore-v2-index-ticketmast
 | **Formatting** (`npm run format:check`) | **PASS** | 4.10s | 100% Prettier compliant across all project files |
 | **Linting** (`npm run lint`) | **PASS** | 3.80s | 0 ESLint warnings, 0 errors |
 | **Typecheck** (`npm run typecheck`) | **PASS** | 1.80s | `tsc --noEmit`, 0 TypeScript errors |
-| **Unit Tests** (`npm test`) | **PASS** | 16.06s | **66/66 test files passed, 892/892 tests passed** |
+| **Unit Tests** (`npm test`) | **PASS** | 16.06s | **66/66 test files passed, 894/894 tests passed** |
 | **Integration Tests** (`npm run test:integration`) | **PASS** | 29.83s | **14/14 test files passed, 108/108 tests passed** (including >520 event pagination test) |
 | **Playwright E2E** (`npx playwright test`) | **PASS** | 28.80s | **16/16 browser tests passed in Chromium** |
 | **Production Build** (`npm run build`) | **PASS** | 3.90s | Clean Next.js 15.5.27 production build (19 routes) |

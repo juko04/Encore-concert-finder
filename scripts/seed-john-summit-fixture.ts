@@ -84,7 +84,7 @@ export function resolveSupabaseAdmin(): {
   }
 
   // Invariant 6: Strict destination safety check
-  assertSafeDatabaseTarget(url, false, 'seed-john-summit-fixture');
+  assertSafeDatabaseTarget(url, false, 'seed-john-summit-fixture', true);
 
   const client = createClient(url, serviceRoleKey, {
     auth: { autoRefreshToken: false, persistSession: false },

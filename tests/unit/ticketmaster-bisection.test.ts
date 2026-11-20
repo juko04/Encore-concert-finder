@@ -624,5 +624,120 @@ describe('Ticketmaster Dynamic Temporal Partitioning (Date Bisection)', () => {
       expect(result.truncatedPartitions?.[0].totalElements).toBe(1500);
       expect(result.truncatedPartitions?.[0].isTruncated).toBe(true);
     });
+
+    it('successfully processes >1,000 provider events end-to-end through runTicketmasterIngestion across bisected partitions with full coverage', async () => {
+      const sourceRepo = new MemorySourceRepository();
+      const rawIngestRepo = new MemoryRawIngestRepository();
+      const candidateRepo = new MemoryEventCandidateRepository();
+      const catalogRepo = new MemoryCatalogRepository();
+
+      // Helper to generate distinct mock events across distinct venues/artists
+      const createDistinctEvent = (
+        id: string,
+        date: string,
+      ): TicketmasterEvent => {
+        const ev = createMockEvent(id, date);
+        ev._embedded!.venues = [
+          {
+            id: `venue-${id}`,
+            name: `Venue ${id}`,
+            city: { name: 'Denver' },
+            state: { stateCode: 'CO' },
+            timezone: 'America/Denver',
+          },
+        ];
+        return ev;
+      };
+
+      // Create 1,050 unique mock events (525 left partition, 525 right partition)
+      const leftEvents = Array.from({ length: 525 }, (_, i) =>
+        createDistinctEvent(`ev-1k-left-${i}`, '2026-10-02'),
+      );
+      const rightEvents = Array.from({ length: 525 }, (_, i) =>
+        createDistinctEvent(`ev-1k-right-${i}`, '2026-10-08'),
+      );
+
+      const mockFetchFn = vi.fn().mockImplementation(async (params) => {
+        const { startDateTime, endDateTime, page = 0, size = 200 } = params;
+
+        // Root probe across 10-day range returns 1,050 elements (exceeds 950 threshold)
+        if (
+          startDateTime === '2026-10-01T00:00:00Z' &&
+          endDateTime === '2026-10-11T00:00:00Z'
+        ) {
+          return {
+            response: createMockResponse([], 1050, 0, size),
+            rawJson: JSON.stringify(createMockResponse([], 1050, 0, size)),
+            url: `https://app.ticketmaster.com/discovery/v2/events.json?startDateTime=${startDateTime}&endDateTime=${endDateTime}&page=0`,
+          };
+        }
+
+        // Left partition [10-01 to 10-06] holds 525 elements (< 950)
+        if (startDateTime === '2026-10-01T00:00:00Z') {
+          const slice = leftEvents.slice(page * size, (page + 1) * size);
+          return {
+            response: createMockResponse(slice, 525, page, size),
+            rawJson: JSON.stringify(createMockResponse(slice, 525, page, size)),
+            url: `https://app.ticketmaster.com/discovery/v2/events.json?startDateTime=${startDateTime}&endDateTime=${endDateTime}&page=${page}`,
+          };
+        }
+
+        // Right partition [10-06 to 10-11] holds 525 elements (< 950)
+        if (startDateTime === '2026-10-06T00:00:00Z') {
+          const slice = rightEvents.slice(page * size, (page + 1) * size);
+          return {
+            response: createMockResponse(slice, 525, page, size),
+            rawJson: JSON.stringify(createMockResponse(slice, 525, page, size)),
+            url: `https://app.ticketmaster.com/discovery/v2/events.json?startDateTime=${startDateTime}&endDateTime=${endDateTime}&page=${page}`,
+          };
+        }
+
+        throw new Error(`Unexpected range: ${startDateTime} to ${endDateTime}`);
+      });
+
+      const adapter = new TicketmasterDiscoveryAdapter();
+      const result = await runTicketmasterIngestion({
+        sourceRepo,
+        rawIngestRepo,
+        candidateRepo,
+        catalogRepo,
+        adapter,
+        usePartitioner: true,
+        persist: true,
+        queryParams: {
+          startDateTime: '2026-10-01T00:00:00Z',
+          endDateTime: '2026-10-11T00:00:00Z',
+        },
+        partitionOptions: {
+          fetchFn: mockFetchFn,
+          threshold: 950,
+          pageSize: 200,
+        },
+      });
+
+      // Verify partition coordination metrics
+      expect(result.bisectionsCount).toBe(1);
+      expect(result.partitionsProcessed).toBe(2);
+      expect(result.hasIncompleteCoverage).toBe(false);
+      expect(result.truncatedPartitions).toEqual([]);
+
+      // Verify >1,000 events: 6 total pages fetched (3 left + 3 right: 200 + 200 + 125 each)
+      expect(result.rawIngestsFetched).toBe(6);
+      expect(result.rawIngestsPersisted).toBe(6);
+
+      // Verify exactly 1,050 candidates extracted and canonicalized
+      expect(result.candidatesParsed).toBe(1050);
+      expect(result.candidatesPersisted).toBe(1050);
+      expect(result.canonicalEventsCreated).toBe(1050);
+
+      // Verify database repository state
+      const persistedIngests = await rawIngestRepo.listBySource(
+        result.source.id,
+      );
+      expect(persistedIngests.length).toBe(6);
+
+      const allEvents = await catalogRepo.listEvents({ limit: 2000 });
+      expect(allEvents.length).toBe(1050);
+    }, 30000);
   });
 });

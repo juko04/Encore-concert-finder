@@ -26,11 +26,12 @@ Durable architecture records belong in [`docs/architecture/`](docs/architecture/
 - `npm run format:check`: **PASS** (100% Prettier code style)
 - `npm run lint`: **PASS** (0 ESLint warnings, 0 errors)
 - `npm run typecheck`: **PASS** (`tsc --noEmit`, 0 TypeScript errors)
-- `npm test`: **PASS** (**66/66 test files, 892/892 unit tests passed**)
+- `npm test`: **PASS** (**66/66 test files, 894/894 unit tests passed**)
 - `npm run test:integration`: **PASS** (**14/14 test files, 108/108 database integration tests passed**)
 - `npx playwright test`: **PASS** (**16/16 Playwright browser tests passed**)
 - `npm run build`: **PASS** (Next.js 15.5.27 production build clean, 19/19 routes compiled)
 - `scripts/verify-live-ingestion.ts`: **PASS** (306 canonical events in DB; Pass 2 100% idempotent with 0 duplicates; 10 event_sources relations verified with 0 orphans)
+- **GitHub Actions Remote CI:** **PASS** (Run `#116` / `44677461105` on commit `9106122` completed green in 5m48s)
 
 ---
 

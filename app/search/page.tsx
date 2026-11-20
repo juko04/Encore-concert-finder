@@ -24,6 +24,7 @@ interface SearchPageProps {
     minPrice?: string;
     maxPrice?: string;
     freeOnly?: string;
+    includeUnknownPrice?: string;
   }>;
 }
 
@@ -41,12 +42,24 @@ export default async function SearchPage({ searchParams }: SearchPageProps) {
     : undefined;
   const freeOnly =
     resolvedParams.freeOnly === 'true' || resolvedParams.freeOnly === '1';
+  const includeUnknownPrice =
+    resolvedParams.includeUnknownPrice !== undefined
+      ? resolvedParams.includeUnknownPrice === 'true' ||
+        resolvedParams.includeUnknownPrice === '1'
+      : true;
 
-  const repoSortBy: EventSortOption | undefined =
-    resolvedParams.sort === 'price_asc' ||
-    resolvedParams.sort === 'score_desc' ||
-    resolvedParams.sort === 'date_asc'
-      ? resolvedParams.sort
+  const validSorts: EventSortOption[] = [
+    'price_asc',
+    'price_desc',
+    'date_asc',
+    'date_desc',
+    'title_asc',
+    'score_desc',
+  ];
+  const repoSortBy: EventSortOption =
+    resolvedParams.sort &&
+    validSorts.includes(resolvedParams.sort as EventSortOption)
+      ? (resolvedParams.sort as EventSortOption)
       : 'date_asc';
 
   const filters: EventListFilters = {
@@ -60,6 +73,7 @@ export default async function SearchPage({ searchParams }: SearchPageProps) {
     maxPrice:
       maxPrice !== undefined && !Number.isNaN(maxPrice) ? maxPrice : undefined,
     freeOnly: freeOnly || undefined,
+    includeUnknownPrice,
     sortBy: repoSortBy,
     limit: 50,
     offset: 0,

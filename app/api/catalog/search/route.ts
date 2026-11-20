@@ -28,6 +28,12 @@ export async function GET(request: Request) {
         : undefined;
     const freeOnlyParam = searchParams.get('freeOnly');
     const freeOnly = freeOnlyParam === 'true' || freeOnlyParam === '1';
+    const includeUnknownPriceParam = searchParams.get('includeUnknownPrice');
+    const includeUnknownPrice =
+      includeUnknownPriceParam !== null
+        ? includeUnknownPriceParam === 'true' ||
+          includeUnknownPriceParam === '1'
+        : true;
 
     const sort = searchParams.get('sort') || 'date_asc';
     const limitParam = searchParams.get('limit');
@@ -47,9 +53,17 @@ export async function GET(request: Request) {
     const supabase = await createClient();
     const catalogRepo = new SupabaseCatalogRepository(supabase);
 
-    const repoSortBy: EventSortOption | undefined =
-      sort === 'price_asc' || sort === 'score_desc' || sort === 'date_asc'
-        ? sort
+    const validSorts: EventSortOption[] = [
+      'price_asc',
+      'price_desc',
+      'date_asc',
+      'date_desc',
+      'title_asc',
+      'score_desc',
+    ];
+    const repoSortBy: EventSortOption =
+      sort && validSorts.includes(sort as EventSortOption)
+        ? (sort as EventSortOption)
         : 'date_asc';
 
     const filters: EventListFilters = {
@@ -67,6 +81,7 @@ export async function GET(request: Request) {
           ? maxPrice
           : undefined,
       freeOnly: freeOnly || undefined,
+      includeUnknownPrice,
       sortBy: repoSortBy,
       limit,
       offset,
@@ -85,19 +100,22 @@ export async function GET(request: Request) {
     if (minPrice !== undefined && !Number.isNaN(minPrice)) {
       events = events.filter(
         (e) =>
-          e.minPrice !== null &&
-          e.minPrice !== undefined &&
-          e.minPrice >= minPrice,
+          (e.minPrice !== null &&
+            e.minPrice !== undefined &&
+            e.minPrice >= minPrice) ||
+          (includeUnknownPrice &&
+            (e.minPrice === null || e.minPrice === undefined)),
       );
     }
 
     if (maxPrice !== undefined && !Number.isNaN(maxPrice)) {
-      events = events.filter(
-        (e) =>
-          e.minPrice !== null &&
-          e.minPrice !== undefined &&
-          e.minPrice <= maxPrice,
-      );
+      events = events.filter((e) => {
+        if (e.eventKind === 'free_event') return true;
+        if (e.minPrice === null || e.minPrice === undefined) {
+          return includeUnknownPrice;
+        }
+        return e.minPrice <= maxPrice;
+      });
     }
 
     if (freeOnly) {
@@ -117,10 +135,12 @@ export async function GET(request: Request) {
       );
     } else if (sort === 'price_desc') {
       events.sort((a, b) => {
-        const aPrice = a.maxPrice ?? a.minPrice ?? -Infinity;
-        const bPrice = b.maxPrice ?? b.minPrice ?? -Infinity;
+        const aPrice = a.minPrice ?? -Infinity;
+        const bPrice = b.minPrice ?? -Infinity;
         return (
-          bPrice - aPrice || a.localStartDate.localeCompare(b.localStartDate)
+          bPrice - aPrice ||
+          a.localStartDate.localeCompare(b.localStartDate) ||
+          a.id.localeCompare(b.id)
         );
       });
     } else if (sort === 'title_asc') {

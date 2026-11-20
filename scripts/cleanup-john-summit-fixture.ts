@@ -70,7 +70,7 @@ function resolveSupabaseAdmin(): { client: SupabaseClient; url: string } {
   }
 
   // Invariant 6: Strict destination safety check
-  assertSafeDatabaseTarget(url, false, 'cleanup-john-summit-fixture');
+  assertSafeDatabaseTarget(url, false, 'cleanup-john-summit-fixture', true);
 
   const client = createClient(url, serviceRoleKey, {
     auth: { autoRefreshToken: false, persistSession: false },

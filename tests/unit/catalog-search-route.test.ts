@@ -72,6 +72,7 @@ describe('GET /api/catalog/search (Server-side Pagination & Filter Route)', () =
       minPrice: 40,
       maxPrice: 100,
       freeOnly: undefined,
+      includeUnknownPrice: true,
       sortBy: 'price_asc',
       limit: 50,
       offset: 50, // (page 2 - 1) * 50
@@ -156,6 +157,24 @@ describe('GET /api/catalog/search (Server-side Pagination & Filter Route)', () =
     expect(Array.isArray(data)).toBe(true);
     expect(data).toHaveLength(1);
     expect(res.headers.get('X-Total-Count')).toBe('1');
+  });
+
+  it('supports includeUnknownPrice=false and sorts', async () => {
+    mockListEvents.mockResolvedValueOnce([]);
+    mockCountEvents.mockResolvedValueOnce(0);
+
+    const url =
+      'http://localhost/api/catalog/search?includeUnknownPrice=false&sort=price_desc';
+    const req = new Request(url);
+
+    await GET(req);
+
+    expect(mockListEvents).toHaveBeenCalledWith(
+      expect.objectContaining({
+        includeUnknownPrice: false,
+        sortBy: 'price_desc',
+      }),
+    );
   });
 
   it('returns 500 when catalog repository throws error', async () => {

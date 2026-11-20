@@ -194,6 +194,7 @@ async function run(): Promise<void> {
         supabaseUrl,
         options.allowProductionWrite,
         'Ticketmaster CLI Ingestion',
+        options.useFixture,
       );
     } catch (err: unknown) {
       console.error(`\nERROR: ${(err as Error).message}\n`);
