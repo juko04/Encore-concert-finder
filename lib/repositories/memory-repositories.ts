@@ -460,11 +460,65 @@ export class MemoryCatalogRepository implements ICatalogRepository {
       result = result.filter((e) => matchingEventIds.has(e.id));
     }
 
-    result.sort(
-      (a, b) =>
-        a.localStartDate.localeCompare(b.localStartDate) ||
-        a.id.localeCompare(b.id),
-    );
+    const getEventMinPrice = (
+      eventId: string,
+      eventKind?: string,
+    ): number | null => {
+      let min: number | null = null;
+      for (const tl of this.eventTicketLinks.values()) {
+        if (
+          tl.eventId === eventId &&
+          tl.minPrice !== null &&
+          tl.minPrice !== undefined
+        ) {
+          min = min === null ? tl.minPrice : Math.min(min, tl.minPrice);
+        }
+      }
+      if (min === null && eventKind === 'free_event') {
+        return 0;
+      }
+      return min;
+    };
+
+    if (filters?.freeOnly) {
+      result = result.filter((e) => {
+        if (e.eventKind === 'free_event') return true;
+        const minP = getEventMinPrice(e.id, e.eventKind);
+        return minP === 0;
+      });
+    }
+
+    if (filters?.minPrice !== undefined) {
+      result = result.filter((e) => {
+        const minP = getEventMinPrice(e.id, e.eventKind);
+        return minP !== null && minP >= filters.minPrice!;
+      });
+    }
+
+    if (filters?.maxPrice !== undefined) {
+      result = result.filter((e) => {
+        const minP = getEventMinPrice(e.id, e.eventKind);
+        return minP !== null && minP <= filters.maxPrice!;
+      });
+    }
+
+    const sortBy = filters?.sortBy ?? 'date_asc';
+    if (sortBy === 'price_asc') {
+      result.sort((a, b) => {
+        const priceA = getEventMinPrice(a.id, a.eventKind) ?? Infinity;
+        const priceB = getEventMinPrice(b.id, b.eventKind) ?? Infinity;
+        if (priceA !== priceB) return priceA - priceB;
+        const dateComp = a.localStartDate.localeCompare(b.localStartDate);
+        if (dateComp !== 0) return dateComp;
+        return a.id.localeCompare(b.id);
+      });
+    } else {
+      result.sort(
+        (a, b) =>
+          a.localStartDate.localeCompare(b.localStartDate) ||
+          a.id.localeCompare(b.id),
+      );
+    }
 
     const offset = filters?.offset ?? 0;
     const limit = filters?.limit ?? 50;
@@ -502,9 +556,11 @@ export class MemoryCatalogRepository implements ICatalogRepository {
       let minPrice: number | null = null;
       let maxPrice: number | null = null;
       let currency: string | null = null;
+      const eventTicketLinks: EventTicketLink[] = [];
 
       for (const tl of this.eventTicketLinks.values()) {
         if (tl.eventId === event.id) {
+          eventTicketLinks.push(tl);
           if (tl.minPrice !== null && tl.minPrice !== undefined) {
             minPrice =
               minPrice === null ? tl.minPrice : Math.min(minPrice, tl.minPrice);
@@ -515,6 +571,10 @@ export class MemoryCatalogRepository implements ICatalogRepository {
           }
           if (tl.currency) currency = tl.currency;
         }
+      }
+
+      if (minPrice === null && event.eventKind === 'free_event') {
+        minPrice = 0;
       }
 
       const eventSources: CanonicalEventSourceSummary[] = [];
@@ -560,6 +620,7 @@ export class MemoryCatalogRepository implements ICatalogRepository {
         title: event.name,
         venueName: venue?.name ?? 'Venue TBA',
         venueId: event.venueId,
+        venue,
         city: venue?.city ?? event.city ?? undefined,
         region: venue?.region ?? event.region ?? undefined,
         lat: venue?.lat ?? event.lat ?? null,
@@ -577,6 +638,7 @@ export class MemoryCatalogRepository implements ICatalogRepository {
         currency,
         sourceName: eventSources.length > 0 ? eventSources[0].name : undefined,
         sources: eventSources,
+        ticketLinks: eventTicketLinks,
       });
     }
 

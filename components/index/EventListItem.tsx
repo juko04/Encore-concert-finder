@@ -1,0 +1,191 @@
+'use client';
+
+import React from 'react';
+import Link from 'next/link';
+import type { IndexEventItem } from './types';
+import {
+  formatIndexDate,
+  formatIndexPrice,
+  getStatusBadge,
+} from './formatters';
+import {
+  HeartIcon,
+  BellIcon,
+  SparklesIcon,
+  AlertCircleIcon,
+  ArrowRightIcon,
+} from './icons';
+
+export interface EventListItemProps {
+  event: IndexEventItem;
+  isSaved?: boolean;
+  hasAlert?: boolean;
+  onToggleSave?: (id: string, title?: string) => void;
+  onToggleAlert?: (id: string, title?: string) => void;
+  href?: string;
+}
+
+export function EventListItem({
+  event,
+  isSaved = false,
+  hasAlert = false,
+  onToggleSave,
+  onToggleAlert,
+  href,
+}: EventListItemProps) {
+  const isPersonalized = Boolean(event.personalScore?.isPersonalized);
+  const score = event.personalScore?.score ?? 50;
+  const isDisliked = Boolean(event.personalScore?.isDisliked);
+  const isFavorite = Boolean(event.personalScore?.isFavorite);
+
+  const statusBadge = getStatusBadge(event.inventoryStatus);
+  const headlinerName = event.headlinerName || event.title;
+  const detailUrl = href || `/concerts/${event.id}`;
+
+  return (
+    <div
+      className={`group flex flex-col justify-between gap-3 border-b border-zinc-200/80 bg-white px-4 py-3.5 transition-colors hover:bg-zinc-50/80 sm:flex-row sm:items-center ${
+        isDisliked ? 'bg-zinc-50 opacity-60' : ''
+      }`}
+    >
+      {/* Left Column: Artwork Dot / Badge + Name + Date + Venue */}
+      <div className="flex min-w-0 flex-1 items-start gap-3.5 sm:items-center">
+        {/* Poster Swatch Avatar */}
+        <div
+          className="shadow-xs relative flex h-10 w-10 shrink-0 items-center justify-center rounded-lg font-mono text-xs font-bold text-white transition-transform duration-150 group-hover:scale-105"
+          style={{
+            background: `linear-gradient(135deg, ${event.posterColor} 0%, ${event.posterSecondaryColor} 100%)`,
+          }}
+        >
+          {headlinerName.charAt(0) || 'E'}
+        </div>
+
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <Link
+              href={detailUrl}
+              className="focus-visible:outline-hidden truncate text-sm font-semibold text-zinc-900 hover:underline"
+            >
+              {headlinerName}
+            </Link>
+
+            {/* Status Badge */}
+            <span
+              className={`rounded border px-1.5 py-0.5 text-[10px] font-medium tracking-wide ${statusBadge.bg}`}
+            >
+              {statusBadge.label}
+            </span>
+
+            {/* Personal Match Score */}
+            {isPersonalized &&
+              (isDisliked ? (
+                <span className="inline-flex items-center gap-0.5 rounded border border-rose-200 bg-rose-50 px-1.5 py-0.5 text-[10px] font-medium text-rose-700">
+                  <AlertCircleIcon className="h-2.5 w-2.5" />
+                  <span>Suppressed</span>
+                </span>
+              ) : isFavorite ? (
+                <span className="inline-flex items-center gap-0.5 rounded border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[10px] font-semibold text-amber-800">
+                  <SparklesIcon className="h-2.5 w-2.5 text-amber-600" />
+                  <span>{score}% Match</span>
+                </span>
+              ) : (
+                <span className="rounded border border-zinc-200 bg-zinc-50 px-1.5 py-0.5 text-[10px] font-medium text-zinc-600">
+                  {score}%
+                </span>
+              ))}
+          </div>
+
+          <div className="mt-0.5 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-xs text-zinc-500">
+            <span className="font-medium text-zinc-700">
+              {formatIndexDate(
+                event.localStartDate,
+                event.doorTime || event.startsAt,
+                event.timezone,
+              )}
+            </span>
+            <span>·</span>
+            <span className="truncate">
+              {event.venueName || 'Venue TBA'}
+              {event.city ? ` (${event.city})` : ''}
+            </span>
+            {event.genre && (
+              <>
+                <span>·</span>
+                <span className="font-mono text-[11px] text-zinc-400">
+                  {event.genre.split('/')[0].trim()}
+                </span>
+              </>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Right Column: Price + Action Buttons */}
+      <div className="flex shrink-0 items-center justify-between gap-4 pl-12 sm:justify-end sm:pl-0">
+        <div className="text-right">
+          <div className="font-mono text-sm font-semibold tabular-nums text-zinc-900">
+            {formatIndexPrice(
+              event.minPrice,
+              event.maxPrice,
+              event.currency,
+              event.eventKind,
+            )}
+          </div>
+          {event.ageRestriction &&
+            event.ageRestriction.toLowerCase() !== 'all ages' && (
+              <div className="font-mono text-[10px] text-zinc-400">
+                {event.ageRestriction}
+              </div>
+            )}
+        </div>
+
+        {/* Action Buttons */}
+        <div className="flex items-center gap-1">
+          <button
+            type="button"
+            onClick={() => onToggleSave?.(event.id, headlinerName)}
+            aria-label={
+              isSaved
+                ? `Remove ${headlinerName} from watchlist`
+                : `Save ${headlinerName} to watchlist`
+            }
+            aria-pressed={isSaved}
+            className={`flex h-8 w-8 items-center justify-center rounded-lg border transition-all duration-150 ease-out active:scale-[0.92] ${
+              isSaved
+                ? 'border-rose-200 bg-rose-50 text-rose-600'
+                : 'border-transparent text-zinc-400 hover:border-zinc-200 hover:bg-zinc-100 hover:text-zinc-700'
+            }`}
+          >
+            <HeartIcon className="h-4 w-4" filled={isSaved} />
+          </button>
+
+          <button
+            type="button"
+            onClick={() => onToggleAlert?.(event.id, headlinerName)}
+            aria-label={
+              hasAlert
+                ? `Disable alerts for ${headlinerName}`
+                : `Enable ticket alerts for ${headlinerName}`
+            }
+            aria-pressed={hasAlert}
+            className={`flex h-8 w-8 items-center justify-center rounded-lg border transition-all duration-150 ease-out active:scale-[0.92] ${
+              hasAlert
+                ? 'border-violet-200 bg-violet-50 text-violet-600'
+                : 'border-transparent text-zinc-400 hover:border-zinc-200 hover:bg-zinc-100 hover:text-zinc-700'
+            }`}
+          >
+            <BellIcon className="h-4 w-4" filled={hasAlert} />
+          </button>
+
+          <Link
+            href={detailUrl}
+            className="flex h-8 w-8 items-center justify-center rounded-lg border border-transparent text-zinc-400 transition-colors hover:border-zinc-200 hover:bg-zinc-100 hover:text-zinc-700"
+            aria-label={`View details for ${headlinerName}`}
+          >
+            <ArrowRightIcon className="h-4 w-4" />
+          </Link>
+        </div>
+      </div>
+    </div>
+  );
+}

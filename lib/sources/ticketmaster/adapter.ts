@@ -46,6 +46,7 @@ export class TicketmasterDiscoveryAdapter implements EventSourceAdapter {
       size: metadata.size ?? 20,
       page: metadata.page ?? 0,
       sort: metadata.sort ?? 'date,asc',
+      allInclusivePricing: metadata.allInclusivePricing ?? true,
     };
 
     const { rawJson, url } = await this.client.fetchEvents(queryParams);

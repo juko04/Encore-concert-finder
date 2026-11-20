@@ -35,9 +35,12 @@ export function formatSourceBadgeName(rawName?: string | null): string {
 }
 
 export function EventCard({ event }: EventCardProps) {
-  const isDetail = 'ticketLinks' in event;
+  const isSummary =
+    'title' in event &&
+    typeof (event as CanonicalEventSummary).title === 'string';
+  const isDetail = !isSummary;
   const detailEvent = isDetail ? (event as CanonicalEventDetail) : null;
-  const summaryEvent = !isDetail ? (event as CanonicalEventSummary) : null;
+  const summaryEvent = isSummary ? (event as CanonicalEventSummary) : null;
 
   const title = summaryEvent?.title ?? detailEvent?.name ?? 'Untitled Event';
 

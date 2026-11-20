@@ -333,6 +333,39 @@ describe('Ticketmaster Ingestion Foundation', () => {
       );
       expect(candidate.confidence).toBe(0.5);
     });
+
+    it('extracts fee details, all-inclusive pricing, and ticketing status when present', () => {
+      const baseEvt = events[0];
+      const evtWithFees: TicketmasterEvent = {
+        ...baseEvt,
+        id: 'tm-evt-with-fees',
+        priceRanges: [
+          {
+            type: 'standard',
+            currency: 'USD',
+            min: 65.0,
+            max: 120.0,
+            estimatedFees: 18.5,
+          },
+        ],
+        allInclusivePricing: true,
+        ticketing: {
+          allInclusivePricing: { enabled: true },
+          status: { code: 'onsale' },
+        },
+      };
+
+      const candidate = parseTicketmasterEvent(evtWithFees, dummyContext);
+
+      expect(candidate.price?.min).toBe(65.0);
+      expect(candidate.price?.max).toBe(120.0);
+      expect(candidate.price?.currency).toBe('USD');
+      expect(candidate.price?.estimatedFees).toBe(18.5);
+
+      expect(candidate.rawPayload?.allInclusivePricing).toBe(true);
+      expect(candidate.rawPayload?.ticketingStatus).toBe('onsale');
+      expect(candidate.rawPayload?.fees).toEqual({ estimatedFees: 18.5 });
+    });
   });
 
   describe('TicketmasterDiscoveryAdapter', () => {
@@ -725,6 +758,19 @@ describe('Ticketmaster Ingestion Foundation', () => {
 
       // 3 serial requests with 200ms spacing should take at least ~350ms
       expect(elapsed).toBeGreaterThanOrEqual(350);
+    });
+
+    it('includes allInclusivePricing=true by default in buildRequestUrl for fee transparency compliance', () => {
+      const client = new TicketmasterApiClient({ apiKey: 'test-key' });
+      const url = client.buildRequestUrl({});
+      expect(url.searchParams.get('allInclusivePricing')).toBe('true');
+      expect(url.searchParams.get('classificationName')).toBe('Music');
+    });
+
+    it('respects allInclusivePricing=false when explicitly specified', () => {
+      const client = new TicketmasterApiClient({ apiKey: 'test-key' });
+      const url = client.buildRequestUrl({ allInclusivePricing: false });
+      expect(url.searchParams.get('allInclusivePricing')).toBe('false');
     });
   });
 });

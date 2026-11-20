@@ -562,6 +562,11 @@ export class CanonicalizationCoordinator {
       ? candidate.sourceId
       : null;
 
+    const inventoryStatus:
+      'available' | 'low_inventory' | 'sold_out' | 'cancelled' | 'unknown' =
+      candidate.inventoryStatus ||
+      (candidate.rawPayload?.isSoldOut === true ? 'sold_out' : 'available');
+
     // 7. Assemble Atomic Transaction Payload (zero upfront writes)
     let payload: CanonicalizationPayload;
 
@@ -679,7 +684,7 @@ export class CanonicalizationCoordinator {
                 min_price: candidate.price?.min ?? null,
                 max_price: candidate.price?.max ?? null,
                 currency: candidate.price?.currency ?? null,
-                inventory_status: 'available',
+                inventory_status: inventoryStatus,
                 verified_at: new Date().toISOString(),
               },
             ]
@@ -725,7 +730,7 @@ export class CanonicalizationCoordinator {
                 min_price: candidate.price?.min ?? null,
                 max_price: candidate.price?.max ?? null,
                 currency: candidate.price?.currency ?? null,
-                inventory_status: 'available',
+                inventory_status: inventoryStatus,
                 verified_at: new Date().toISOString(),
               },
             ]

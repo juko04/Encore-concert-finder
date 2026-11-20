@@ -42,6 +42,8 @@ import type {
   UserProfileUpdateInput,
 } from '@/lib/domain/profile';
 
+export type EventSortOption = 'date_asc' | 'price_asc' | 'score_desc';
+
 export interface EventListFilters {
   fromDate?: string;
   toDate?: string;
@@ -52,6 +54,10 @@ export interface EventListFilters {
   region?: string;
   status?: Event['status'] | Event['status'][];
   searchQuery?: string;
+  minPrice?: number;
+  maxPrice?: number;
+  freeOnly?: boolean;
+  sortBy?: EventSortOption;
   limit?: number;
   offset?: number;
 }

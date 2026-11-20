@@ -125,16 +125,38 @@ export type TicketmasterVenue = z.infer<typeof TicketmasterVenueSchema>;
 /**
  * Ticketmaster Price Range Schema
  */
-export const TicketmasterPriceRangeSchema = z.object({
-  type: z.string().optional(),
-  currency: z.string().optional(),
-  min: z.number().optional(),
-  max: z.number().optional(),
-});
+export const TicketmasterPriceRangeSchema = z
+  .object({
+    type: z.string().optional(),
+    currency: z.string().optional(),
+    min: z.number().optional(),
+    max: z.number().optional(),
+    fee: z.number().optional(),
+    estimatedFees: z.number().optional(),
+    includingFee: z.boolean().optional(),
+  })
+  .passthrough();
 
 export type TicketmasterPriceRange = z.infer<
   typeof TicketmasterPriceRangeSchema
 >;
+
+/**
+ * Ticketmaster Ticketing Details Schema
+ */
+export const TicketmasterTicketingSchema = z
+  .object({
+    safeTix: z.object({ enabled: z.boolean().optional() }).optional(),
+    allInclusivePricing: z
+      .union([z.boolean(), z.object({ enabled: z.boolean().optional() })])
+      .optional(),
+    status: z
+      .union([z.string(), z.object({ code: z.string().optional() })])
+      .optional(),
+  })
+  .passthrough();
+
+export type TicketmasterTicketing = z.infer<typeof TicketmasterTicketingSchema>;
 
 /**
  * Ticketmaster Dates Schema
@@ -203,6 +225,10 @@ export const TicketmasterEventSchema = z.object({
   dates: TicketmasterEventDatesSchema,
   priceRanges: z.array(TicketmasterPriceRangeSchema).optional(),
   classifications: z.array(TicketmasterClassificationSchema).optional(),
+  allInclusivePricing: z
+    .union([z.boolean(), z.object({ enabled: z.boolean().optional() })])
+    .optional(),
+  ticketing: TicketmasterTicketingSchema.optional(),
   _embedded: z
     .object({
       venues: z.array(TicketmasterVenueSchema).optional(),
@@ -259,4 +285,5 @@ export interface TicketmasterEventQueryParams {
   size?: number;
   page?: number;
   sort?: string;
+  allInclusivePricing?: boolean;
 }

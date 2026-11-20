@@ -451,11 +451,20 @@ export class SupabaseCatalogRepository implements ICatalogRepository {
         }
       }
       const allMerged = Array.from(mergedMap.values());
-      allMerged.sort(
-        (a, b) =>
-          a.localStartDate.localeCompare(b.localStartDate) ||
-          a.id.localeCompare(b.id),
-      );
+      if (filters?.sortBy === 'price_asc') {
+        allMerged.sort(
+          (a, b) =>
+            (a.minPrice ?? Infinity) - (b.minPrice ?? Infinity) ||
+            a.localStartDate.localeCompare(b.localStartDate) ||
+            a.id.localeCompare(b.id),
+        );
+      } else {
+        allMerged.sort(
+          (a, b) =>
+            a.localStartDate.localeCompare(b.localStartDate) ||
+            a.id.localeCompare(b.id),
+        );
+      }
       const limit = globalLimit !== undefined ? globalLimit : allMerged.length;
       return allMerged.slice(globalOffset, globalOffset + limit);
     }
@@ -636,43 +645,58 @@ export class SupabaseCatalogRepository implements ICatalogRepository {
     }
 
     const eventIds = rows.map((r) => r.id);
-
-    // Batch-fetch artists for all returned events (1 query, ordered by sort_order)
-    const { data: allArtistLinks, error: artistError } = await this.client
-      .from('event_artists')
-      .select('*, artists(*, artist_external_ids(provider, external_id))')
-      .in('event_id', eventIds)
-      .order('sort_order', { ascending: true });
-
-    if (artistError) {
-      throw new Error(
-        `Failed to batch-fetch event artists: ${artistError.message}`,
-      );
+    if (eventIds.length === 0) {
+      return [];
     }
 
-    // Batch-fetch ticket links for all returned events (1 query)
-    const { data: allTicketLinks, error: ticketError } = await this.client
-      .from('event_ticket_links')
-      .select('*')
-      .in('event_id', eventIds);
+    // Chunk eventIds in batches of 25 to prevent PostgREST URI buffer overflow (HTTP 414 URI Too Long)
+    const BATCH_CHUNK_SIZE = 25;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const allArtistLinks: any[] = [];
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const allTicketLinks: any[] = [];
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const allSourceLinks: any[] = [];
 
-    if (ticketError) {
-      throw new Error(
-        `Failed to batch-fetch event ticket links: ${ticketError.message}`,
-      );
-    }
+    for (let i = 0; i < eventIds.length; i += BATCH_CHUNK_SIZE) {
+      const chunk = eventIds.slice(i, i + BATCH_CHUNK_SIZE);
 
-    // Batch-fetch event sources with joined source registry relation for all returned events (1 query)
-    const { data: allSourceLinks, error: sourceError } = await this.client
-      .from('event_sources')
-      .select('event_id, source_id, source_url, is_current, sources(*)')
-      .in('event_id', eventIds)
-      .eq('is_current', true);
+      const [artistRes, ticketRes, sourceRes] = await Promise.all([
+        this.client
+          .from('event_artists')
+          .select('*, artists(*, artist_external_ids(provider, external_id))')
+          .in('event_id', chunk)
+          .order('sort_order', { ascending: true }),
+        this.client
+          .from('event_ticket_links')
+          .select('*')
+          .in('event_id', chunk),
+        this.client
+          .from('event_sources')
+          .select('event_id, source_id, source_url, is_current, sources(*)')
+          .in('event_id', chunk)
+          .eq('is_current', true),
+      ]);
 
-    if (sourceError) {
-      throw new Error(
-        `Failed to batch-fetch event sources: ${sourceError.message}`,
-      );
+      if (artistRes.error) {
+        throw new Error(
+          `Failed to batch-fetch event artists: ${artistRes.error.message}`,
+        );
+      }
+      if (ticketRes.error) {
+        throw new Error(
+          `Failed to batch-fetch event ticket links: ${ticketRes.error.message}`,
+        );
+      }
+      if (sourceRes.error) {
+        throw new Error(
+          `Failed to batch-fetch event sources: ${sourceRes.error.message}`,
+        );
+      }
+
+      if (artistRes.data) allArtistLinks.push(...artistRes.data);
+      if (ticketRes.data) allTicketLinks.push(...ticketRes.data);
+      if (sourceRes.data) allSourceLinks.push(...sourceRes.data);
     }
 
     // Group relations in-memory by event_id
@@ -752,10 +776,14 @@ export class SupabaseCatalogRepository implements ICatalogRepository {
       const ticketLinks = ticketLinksByEventId.get(event.id) || [];
       const sources = sourcesByEventId.get(event.id) || [];
 
-      const minPrice = ticketLinks.reduce<number | null>((min, tl) => {
+      let minPrice = ticketLinks.reduce<number | null>((min, tl) => {
         if (tl.minPrice === null || tl.minPrice === undefined) return min;
         return min === null ? tl.minPrice : Math.min(min, tl.minPrice);
       }, null);
+
+      if (minPrice === null && event.eventKind === 'free_event') {
+        minPrice = 0;
+      }
 
       const maxPrice = ticketLinks.reduce<number | null>((max, tl) => {
         if (tl.maxPrice === null || tl.maxPrice === undefined) return max;
@@ -769,6 +797,7 @@ export class SupabaseCatalogRepository implements ICatalogRepository {
         title: event.name,
         venueName: venue?.name ?? 'Venue TBA',
         venueId: event.venueId,
+        venue,
         city: venue?.city ?? event.city ?? undefined,
         region: venue?.region ?? event.region ?? undefined,
         lat: venue?.lat ?? event.lat ?? null,
@@ -786,10 +815,44 @@ export class SupabaseCatalogRepository implements ICatalogRepository {
         currency,
         sourceName: sources.length > 0 ? sources[0].name : undefined,
         sources,
+        ticketLinks,
       });
     }
 
-    return summaries;
+    let filteredSummaries = summaries;
+
+    if (filters?.freeOnly) {
+      filteredSummaries = filteredSummaries.filter(
+        (s) => s.eventKind === 'free_event' || s.minPrice === 0,
+      );
+    }
+    if (filters?.minPrice !== undefined) {
+      filteredSummaries = filteredSummaries.filter(
+        (s) =>
+          s.minPrice !== null &&
+          s.minPrice !== undefined &&
+          s.minPrice >= filters.minPrice!,
+      );
+    }
+    if (filters?.maxPrice !== undefined) {
+      filteredSummaries = filteredSummaries.filter(
+        (s) =>
+          s.minPrice !== null &&
+          s.minPrice !== undefined &&
+          s.minPrice <= filters.maxPrice!,
+      );
+    }
+
+    if (filters?.sortBy === 'price_asc') {
+      filteredSummaries.sort(
+        (a, b) =>
+          (a.minPrice ?? Infinity) - (b.minPrice ?? Infinity) ||
+          a.localStartDate.localeCompare(b.localStartDate) ||
+          a.id.localeCompare(b.id),
+      );
+    }
+
+    return filteredSummaries;
   }
 
   async listCities(): Promise<string[]> {

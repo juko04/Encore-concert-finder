@@ -1,5 +1,7 @@
 export * from './types';
 export * from './errors';
+export * from './quota-guard';
+export * from './partitioner';
 export * from './client';
 export * from './parser';
 export * from './adapter';

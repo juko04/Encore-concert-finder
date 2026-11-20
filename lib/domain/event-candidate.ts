@@ -54,6 +54,8 @@ export interface EventCandidate {
   doorsOpenAt?: string;
   ticketUrl?: string;
   price?: CandidatePrice;
+  inventoryStatus?:
+    'available' | 'low_inventory' | 'sold_out' | 'cancelled' | 'unknown';
   isFestival?: boolean;
   eventKind?: EventKind;
   confidence: number;

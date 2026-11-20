@@ -109,6 +109,37 @@ export class TicketmasterRateLimitError extends TicketmasterError {
 }
 
 /**
+ * Daily quota exceeded or circuit breaker tripped.
+ */
+export class TicketmasterQuotaExceededError extends TicketmasterError {
+  readonly isCircuitBreaker: boolean;
+  readonly quotaCount?: number;
+  readonly dailyLimit?: number;
+
+  constructor(
+    message: string,
+    options: {
+      isCircuitBreaker?: boolean;
+      quotaCount?: number;
+      dailyLimit?: number;
+      sanitizedUrl?: string;
+      cause?: unknown;
+    } = {},
+  ) {
+    super(message, {
+      category: 'rate_limit_exceeded',
+      statusCode: 429,
+      sanitizedUrl: options.sanitizedUrl,
+      cause: options.cause,
+    });
+    this.name = 'TicketmasterQuotaExceededError';
+    this.isCircuitBreaker = options.isCircuitBreaker ?? false;
+    this.quotaCount = options.quotaCount;
+    this.dailyLimit = options.dailyLimit;
+  }
+}
+
+/**
  * Network failure, connection abort, or timeout when retries are exhausted.
  */
 export class TicketmasterNetworkError extends TicketmasterError {

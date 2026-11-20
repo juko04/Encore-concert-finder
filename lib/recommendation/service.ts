@@ -5,7 +5,11 @@ import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 import type { CanonicalEventSummary } from '@/lib/domain/catalog';
 import type { UserProfile } from '@/lib/domain/profile';
-import { rankEvents } from '@/lib/recommendation/engine';
+import {
+  compareScoredEvents,
+  rankEvents,
+  scoreEvent,
+} from '@/lib/recommendation/engine';
 import { calculateTimingFactor } from '@/lib/recommendation/factors/timing';
 import {
   calculate14DayLookaheadEndDate,
@@ -32,6 +36,7 @@ import type {
 import { SupabaseCatalogRepository } from '@/lib/repositories/catalog-repository';
 import type {
   EventListFilters,
+  EventSortOption,
   ICatalogRepository,
   IProfileRepository,
   ISpotifyConnectionRepository,
@@ -926,3 +931,99 @@ export async function getPublicDiscoverData(
     activeMode,
   };
 }
+
+export interface PersonalizedFeedOptions extends PersonalizedDiscoverOptions {
+  minPrice?: number;
+  maxPrice?: number;
+  freeOnly?: boolean;
+  sortBy?: EventSortOption;
+  limit?: number;
+  offset?: number;
+  includeSuppressed?: boolean;
+  includeExploratory?: boolean;
+}
+
+/**
+ * Produces a personalized, ranked feed of scored events suitable for the Index UI.
+ * Integrates factor breakdowns (artist, distance, price, timing), user explanations,
+ * price/free filtering, and flexible sorting.
+ */
+export async function getPersonalizedFeed(
+  options: PersonalizedFeedOptions,
+): Promise<ScoredEvent[]> {
+  const result = await getPersonalizedDiscoverData(options);
+
+  let feed: ScoredEvent[] = [...result.recommendations];
+  if (options.includeExploratory !== false) {
+    feed.push(...result.exploratory);
+  }
+  if (options.includeSuppressed) {
+    feed.push(...result.suppressed);
+  }
+
+  // Price & free filtering
+  if (options.freeOnly) {
+    feed = feed.filter(
+      (se) => se.event.eventKind === 'free_event' || se.event.minPrice === 0,
+    );
+  }
+  if (options.minPrice !== undefined) {
+    feed = feed.filter(
+      (se) =>
+        se.event.minPrice !== null &&
+        se.event.minPrice !== undefined &&
+        se.event.minPrice >= options.minPrice!,
+    );
+  }
+  if (options.maxPrice !== undefined) {
+    feed = feed.filter(
+      (se) =>
+        se.event.minPrice !== null &&
+        se.event.minPrice !== undefined &&
+        se.event.minPrice <= options.maxPrice!,
+    );
+  }
+
+  // Sorting
+  const sortBy = options.sortBy ?? 'score_desc';
+  if (sortBy === 'price_asc') {
+    feed.sort((a, b) => {
+      const priceA = a.event.minPrice ?? Infinity;
+      const priceB = b.event.minPrice ?? Infinity;
+      if (priceA !== priceB) return priceA - priceB;
+      return compareScoredEvents(a, b);
+    });
+  } else if (sortBy === 'date_asc') {
+    feed.sort((a, b) => {
+      const dateComp = a.event.localStartDate.localeCompare(
+        b.event.localStartDate,
+      );
+      if (dateComp !== 0) return dateComp;
+      return compareScoredEvents(a, b);
+    });
+  } else {
+    // 'score_desc' (default)
+    feed.sort(compareScoredEvents);
+  }
+
+  // Paging
+  if (options.offset !== undefined && options.offset > 0) {
+    feed = feed.slice(options.offset);
+  }
+  if (options.limit !== undefined && options.limit > 0) {
+    feed = feed.slice(0, options.limit);
+  }
+
+  return feed;
+}
+
+/**
+ * Service object encapsulating ranking, scoring, discovery, and feed generation.
+ */
+export const RecommendationService = {
+  rankEvents,
+  scoreEvent,
+  getPersonalizedFeed,
+  getPersonalizedDiscoverData,
+  getPublicDiscoverData,
+};

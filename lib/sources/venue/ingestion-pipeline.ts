@@ -9,11 +9,13 @@ import { CervantesVenueAdapter } from './cervantes/adapter';
 import { IndependentVenueAdapter } from './independent-venue-group/adapter';
 import { VelvetElkAdapter } from './velvet-elk/adapter';
 import { RootsMusicProjectAdapter } from './roots-music-project/adapter';
+import { Z2EntertainmentAdapter } from './z2-entertainment/adapter';
 import {
   ensureVenueSource,
   CERVANTES_CONFIG,
   VELVET_ELK_CONFIG,
   ROOTS_MUSIC_PROJECT_CONFIG,
+  Z2_ENTERTAINMENT_CONFIG,
 } from './source-registry';
 import type {
   VenueIngestionOptions,
@@ -53,6 +55,11 @@ function resolveDefaultFixturePath(slug: string): string {
         process.cwd(),
         'tests/fixtures/roots-music-project-events-response.html',
       );
+    case 'z2-entertainment':
+      return path.resolve(
+        process.cwd(),
+        'tests/fixtures/z2-events-response.html',
+      );
     case 'cervantes-masterpiece':
     default:
       return path.resolve(
@@ -81,7 +88,9 @@ export async function runVenueIngestion(
         ? new VelvetElkAdapter(config)
         : config.slug === ROOTS_MUSIC_PROJECT_CONFIG.slug
           ? new RootsMusicProjectAdapter(config)
-          : new IndependentVenueAdapter(config));
+          : config.slug === Z2_ENTERTAINMENT_CONFIG.slug
+            ? new Z2EntertainmentAdapter(config)
+            : new IndependentVenueAdapter(config));
   const source = await ensureVenueSource(options.sourceRepo, config);
 
   // Link in-memory catalog repo with sourceRepo if supported

@@ -1,80 +1,74 @@
-import Link from 'next/link';
-import { Container } from '@/components/foundation/Container';
-import { StatusBadge } from '@/components/foundation/StatusBadge';
+import React from 'react';
+import { getAuthenticatedUser } from '@/lib/auth/session';
+import { createClient } from '@/lib/supabase/server';
+import { SupabaseCatalogRepository } from '@/lib/repositories/catalog-repository';
+import {
+  getPersonalizedDiscoverData,
+  getPublicDiscoverData,
+} from '@/lib/recommendation/service';
+import { Header } from '@/components/index/Header';
+import { IndexFeedContainer } from '@/components/index/IndexFeedContainer';
+import type { CanonicalEventSummary } from '@/lib/domain/catalog';
+import type { ScoredEvent } from '@/lib/recommendation/types';
 
-export default function HomePage() {
+export const dynamic = 'force-dynamic';
+
+export default async function HomePage() {
+  const user = await getAuthenticatedUser();
+
+  let events: Array<CanonicalEventSummary | ScoredEvent> = [];
+
+  if (user) {
+    try {
+      const personalizedData = await getPersonalizedDiscoverData({
+        userId: user.id,
+      });
+      events = [
+        ...personalizedData.recommendations,
+        ...personalizedData.exploratory,
+      ];
+      if (events.length === 0) {
+        const publicData = await getPublicDiscoverData({ limit: 100 });
+        events = publicData.events;
+      }
+    } catch (err) {
+      console.error(
+        '[HomePage] Error loading personalized recommendations:',
+        err,
+      );
+      try {
+        const publicData = await getPublicDiscoverData({ limit: 100 });
+        events = publicData.events;
+      } catch (pubErr) {
+        console.error('[HomePage] Error loading public fallback:', pubErr);
+        const supabase = await createClient();
+        const catalogRepo = new SupabaseCatalogRepository(supabase);
+        events = await catalogRepo.listEvents({ limit: 100 });
+      }
+    }
+  } else {
+    try {
+      const publicData = await getPublicDiscoverData({ limit: 100 });
+      events = publicData.events;
+    } catch (err) {
+      console.error('[HomePage] Error loading public discover data:', err);
+      try {
+        const supabase = await createClient();
+        const catalogRepo = new SupabaseCatalogRepository(supabase);
+        events = await catalogRepo.listEvents({ limit: 100 });
+      } catch (catErr) {
+        console.error('[HomePage] Error loading catalog repo:', catErr);
+        events = [];
+      }
+    }
+  }
+
   return (
-    <main className="flex min-h-screen flex-col items-center justify-center py-16">
-      <Container className="text-center">
-        <div className="mb-6 flex justify-center gap-2">
-          <StatusBadge label="Phase 0: Foundations" status="ready" />
-          <StatusBadge label="PWA Shell" status="ready" />
-        </div>
-
-        <h1
-          data-testid="landing-title"
-          className="text-4xl font-extrabold tracking-tight sm:text-5xl md:text-6xl"
-        >
-          <span className="block text-slate-100">Encore</span>
-          <span className="block bg-gradient-to-r from-indigo-400 to-cyan-400 bg-clip-text text-transparent">
-            Concert Finder
-          </span>
-        </h1>
-
-        <p className="mx-auto mt-6 max-w-2xl text-base text-slate-400 sm:text-lg">
-          Personalized live-music discovery ranking concerts, festivals, and
-          local events by personalized value.
-        </p>
-
-        <div className="mt-8 flex flex-wrap justify-center gap-4">
-          <Link
-            href="/discover"
-            data-testid="home-discover-btn"
-            className="rounded-xl bg-indigo-600 px-6 py-3 text-sm font-semibold text-white shadow-lg transition-colors hover:bg-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-          >
-            Discover Live Music
-          </Link>
-          <Link
-            href="/profile/taste"
-            data-testid="home-taste-btn"
-            className="rounded-xl border border-zinc-700 bg-zinc-900/80 px-6 py-3 text-sm font-semibold text-zinc-200 shadow transition-colors hover:border-indigo-500 hover:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
-          >
-            Music Taste Profile
-          </Link>
-        </div>
-
-        <div className="mt-10 rounded-xl border border-slate-800 bg-slate-900/50 p-6 text-left shadow-xl backdrop-blur sm:p-8">
-          <h2 className="text-sm font-semibold uppercase tracking-wider text-slate-400">
-            System Foundation Status
-          </h2>
-          <dl className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-3">
-            <div className="rounded-lg border border-slate-800/80 bg-slate-950/50 p-4">
-              <dt className="text-xs font-medium text-slate-400">
-                Application Stack
-              </dt>
-              <dd className="mt-1 text-sm font-medium text-slate-200">
-                Next.js 15 App Router · TypeScript · Tailwind
-              </dd>
-            </div>
-            <div className="rounded-lg border border-slate-800/80 bg-slate-950/50 p-4">
-              <dt className="text-xs font-medium text-slate-400">
-                Database & Security
-              </dt>
-              <dd className="mt-1 text-sm font-medium text-slate-200">
-                Supabase PostgreSQL · Profiles RLS
-              </dd>
-            </div>
-            <div className="rounded-lg border border-slate-800/80 bg-slate-950/50 p-4">
-              <dt className="text-xs font-medium text-slate-400">
-                Ingestion Architecture
-              </dt>
-              <dd className="mt-1 text-sm font-medium text-slate-200">
-                Domain Contracts · Source Adapters Interface
-              </dd>
-            </div>
-          </dl>
-        </div>
-      </Container>
-    </main>
+    <div className="min-h-screen bg-[#fafaf9] text-zinc-900">
+      <Header isAuthenticated={Boolean(user)} userEmail={user?.email} />
+      <main className="mx-auto w-full max-w-7xl px-4 py-6 sm:px-6 sm:py-8 lg:px-8">
+        <IndexFeedContainer events={events} />
+      </main>
+    </div>
   );
 }
