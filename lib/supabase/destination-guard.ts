@@ -4,6 +4,9 @@
  * Enforces strict destination safety for database operations to prevent
  * destructive commands, fixture loading, or test runs from inadvertently
  * targeting production or unverified remote databases.
+ *
+ * Rejects generic wildcard Supabase URLs (*.supabase.co). Production targets
+ * must be explicitly allowlisted via ENCORE_APPROVED_PROD_HOSTS or ENCORE_PROD_PROJECT_REF.
  */
 
 const VERIFIED_LOCAL_HOSTNAMES = new Set([
@@ -19,7 +22,7 @@ const VERIFIED_LOCAL_HOSTNAMES = new Set([
  * Checks whether a given database URL strictly targets a verified local or development instance.
  *
  * Rejects substring-matching traps (e.g. "evil-local.com", "attacker.dev", "local.supabase.co").
- * All remote hostnames are treated as non-local by default.
+ * All remote hostnames are treated as non-local by default unless explicitly listed in ENCORE_APPROVED_DEV_HOSTS.
  */
 export function isVerifiedLocalOrDevDatabase(urlStr: string): boolean {
   if (!urlStr || typeof urlStr !== 'string') {
@@ -60,9 +63,13 @@ export function isVerifiedLocalOrDevDatabase(urlStr: string): boolean {
 }
 
 /**
- * Checks whether a given database URL targets a verified Supabase instance or approved production domain.
+ * Checks whether a given database URL targets an explicitly approved production Supabase instance.
+ *
+ * Invariant: Does NOT accept generic *.supabase.co wildcards. The specific production hostname
+ * or project reference MUST be explicitly authorized via ENCORE_APPROVED_PROD_HOSTS,
+ * ENCORE_PROD_PROJECT_REF, or ENCORE_PROD_SUPABASE_URL.
  */
-export function isVerifiedSupabaseInstance(urlStr: string): boolean {
+export function isVerifiedProductionDatabase(urlStr: string): boolean {
   if (!urlStr || typeof urlStr !== 'string') {
     return false;
   }
@@ -75,19 +82,33 @@ export function isVerifiedSupabaseInstance(urlStr: string): boolean {
 
     const hostname = parsed.hostname.toLowerCase();
 
-    // Must be a valid subdomain of supabase.co (e.g. xyzcompany.supabase.co, not just supabase.co)
-    if (hostname.endsWith('.supabase.co') && hostname !== 'supabase.co') {
-      return true;
+    // Collect explicitly approved production hosts
+    const approvedProdHosts = new Set<string>();
+
+    if (process.env.ENCORE_APPROVED_PROD_HOSTS) {
+      process.env.ENCORE_APPROVED_PROD_HOSTS.split(',').forEach((h) => {
+        const trimmed = h.trim().toLowerCase();
+        if (trimmed) approvedProdHosts.add(trimmed);
+      });
     }
 
-    // Check optional approved production hosts via environment
-    const approvedProdHosts = process.env.ENCORE_APPROVED_PROD_HOSTS
-      ? process.env.ENCORE_APPROVED_PROD_HOSTS.split(',').map((h) =>
-          h.trim().toLowerCase(),
-        )
-      : [];
+    if (process.env.ENCORE_PROD_PROJECT_REF) {
+      const ref = process.env.ENCORE_PROD_PROJECT_REF.trim().toLowerCase();
+      if (ref) {
+        approvedProdHosts.add(`${ref}.supabase.co`);
+      }
+    }
 
-    if (approvedProdHosts.length > 0 && approvedProdHosts.includes(hostname)) {
+    if (process.env.ENCORE_PROD_SUPABASE_URL) {
+      try {
+        const prodUrl = new URL(process.env.ENCORE_PROD_SUPABASE_URL);
+        approvedProdHosts.add(prodUrl.hostname.toLowerCase());
+      } catch {
+        // ignore malformed env var
+      }
+    }
+
+    if (approvedProdHosts.size > 0 && approvedProdHosts.has(hostname)) {
       return true;
     }
 
@@ -95,6 +116,14 @@ export function isVerifiedSupabaseInstance(urlStr: string): boolean {
   } catch {
     return false;
   }
+}
+
+/**
+ * Backward compatibility alias for isVerifiedProductionDatabase.
+ * Verifies that the URL targets an explicitly approved production instance.
+ */
+export function isVerifiedSupabaseInstance(urlStr: string): boolean {
+  return isVerifiedProductionDatabase(urlStr);
 }
 
 export interface ValidateDatabaseTargetOptions {
@@ -109,9 +138,10 @@ export interface ValidateDatabaseTargetOptions {
  * Enforces that:
  * 1. Verified local/dev instances are always permitted.
  * 2. Remote/production writes are permitted ONLY when BOTH:
- *    a) allowProductionWrite === true (explicit opt-in flag).
- *    b) Target URL is a verified Supabase instance (.supabase.co) or approved production domain.
+ *    a) Target URL is an explicitly approved production instance (via ENCORE_APPROVED_PROD_HOSTS / project ref).
+ *    b) allowProductionWrite === true (explicit opt-in flag).
  * 3. STRICT INVARIANT: If isFixture === true, writing to production is strictly forbidden under all circumstances.
+ * 4. Unapproved remote destinations (including arbitrary *.supabase.co URLs) are unconditionally rejected.
  */
 export function validateDatabaseTarget(
   urlStr: string,
@@ -129,26 +159,27 @@ export function validateDatabaseTarget(
     return { isLocal: true, isProduction: false };
   }
 
-  const isProd = isVerifiedSupabaseInstance(urlStr);
-
   // STRICT INVARIANT: If isFixture === true or synthetic fixtures are being run,
-  // writing to production is STRICTLY FORBIDDEN under all circumstances.
+  // writing to production or remote is STRICTLY FORBIDDEN under all circumstances.
   if (isFixture) {
     throw new Error(
       `${context} aborted: Synthetic fixture execution or test data writes are strictly forbidden against remote or production databases (${urlStr || 'unknown'}).`,
     );
   }
 
-  if (!allowProductionWrite) {
-    throw new Error(
-      `${context} aborted: Target database (${urlStr || 'unknown'}) is not a verified local or development instance. ` +
-        'Writing to remote or production databases requires deliberate authorization via --allow-production-write.',
-    );
-  }
+  const isProd = isVerifiedProductionDatabase(urlStr);
 
   if (!isProd) {
     throw new Error(
-      `${context} aborted: Target database (${urlStr || 'unknown'}) is not a verified Supabase instance (.supabase.co) or approved production domain.`,
+      `${context} aborted: Target database (${urlStr || 'unknown'}) is not a verified local or development instance, nor an approved production instance. ` +
+        'Remote destinations must be explicitly allowlisted in ENCORE_APPROVED_PROD_HOSTS or match ENCORE_PROD_PROJECT_REF.',
+    );
+  }
+
+  if (!allowProductionWrite) {
+    throw new Error(
+      `${context} aborted: Target database (${urlStr || 'unknown'}) is an approved remote production instance. ` +
+        'Writing to remote or production databases requires deliberate authorization via --allow-production-write.',
     );
   }
 

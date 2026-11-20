@@ -7,7 +7,11 @@ import {
   TICKETMASTER_DAILY_LIMIT,
   resetGlobalTicketmasterQuotaGuard,
 } from '@/lib/sources/ticketmaster/quota-guard';
-import { TicketmasterQuotaExceededError } from '@/lib/sources/ticketmaster/errors';
+import {
+  TicketmasterQuotaCorruptionError,
+  TicketmasterQuotaExceededError,
+  TicketmasterQuotaLockError,
+} from '@/lib/sources/ticketmaster/errors';
 
 describe('Ticketmaster Quota Guard: Concurrency, Persistence & Provider Reconciliation', () => {
   let tmpDir: string;
@@ -176,7 +180,7 @@ describe('Ticketmaster Quota Guard: Concurrency, Persistence & Provider Reconcil
   });
 
   describe('Resilience, Corrupt State & Stale Locks', () => {
-    it('fails safely when quota state file is corrupt', () => {
+    it('fails closed when quota state file is corrupt and recovers after explicit reset', () => {
       // Write corrupted JSON to quota state file
       fs.writeFileSync(
         quotaFilePath,
@@ -188,15 +192,54 @@ describe('Ticketmaster Quota Guard: Concurrency, Persistence & Provider Reconcil
         persistFilePath: quotaFilePath,
       });
 
-      // Does not throw syntax error; starts gracefully
+      // Fail-closed: refuses to execute requests on corrupt state
+      const check = guard.canExecute();
+      expect(check.allowed).toBe(false);
+      expect(check.reason).toMatch(/corrupted/i);
+
+      // Throws explicit TicketmasterQuotaCorruptionError rather than silently granting a full budget
+      expect(() => guard.recordRequest()).toThrow();
+
+      // Status reflects corruption
+      expect(guard.getStatus().isCorrupted).toBe(true);
+
+      // Explicit administrative reset safely recovers functionality
+      guard.reset();
+      expect(guard.getStatus().isCorrupted).toBe(false);
       expect(guard.getCount()).toBe(0);
 
-      // Recording requests rewrites valid state without crashing
+      // Now recording requests succeeds normally
       const status = guard.recordRequest();
       expect(status.count).toBe(1);
 
       const parsed = JSON.parse(fs.readFileSync(quotaFilePath, 'utf8'));
       expect(parsed.count).toBe(1);
+    });
+
+    it('fails closed with TicketmasterQuotaLockError when lock acquisition times out', () => {
+      const lockPath = `${quotaFilePath}.lock`;
+
+      // Simulate an active lock held by the CURRENT live process (not stale)
+      fs.writeFileSync(
+        lockPath,
+        JSON.stringify({ pid: process.pid, createdAt: Date.now() }),
+        'utf8',
+      );
+
+      const guard = new TicketmasterQuotaGuard({
+        persistFilePath: quotaFilePath,
+        lockWaitMs: 30, // 30ms timeout for fast unit test
+      });
+
+      // Must fail closed: throw TicketmasterQuotaLockError rather than proceeding uncoordinated
+      expect(() => guard.recordRequest()).toThrow(TicketmasterQuotaLockError);
+
+      // Clean up our manual lock
+      try {
+        fs.unlinkSync(lockPath);
+      } catch {
+        // ignore
+      }
     });
 
     it('detects and breaks stale lock files left by crashed processes', () => {

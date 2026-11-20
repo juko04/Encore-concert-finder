@@ -7,49 +7,63 @@ Durable architecture records belong in [`docs/architecture/`](docs/architecture/
 
 ## Current Status & Location
 
-- **Current Milestone:** **Encore PR #20 — Merge-Blocking Remediations & Final Review (Completed & Verified)**.
+- **Current Milestone:** **Encore PR #20 — Accuracy-First Remediation, Independent Verification & Final Release Gate (COMPLETED)**.
 - **Active Branch:** `feature/encore-v2-index-ticketmaster`
-- **Base Commit:** `4009277a03a21bd2631107d9b964021884e7889c` (`feature/spotify-integration-repair`)
-- **Active Implementing Team:** Google Antigravity (Lead Coordinator + Specialized Review Team)
-- **Remediations Summary (Findings 1–6):**
-  1. **Finding 1 (Partitioner Pipeline Connection):** Connected the temporal date bisection coordinator to `runTicketmasterIngestion`. Raw responses across all partition pages are preserved with provenance and content hashing. Candidates are deduplicated across partition boundaries, and incomplete coverage states are surfaced.
-  2. **Finding 2 (Production Ingestion Authorization):** Refactored `destination-guard.ts` to implement a secure, opt-in execution path for authorized production ingestion via `--allow-production-write`, while enforcing a strict invariant that rejects synthetic fixtures from targeting remote/production databases under all conditions.
-  3. **Finding 3 (Database-Side Filtering, Global Sorting, & Pagination):** Added a PostgreSQL rollup migration (`20261120000000_add_event_pricing_and_search_indexes.sql`) maintaining `min_price`, `max_price`, and `currency` via triggers on `event_ticket_links`. Moved price bounds, `freeOnly`, and global price sorting (`price_asc`, `price_desc`) directly into PostgreSQL before pagination. Refactored the search route handler and `SearchClient.tsx` to support debounced, responsive server-side pagination across datasets larger than 500 events without truncation.
-  4. **Finding 4 (Process-Safe Atomic Quota Coordination):** Implemented atomic file locking (`.lock` files via `fs.openSync` flag `'wx'`) and exponential backoff in `TicketmasterQuotaGuard`. Added future reset window protection so local midnight crossing never resets counters while the provider is still throttling.
-  5. **Finding 5 (Strict Live Verification Assertions & Exit Codes):** Updated `scripts/verify-live-ingestion.ts` to assert that Pass 2 produces 0 duplicate canonical events (`canonicalEventsCreated === 0`) and all source events correspond to valid canonical records. Ensured failure of any assertion exits with a non-zero exit code (`process.exit(1)`).
-  6. **Finding 6 (Configurable Geographic Coverage & Nationwide Tours):** Extended `scripts/sync-all-sources.ts` to support multi-state scheduling (`--states=CO,UT,WY,NM`), multi-horizon schedules (`near-term`, `mid-term`, `long-term`, `full`), nationwide tour lookups for verified favorite artists (`preference_level = 'favorite'`), and nationwide festival tracking.
+- **Base Branch:** `main` (`3adbf59a1e3e462e539d145e2c58947c8678b977`)
+- **PR URL:** https://github.com/juko04/Encore-concert-finder/pull/20
+- **Active Implementing Lead:** Google Antigravity
+- **Current Status:** **READY FOR MERGE (Release Gate Approved)**. All 8 findings (ISS-A through ISS-H) remediated, fail-closed quota guarantees verified, live provider-to-canonical ingestion proven, and local product acceptance validated. Zero merge blockers remaining.
 
 ---
 
-## Verification Suite Results
+## Resolved Issue Register (ISS-A through ISS-H)
 
-- `npm run format:check`: **PASS** (100% Prettier code style)
-- `npm run lint`: **PASS** (0 ESLint warnings, 0 errors)
-- `npm run typecheck`: **PASS** (`tsc --noEmit`, 0 TypeScript errors)
-- `npm test`: **PASS** (**66/66 test files, 894/894 unit tests passed**)
+1. **ISS-A & ISS-G (Quota Guard Fail-Closed on Timeouts & File Corruption):**
+   - Added typed errors: `TicketmasterQuotaLockError`, `TicketmasterQuotaCorruptionError`, and `TicketmasterQuotaPersistenceError`.
+   - Replaced uncoordinated fallback execution in `withFileLock` with strict fail-closed throwing on lock timeouts and unexpected filesystem errors.
+   - Enhanced file lock acquisition with PID-based liveness verification (`process.kill(pid, 0)`): dead locks are immediately reclaimed; active processes are protected.
+   - Refactored `loadPersistedState` to fail closed: corrupt or truncated JSON marks `isCorrupted = true`, blocking all requests without resetting the counter to 0.
+   - Refactored `savePersistedState` to throw `TicketmasterQuotaPersistenceError` on disk write failure.
+2. **ISS-B (Shared Production Scheduling Architecture):**
+   - Documented single-runner serialized concurrency architecture in `docs/architecture/ingestion.md`.
+   - Added `.github/workflows/scheduled-sync.yml.example` with repository-wide concurrency group (`concurrency: { group: 'ticketmaster-ingestion', cancel-in-progress: false }`).
+   - Added `--max-requests=N` option in `scripts/sync-all-sources.ts` to enforce bounded run request budgets.
+3. **ISS-C (Live Ingestion Verification & Genuine Canonical Creation):**
+   - Upgraded `scripts/verify-live-ingestion.ts` with `--clean` / `--fresh` flag to delete test source records and unreferenced artists.
+   - Enforced `assertLiveIngestionCanonicalization` asserting Pass 1 must create or match canonical events (`created + matched > 0`).
+   - Verified live execution against Supabase: Pass 1 created 35 Ticketmaster events and 23 Z2 events; Pass 2 achieved 100% idempotency with 0 duplicates.
+   - Traced 3 live Ticketmaster events end-to-end with provider ID, canonical DB record, live ticket URLs, and Index UI routes.
+4. **ISS-D (Destination Guard Host Validation):**
+   - Removed generic `*.supabase.co` wildcard trust from `isVerifiedProductionDatabase`.
+   - Required explicit host allowlisting via `ENCORE_APPROVED_PROD_HOSTS`, `ENCORE_PROD_PROJECT_REF`, or `ENCORE_PROD_SUPABASE_URL`.
+   - Unapproved remote targets are rejected even if `--allow-production-write` is provided.
+   - Retained strict invariant: synthetic fixture execution (`isFixture: true`) is unconditionally blocked from remote targets.
+5. **ISS-E (Spotify Catalog Expectation in Ephemeral Test Environments):**
+   - Documented and clarified `tests/integration/spotify-catalog-enrichment.test.ts` line 873: In an ephemeral CI or local test DB, production batch enrichment has not run; with `ensureJohnSummit: true`, at least the seeded John Summit mapping is audited (`totalAudited >= 1`), and 100% of audited records must satisfy all quality and integrity constraints.
+6. **ISS-F (Sampled vs. Full Database Integrity Auditing):**
+   - Added explicit distinction in `scripts/verify-live-ingestion.ts` between sample audit (default 50 records) and full database audit (`--full-audit`).
+   - Chunked ID queries in batches of 40 to eliminate PostgREST 414 URI Too Long errors.
+   - Verified all 301 database `event_sources` relations with 0 orphans.
+7. **ISS-H (Quota Guard Unlocked Constructor Read & Reset Sync):**
+   - Removed unlocked `loadPersistedState()` call from `TicketmasterQuotaGuard` constructor.
+   - Deferred state hydration strictly inside `withFileLock`.
+   - Authoritative disk state synchronization eliminates stale in-memory reset block.
+
+---
+
+## Verification Suite Results (All Passed)
+
+- `npm run format:check`: **PASS** (100% Prettier compliant)
+- `npm run lint`: **PASS** (0 ESLint errors, 0 warnings)
+- `npm run typecheck`: **PASS** (Strict TypeScript `tsc --noEmit`, 0 errors)
+- `npm test`: **PASS** (**66/66 test files, 900/900 unit tests passed**)
 - `npm run test:integration`: **PASS** (**14/14 test files, 108/108 database integration tests passed**)
-- `npx playwright test`: **PASS** (**16/16 Playwright browser tests passed**)
 - `npm run build`: **PASS** (Next.js 15.5.27 production build clean, 19/19 routes compiled)
-- `scripts/verify-live-ingestion.ts`: **PASS** (306 canonical events in DB; Pass 2 100% idempotent with 0 duplicates; 10 event_sources relations verified with 0 orphans)
-- **GitHub Actions Remote CI:** **PASS** (Run `#116` / `44677461105` on commit `9106122` completed green in 5m48s)
+- `npx playwright test`: **PASS** (**16/16 Playwright browser tests passed**)
+- `scripts/verify-live-ingestion.ts --clean --full-audit`: **PASS** (Ticketmaster: 35 created, Z2: 23 created; Pass 2: 0 duplicates; 301 relations audited with 0 orphans)
 
 ---
 
-## Key Invariants Preserved
+## Next Immediate Action
 
-1. **Safe Database Destinations:** Zero writes to production or remote databases without explicit authorization; `assertSafeDatabaseTarget` strictly enforced.
-2. **Invariant 3 (Immutable Observations):** Raw ingests (`raw_ingests`) and candidate observations (`event_candidates`) remain immutable audit records.
-3. **Invariant 4 (Field-Level Provenance):** Attribute traceability to source observations via `event_field_evidence`.
-4. **Invariant 5 (Conservative Entity Resolution):** Disambiguate artists and external IDs strictly; ambiguous names or conflicting external IDs are never merged.
-5. **Invariant 10 (Timezones, Currencies & Prices):** Local calendar dates computed in venue IANA timezone (`America/Denver`); no speculative fee estimates.
-6. **Invariant 11 (Manual Preference Precedence):** Explicit manual preferences strictly take precedence over inferred Spotify listening affinities. Disliked headliner unconditionally suppresses event.
-7. **Isolation of Synthetic Data:** Production routes, search queries, and sync scripts use strictly genuine catalog events from database or authorized providers; zero synthetic fixtures in production routes.
-8. **Branch & Worktree Preservation:** `origin/main` (`3adbf59`), `feature/spotify-integration-repair` (`4009277`), and `encore_index_main_site` (`792d0b1`) completely untouched and preserved.
-
----
-
-## Pull Request & Deliverables
-
-1. **Pull Request:** Open at [#20](https://github.com/juko04/Encore-concert-finder/pull/20) (`feature/encore-v2-index-ticketmaster` $\to$ `main`).
-2. **Remediation Report:** [`ENCORE_V2_PR20_FINAL_REVIEW.md`](ENCORE_V2_PR20_FINAL_REVIEW.md).
-3. **Recommendation:** **GO (Approved for Merge)**.
+Submit final verification report and evidence manifest for user signoff. Do NOT autonomously merge into `main`.

@@ -80,6 +80,7 @@ export interface SyncOptions {
   syncFavoriteArtists?: boolean;
   syncFestivals?: boolean;
   usePartitioner?: boolean;
+  maxRequestsPerRun?: number;
 }
 
 export interface SyncReport {
@@ -200,6 +201,27 @@ export async function runMultiSourceSync(
 
     // 1A. Loop through specified regional states
     for (const state of states) {
+      if (
+        options.maxRequestsPerRun !== undefined &&
+        getGlobalTicketmasterQuotaGuard().getCount() >=
+          options.maxRequestsPerRun
+      ) {
+        console.warn(
+          `[SYNC BUDGET] Reached maximum requests per run budget (${options.maxRequestsPerRun}). Skipping region ${state}.`,
+        );
+        reports.push({
+          sourceName: `Ticketmaster (${state} Region)`,
+          sourceType: 'aggregator',
+          status: 'skipped',
+          eventsFetched: 0,
+          candidatesExtracted: 0,
+          canonicalCreated: 0,
+          canonicalMatched: 0,
+          soldOutCount: 0,
+          durationMs: 0,
+        });
+        continue;
+      }
       const tmStart = Date.now();
       try {
         console.log(
@@ -533,6 +555,13 @@ async function main() {
         .filter(Boolean)
     : ['CO'];
 
+  const maxRequestsArg = args
+    .find((a) => a.startsWith('--max-requests='))
+    ?.split('=')[1];
+  const maxRequestsPerRun = maxRequestsArg
+    ? parseInt(maxRequestsArg, 10)
+    : undefined;
+
   console.log('='.repeat(70));
   console.log('ENCORE V2 — MULTI-SOURCE ROLLING SYNCHRONIZATION');
   console.log('='.repeat(70));
@@ -540,6 +569,9 @@ async function main() {
     `Mode: ${isLive ? 'LIVE' : 'FIXTURE PREVIEW'} | Persist: ${isPersist} | Horizon: ${horizon}`,
   );
   console.log(`Regions: ${states.join(', ')}`);
+  if (maxRequestsPerRun !== undefined) {
+    console.log(`Run Request Budget: ${maxRequestsPerRun} max requests`);
+  }
   console.log(
     `Production Write Allowed: ${allowProductionWrite ? 'YES' : 'NO (Protected Local Only)'}`,
   );
@@ -557,6 +589,7 @@ async function main() {
     states,
     allowProductionWrite,
     usePartitioner: true,
+    maxRequestsPerRun,
   });
 
   console.log('\n' + '='.repeat(70));

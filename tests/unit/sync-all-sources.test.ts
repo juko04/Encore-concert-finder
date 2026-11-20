@@ -4,6 +4,7 @@ import {
   runMultiSourceSync,
 } from '@/scripts/sync-all-sources';
 import {
+  assertLiveIngestionCanonicalization,
   assertLiveVerificationIdempotency,
   auditDatabaseRelations,
 } from '@/scripts/verify-live-ingestion';
@@ -165,24 +166,46 @@ describe('Sync All Sources & Live Verification (PR #20 Remediations)', () => {
       );
     });
 
-    it('rejects remote database URL when allowProductionWrite is false', () => {
+    it('rejects remote database URL when allowProductionWrite is false or unapproved', () => {
+      // 1. Unapproved remote destination fails even with allowProductionWrite
       expect(() =>
         assertSafeDatabaseTarget(
-          'https://my-prod-project.supabase.co',
-          false,
-          'Test Runner',
-        ),
-      ).toThrow(/not a verified local or development instance/);
-    });
-
-    it('permits remote database URL when allowProductionWrite is true', () => {
-      expect(() =>
-        assertSafeDatabaseTarget(
-          'https://my-prod-project.supabase.co',
+          'https://unapproved-project.supabase.co',
           true,
           'Test Runner',
         ),
-      ).not.toThrow();
+      ).toThrow(/not an approved local, development, or production instance/);
+
+      // 2. Approved remote destination without allowProductionWrite fails
+      process.env.ENCORE_APPROVED_PROD_HOSTS = 'my-prod-project.supabase.co';
+      try {
+        expect(() =>
+          assertSafeDatabaseTarget(
+            'https://my-prod-project.supabase.co',
+            false,
+            'Test Runner',
+          ),
+        ).toThrow(
+          /Writing to remote or production databases requires deliberate authorization/,
+        );
+      } finally {
+        delete process.env.ENCORE_APPROVED_PROD_HOSTS;
+      }
+    });
+
+    it('permits remote database URL when allowProductionWrite is true AND host is approved', () => {
+      process.env.ENCORE_APPROVED_PROD_HOSTS = 'my-prod-project.supabase.co';
+      try {
+        expect(() =>
+          assertSafeDatabaseTarget(
+            'https://my-prod-project.supabase.co',
+            true,
+            'Test Runner',
+          ),
+        ).not.toThrow();
+      } finally {
+        delete process.env.ENCORE_APPROVED_PROD_HOSTS;
+      }
     });
 
     it('permits local development database URL without allowProductionWrite', () => {
@@ -200,6 +223,93 @@ describe('Sync All Sources & Live Verification (PR #20 Remediations)', () => {
           'Test Runner',
         ),
       ).not.toThrow();
+    });
+  });
+
+  describe('Live Ingestion Canonicalization Assertions (Pass 1)', () => {
+    it('passes when Pass 1 creates or matches canonical events for both providers', () => {
+      expect(() =>
+        assertLiveIngestionCanonicalization({
+          pass1: {
+            ticketmaster: {
+              fetched: 1,
+              candidates: 50,
+              created: 45,
+              matched: 5,
+              needsReview: 0,
+              reviewReasons: {},
+              durationMs: 400,
+            },
+            z2: {
+              fetched: 1,
+              candidates: 25,
+              created: 25,
+              matched: 0,
+              needsReview: 0,
+              reviewReasons: {},
+              durationMs: 350,
+            },
+          },
+        }),
+      ).not.toThrow();
+    });
+
+    it('throws when Ticketmaster Pass 1 creates 0 and matches 0 events despite having candidates', () => {
+      expect(() =>
+        assertLiveIngestionCanonicalization({
+          pass1: {
+            ticketmaster: {
+              fetched: 1,
+              candidates: 50,
+              created: 0,
+              matched: 0, // VIOLATION: canonicalization was not exercised!
+              needsReview: 0,
+              reviewReasons: {},
+              durationMs: 400,
+            },
+            z2: {
+              fetched: 1,
+              candidates: 25,
+              created: 25,
+              matched: 0,
+              needsReview: 0,
+              reviewReasons: {},
+              durationMs: 350,
+            },
+          },
+        }),
+      ).toThrow(
+        /\[CANONICALIZATION FAILURE\] Ticketmaster Pass 1 processed 50 candidates but created 0 and matched 0 canonical events/,
+      );
+    });
+
+    it('throws when Z2 Pass 1 creates 0 and matches 0 events despite having candidates', () => {
+      expect(() =>
+        assertLiveIngestionCanonicalization({
+          pass1: {
+            ticketmaster: {
+              fetched: 1,
+              candidates: 50,
+              created: 50,
+              matched: 0,
+              needsReview: 0,
+              reviewReasons: {},
+              durationMs: 400,
+            },
+            z2: {
+              fetched: 1,
+              candidates: 25,
+              created: 0,
+              matched: 0, // VIOLATION
+              needsReview: 0,
+              reviewReasons: {},
+              durationMs: 350,
+            },
+          },
+        }),
+      ).toThrow(
+        /\[CANONICALIZATION FAILURE\] Z2 Entertainment Pass 1 processed 25 candidates but created 0 and matched 0 canonical events/,
+      );
     });
   });
 

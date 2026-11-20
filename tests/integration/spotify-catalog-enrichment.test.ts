@@ -869,7 +869,12 @@ describe('Spotify Catalog Enrichment Integration Suite', () => {
       ensureJohnSummit: true,
     });
 
-    // Without assuming production enrichment has run, verify audited mappings adhere to all constraints
+    // ISS-E Audit Clarification:
+    // In an ephemeral CI or local test database, production batch enrichment has not run, so we do not
+    // expect the full production artist catalog (which may contain hundreds of enriched artists).
+    // Instead, with `ensureJohnSummit: true`, the test guarantees that at least the seeded John Summit mapping
+    // is audited (totalAudited >= 1), and strictly enforces that 100% of all audited records satisfy every
+    // quality and integrity constraint (zero invalid formats, zero placeholders, zero conflicts, zero ambiguities, zero mismatches).
     expect(report.summary.totalAudited).toBeGreaterThanOrEqual(1);
     expect(report.summary.validFormatCount).toBe(report.summary.totalAudited);
     expect(report.summary.corroboratedCount).toBe(report.summary.totalAudited);

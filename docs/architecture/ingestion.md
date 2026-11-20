@@ -201,3 +201,27 @@ Examples:
 - rescheduled date
 - canceled show
 - changed lineup
+
+---
+
+## Production Scheduling & Quota Governance (ISS-B & ISS-A)
+
+### Ticketmaster Quota Constraints
+Ticketmaster Discovery API v2 enforces strict account-wide rate limits:
+- **Daily Quota:** 5,000 requests per 24-hour UTC window.
+- **Burst Rate:** 5 requests per second.
+
+### Single-Runner Serialized Execution Architecture
+Independent serverless or cloud runners cannot coordinate local filesystem state without centralized locking. To prevent race conditions, uncoordinated quota exhaustion, and 429 penalties in production:
+
+1. **Serialized Workflow Concurrency:** Scheduled jobs in CI/CD (e.g. GitHub Actions) MUST configure a repository-wide concurrency group (`concurrency: { group: 'ticketmaster-ingestion', cancel-in-progress: false }`). Only one ingestion runner executes at any moment.
+2. **Rolling Temporal Horizons:** Rather than requesting 365 days across all geographies daily:
+   - **Near-term (0–14 days):** Daily sync (high frequency, small page yield, bounded request budget).
+   - **Mid-term (15–60 days):** Bi-weekly sync (Wednesdays/Sundays).
+   - **Long-term (61–365 days):** Weekly sync (Saturdays).
+3. **Bounded Request Budgets (`--max-requests=N`):** Every scheduled ingestion run specifies an explicit upper request ceiling (e.g. 250 requests for near-term, 500 for full baseline). Once reached, further regions or tour searches are gracefully deferred to subsequent runs.
+4. **Fail-Closed Quota Guard (`TicketmasterQuotaGuard`):**
+   - File locks use PID-based liveness verification (`process.kill(pid, 0)`). Dead process locks are reclaimed; active processes are respected.
+   - Lock acquisition timeouts, corrupt storage files, and persistence failures strictly fail closed, throwing typed errors (`TicketmasterQuotaLockError`, `TicketmasterQuotaCorruptionError`, `TicketmasterQuotaPersistenceError`).
+   - The budget never silently resets to zero on storage corruption.
+5. **Provider Rate Limit Header Feedback:** Ingestion monitors `rate-limit-available` and `rate-limit-reset` headers from Ticketmaster API responses to adjust inter-request delays dynamically and avoid burst rate limit violations.

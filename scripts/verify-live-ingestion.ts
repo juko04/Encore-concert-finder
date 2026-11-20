@@ -5,7 +5,7 @@
  *
  * NOTE: This is a bounded smoke test (near-term horizon, limited to 50 events)
  * specifically designed to verify live API/calendar provider contracts,
- * field-level schema compliance, and 100% database idempotency.
+ * field-level schema compliance, genuine canonicalization, and 100% database idempotency.
  * It is DISTINCT from a full multi-state 12-month production synchronization
  * (which is orchestrated via scripts/sync-all-sources.ts --horizon=full).
  *
@@ -14,10 +14,17 @@
  * 2. Live Z2 Entertainment Calendar (Boulder Theater, Fox Theatre, Aggie Theatre)
  *
  * Enforces destination guard (strictly local database), runs 2 consecutive passes
- * to prove idempotency, and audits resulting canonical records against raw observations.
+ * to prove:
+ * - Pass 1: Genuine canonical event creation / matching (fails if 0 events created and matched)
+ * - Pass 2: 100% idempotency with zero duplicate canonical events
+ * - Referential integrity: 100% foreign key relationships verified with 0 orphans
+ * - Traces at least 3 real Ticketmaster events from provider ID to canonical database record to Index UI
  */
 
-import { assertSafeDatabaseTarget } from '@/lib/supabase/destination-guard';
+import {
+  assertSafeDatabaseTarget,
+  isVerifiedLocalOrDevDatabase,
+} from '@/lib/supabase/destination-guard';
 import { createAdminClient } from '@/lib/supabase/admin';
 import {
   TicketmasterDiscoveryAdapter,
@@ -33,6 +40,11 @@ import { SupabaseCatalogRepository } from '@/lib/repositories/catalog-repository
 import { SupabaseEventCandidateRepository } from '@/lib/repositories/event-candidate-repository';
 import { SupabaseRawIngestRepository } from '@/lib/repositories/raw-ingest-repository';
 import { SupabaseSourceRepository } from '@/lib/repositories/source-repository';
+
+export interface LiveVerificationOptions {
+  clean?: boolean;
+  fullAudit?: boolean;
+}
 
 export interface LiveVerificationSummary {
   pass1: {
@@ -77,7 +89,9 @@ export interface LiveVerificationSummary {
     totalEventsInDb: number;
     totalArtistsInDb: number;
     totalVenuesInDb: number;
+    totalEventSourcesInDb: number;
     verifiedRelationsCount: number;
+    isFullAudit: boolean;
     sampleCanonicalEvents: Array<{
       id: string;
       title: string;
@@ -90,6 +104,41 @@ export interface LiveVerificationSummary {
       ticketUrl?: string;
     }>;
   };
+  tracedEvents: Array<{
+    providerEventId: string;
+    canonicalEventId: string;
+    name: string;
+    venue: string;
+    date: string;
+    minPrice: number | null;
+    currency: string | null;
+    ticketUrl: string | null;
+    indexUiPath: string;
+  }>;
+}
+
+/**
+ * Strictly asserts that Pass 1 exercised genuine canonicalization.
+ * Throws descriptive error if Pass 1 processed candidates but created 0 and matched 0 events.
+ */
+export function assertLiveIngestionCanonicalization(summary: {
+  pass1: LiveVerificationSummary['pass1'];
+}): void {
+  const { ticketmaster, z2 } = summary.pass1;
+
+  const tmTotal = ticketmaster.created + ticketmaster.matched;
+  if (ticketmaster.candidates > 0 && tmTotal === 0) {
+    throw new Error(
+      `[CANONICALIZATION FAILURE] Ticketmaster Pass 1 processed ${ticketmaster.candidates} candidates but created 0 and matched 0 canonical events. Canonicalization was not exercised.`,
+    );
+  }
+
+  const z2Total = z2.created + z2.matched;
+  if (z2.candidates > 0 && z2Total === 0) {
+    throw new Error(
+      `[CANONICALIZATION FAILURE] Z2 Entertainment Pass 1 processed ${z2.candidates} candidates but created 0 and matched 0 canonical events. Canonicalization was not exercised.`,
+    );
+  }
 }
 
 /**
@@ -140,21 +189,30 @@ export function assertLiveVerificationIdempotency(summary: {
 export async function auditDatabaseRelations(
   adminClient: ReturnType<typeof createAdminClient>,
   sampleEventIds: string[] = [],
+  options: { fullAudit?: boolean } = {},
 ): Promise<{
   verifiedRelationsCount: number;
+  totalRelationsCount: number;
   orphanedEventSourcesCount: number;
   missingEventsCount: number;
   missingVenuesCount: number;
+  isFullAudit: boolean;
 }> {
+  const fullAudit = Boolean(options.fullAudit);
   console.log('\n--- Auditing Database Referential Integrity & Relations ---');
+
+  // Query total count of event_sources in database
+  const { count: totalRelationsCount } = await adminClient
+    .from('event_sources')
+    .select('id', { count: 'exact', head: true });
 
   let query = adminClient
     .from('event_sources')
     .select('id, event_id, source_id, source_url, source_event_id');
 
-  if (sampleEventIds.length > 0) {
+  if (!fullAudit && sampleEventIds.length > 0) {
     query = query.in('event_id', sampleEventIds.slice(0, 50));
-  } else {
+  } else if (!fullAudit) {
     query = query.order('created_at', { ascending: false }).limit(50);
   }
 
@@ -169,9 +227,11 @@ export async function auditDatabaseRelations(
     console.warn('[AUDIT WARNING] No event_sources records found to verify.');
     return {
       verifiedRelationsCount: 0,
+      totalRelationsCount: totalRelationsCount || 0,
       orphanedEventSourcesCount: 0,
       missingEventsCount: 0,
       missingVenuesCount: 0,
+      isFullAudit: fullAudit,
     };
   }
 
@@ -183,21 +243,40 @@ export async function auditDatabaseRelations(
     ),
   );
 
-  const { data: events, error: evError } = await adminClient
-    .from('events')
-    .select('id, venue_id, name')
-    .in('id', eventIds);
+  function chunkIds<T>(arr: T[], size = 40): T[][] {
+    const chunks: T[][] = [];
+    for (let i = 0; i < arr.length; i += size) {
+      chunks.push(arr.slice(i, i + size));
+    }
+    return chunks;
+  }
 
-  if (evError) {
-    throw new Error(
-      `Failed to query events table for relation audit: ${evError.message}`,
-    );
+  const allEvents: Array<{
+    id: string;
+    venue_id?: string | null;
+    name?: string;
+    title?: string;
+  }> = [];
+
+  for (const eChunk of chunkIds(eventIds, 40)) {
+    const { data: events, error: evError } = await adminClient
+      .from('events')
+      .select('id, venue_id, name')
+      .in('id', eChunk);
+
+    if (evError) {
+      throw new Error(
+        `Failed to query events table for relation audit: ${evError.message}`,
+      );
+    }
+    if (events) allEvents.push(...events);
   }
 
   const existingEventMap = new Map(
-    (events || []).map(
-      (e: { id: string; venue_id?: string | null; name: string }) => [e.id, e],
-    ),
+    allEvents.map((e) => [
+      e.id,
+      { ...e, name: e.name || e.title || 'Unknown Event' },
+    ]),
   );
 
   let orphanedEventSourcesCount = 0;
@@ -226,19 +305,236 @@ export async function auditDatabaseRelations(
     );
   }
 
-  console.log(
-    `✓ Verified ${eventSources.length} event_source relations: 0 orphans, 100% referential integrity.`,
-  );
+  if (fullAudit) {
+    console.log(
+      `✓ [FULL AUDIT] Verified all ${eventSources.length} event_source relations in database: 0 orphans, 100% referential integrity.`,
+    );
+  } else {
+    console.log(
+      `✓ [SAMPLE AUDIT] Verified ${eventSources.length} of ${totalRelationsCount || eventSources.length} event_source relations: 0 orphans, 100% referential integrity.`,
+    );
+  }
 
   return {
     verifiedRelationsCount: eventSources.length,
+    totalRelationsCount: totalRelationsCount || eventSources.length,
     orphanedEventSourcesCount,
     missingEventsCount,
     missingVenuesCount,
+    isFullAudit: fullAudit,
   };
 }
 
-export async function runLiveVerification(): Promise<LiveVerificationSummary> {
+/**
+ * Safely clears prior live test ingestion records for Ticketmaster and Z2 from local database.
+ * Only permitted against local development databases.
+ */
+export async function cleanLiveTestSources(
+  adminClient: ReturnType<typeof createAdminClient>,
+): Promise<void> {
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+  if (!isVerifiedLocalOrDevDatabase(supabaseUrl)) {
+    throw new Error(
+      'cleanLiveTestSources is strictly prohibited against non-local databases.',
+    );
+  }
+
+  console.log('\n--- Resetting Live Ingestion Test Records in Local DB ---');
+
+  const { data: sources, error: sErr } = await adminClient
+    .from('sources')
+    .select('id, slug')
+    .in('slug', ['ticketmaster-discovery', 'z2-entertainment']);
+
+  if (sErr) {
+    throw new Error(`Failed to query sources for cleanup: ${sErr.message}`);
+  }
+
+  if (!sources || sources.length === 0) return;
+
+  const sourceIds = sources.map((s) => s.id);
+
+  function chunk<T>(arr: T[], size = 40): T[][] {
+    const chunks: T[][] = [];
+    for (let i = 0; i < arr.length; i += size) {
+      chunks.push(arr.slice(i, i + size));
+    }
+    return chunks;
+  }
+
+  // 1. Gather candidate IDs
+  const { data: cands, error: cErr } = await adminClient
+    .from('event_candidates')
+    .select('id')
+    .in('source_id', sourceIds);
+  if (cErr)
+    throw new Error(`Failed to query candidates for cleanup: ${cErr.message}`);
+  const candIds = (cands || []).map((c) => c.id);
+
+  // 2. Gather raw ingest IDs
+  const { data: raws, error: rErr } = await adminClient
+    .from('raw_ingests')
+    .select('id')
+    .in('source_id', sourceIds);
+  if (rErr)
+    throw new Error(`Failed to query raw_ingests for cleanup: ${rErr.message}`);
+  const rawIds = (raws || []).map((r) => r.id);
+
+  // 3. Gather event IDs tied to these sources
+  const { data: eventSources, error: esErr } = await adminClient
+    .from('event_sources')
+    .select('event_id')
+    .in('source_id', sourceIds);
+  if (esErr)
+    throw new Error(
+      `Failed to query event_sources for cleanup: ${esErr.message}`,
+    );
+
+  const eventIds = Array.from(
+    new Set(
+      (eventSources || [])
+        .map((es: { event_id?: string | null }) => es.event_id)
+        .filter((id): id is string => Boolean(id)),
+    ),
+  );
+
+  // 4. Delete candidate resolutions (by event_candidate_id and event_id)
+  for (const cChunk of chunk(candIds)) {
+    const { error } = await adminClient
+      .from('candidate_resolutions')
+      .delete()
+      .in('event_candidate_id', cChunk);
+    if (error)
+      throw new Error(
+        `Failed to delete candidate_resolutions: ${error.message}`,
+      );
+  }
+  for (const eChunk of chunk(eventIds)) {
+    const { error } = await adminClient
+      .from('candidate_resolutions')
+      .delete()
+      .in('event_id', eChunk);
+    if (error)
+      throw new Error(
+        `Failed to delete candidate_resolutions by event_id: ${error.message}`,
+      );
+  }
+
+  // 5. Delete event_field_evidence (by event_id and raw_ingest_id)
+  for (const eChunk of chunk(eventIds)) {
+    const { error } = await adminClient
+      .from('event_field_evidence')
+      .delete()
+      .in('event_id', eChunk);
+    if (error)
+      throw new Error(
+        `Failed to delete event_field_evidence: ${error.message}`,
+      );
+  }
+  for (const rChunk of chunk(rawIds)) {
+    const { error } = await adminClient
+      .from('event_field_evidence')
+      .delete()
+      .in('raw_ingest_id', rChunk);
+    if (error)
+      throw new Error(
+        `Failed to delete event_field_evidence by raw: ${error.message}`,
+      );
+  }
+
+  // 6. Delete event_ticket_links
+  for (const eChunk of chunk(eventIds)) {
+    const { error } = await adminClient
+      .from('event_ticket_links')
+      .delete()
+      .in('event_id', eChunk);
+    if (error)
+      throw new Error(`Failed to delete event_ticket_links: ${error.message}`);
+  }
+
+  // 7. Delete event_artists
+  for (const eChunk of chunk(eventIds)) {
+    const { error } = await adminClient
+      .from('event_artists')
+      .delete()
+      .in('event_id', eChunk);
+    if (error)
+      throw new Error(`Failed to delete event_artists: ${error.message}`);
+  }
+
+  // 8. Delete event_sources
+  const { error: esDelErr } = await adminClient
+    .from('event_sources')
+    .delete()
+    .in('source_id', sourceIds);
+  if (esDelErr)
+    throw new Error(`Failed to delete event_sources: ${esDelErr.message}`);
+
+  // 9. Delete events
+  for (const eChunk of chunk(eventIds)) {
+    const { error } = await adminClient
+      .from('events')
+      .delete()
+      .in('id', eChunk);
+    if (error) throw new Error(`Failed to delete events: ${error.message}`);
+  }
+
+  // 10. Delete event_candidates
+  const { error: ecDelErr } = await adminClient
+    .from('event_candidates')
+    .delete()
+    .in('source_id', sourceIds);
+  if (ecDelErr)
+    throw new Error(`Failed to delete event_candidates: ${ecDelErr.message}`);
+
+  // 11. Delete raw_ingests
+  const { error: riDelErr } = await adminClient
+    .from('raw_ingests')
+    .delete()
+    .in('source_id', sourceIds);
+  if (riDelErr)
+    throw new Error(`Failed to delete raw_ingests: ${riDelErr.message}`);
+
+  // 12. Clean up any unreferenced artists left behind by deleted test events
+  const { data: allArtists } = await adminClient.from('artists').select('id');
+  const { data: allEventArtists } = await adminClient
+    .from('event_artists')
+    .select('artist_id');
+  const referencedArtistIds = new Set(
+    (allEventArtists || []).map((ea: { artist_id: string }) => ea.artist_id),
+  );
+  const { data: allUserPrefs } = await adminClient
+    .from('user_artist_preferences')
+    .select('artist_id');
+  const prefArtistIds = new Set(
+    (allUserPrefs || []).map((p: { artist_id: string }) => p.artist_id),
+  );
+
+  const orphanArtistIds = (allArtists || [])
+    .filter(
+      (a: { id: string }) =>
+        !referencedArtistIds.has(a.id) && !prefArtistIds.has(a.id),
+    )
+    .map((a: { id: string }) => a.id);
+
+  if (orphanArtistIds.length > 0) {
+    for (const aChunk of chunk(orphanArtistIds)) {
+      await adminClient
+        .from('artist_external_ids')
+        .delete()
+        .in('artist_id', aChunk);
+      await adminClient.from('artists').delete().in('id', aChunk);
+    }
+  }
+
+  console.log(
+    `Cleaned prior test records for sources [${sourceIds.join(', ')}]: ${candIds.length} candidates, ${eventIds.length} events, ${rawIds.length} raw ingests, ${orphanArtistIds.length} orphaned artists.`,
+  );
+}
+
+export async function runLiveVerification(
+  options: LiveVerificationOptions = {},
+): Promise<LiveVerificationSummary> {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
   assertSafeDatabaseTarget(supabaseUrl, false, 'Live Ingestion Verification');
 
@@ -259,7 +555,7 @@ export async function runLiveVerification(): Promise<LiveVerificationSummary> {
     'LABEL: Bounded smoke test (near-term horizon, limited to 50 events)',
   );
   console.log(
-    'PURPOSE: Proves real provider contracts, schema compliance & 100% idempotency.',
+    'PURPOSE: Proves real provider contracts, genuine canonicalization & 100% idempotency.',
   );
   console.log(
     'NOTE: Distinct from a full 12-month production sync (via scripts/sync-all-sources.ts).',
@@ -271,6 +567,11 @@ export async function runLiveVerification(): Promise<LiveVerificationSummary> {
   console.log(
     `Quota Guard Status: ${getGlobalTicketmasterQuotaGuard().getCount()}/5000 requests used`,
   );
+
+  // If clean mode requested, reset test records to prove genuine canonical creation
+  if (options.clean) {
+    await cleanLiveTestSources(adminClient);
+  }
 
   // Count before
   const { count: initialEventsCount } = await adminClient
@@ -330,6 +631,30 @@ export async function runLiveVerification(): Promise<LiveVerificationSummary> {
   console.log(
     `[PASS 1] Z2 Entertainment done: ${z2Pass1.candidatesParsed} candidates, ${z2Pass1.canonicalEventsCreated} created, ${z2Pass1.canonicalEventsMatched} matched in ${z2Duration1}ms`,
   );
+
+  // Enforce genuine canonicalization in Pass 1
+  assertLiveIngestionCanonicalization({
+    pass1: {
+      ticketmaster: {
+        fetched: tmPass1.rawIngestsFetched,
+        candidates: tmPass1.candidatesParsed,
+        created: tmPass1.canonicalEventsCreated,
+        matched: tmPass1.canonicalEventsMatched,
+        needsReview: tmPass1.candidatesNeedsReview,
+        reviewReasons: tmPass1.reviewReasons,
+        durationMs: tmDuration1,
+      },
+      z2: {
+        fetched: z2Pass1.rawIngestsFetched,
+        candidates: z2Pass1.candidatesParsed,
+        created: z2Pass1.canonicalEventsCreated,
+        matched: z2Pass1.canonicalEventsMatched,
+        needsReview: z2Pass1.candidatesNeedsReview,
+        reviewReasons: z2Pass1.reviewReasons,
+        durationMs: z2Duration1,
+      },
+    },
+  });
 
   // Report review-needed records and explicit review reasons
   console.log('\n--- Review-Needed Records & Explicit Reasons Breakdown ---');
@@ -403,9 +728,7 @@ export async function runLiveVerification(): Promise<LiveVerificationSummary> {
     `[PASS 2] Z2 re-sync: Created: ${z2Pass2.canonicalEventsCreated} (expected: 0), Matched: ${z2Pass2.canonicalEventsMatched}, Raw Reused: ${z2Pass2.rawIngestsReused} in ${z2Duration2}ms`,
   );
 
-  // ------------------------------------------------------------------
   // Enforce Strict Idempotency Assertions
-  // ------------------------------------------------------------------
   assertLiveVerificationIdempotency({
     pass2Idempotency: {
       ticketmaster: {
@@ -485,7 +808,85 @@ export async function runLiveVerification(): Promise<LiveVerificationSummary> {
   const relationAudit = await auditDatabaseRelations(
     adminClient,
     sampleEvents.map((e) => e.id),
+    { fullAudit: options.fullAudit },
   );
+
+  // ------------------------------------------------------------------
+  // Trace 3 Genuine Ticketmaster Events
+  // ------------------------------------------------------------------
+  console.log(
+    '\n======================================================================',
+  );
+  console.log(
+    'TRACED TICKETMASTER EVENTS (PROVIDER ID -> CANONICAL DB RECORD -> UI)',
+  );
+  console.log(
+    '======================================================================',
+  );
+
+  const { data: tmSources } = await adminClient
+    .from('sources')
+    .select('id')
+    .eq('slug', 'ticketmaster-discovery')
+    .maybeSingle();
+
+  const tracedEvents: LiveVerificationSummary['tracedEvents'] = [];
+
+  if (tmSources) {
+    const { data: tmEventSources } = await adminClient
+      .from('event_sources')
+      .select('source_event_id, event_id, source_url')
+      .eq('source_id', tmSources.id)
+      .limit(3);
+
+    if (tmEventSources && tmEventSources.length > 0) {
+      for (let i = 0; i < tmEventSources.length; i++) {
+        const es = tmEventSources[i];
+        const { data: ev } = await adminClient
+          .from('events')
+          .select(
+            'id, name, local_start_date, min_price, currency, venue_id, primary_ticket_url',
+          )
+          .eq('id', es.event_id)
+          .maybeSingle();
+
+        let venueName = 'Unknown Venue';
+        if (ev?.venue_id) {
+          const { data: ven } = await adminClient
+            .from('venues')
+            .select('name')
+            .eq('id', ev.venue_id)
+            .maybeSingle();
+          if (ven?.name) venueName = ven.name;
+        }
+
+        const traced = {
+          providerEventId: es.source_event_id || 'N/A',
+          canonicalEventId: es.event_id,
+          name: ev?.name || 'Unknown',
+          venue: venueName,
+          date: ev?.local_start_date || 'N/A',
+          minPrice: ev?.min_price ?? null,
+          currency: ev?.currency ?? null,
+          ticketUrl: ev?.primary_ticket_url || es.source_url || null,
+          indexUiPath: `/concerts/${es.event_id}`,
+        };
+        tracedEvents.push(traced);
+
+        console.log(`Trace #${i + 1}:`);
+        console.log(`  Provider Event ID:  ${traced.providerEventId}`);
+        console.log(`  Canonical Event ID: ${traced.canonicalEventId}`);
+        console.log(`  Title:              "${traced.name}"`);
+        console.log(`  Venue:              ${traced.venue}`);
+        console.log(`  Date:               ${traced.date}`);
+        console.log(
+          `  Pricing:            ${traced.minPrice !== null ? `$${traced.minPrice} ${traced.currency || ''}` : 'Unknown'}`,
+        );
+        console.log(`  Ticket URL:         ${traced.ticketUrl || 'none'}`);
+        console.log(`  Index UI Route:     ${traced.indexUiPath}`);
+      }
+    }
+  }
 
   console.log(
     '\n======================================================================',
@@ -495,13 +896,16 @@ export async function runLiveVerification(): Promise<LiveVerificationSummary> {
     '======================================================================',
   );
   console.log(
+    `Pass 1 Canonical Creation:    PASS (TM: ${tmPass1.canonicalEventsCreated} created, ${tmPass1.canonicalEventsMatched} matched | Z2: ${z2Pass1.canonicalEventsCreated} created, ${z2Pass1.canonicalEventsMatched} matched)`,
+  );
+  console.log(
     'Ticketmaster Idempotency:     PASS (0 duplicate events created, all matched/reused)',
   );
   console.log(
     'Z2 Entertainment Idempotency: PASS (0 duplicate events created, all matched/reused)',
   );
   console.log(
-    `Database Relations Audit:     PASS (${relationAudit.verifiedRelationsCount} verified, 0 orphans)`,
+    `Database Relations Audit:     PASS (${relationAudit.verifiedRelationsCount} verified, 0 orphans, fullAudit: ${relationAudit.isFullAudit})`,
   );
   console.log(
     '======================================================================\n',
@@ -550,23 +954,23 @@ export async function runLiveVerification(): Promise<LiveVerificationSummary> {
       totalEventsInDb: finalEventsCount || 0,
       totalArtistsInDb: finalArtistsCount || 0,
       totalVenuesInDb: finalVenuesCount || 0,
+      totalEventSourcesInDb: relationAudit.totalRelationsCount,
       verifiedRelationsCount: relationAudit.verifiedRelationsCount,
+      isFullAudit: relationAudit.isFullAudit,
       sampleCanonicalEvents: sampleAudit,
     },
+    tracedEvents,
   };
 }
 
-const isDirectExecution =
-  typeof process !== 'undefined' &&
-  process.argv.some(
-    (arg) =>
-      arg.endsWith('verify-live-ingestion.ts') ||
-      arg.endsWith('verify-live-ingestion') ||
-      arg.includes('verify-live-ingestion'),
-  );
+const isTestRunner = Boolean(process.env.VITEST);
 
-if (isDirectExecution) {
-  runLiveVerification()
+if (!isTestRunner) {
+  const clean =
+    process.argv.includes('--clean') || process.argv.includes('--fresh');
+  const fullAudit = process.argv.includes('--full-audit');
+
+  runLiveVerification({ clean, fullAudit })
     .then(() => {
       console.log('Verification completed successfully.');
       process.exit(0);

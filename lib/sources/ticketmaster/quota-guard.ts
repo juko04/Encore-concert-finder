@@ -1,5 +1,10 @@
 import fs from 'node:fs';
-import { TicketmasterQuotaExceededError } from './errors';
+import {
+  TicketmasterQuotaCorruptionError,
+  TicketmasterQuotaExceededError,
+  TicketmasterQuotaLockError,
+  TicketmasterQuotaPersistenceError,
+} from './errors';
 
 export const TICKETMASTER_DAILY_LIMIT = 5000;
 export const TICKETMASTER_WARNING_THRESHOLD = 4000;
@@ -12,6 +17,7 @@ export interface QuotaGuardOptions {
   initialCount?: number;
   getCurrentDate?: () => Date;
   persistFilePath?: string | null;
+  lockWaitMs?: number;
   onWarning?: (status: TicketmasterQuotaStatus) => void;
   onCircuitBreaker?: (status: TicketmasterQuotaStatus) => void;
 }
@@ -24,6 +30,7 @@ export interface TicketmasterQuotaStatus {
   circuitBreakerThreshold: number;
   isWarning: boolean;
   isCircuitBroken: boolean;
+  isCorrupted?: boolean;
   dateKey: string;
   resetAtUtc: string;
   providerResetAtUtc?: string;
@@ -46,6 +53,8 @@ export interface ProviderQuotaHeaders {
  * resets at UTC midnight or when provider reset window occurs.
  *
  * Supports cross-process shared state via atomic file locking and provider header reconciliation.
+ * Implements strict FAIL-CLOSED safety: lock acquisition failures and corrupted state throw errors
+ * rather than allowing uncoordinated requests or restoring full budgets.
  */
 export class TicketmasterQuotaGuard {
   readonly dailyLimit: number;
@@ -55,8 +64,11 @@ export class TicketmasterQuotaGuard {
   private currentDateKey: string;
   private warningEmitted: boolean = false;
   private circuitBreakerEmitted: boolean = false;
+  private isCorrupted: boolean = false;
+  private corruptionReason?: string;
   private getCurrentDate: () => Date;
   private persistFilePath: string | null;
+  private lockWaitMs: number;
   private providerResetAtUtc?: string;
   private onWarning?: (status: TicketmasterQuotaStatus) => void;
   private onCircuitBreaker?: (status: TicketmasterQuotaStatus) => void;
@@ -69,6 +81,7 @@ export class TicketmasterQuotaGuard {
       options?.circuitBreakerThreshold ??
       TICKETMASTER_CIRCUIT_BREAKER_THRESHOLD;
     this.getCurrentDate = options?.getCurrentDate ?? (() => new Date());
+    this.lockWaitMs = options?.lockWaitMs ?? 5000;
     this.count = options?.initialCount ?? 0;
     this.onWarning = options?.onWarning;
     this.onCircuitBreaker = options?.onCircuitBreaker;
@@ -85,8 +98,9 @@ export class TicketmasterQuotaGuard {
     const initialDate = this.getCurrentDate();
     this.currentDateKey = this.getUtcDateKey(initialDate);
 
-    // Hydrate persisted count if available
-    this.loadPersistedState();
+    // Note: Do NOT perform unlocked loadPersistedState() in constructor to prevent
+    // TOCTOU race conditions with concurrent processes. All state hydration occurs
+    // safely inside withFileLock() during guarded method calls.
   }
 
   private getUtcDateKey(d: Date): string {
@@ -111,8 +125,11 @@ export class TicketmasterQuotaGuard {
   /**
    * Executes a callback within an atomic process-safe file lock.
    * If persistFilePath is null, executes immediately without locking.
-   * Employs stale lock detection and exponential backoff.
-   * Fails safely if lock cannot be acquired or file is corrupt.
+   *
+   * FAIL-CLOSED:
+   * - If lock cannot be acquired within timeout, throws TicketmasterQuotaLockError.
+   * - If filesystem throws an unrecoverable error, throws TicketmasterQuotaLockError.
+   * - Stale lock detection inspects holder PID and creation time. Dead processes are reclaimed immediately.
    */
   private withFileLock<T>(fn: () => T): T {
     if (!this.persistFilePath) {
@@ -120,8 +137,8 @@ export class TicketmasterQuotaGuard {
     }
 
     const lockPath = `${this.persistFilePath}.lock`;
-    const maxWaitMs = 5000;
-    const staleLockAgeMs = 10000;
+    const maxWaitMs = this.lockWaitMs;
+    const staleLockAgeMs = 15000;
     const start = Date.now();
     let fd: number | null = null;
     let acquired = false;
@@ -129,19 +146,60 @@ export class TicketmasterQuotaGuard {
     while (!acquired) {
       try {
         fd = fs.openSync(lockPath, 'wx');
+        // Record lock holder PID and creation timestamp for robust stale-lock detection
+        try {
+          const lockMeta = JSON.stringify({
+            pid: process.pid,
+            createdAt: Date.now(),
+          });
+          fs.writeSync(fd, lockMeta);
+        } catch {
+          // write error on new fd is non-fatal for holding lock
+        }
         acquired = true;
       } catch (err: unknown) {
-        const error = err as { code?: string };
+        const error = err as { code?: string; message?: string };
         if (error && error.code === 'EEXIST') {
-          // Check if lock file is stale (orphaned by killed process)
+          // Check if lock file is stale or orphaned by killed process
           try {
-            const stat = fs.statSync(lockPath);
-            if (Date.now() - stat.mtimeMs > staleLockAgeMs) {
+            if (fs.existsSync(lockPath)) {
+              let isDeadProcess = false;
+              let isStaleTime = false;
+
               try {
-                fs.unlinkSync(lockPath);
-                continue;
+                const content = fs.readFileSync(lockPath, 'utf8');
+                const meta = JSON.parse(content);
+                if (
+                  typeof meta.createdAt === 'number' &&
+                  Date.now() - meta.createdAt > staleLockAgeMs
+                ) {
+                  isStaleTime = true;
+                }
+                if (typeof meta.pid === 'number') {
+                  try {
+                    // Signal 0 tests process existence without terminating it
+                    process.kill(meta.pid, 0);
+                  } catch (killErr: unknown) {
+                    if ((killErr as { code?: string })?.code === 'ESRCH') {
+                      isDeadProcess = true; // Process definitely dead
+                    }
+                  }
+                }
               } catch {
-                // Another process might have cleaned it up
+                // If content is empty or unparseable, fall back to mtime check
+                const stat = fs.statSync(lockPath);
+                if (Date.now() - stat.mtimeMs > staleLockAgeMs) {
+                  isStaleTime = true;
+                }
+              }
+
+              if (isDeadProcess || isStaleTime) {
+                try {
+                  fs.unlinkSync(lockPath);
+                  continue; // Retry lock acquisition immediately
+                } catch {
+                  // Another process might have cleaned it up
+                }
               }
             }
           } catch {
@@ -150,20 +208,15 @@ export class TicketmasterQuotaGuard {
           }
 
           if (Date.now() - start > maxWaitMs) {
-            // Timed out: break stale lock safely or proceed
-            try {
-              fs.unlinkSync(lockPath);
-              fd = fs.openSync(lockPath, 'wx');
-              acquired = true;
-              break;
-            } catch {
-              // Proceed in-memory safely to avoid hanging indefinitely
-              return fn();
-            }
+            // FAIL-CLOSED: Refuse uncoordinated execution on lock timeout
+            throw new TicketmasterQuotaLockError(
+              `Failed to acquire Ticketmaster quota lock at ${lockPath} within ${maxWaitMs}ms. Refusing execution in fail-closed mode to prevent quota violations.`,
+              { lockPath, waitMs: maxWaitMs },
+            );
           }
 
-          // Backoff before retry
-          const backoffMs = 5 + Math.floor(Math.random() * 15);
+          // Backoff with jitter before retry
+          const backoffMs = 5 + Math.floor(Math.random() * 20);
           try {
             Atomics.wait(
               new Int32Array(new SharedArrayBuffer(4)),
@@ -178,8 +231,11 @@ export class TicketmasterQuotaGuard {
             }
           }
         } else {
-          // Other filesystem error: fail safely, proceed in-memory
-          return fn();
+          // FAIL-CLOSED: Other filesystem error (e.g. EACCES, ENOSPC, EROFS)
+          throw new TicketmasterQuotaLockError(
+            `Filesystem error accessing Ticketmaster quota lock at ${lockPath}: ${error?.message || String(err)}`,
+            { lockPath, cause: err },
+          );
         }
       }
     }
@@ -202,6 +258,11 @@ export class TicketmasterQuotaGuard {
     }
   }
 
+  /**
+   * Loads persisted quota state from disk.
+   * FAIL-CLOSED: Corrupted state sets isCorrupted flag, blocking subsequent requests
+   * rather than silently resetting count to 0.
+   */
   private loadPersistedState(): void {
     if (!this.persistFilePath) return;
     try {
@@ -214,31 +275,46 @@ export class TicketmasterQuotaGuard {
         };
         try {
           data = JSON.parse(raw);
-        } catch {
-          // Corrupt state file: fail safely, do not crash
+        } catch (parseErr) {
+          // FAIL-CLOSED: Corrupted state file must not silently reset budget to 0
+          this.isCorrupted = true;
+          this.corruptionReason = `JSON parse failed: ${(parseErr as Error).message}`;
           return;
         }
 
-        if (data && typeof data === 'object') {
-          if (data.dateKey) {
-            this.currentDateKey = data.dateKey;
-          }
-          if (typeof data.count === 'number') {
-            this.count = Math.max(this.count, data.count);
-          }
-          if (data.providerResetAtUtc) {
-            this.providerResetAtUtc = data.providerResetAtUtc;
-          }
-          this.warningEmitted = this.count >= this.warningThreshold;
-          this.circuitBreakerEmitted =
-            this.count >= this.circuitBreakerThreshold;
+        if (!data || typeof data !== 'object') {
+          this.isCorrupted = true;
+          this.corruptionReason = 'State file contains non-object data';
+          return;
         }
+
+        this.isCorrupted = false;
+        this.corruptionReason = undefined;
+
+        if (data.dateKey) {
+          this.currentDateKey = data.dateKey;
+        }
+        if (typeof data.count === 'number') {
+          // Synchronize to the authoritative count in the lock-guarded file
+          this.count = data.count;
+        }
+        if (data.providerResetAtUtc) {
+          this.providerResetAtUtc = data.providerResetAtUtc;
+        }
+        this.warningEmitted = this.count >= this.warningThreshold;
+        this.circuitBreakerEmitted = this.count >= this.circuitBreakerThreshold;
       }
-    } catch {
-      // Ignore persistence load failures gracefully
+    } catch (readErr) {
+      // If file unreadable due to filesystem error, fail closed
+      this.isCorrupted = true;
+      this.corruptionReason = `Read error: ${(readErr as Error).message}`;
     }
   }
 
+  /**
+   * Saves updated quota count to disk atomically using temporary file rename.
+   * FAIL-CLOSED: Throws TicketmasterQuotaPersistenceError on failure.
+   */
   private savePersistedState(): void {
     if (!this.persistFilePath) return;
     try {
@@ -252,8 +328,11 @@ export class TicketmasterQuotaGuard {
       const tmpPath = `${this.persistFilePath}.tmp.${Date.now()}_${Math.random().toString(36).slice(2)}`;
       fs.writeFileSync(tmpPath, JSON.stringify(payload, null, 2), 'utf8');
       fs.renameSync(tmpPath, this.persistFilePath);
-    } catch {
-      // Ignore persistence save failures gracefully
+    } catch (saveErr) {
+      throw new TicketmasterQuotaPersistenceError(
+        `Failed to save persisted quota state to ${this.persistFilePath}: ${(saveErr as Error).message}`,
+        { filePath: this.persistFilePath, cause: saveErr },
+      );
     }
   }
 
@@ -298,7 +377,7 @@ export class TicketmasterQuotaGuard {
     const now = this.getCurrentDate();
     const todayKey = this.getUtcDateKey(now);
 
-    // If providerResetAtUtc is set and in the future, do NOT reset accounting to 0 upon crossing midnight!
+    // If providerResetAtUtc is set and in the future, do NOT reset accounting to 0 upon crossing midnight
     if (this.providerResetAtUtc) {
       const resetTime = new Date(this.providerResetAtUtc).getTime();
       if (!isNaN(resetTime)) {
@@ -337,6 +416,7 @@ export class TicketmasterQuotaGuard {
       circuitBreakerThreshold: this.circuitBreakerThreshold,
       isWarning,
       isCircuitBroken,
+      isCorrupted: this.isCorrupted,
       dateKey: this.currentDateKey,
       resetAtUtc: this.providerResetAtUtc || this.getNextUtcMidnightIso(now),
       providerResetAtUtc: this.providerResetAtUtc,
@@ -357,6 +437,7 @@ export class TicketmasterQuotaGuard {
 
   /**
    * Determines if a request can be executed without exceeding budget or circuit breaker limits.
+   * FAIL-CLOSED: Returns allowed: false if state file is corrupted.
    */
   canExecute(options?: RecordRequestOptions): {
     allowed: boolean;
@@ -364,6 +445,13 @@ export class TicketmasterQuotaGuard {
   } {
     return this.withFileLock(() => {
       this.loadPersistedState();
+      if (this.isCorrupted) {
+        return {
+          allowed: false,
+          reason: `Ticketmaster quota state is corrupted (${this.corruptionReason}). Failing closed.`,
+        };
+      }
+
       this.checkDateReset();
       const isEssential = options?.isEssential ?? false;
 
@@ -388,10 +476,18 @@ export class TicketmasterQuotaGuard {
   /**
    * Checks quota and records a request. Throws TicketmasterQuotaExceededError if limit is reached
    * or if non-essential request arrives when circuit breaker is tripped.
+   * FAIL-CLOSED: Throws TicketmasterQuotaCorruptionError if state file is corrupted.
    */
   recordRequest(options?: RecordRequestOptions): TicketmasterQuotaStatus {
     return this.withFileLock(() => {
       this.loadPersistedState();
+      if (this.isCorrupted) {
+        throw new TicketmasterQuotaCorruptionError(
+          `Ticketmaster quota state file at ${this.persistFilePath} is corrupted (${this.corruptionReason}). Failing closed to prevent exceeding daily request limit.`,
+          { filePath: this.persistFilePath || undefined },
+        );
+      }
+
       this.checkDateReset();
       const isEssential = options?.isEssential ?? false;
       const now = this.getCurrentDate();
@@ -454,6 +550,8 @@ export class TicketmasterQuotaGuard {
       this.loadPersistedState();
       this.checkDateReset();
       this.count = Math.max(0, newCount);
+      this.isCorrupted = false;
+      this.corruptionReason = undefined;
       this.warningEmitted = this.count >= this.warningThreshold;
       this.circuitBreakerEmitted = this.count >= this.circuitBreakerThreshold;
       this.savePersistedState();
@@ -461,7 +559,7 @@ export class TicketmasterQuotaGuard {
   }
 
   /**
-   * Resets counter and flags to 0.
+   * Resets counter and flags to 0. Clears any corrupted state flag.
    */
   reset(date?: Date): void {
     this.withFileLock(() => {
@@ -474,6 +572,8 @@ export class TicketmasterQuotaGuard {
       this.warningEmitted = false;
       this.circuitBreakerEmitted = false;
       this.providerResetAtUtc = undefined;
+      this.isCorrupted = false;
+      this.corruptionReason = undefined;
       this.savePersistedState();
     });
   }

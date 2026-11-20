@@ -1,0 +1,107 @@
+# Example: Production Multi-Horizon Scheduled Ingestion Workflow
+#
+# ARCHITECTURAL INVARIANT (ISS-B):
+# Ticketmaster API has a strict 5,000 requests/day and 5 requests/sec account-wide limit.
+# Because independent cloud workers running in parallel without shared state would exhaust
+# rate limits and fail to coordinate quota consumption, production scheduled jobs MUST:
+#
+# 1. Be strictly serialized via a repository-wide concurrency group (`cancel-in-progress: false`).
+# 2. Bound requests per run (`--max-requests=250`).
+# 3. Use rolling horizons (near-term high frequency, mid/long-term low frequency).
+# 4. Enforce Destination Guard with approved production host environment variables.
+
+name: Scheduled Ingestion Sync
+
+on:
+  schedule:
+    # Near-term horizon (0-14 days): Every morning at 06:00 UTC
+    - cron: '0 6 * * *'
+    # Mid-term horizon (15-60 days): Every Wednesday and Sunday at 08:00 UTC
+    - cron: '0 8 * * 0,3'
+    # Long-term horizon (61-365 days): Every Saturday at 10:00 UTC
+    - cron: '0 10 * * 6'
+  workflow_dispatch:
+    inputs:
+      horizon:
+        description: 'Scheduling horizon to synchronize'
+        required: true
+        default: 'near-term'
+        type: choice
+        options:
+          - near-term
+          - mid-term
+          - long-term
+          - full
+      states:
+        description: 'Comma-separated state codes (defaults to CO)'
+        required: false
+        default: 'CO'
+        type: string
+      max_requests:
+        description: 'Maximum Ticketmaster requests for this run'
+        required: false
+        default: '250'
+        type: string
+
+# CRITICAL CONCURRENCY GUARD:
+# Prevents multiple concurrent ingestion workers from executing simultaneously across
+# scheduled runs and manual triggers, guaranteeing serialized execution and preventing quota race conditions.
+concurrency:
+  group: ticketmaster-ingestion
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    name: Run Ingestion Sync
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Determine horizon from trigger
+        id: horizon-selector
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "horizon=${{ github.event.inputs.horizon }}" >> $GITHUB_OUTPUT
+            echo "states=${{ github.event.inputs.states }}" >> $GITHUB_OUTPUT
+            echo "max_requests=${{ github.event.inputs.max_requests }}" >> $GITHUB_OUTPUT
+          elif [ "${{ github.event.schedule }}" = "0 6 * * *" ]; then
+            echo "horizon=near-term" >> $GITHUB_OUTPUT
+            echo "states=CO" >> $GITHUB_OUTPUT
+            echo "max_requests=250" >> $GITHUB_OUTPUT
+          elif [ "${{ github.event.schedule }}" = "0 8 * * 0,3" ]; then
+            echo "horizon=mid-term" >> $GITHUB_OUTPUT
+            echo "states=CO" >> $GITHUB_OUTPUT
+            echo "max_requests=500" >> $GITHUB_OUTPUT
+          else
+            echo "horizon=long-term" >> $GITHUB_OUTPUT
+            echo "states=CO" >> $GITHUB_OUTPUT
+            echo "max_requests=500" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Execute Synchronized Ingestion
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          TICKETMASTER_API_KEY: ${{ secrets.TICKETMASTER_API_KEY }}
+          ENCORE_APPROVED_PROD_HOSTS: ${{ secrets.ENCORE_APPROVED_PROD_HOSTS }}
+          ENCORE_PROD_PROJECT_REF: ${{ secrets.ENCORE_PROD_PROJECT_REF }}
+        run: |
+          npx tsx scripts/sync-all-sources.ts \
+            --live \
+            --persist \
+            --allow-production-write \
+            --horizon=${{ steps.horizon-selector.outputs.horizon }} \
+            --states=${{ steps.horizon-selector.outputs.states }} \
+            --max-requests=${{ steps.horizon-selector.outputs.max_requests }}

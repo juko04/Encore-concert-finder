@@ -140,6 +140,87 @@ export class TicketmasterQuotaExceededError extends TicketmasterError {
 }
 
 /**
+ * Failed to acquire process-safe quota lock or filesystem error during coordination.
+ * Fail-closed: operations must abort rather than executing uncoordinated.
+ */
+export class TicketmasterQuotaLockError extends TicketmasterError {
+  readonly lockPath?: string;
+  readonly waitMs?: number;
+
+  constructor(
+    message: string,
+    options: {
+      lockPath?: string;
+      waitMs?: number;
+      sanitizedUrl?: string;
+      cause?: unknown;
+    } = {},
+  ) {
+    super(message, {
+      category: 'rate_limit_exceeded',
+      statusCode: 503,
+      sanitizedUrl: options.sanitizedUrl,
+      cause: options.cause,
+    });
+    this.name = 'TicketmasterQuotaLockError';
+    this.lockPath = options.lockPath;
+    this.waitMs = options.waitMs;
+  }
+}
+
+/**
+ * Persisted quota state file is corrupt or unreadable.
+ * Fail-closed: operations must abort rather than resetting to a full budget.
+ */
+export class TicketmasterQuotaCorruptionError extends TicketmasterError {
+  readonly filePath?: string;
+
+  constructor(
+    message: string,
+    options: {
+      filePath?: string;
+      sanitizedUrl?: string;
+      cause?: unknown;
+    } = {},
+  ) {
+    super(message, {
+      category: 'validation_error',
+      statusCode: 500,
+      sanitizedUrl: options.sanitizedUrl,
+      cause: options.cause,
+    });
+    this.name = 'TicketmasterQuotaCorruptionError';
+    this.filePath = options.filePath;
+  }
+}
+
+/**
+ * Failed to persist updated quota count to disk.
+ * Fail-closed: operations must abort rather than losing track of API consumption.
+ */
+export class TicketmasterQuotaPersistenceError extends TicketmasterError {
+  readonly filePath?: string;
+
+  constructor(
+    message: string,
+    options: {
+      filePath?: string;
+      sanitizedUrl?: string;
+      cause?: unknown;
+    } = {},
+  ) {
+    super(message, {
+      category: 'database_error',
+      statusCode: 500,
+      sanitizedUrl: options.sanitizedUrl,
+      cause: options.cause,
+    });
+    this.name = 'TicketmasterQuotaPersistenceError';
+    this.filePath = options.filePath;
+  }
+}
+
+/**
  * Network failure, connection abort, or timeout when retries are exhausted.
  */
 export class TicketmasterNetworkError extends TicketmasterError {
