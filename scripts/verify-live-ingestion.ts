@@ -215,7 +215,7 @@ export async function auditDatabaseRelations(
     } else if (!parentEvent.venue_id) {
       missingVenuesCount++;
       console.error(
-        `[RELATION ERROR] Canonical event ${parentEvent.id} ("${parentEvent.title}") lacks venue_id`,
+        `[RELATION ERROR] Canonical event ${parentEvent.id} ("${parentEvent.name}") lacks venue_id`,
       );
     }
   }
