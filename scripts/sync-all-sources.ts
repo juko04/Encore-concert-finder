@@ -33,14 +33,17 @@
  *   npx tsx scripts/sync-all-sources.ts --live --persist --allow-production-write
  */
 
+import crypto from 'node:crypto';
 import path from 'node:path';
 import { assertSafeDatabaseTarget } from '@/lib/supabase/destination-guard';
 import { createAdminClient } from '@/lib/supabase/admin';
+import type { IRawIngestRepository } from '@/lib/repositories/interfaces';
 import {
   TicketmasterDiscoveryAdapter,
   runTicketmasterIngestion,
   getGlobalTicketmasterQuotaGuard,
   RunRequestBudget,
+  ensureTicketmasterSource,
 } from '@/lib/sources/ticketmaster';
 import {
   CervantesVenueAdapter,
@@ -68,7 +71,17 @@ import { SupabaseEventCandidateRepository } from '@/lib/repositories/event-candi
 import { SupabaseRawIngestRepository } from '@/lib/repositories/raw-ingest-repository';
 import { SupabaseSourceRepository } from '@/lib/repositories/source-repository';
 
-export type SyncHorizon = 'near-term' | 'mid-term' | 'long-term' | 'full';
+export type SyncHorizon =
+  'near-term' | 'mid-term' | 'long-term' | 'full' | 'auto';
+
+export const HORIZON_SLA_MS: Record<
+  Exclude<SyncHorizon, 'full' | 'auto'>,
+  number
+> = {
+  'near-term': 24 * 60 * 60 * 1000, // 24 hours (sync daily)
+  'mid-term': 96 * 60 * 60 * 1000, // 96 hours / 4 days (sync twice weekly)
+  'long-term': 192 * 60 * 60 * 1000, // 192 hours / 8 days (sync weekly)
+};
 
 export interface SyncOptions {
   horizon: SyncHorizon;
@@ -83,6 +96,7 @@ export interface SyncOptions {
   usePartitioner?: boolean;
   maxRequestsPerRun?: number;
   silent?: boolean;
+  recoverMissed?: boolean;
 }
 
 export interface SyncReport {
@@ -107,6 +121,8 @@ export interface MultiSourceSyncResult {
   regionsCovered: string[];
   favoriteArtistsQueried: string[];
   festivalsQueried: boolean;
+  horizonsExecuted?: SyncHorizon[];
+  recoveredHorizons?: SyncHorizon[];
   runBudgetStatus?: {
     maxRequests: number;
     consumed: number;
@@ -123,6 +139,7 @@ export function calculateHorizonDates(horizon: SyncHorizon): {
   const end = new Date(now);
 
   switch (horizon) {
+    case 'auto':
     case 'near-term':
       end.setDate(now.getDate() + 14);
       break;
@@ -144,6 +161,136 @@ export function calculateHorizonDates(horizon: SyncHorizon): {
     startUtc: start.toISOString().replace(/\.\d{3}Z$/, 'Z'),
     endUtc: end.toISOString().replace(/\.\d{3}Z$/, 'Z'),
   };
+}
+
+/**
+ * Retrieves the most recent successful sync timestamp for each Ticketmaster horizon from raw_ingests.
+ */
+export async function getHorizonSyncHistory(
+  rawIngestRepo: IRawIngestRepository,
+  tmSourceId?: string,
+): Promise<Record<Exclude<SyncHorizon, 'full' | 'auto'>, Date | null>> {
+  const result: Record<Exclude<SyncHorizon, 'full' | 'auto'>, Date | null> = {
+    'near-term': null,
+    'mid-term': null,
+    'long-term': null,
+  };
+
+  if (!tmSourceId) return result;
+
+  try {
+    const ingests = await rawIngestRepo.listBySource(tmSourceId, 100);
+    const sorted = [...ingests].sort(
+      (a, b) =>
+        new Date(b.fetchedAt).getTime() - new Date(a.fetchedAt).getTime(),
+    );
+    for (const ingest of sorted) {
+      if (
+        ingest.sourceUrl.startsWith('encore://sync-checkpoint/ticketmaster/')
+      ) {
+        for (const h of ['near-term', 'mid-term', 'long-term'] as const) {
+          if (ingest.sourceUrl.includes(`/ticketmaster/${h}`) && !result[h]) {
+            result[h] = new Date(ingest.fetchedAt);
+          }
+        }
+      }
+    }
+  } catch {
+    // If error or empty, return null timestamps
+  }
+
+  return result;
+}
+
+/**
+ * Determines which horizons are overdue and need execution based on SLAs and durable history.
+ * Guarantees that pending-run replacement in GitHub Actions (concurrency queue depth 1)
+ * cannot silently drop or starve mid-term or long-term synchronization windows.
+ */
+export function determineDueHorizons(
+  requestedHorizon: SyncHorizon,
+  syncHistory: Record<Exclude<SyncHorizon, 'full' | 'auto'>, Date | null>,
+  now: Date = new Date(),
+  recoverMissed: boolean = true,
+): Exclude<SyncHorizon, 'auto'>[] {
+  if (requestedHorizon === 'full') {
+    return ['full'];
+  }
+
+  const overdue: Exclude<SyncHorizon, 'full' | 'auto'>[] = [];
+  const horizons: Exclude<SyncHorizon, 'full' | 'auto'>[] = [
+    'near-term',
+    'mid-term',
+    'long-term',
+  ];
+
+  for (const h of horizons) {
+    const lastSync = syncHistory[h];
+    const slaMs = HORIZON_SLA_MS[h];
+    if (!lastSync) {
+      overdue.push(h);
+    } else {
+      const elapsedMs = now.getTime() - lastSync.getTime();
+      if (elapsedMs > slaMs) {
+        overdue.push(h);
+      }
+    }
+  }
+
+  if (requestedHorizon === 'auto') {
+    return overdue.length > 0 ? overdue : ['near-term'];
+  }
+
+  const target: Exclude<SyncHorizon, 'auto'>[] = [requestedHorizon];
+  if (recoverMissed) {
+    for (const h of overdue) {
+      if (!target.includes(h)) {
+        target.push(h);
+      }
+    }
+  }
+  return target;
+}
+
+/**
+ * Durably records an immutable synchronization checkpoint in raw_ingests.
+ */
+export async function recordHorizonCheckpoint(
+  rawIngestRepo: IRawIngestRepository,
+  tmSourceId: string,
+  horizon: Exclude<SyncHorizon, 'auto'>,
+  fetchedAt: Date = new Date(),
+): Promise<void> {
+  const horizonsToMark =
+    horizon === 'full'
+      ? (['near-term', 'mid-term', 'long-term'] as const)
+      : [horizon];
+
+  for (const h of horizonsToMark) {
+    const sourceUrl = `encore://sync-checkpoint/ticketmaster/${h}`;
+    const content = JSON.stringify({
+      horizon: h,
+      completedAt: fetchedAt.toISOString(),
+      status: 'success',
+    });
+    const contentHash = crypto
+      .createHash('sha256')
+      .update(sourceUrl + content + fetchedAt.getTime())
+      .digest('hex');
+
+    await rawIngestRepo.create({
+      sourceId: tmSourceId,
+      sourceUrl,
+      acquisitionMethod: 'api',
+      fetchedAt: fetchedAt.toISOString(),
+      contentHash,
+      contentType: 'application/json',
+      rawContent: content,
+      externalStorageRef: null,
+      httpStatus: 200,
+      parserVersion: '1.0.0',
+    });
+  }
 }
 
 export async function runMultiSourceSync(
@@ -211,6 +358,8 @@ export async function runMultiSourceSync(
 
   let favoriteArtistsQueried: string[] = [];
   let festivalsQueried = false;
+  const horizonsExecuted: SyncHorizon[] = [];
+  const recoveredHorizons: SyncHorizon[] = [];
 
   if (options.maxRequestsPerRun !== undefined) {
     if (
@@ -237,84 +386,137 @@ export async function runMultiSourceSync(
       runBudget,
     });
 
-    // 1A. Loop through specified regional states
-    for (const state of states) {
-      if (runBudget && runBudget.isExhausted()) {
-        warn(
-          `[SYNC BUDGET] Reached maximum requests per run budget (${options.maxRequestsPerRun}). Skipping region ${state}.`,
-        );
-        reports.push({
-          sourceName: `Ticketmaster (${state} Region)`,
-          sourceType: 'aggregator',
-          status: 'partial',
-          eventsFetched: 0,
-          candidatesExtracted: 0,
-          canonicalCreated: 0,
-          canonicalMatched: 0,
-          soldOutCount: 0,
-          durationMs: 0,
-          hasIncompleteCoverage: true,
-          error: `Run request budget exhausted (${runBudget.getConsumed()}/${runBudget.getMaxRequests()})`,
-        });
-        continue;
+    const tmSource = await ensureTicketmasterSource(sourceRepo);
+
+    const syncHistory = await getHorizonSyncHistory(rawIngestRepo, tmSource.id);
+    const shouldRecoverMissed =
+      options.recoverMissed ??
+      ((options.persist && options.horizon !== 'full') ||
+        options.horizon === 'auto');
+    const targetHorizons = determineDueHorizons(
+      options.horizon,
+      syncHistory,
+      new Date(),
+      shouldRecoverMissed,
+    );
+
+    if (targetHorizons.length > 1) {
+      const recovered = targetHorizons.filter((h) => h !== options.horizon);
+      recoveredHorizons.push(...recovered);
+      log(
+        `\n[SYNC RECOVERY] Multi-horizon execution active to guarantee missed synchronization windows: [${targetHorizons.join(', ')}] (Recovered: [${recovered.join(', ')}])`,
+      );
+    }
+    horizonsExecuted.push(...targetHorizons);
+
+    for (const currentHorizon of targetHorizons) {
+      const { startUtc: hStartUtc, endUtc: hEndUtc } =
+        calculateHorizonDates(currentHorizon);
+
+      // 1A. Loop through specified regional states
+      for (const state of states) {
+        if (runBudget && runBudget.isExhausted()) {
+          warn(
+            `[SYNC BUDGET] Reached maximum requests per run budget (${options.maxRequestsPerRun}). Skipping region ${state} (${currentHorizon}).`,
+          );
+          reports.push({
+            sourceName:
+              targetHorizons.length > 1 || currentHorizon !== 'near-term'
+                ? `Ticketmaster (${state} Region, ${currentHorizon})`
+                : `Ticketmaster (${state} Region)`,
+            sourceType: 'aggregator',
+            status: 'partial',
+            eventsFetched: 0,
+            candidatesExtracted: 0,
+            canonicalCreated: 0,
+            canonicalMatched: 0,
+            soldOutCount: 0,
+            durationMs: 0,
+            hasIncompleteCoverage: true,
+            error: `Run request budget exhausted (${runBudget.getConsumed()}/${runBudget.getMaxRequests()})`,
+          });
+          continue;
+        }
+        const tmStart = Date.now();
+        try {
+          log(
+            `\n[SYNC] Starting Ticketmaster sync for region: ${state} (${currentHorizon}: ${hStartUtc} -> ${hEndUtc})...`,
+          );
+
+          const tmResult = await runTicketmasterIngestion({
+            adapter: tmAdapter,
+            rawIngestRepo,
+            candidateRepo,
+            catalogRepo,
+            sourceRepo,
+            queryParams: {
+              stateCode: state,
+              startDateTime: hStartUtc,
+              endDateTime: hEndUtc,
+              size: 50,
+              classificationName: 'Music',
+            },
+            usePartitioner: options.usePartitioner ?? true,
+            useFixture: !options.live,
+            persist: options.persist,
+          });
+
+          const isPartial = Boolean(tmResult.hasIncompleteCoverage);
+
+          reports.push({
+            sourceName:
+              targetHorizons.length > 1 || currentHorizon !== 'near-term'
+                ? `Ticketmaster (${state} Region, ${currentHorizon})`
+                : `Ticketmaster (${state} Region)`,
+            sourceType: 'aggregator',
+            status: isPartial ? 'partial' : 'success',
+            eventsFetched: tmResult.rawIngestsFetched,
+            candidatesExtracted: tmResult.candidatesParsed,
+            canonicalCreated: tmResult.canonicalEventsCreated,
+            canonicalMatched: tmResult.canonicalEventsMatched,
+            soldOutCount: tmResult.candidates.filter(
+              (c) => c.inventoryStatus === 'sold_out',
+            ).length,
+            durationMs: Date.now() - tmStart,
+            hasIncompleteCoverage: tmResult.hasIncompleteCoverage,
+          });
+        } catch (err) {
+          console.error(
+            `[SYNC] Ticketmaster sync failed for region ${state} (${currentHorizon}):`,
+            err,
+          );
+          reports.push({
+            sourceName:
+              targetHorizons.length > 1 || currentHorizon !== 'near-term'
+                ? `Ticketmaster (${state} Region, ${currentHorizon})`
+                : `Ticketmaster (${state} Region)`,
+            sourceType: 'aggregator',
+            status: 'failed',
+            eventsFetched: 0,
+            candidatesExtracted: 0,
+            canonicalCreated: 0,
+            canonicalMatched: 0,
+            soldOutCount: 0,
+            durationMs: Date.now() - tmStart,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
       }
-      const tmStart = Date.now();
-      try {
-        log(
-          `\n[SYNC] Starting Ticketmaster sync for region: ${state} (${options.horizon}: ${startUtc} -> ${endUtc})...`,
-        );
 
-        const tmResult = await runTicketmasterIngestion({
-          adapter: tmAdapter,
-          rawIngestRepo,
-          candidateRepo,
-          catalogRepo,
-          sourceRepo,
-          queryParams: {
-            stateCode: state,
-            startDateTime: startUtc,
-            endDateTime: endUtc,
-            size: 50,
-            classificationName: 'Music',
-          },
-          usePartitioner: options.usePartitioner ?? true,
-          useFixture: !options.live,
-          persist: options.persist,
-        });
-
-        const isPartial = Boolean(tmResult.hasIncompleteCoverage);
-
-        reports.push({
-          sourceName: `Ticketmaster (${state} Region)`,
-          sourceType: 'aggregator',
-          status: isPartial ? 'partial' : 'success',
-          eventsFetched: tmResult.rawIngestsFetched,
-          candidatesExtracted: tmResult.candidatesParsed,
-          canonicalCreated: tmResult.canonicalEventsCreated,
-          canonicalMatched: tmResult.canonicalEventsMatched,
-          soldOutCount: tmResult.candidates.filter(
-            (c) => c.inventoryStatus === 'sold_out',
-          ).length,
-          durationMs: Date.now() - tmStart,
-          hasIncompleteCoverage: tmResult.hasIncompleteCoverage,
-        });
-      } catch (err) {
-        console.error(
-          `[SYNC] Ticketmaster sync failed for region ${state}:`,
-          err,
-        );
-        reports.push({
-          sourceName: `Ticketmaster (${state} Region)`,
-          sourceType: 'aggregator',
-          status: 'failed',
-          eventsFetched: 0,
-          candidatesExtracted: 0,
-          canonicalCreated: 0,
-          canonicalMatched: 0,
-          soldOutCount: 0,
-          durationMs: Date.now() - tmStart,
-          error: err instanceof Error ? err.message : String(err),
-        });
+      // Record durable checkpoint for this horizon if persisted
+      if (options.persist) {
+        try {
+          await recordHorizonCheckpoint(
+            rawIngestRepo,
+            tmSource.id,
+            currentHorizon,
+          );
+        } catch (cpErr) {
+          warn(
+            `[SYNC] Failed to record horizon checkpoint for ${currentHorizon}:`,
+            cpErr,
+          );
+        }
       }
     }
 
@@ -618,6 +820,8 @@ export async function runMultiSourceSync(
     regionsCovered: states,
     favoriteArtistsQueried,
     festivalsQueried,
+    horizonsExecuted,
+    recoveredHorizons,
     runBudgetStatus: runBudget?.getStatus(),
   };
 }
@@ -629,6 +833,7 @@ async function main() {
   const isPersist = args.includes('--persist');
   const isJson = args.includes('--json');
   const allowProductionWrite = args.includes('--allow-production-write');
+  const recoverMissed = !args.includes('--no-recover-missed');
 
   if (allowProductionWrite && !isLive) {
     throw new Error(
@@ -709,6 +914,7 @@ async function main() {
     usePartitioner: true,
     maxRequestsPerRun,
     silent: isJson,
+    recoverMissed,
   });
 
   let totalFetched = 0;
@@ -733,6 +939,8 @@ async function main() {
       regionsCovered: result.regionsCovered,
       favoriteArtistsQueried: result.favoriteArtistsQueried,
       festivalsQueried: result.festivalsQueried,
+      horizonsExecuted: result.horizonsExecuted,
+      recoveredHorizons: result.recoveredHorizons,
       runBudgetStatus: result.runBudgetStatus,
       totals: {
         jobs: result.reports.length,
@@ -760,6 +968,14 @@ async function main() {
       `Regions Covered:           ${result.regionsCovered.join(', ')}`,
     );
     console.log(`Horizon:                   ${horizon}`);
+    if (result.horizonsExecuted && result.horizonsExecuted.length > 1) {
+      console.log(
+        `Horizons Executed:         ${result.horizonsExecuted.join(', ')}`,
+      );
+      console.log(
+        `Recovered Missed Horizons: ${result.recoveredHorizons?.join(', ') || 'None'}`,
+      );
+    }
     console.log(
       `Favorite Artist Tours:     ${
         result.favoriteArtistsQueried.length > 0

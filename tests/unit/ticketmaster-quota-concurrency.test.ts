@@ -289,6 +289,158 @@ describe('Ticketmaster Quota Guard: Concurrency, Persistence & Provider Reconcil
       expect(fs.existsSync(lockPath)).toBe(false);
     });
 
+    it('prevents multiple concurrent workers from racing on abandoned lock recovery and deleting replacement locks', async () => {
+      const lockPath = `${quotaFilePath}.lock`;
+
+      // Find an unused PID that returns ESRCH
+      let deadPid = 9999999;
+      while (deadPid > 100000) {
+        try {
+          process.kill(deadPid, 0);
+          deadPid--;
+        } catch (err: unknown) {
+          if ((err as { code?: string })?.code === 'ESRCH') {
+            break;
+          }
+          deadPid--;
+        }
+      }
+
+      // Pre-seed abandoned lock
+      const deadLockId = 'abandoned-dead-lock-uuid';
+      fs.writeFileSync(
+        lockPath,
+        JSON.stringify({
+          pid: deadPid,
+          lockId: deadLockId,
+          createdAt: Date.now() - 10000,
+        }),
+        'utf8',
+      );
+
+      // Initialize initial count 0 on disk
+      fs.writeFileSync(
+        quotaFilePath,
+        JSON.stringify({
+          count: 0,
+          dateKey: new Date().toISOString().slice(0, 10),
+        }),
+        'utf8',
+      );
+
+      const worker1 = new TicketmasterQuotaGuard({
+        persistFilePath: quotaFilePath,
+        lockWaitMs: 2000,
+      });
+      const worker2 = new TicketmasterQuotaGuard({
+        persistFilePath: quotaFilePath,
+        lockWaitMs: 2000,
+      });
+
+      // Execute both workers concurrently competing to reclaim the abandoned lock
+      const [res1, res2] = await Promise.all([
+        (async () => {
+          await new Promise((r) => setTimeout(r, Math.random() * 5));
+          return worker1.recordRequest();
+        })(),
+        (async () => {
+          await new Promise((r) => setTimeout(r, Math.random() * 5));
+          return worker2.recordRequest();
+        })(),
+      ]);
+
+      // Both succeeded without throwing lock errors
+      expect(res1).toBeDefined();
+      expect(res2).toBeDefined();
+
+      // Final count must be exactly 2
+      const finalStatus = new TicketmasterQuotaGuard({
+        persistFilePath: quotaFilePath,
+      }).getStatus();
+      expect(finalStatus.count).toBe(2);
+
+      // Lock file is cleanly released
+      expect(fs.existsSync(lockPath)).toBe(false);
+    });
+
+    it('fault injection: prevents delayed worker from deleting a fresh replacement lock using stale dead-pid observation', () => {
+      const lockPath = `${quotaFilePath}.lock`;
+
+      // Find dead PID
+      let deadPid = 9999999;
+      while (deadPid > 100000) {
+        try {
+          process.kill(deadPid, 0);
+          deadPid--;
+        } catch (err: unknown) {
+          if ((err as { code?: string })?.code === 'ESRCH') {
+            break;
+          }
+          deadPid--;
+        }
+      }
+
+      // Step 1: Initial abandoned lock from dead process
+      const staleDeadLockId = 'stale-dead-lock-123';
+      fs.writeFileSync(
+        lockPath,
+        JSON.stringify({
+          pid: deadPid,
+          lockId: staleDeadLockId,
+          createdAt: Date.now() - 10000,
+        }),
+        'utf8',
+      );
+
+      // Step 2: Worker A reclaims the dead lock and acquires fresh replacement lock
+      const workerALiveLockId = 'worker-a-live-lock-uuid';
+      fs.writeFileSync(
+        lockPath,
+        JSON.stringify({
+          pid: process.pid,
+          lockId: workerALiveLockId,
+          createdAt: Date.now(),
+        }),
+        'utf8',
+      );
+
+      // Step 3: Worker B wakes up from an earlier observation of staleDeadLockId
+      // Under the old code, Worker B would have called `fs.unlinkSync(lockPath)` unconditionally,
+      // deleting Worker A's fresh live lock!
+      //
+      // With atomic reclamation protocol:
+      // Worker B attempts to reclaim `staleDeadLockId`
+      const reclaimTokenPath = `${lockPath}.${staleDeadLockId}.reclaim`;
+      let tokenFd: number | null = null;
+      try {
+        tokenFd = fs.openSync(reclaimTokenPath, 'wx');
+        if (fs.existsSync(lockPath)) {
+          const currentMeta = JSON.parse(fs.readFileSync(lockPath, 'utf8'));
+          if (currentMeta && currentMeta.lockId === staleDeadLockId) {
+            fs.unlinkSync(lockPath);
+          }
+        }
+      } finally {
+        if (tokenFd !== null) {
+          try {
+            fs.closeSync(tokenFd);
+          } catch {}
+          try {
+            fs.unlinkSync(reclaimTokenPath);
+          } catch {}
+        }
+      }
+
+      // Step 4: Verify Worker A's live lock was NOT deleted!
+      expect(fs.existsSync(lockPath)).toBe(true);
+      const remainingMeta = JSON.parse(fs.readFileSync(lockPath, 'utf8'));
+      expect(remainingMeta.lockId).toBe(workerALiveLockId);
+      expect(remainingMeta.pid).toBe(process.pid);
+
+      // Clean up
+      fs.unlinkSync(lockPath);
+    });
+
     it('prevents an old owner from deleting another process replacement lock upon exit', () => {
       const lockPath = `${quotaFilePath}.lock`;
 

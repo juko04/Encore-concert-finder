@@ -31,8 +31,8 @@ Two fresh independent specialist subagents were deployed with clean review conte
 
 ## 2. Itemized Remediations (Findings 1–7)
 
-### Finding 1: Critical — Live Quota Lock Stealing Prevention
-- **Root Cause:** In `lib/sources/ticketmaster/quota-guard.ts`, stale lock reclamation previously checked `isDeadProcess || isStaleTime`. If an operation ran longer than 15 seconds, a competing worker stole the lock while the holder was still actively making API requests. Furthermore, when the delayed worker exited, its `finally` block unlinked `lockPath`, deleting the newer worker's replacement lock.
+### Finding 1: Critical — Live Quota Lock Stealing Prevention & Dead-Lock Recovery Race Resolution
+- **Root Cause:** In `lib/sources/ticketmaster/quota-guard.ts`, stale lock reclamation previously checked `isDeadProcess || isStaleTime`. If an operation ran longer than 15 seconds, a competing worker stole the lock while the holder was still actively making API requests. Furthermore, when the delayed worker exited, its `finally` block unlinked `lockPath`, deleting the newer worker's replacement lock. In addition, when multiple workers observed an abandoned dead lock concurrently, a TOCTOU race existed where Worker B could delete Worker A's fresh replacement lock using its prior stale dead-PID observation.
 - **Remediation:**
   - Added cryptographic UUID `lockId` generation on lock acquisition.
   - Lock files persist `{ pid: number, lockId: string, createdAt: string }`.
@@ -40,9 +40,10 @@ Two fresh independent specialist subagents were deployed with clean review conte
   - Process death detection strictly requires `killErr.code === 'ESRCH'`. If `EPERM` or any unknown error occurs, `isDeadProcess` remains `false`.
   - Missing, empty, or malformed lock metadata fails closed without deleting the lock file.
   - In `withFileLock` `finally`: the releasing process reads `lockPath` and verifies `meta.lockId === currentLockId` before unlinking. If the lock was replaced by another process, the file is left untouched.
+  - **Dead-Lock Reclamation Token Protocol:** Created kernel-guaranteed mutual exclusion token file `${lockPath}.${deadLockId}.reclaim` using `open(..., 'wx')` (`O_CREAT | O_EXCL`). Only the single worker that successfully acquires this token is permitted to clean up the dead lock. Prior to unlinking `lockPath`, the token holder re-reads `lockPath` and verifies `currentMeta.lockId === deadLockId`. If a replacement lock has already taken over, `lockPath` is left intact.
   - In `savePersistedState()`: verifies `verifyLockOwnership(lockPath, this.activeLockId)` before saving.
   - In `loadPersistedState()`: invalid counts (<0, non-integer, NaN) or invalid dates set `this.isCorrupted = true`, which halts requests and prevents budget resets.
-- **Verification:** `tests/unit/ticketmaster-quota-concurrency.test.ts` (10/10 passed, including 5 adversarial lock stealing, dead PID, replacement lock, and malformed metadata tests).
+- **Verification:** `tests/unit/ticketmaster-quota-concurrency.test.ts` (12/12 passed, including adversarial lock stealing, dead PID, replacement lock, malformed metadata, and multi-process dead-lock recovery race tests).
 
 ### Finding 2: High — Enforce the Actual Per-Run Request Budget
 - **Root Cause:** In `scripts/sync-all-sources.ts`, `--max-requests=N` was previously only checked before starting a region. Once inside a regional sync, Ticketmaster partition bisection, pagination, retries, favorite-artist tour lookups, and festival queries could consume dozens of requests unchecked.
@@ -89,10 +90,11 @@ Two fresh independent specialist subagents were deployed with clean review conte
   3. `33db73d8-2764-4c50-96c0-c3f947bc1ab1` ("TYLA - THE A*POP WORLD TOUR" @ Fillmore Auditorium) $\to$ `docs/screenshots/traced-event-3.png`
 - **Verification:** `npx playwright test tests/e2e/live-event-ui-trace.spec.ts` passed (1/1 passed, 3 screenshots captured).
 
-### Finding 6: Production Execution Model
+### Finding 6: Production Execution Model & Missed-Run Recovery
 - **Remediation:**
   - Documented scheduled sync workflow in `.github/workflows/scheduled-sync.yml.example`.
   - Configured concurrency group `ticketmaster-ingestion` with `cancel-in-progress: false` to ensure job serialization across scheduled runs and manual triggers.
+  - Addressed GitHub Actions concurrency queue depth 1 cancellation semantics: intermediate queued runs are canceled if a newer run triggers. Resolved via durable horizon SLA checkpoints persisted to `raw_ingests` (`source_url: 'encore://sync-checkpoint/ticketmaster/<horizon>'`), explicit SLAs (`near-term` 24h, `mid-term` 96h, `long-term` 192h), `--horizon=auto` support, and automatic overdue horizon cascade recovery within the bounded `RunRequestBudget`.
   - Documented quota calibration via provider response headers (`rate-limit`, `rate-limit-available`, `rate-limit-reset`) on ephemeral runners.
   - Documented bounded request ceilings (`--max-requests=250` for near-term, `500` for full baseline).
   - Documented failure detection, retry strategy, and pre-activation checklist in `docs/architecture/ingestion.md`.
@@ -113,6 +115,10 @@ Two fresh independent specialist subagents were deployed with clean review conte
   - Verified double-gated disposable cleanup safety and isolated artist deletion.
   - Verified current-run live trace integrity in Index UI with Playwright.
   - Executed tests: 25/25 sync tests passed, 3/3 safety tests passed, 1/1 trace E2E passed.
+  - **Verdict:** **PASS**.
+- **Auditor 3 (Independent Systems Auditor):**
+  - Audited dead-lock reclamation race conditions, kernel-level atomic file tokens, GitHub Actions queue replacement semantics, and overdue horizon cascade recovery.
+  - Verified 12/12 concurrency tests (including fault-injected recovery races) and 31/31 sync-all-sources tests (including auto horizon cascade).
   - **Verdict:** **PASS**.
 
 ---
@@ -142,7 +148,7 @@ Product acceptance was verified against the live Next.js application running at 
 | **Code Formatting** | `npm run format:check` | **PASS** | 100% Prettier compliant across all files |
 | **Static Analysis** | `npm run lint` | **PASS** | 0 ESLint warnings, 0 errors |
 | **Type Integrity** | `npm run typecheck` | **PASS** | Strict TypeScript (`tsc --noEmit`), 0 errors |
-| **Unit Test Suite** | `npm test` | **PASS** | **68 test files, 914 unit tests passed** |
+| **Unit Test Suite** | `npm test` | **PASS** | **68 test files, 922 unit tests passed** |
 | **Integration Test Suite** | `npm run test:integration` | **PASS** | **14 test files, 108 database tests passed** |
 | **End-to-End Browser Tests** | `npx playwright test` | **PASS** | **17 browser scenarios passed**, 0 failed |
 | **Production Build** | `npm run build` | **PASS** | Next.js 15.5.27 production build clean (19 routes) |

@@ -2,7 +2,12 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   calculateHorizonDates,
   runMultiSourceSync,
+  determineDueHorizons,
+  getHorizonSyncHistory,
+  recordHorizonCheckpoint,
+  HORIZON_SLA_MS,
 } from '@/scripts/sync-all-sources';
+import { MemoryRawIngestRepository } from '@/lib/repositories/memory-repositories';
 import {
   assertLiveIngestionCanonicalization,
   assertLiveVerificationIdempotency,
@@ -604,6 +609,111 @@ describe('Sync All Sources & Live Verification (PR #20 Remediations)', () => {
       } finally {
         logSpy.mockRestore();
       }
+    });
+  });
+
+  describe('Durable Missed-Run Recovery & Horizon SLA Coordination', () => {
+    it('detects overdue mid-term horizon when elapsed time exceeds 96h SLA', () => {
+      const now = new Date('2026-11-20T12:00:00Z');
+      const syncHistory = {
+        'near-term': new Date('2026-11-20T06:00:00Z'), // 6h ago (< 24h SLA)
+        'mid-term': new Date('2026-11-15T12:00:00Z'), // 5 days ago (120h > 96h SLA) -> OVERDUE!
+        'long-term': new Date('2026-11-18T10:00:00Z'), // 2 days ago (< 192h SLA)
+      };
+
+      const due = determineDueHorizons('near-term', syncHistory, now, true);
+      expect(due).toEqual(['near-term', 'mid-term']);
+    });
+
+    it('returns only requested horizon when recoverMissed is false', () => {
+      const now = new Date('2026-11-20T12:00:00Z');
+      const syncHistory = {
+        'near-term': new Date('2026-11-20T06:00:00Z'),
+        'mid-term': new Date('2026-11-15T12:00:00Z'), // Overdue
+        'long-term': null, // Overdue
+      };
+
+      const due = determineDueHorizons('near-term', syncHistory, now, false);
+      expect(due).toEqual(['near-term']);
+    });
+
+    it('returns all overdue horizons when horizon: auto is requested', () => {
+      const now = new Date('2026-11-20T12:00:00Z');
+      const syncHistory = {
+        'near-term': new Date('2026-11-19T00:00:00Z'), // 36h ago (> 24h SLA) -> Overdue
+        'mid-term': new Date('2026-11-15T12:00:00Z'), // 120h ago (> 96h SLA) -> Overdue
+        'long-term': new Date('2026-11-18T10:00:00Z'), // 48h ago (< 192h SLA) -> Fresh
+      };
+
+      const due = determineDueHorizons('auto', syncHistory, now);
+      expect(due).toEqual(['near-term', 'mid-term']);
+    });
+
+    it('defaults to near-term when horizon: auto is requested and all horizons are fresh', () => {
+      const now = new Date('2026-11-20T12:00:00Z');
+      const syncHistory = {
+        'near-term': new Date('2026-11-20T08:00:00Z'), // 4h ago
+        'mid-term': new Date('2026-11-19T08:00:00Z'), // 28h ago
+        'long-term': new Date('2026-11-18T10:00:00Z'), // 50h ago
+      };
+
+      const due = determineDueHorizons('auto', syncHistory, now);
+      expect(due).toEqual(['near-term']);
+    });
+
+    it('records durable checkpoints and retrieves sync history from raw_ingests', async () => {
+      const rawRepo = new MemoryRawIngestRepository();
+      const tmSourceId = 'b0000000-0000-0000-0000-000000000003';
+
+      // Initially empty
+      const initialHistory = await getHorizonSyncHistory(rawRepo, tmSourceId);
+      expect(initialHistory['near-term']).toBeNull();
+      expect(initialHistory['mid-term']).toBeNull();
+      expect(initialHistory['long-term']).toBeNull();
+
+      // Record near-term checkpoint
+      const t1 = new Date('2026-11-20T06:00:00Z');
+      await recordHorizonCheckpoint(rawRepo, tmSourceId, 'near-term', t1);
+
+      const history1 = await getHorizonSyncHistory(rawRepo, tmSourceId);
+      expect(history1['near-term']?.toISOString()).toBe(t1.toISOString());
+      expect(history1['mid-term']).toBeNull();
+
+      // Record mid-term checkpoint
+      const t2 = new Date('2026-11-20T08:00:00Z');
+      await recordHorizonCheckpoint(rawRepo, tmSourceId, 'mid-term', t2);
+
+      const history2 = await getHorizonSyncHistory(rawRepo, tmSourceId);
+      expect(history2['near-term']?.toISOString()).toBe(t1.toISOString());
+      expect(history2['mid-term']?.toISOString()).toBe(t2.toISOString());
+      expect(history2['long-term']).toBeNull();
+
+      // Record full checkpoint (marks all 3 horizons)
+      const t3 = new Date('2026-11-20T10:00:00Z');
+      await recordHorizonCheckpoint(rawRepo, tmSourceId, 'full', t3);
+
+      const history3 = await getHorizonSyncHistory(rawRepo, tmSourceId);
+      expect(history3['near-term']?.toISOString()).toBe(t3.toISOString());
+      expect(history3['mid-term']?.toISOString()).toBe(t3.toISOString());
+      expect(history3['long-term']?.toISOString()).toBe(t3.toISOString());
+    });
+
+    it('executes multi-horizon recovery cleanly in fixture mode', async () => {
+      const result = await runMultiSourceSync({
+        horizon: 'auto',
+        live: false,
+        persist: false,
+        sources: ['ticketmaster'],
+        states: ['CO'],
+        syncFavoriteArtists: false,
+        syncFestivals: false,
+        silent: true,
+      });
+
+      expect(result.overallStatus).toBe('success');
+      expect(result.exitCode).toBe(0);
+      expect(result.horizonsExecuted).toBeDefined();
+      expect(result.horizonsExecuted?.length).toBeGreaterThanOrEqual(1);
     });
   });
 });

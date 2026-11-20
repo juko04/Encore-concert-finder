@@ -214,14 +214,19 @@ Ticketmaster Discovery API v2 enforces strict account-wide rate limits:
 ### Production Single-Runner Serialized Execution Model
 Independent serverless or cloud runners cannot coordinate local filesystem state without centralized locking. To prevent race conditions, uncoordinated quota exhaustion, and 429 penalties in production:
 
-1. **Serialized Workflow Concurrency:**
+1. **Serialized Workflow Concurrency & GitHub Actions Queue Semantics:**
    Scheduled jobs in CI/CD (e.g. GitHub Actions) MUST configure a repository-wide concurrency group:
    ```yaml
    concurrency:
      group: ticketmaster-ingestion
      cancel-in-progress: false
    ```
-   This guarantees that scheduled runs and manual triggers are queued and executed strictly one at a time, completely eliminating parallel execution race conditions.
+   - **Concurrency Semantics & Queue Depth:** GitHub Actions enforces a maximum queue depth of **1 pending run** when `cancel-in-progress: false` is used. If multiple scheduled triggers or manual dispatches arrive while a job is running, GitHub Actions replaces and cancels previously queued pending jobs in favor of the newest run.
+   - **Durable Missed-Run Recovery:** To ensure intermediate horizons (such as bi-weekly mid-term or weekly long-term syncs) cannot be silently lost or starved if a scheduled trigger is delayed or canceled by GitHub Actions queue replacement, `sync-all-sources.ts` implements durable missed-run recovery:
+     - Maintains immutable synchronization checkpoints in `raw_ingests` (`source_url: 'encore://sync-checkpoint/ticketmaster/<horizon>'`).
+     - Defines explicit horizon SLAs: **near-term** (24h SLA), **mid-term** (96h SLA), and **long-term** (192h SLA).
+     - Every scheduled run detects overdue horizons and automatically cascades to recover missed synchronization windows within the bounded per-run request budget (`--max-requests`).
+     - Operators can also invoke `--horizon=auto` to automatically synchronize all overdue horizons.
 
 2. **Ephemeral Quota Reconciliation via Response Headers:**
    When an ephemeral cloud runner (e.g. GitHub Actions container) starts up, it does not require a persistent external cache (like Redis) to discover account-wide usage. On its very first request, the Ticketmaster Discovery API returns authoritative usage headers:
@@ -250,10 +255,11 @@ Independent serverless or cloud runners cannot coordinate local filesystem state
    - `exit 1`: When any source fails completely (`status === 'failed'`) or a fatal error occurs.
    - `--json`: Outputs machine-readable run statistics uploaded as build artifacts.
 
-6. **Fail-Closed Quota Guard (`TicketmasterQuotaGuard`):**
+6. **Fail-Closed Quota Guard & Safe Atomic Lock Reclamation (`TicketmasterQuotaGuard`):**
    - File locks use unique UUID tokens (`lockId`) and PID liveness verification (`process.kill(pid, 0)`).
    - A lock is NEVER stolen or reclaimed if the holding process is demonstrably alive, even after 15+ seconds.
-   - Replaced locks cannot be deleted by old delayed owners upon exit.
+   - **Atomic Reclamation Protocol (`<lockPath>.<deadLockId>.reclaim`):** When multiple concurrent workers simultaneously observe an abandoned lock from a dead process, only the worker that successfully acquires an exclusive atomic reclamation token file via `open(O_CREAT | O_EXCL)` is permitted to reclaim the lock. The reclaimer verifies that the file on disk still contains the matching `deadLockId` before unlinking, completely eliminating the race where a delayed worker deletes another process's newly acquired replacement lock.
+   - Replaced locks cannot be deleted by old delayed owners upon exit (UUID ownership checks on release).
    - State corruption, lock timeouts, and filesystem write failures strictly fail closed.
 
 7. **Production Pre-Activation Checklist:**

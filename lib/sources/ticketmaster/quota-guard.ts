@@ -201,6 +201,7 @@ export class TicketmasterQuotaGuard {
           try {
             if (fs.existsSync(lockPath)) {
               let isDeadProcess = false;
+              let deadLockId: string | null = null;
 
               try {
                 const content = fs.readFileSync(lockPath, 'utf8');
@@ -209,7 +210,9 @@ export class TicketmasterQuotaGuard {
                   if (
                     typeof meta.pid === 'number' &&
                     Number.isInteger(meta.pid) &&
-                    meta.pid > 0
+                    meta.pid > 0 &&
+                    typeof meta.lockId === 'string' &&
+                    meta.lockId.trim().length > 0
                   ) {
                     try {
                       // Signal 0 tests process existence without terminating it
@@ -221,6 +224,7 @@ export class TicketmasterQuotaGuard {
                       if (kErr && kErr.code === 'ESRCH') {
                         // ESRCH: No such process. The holder is demonstrably dead.
                         isDeadProcess = true;
+                        deadLockId = meta.lockId.trim();
                       } else if (kErr && kErr.code === 'EPERM') {
                         // EPERM: Process exists and is alive (different user/permissions).
                         isDeadProcess = false;
@@ -229,7 +233,7 @@ export class TicketmasterQuotaGuard {
                       }
                     }
                   }
-                  // If meta.pid is not a valid number, ownership cannot be established safely.
+                  // If meta.pid or meta.lockId is invalid, ownership cannot be established safely.
                   // FAIL-CLOSED: Do NOT reclaim or delete.
                 }
               } catch {
@@ -237,13 +241,79 @@ export class TicketmasterQuotaGuard {
                 // FAIL-CLOSED: Do NOT delete.
               }
 
-              if (isDeadProcess) {
+              if (isDeadProcess && deadLockId) {
+                // SAFE ATOMIC RECLAMATION PROTOCOL:
+                // Prevent race conditions where multiple workers observe the same dead process lock.
+                // If Worker A and Worker B both see deadLockId, Worker A unlinks it and acquires a
+                // replacement lock; Worker B MUST NOT delete Worker A's fresh replacement lock.
+                //
+                // Coordinate reclamation using an exclusive token file keyed by deadLockId:
+                const reclaimTokenPath = `${lockPath}.${deadLockId}.reclaim`;
+                let tokenFd: number | null = null;
                 try {
-                  fs.unlinkSync(lockPath);
-                  continue; // Retry lock acquisition immediately
-                } catch {
-                  // Another process might have cleaned it up or acquired it
+                  tokenFd = fs.openSync(reclaimTokenPath, 'wx');
+                  // Only the single winning worker reaches here!
+                  const tokenMeta = JSON.stringify({
+                    pid: process.pid,
+                    deadLockId,
+                    createdAt: Date.now(),
+                  });
+                  fs.writeSync(tokenFd, tokenMeta, 0, 'utf8');
+                  fs.fsyncSync(tokenFd);
+
+                  // Double-check: does lockPath STILL exist and STILL have deadLockId?
+                  if (fs.existsSync(lockPath)) {
+                    try {
+                      const currentContent = fs.readFileSync(lockPath, 'utf8');
+                      const currentMeta = JSON.parse(currentContent);
+                      if (currentMeta && currentMeta.lockId === deadLockId) {
+                        fs.unlinkSync(lockPath);
+                      }
+                    } catch {
+                      // Lock file already unlinked or modified
+                    }
+                  }
+                } catch (tokenErr: unknown) {
+                  // Another worker already won reclamation of deadLockId, OR token exists.
+                  const tErr = tokenErr as { code?: string };
+                  if (tErr && tErr.code === 'EEXIST') {
+                    try {
+                      if (fs.existsSync(reclaimTokenPath)) {
+                        const tokenContent = fs.readFileSync(
+                          reclaimTokenPath,
+                          'utf8',
+                        );
+                        const tMeta = JSON.parse(tokenContent);
+                        if (typeof tMeta.pid === 'number') {
+                          try {
+                            process.kill(tMeta.pid, 0);
+                          } catch (killErr: unknown) {
+                            if (
+                              (killErr as { code?: string })?.code === 'ESRCH'
+                            ) {
+                              // Reclaimer process died mid-reclamation; remove orphaned token
+                              try {
+                                fs.unlinkSync(reclaimTokenPath);
+                              } catch {}
+                            }
+                          }
+                        }
+                      }
+                    } catch {
+                      // ignore token cleanup error
+                    }
+                  }
+                } finally {
+                  if (tokenFd !== null) {
+                    try {
+                      fs.closeSync(tokenFd);
+                    } catch {}
+                    try {
+                      fs.unlinkSync(reclaimTokenPath);
+                    } catch {}
+                  }
                 }
+                continue; // Retry lock acquisition immediately
               }
             }
           } catch {

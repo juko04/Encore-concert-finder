@@ -15,14 +15,15 @@ This Pull Request delivers **Encore V2** by integrating three coordinated system
 1. **Index Visual Design & Production Route Migration:** Promotes the approved editorial Index prototype into the real production application across `/`, `/concerts/[id]`, `/search`, `/saved`, and `/preferences`, wired to live Supabase database events.
 2. **Ticketmaster V2 Discovery Engine:** Enterprise-grade ingestion client with dynamic recursive temporal date bisection (<950 events threshold, sub-day bisection support), header-synchronized 5,000 req/day quota guard with atomic file locking and circuit breaker at 4,750, response-derived fee status, and elimination of unsupported query parameters.
 3. **Colorado Venue Coverage (Z2 Entertainment Shared Adapter):** Multi-venue scraping adapter onboarding Boulder Theater, Fox Theatre, Aggie Theatre (Fort Collins), and Chautauqua Auditorium with live Webflow extraction, relative URL resolution, and sold-out inventory preservation.
-4. **Merge-Blocking Audit Remediations (Findings 1–7):**
-   - Live quota lock stealing eliminated: UUID `lockId` generation, strict `ESRCH` dead process check, and replacement lock protection.
+4. **Merge-Blocking Audit Remediations & Concurrency Hardening:**
+   - Live quota lock stealing eliminated and atomic dead-lock reclamation implemented via kernel-guaranteed reclamation token files (`${lockPath}.${deadLockId}.reclaim` via `O_CREAT | O_EXCL`) and pre-unlink identity verification, eliminating TOCTOU races between concurrent workers.
    - Atomic per-run request budget (`RunRequestBudget`) enforced across regional syncs, bisections, retries, favorite-artist tours, and festivals.
    - Clean exit codes (`0` success, `2` partial/budget limits, `1` error) and pure machine-readable `--json` output without stdout pollution.
+   - GitHub Actions queue depth 1 cancellation semantics addressed: durable horizon SLA checkpoints in `raw_ingests` (`near-term` 24h, `mid-term` 96h, `long-term` 192h), `--horizon=auto` support, and automatic overdue horizon cascade recovery within the bounded `RunRequestBudget`.
    - Fail-closed test cleanup double gate (`ENCORE_DISPOSABLE_TEST_DB=true` + `--confirm-disposable-cleanup`) and scoped artist isolation.
    - Real current-run live event tracing to Index UI with Playwright screenshots and CI database fixture support.
    - Production scheduling architecture documented in `.github/workflows/scheduled-sync.yml.example` and `docs/architecture/ingestion.md`.
-   - Independent adversarial review passed 100% across all subsystems.
+   - Independent adversarial reviews passed 100% across all subsystems.
 
 ### Summary Metrics
 
@@ -31,17 +32,17 @@ This Pull Request delivers **Encore V2** by integrating three coordinated system
 FULL PR #20 DIFF AGAINST origin/main (including Spotify foundation & V2 Engine)
 ========================================================================================
 Files Changed:     137 files
-Insertions (+):    33,787 lines
+Insertions (+):    34,355 lines
 Deletions (-):     364 lines
-Net Delta:         +33,423 lines
+Net Delta:         +33,991 lines
 
 ========================================================================================
-LATEST SOURCE-VERIFIED CORRECTIONS SPRINT (8f83aa8 -> f18047d)
+LATEST SOURCE-VERIFIED CORRECTIONS SPRINT
 ========================================================================================
-Files Changed:     31 files
-Insertions (+):    2,084 lines
-Deletions (-):     558 lines
-Net Delta:         +1,526 lines
+Files Changed:     7 files
+Insertions (+):    656 lines
+Deletions (-):     94 lines
+Net Delta:         +562 lines
 ========================================================================================
 ```
 
@@ -66,6 +67,8 @@ Net Delta:         +1,526 lines
 | `998a7de` | `fix(ingestion)` | resolve live quota lock stealing, enforce run budgets, and verify current-run live trace to Index UI | Eliminates lock stealing, adds `RunRequestBudget`, standardizes exit codes, clean JSON, double-gated cleanup, and live UI tracing |
 | `f5962dc` | `test(e2e)` | ensure traced events exist in fresh CI database before running UI trace | Adds idempotent fixture seeder for fresh CI runner databases; achieves 100% green remote CI |
 | `f18047d` | `docs` | record verified green remote CI run 44794056401 on commit f5962dc | Updates evidence manifest and handoff with CI run 44794056401 |
+| `d47ec9e` | `docs` | update PR diff report with 137-file metrics and latest commit history | Updates PR diff report with 137-file metrics and commit table |
+| *(pending)* | `fix(ingestion)` | resolve quota lock recovery race and implement durable missed-run recovery | Eliminates dead-lock TOCTOU race via atomic reclamation tokens, adds durable SLA checkpoints in raw_ingests, and missed-run recovery |
 
 ---
 
@@ -228,7 +231,8 @@ Below is the complete file listing comparing `feature/encore-v2-index-ticketmast
 | `lib/sources/ticketmaster/ingestion-pipeline.ts` | `M` | +76 / -2 | Connects partition coordinator; candidate deduplication |
 | `lib/sources/ticketmaster/parser.ts` | `M` | +57 / -3 | Parses feeStatus; sets unknown billingPosition |
 | `lib/sources/ticketmaster/partitioner.ts` | `A` | +453 / -0 | Sub-day date bisection engine with raw page collection |
-| `lib/sources/ticketmaster/quota-guard.ts` | `A` | +501 / -0 | Quota guard with atomic file locks and reset window protection |
+| `lib/sources/ticketmaster/quota-guard.ts` | `A` | +771 / -0 | Quota guard with atomic file locks, dead-lock atomic reclamation token protocol, and reset window protection |
+| `lib/sources/ticketmaster/run-budget.ts` | `A` | +70 / -0 | Atomic per-run request budget with circuit breaker |
 | `lib/sources/ticketmaster/types.ts` | `M` | +31 / -6 | Strips unsupported params; strict price range schema |
 | `lib/sources/venue/index.ts` | `M` | +1 / -0 | Exports Z2 Entertainment adapter |
 | `lib/sources/venue/ingestion-pipeline.ts` | `M` | +10 / -1 | Venue ingestion pipeline enhancements |
@@ -241,12 +245,14 @@ Below is the complete file listing comparing `feature/encore-v2-index-ticketmast
 | `lib/supabase/destination-guard.ts` | `M` | +102 / -8 | Validates local targets; authorized production path; blocks fixtures |
 | `package.json` | `M` | +1 / -0 | Adds sync:all npm run script |
 | `scripts/ingest-venue.ts` | `M` | +5 / -1 | Supports Z2 source slug |
-| `scripts/sync-all-sources.ts` | `A` | +624 / -0 | Multi-source rolling synchronization CLI |
-| `scripts/verify-live-ingestion.ts` | `A` | +578 / -0 | Live ingestion verification runner with strict assertions |
+| `scripts/sync-all-sources.ts` | `A` | +1046 / -0 | Multi-source rolling synchronization CLI with durable SLA checkpoints and missed-run recovery |
+| `scripts/verify-live-ingestion.ts` | `A` | +1058 / -0 | Live ingestion verification runner with strict assertions, double-gated cleanup, and current-run UI trace |
 | `supabase/migrations/20261120000000_add_event_pricing_and_search_indexes.sql` | `A` | +152 / -0 | Migration for event pricing rollups and search indexes |
 | `tests/e2e/discover.spec.ts` | `M` | +6 / -8 | Seeds events for today; tests guest discover flow |
 | `tests/e2e/index-flow.spec.ts` | `A` | +114 / -0 | Playwright E2E tests for Index user flows |
+| `tests/e2e/live-event-ui-trace.spec.ts` | `A` | +186 / -0 | End-to-end browser UI trace verifying current-run live Ticketmaster events |
 | `tests/e2e/smoke.spec.ts` | `M` | +22 / -11 | Updates smoke tests for Index routes |
+| `tests/fixtures/traced-events-fixture.ts` | `A` | +219 / -0 | Headless CI database seeder for traced events |
 | `tests/fixtures/z2-events-response.html` | `A` | +212 / -0 | Z2 Entertainment calendar HTML fixture |
 | `tests/integration/catalog-search-pagination.test.ts` | `A` | +489 / -0 | Integration test verifying search pagination across >520 events |
 | `tests/integration/john-summit-recommendation.test.ts` | `M` | +18 / -0 | Provisions test user in auth.users |
@@ -262,12 +268,14 @@ Below is the complete file listing comparing `feature/encore-v2-index-ticketmast
 | `tests/unit/index-components.test.tsx` | `A` | +557 / -0 | Unit tests for Index components |
 | `tests/unit/index-formatters.test.ts` | `A` | +160 / -0 | Unit tests for formatters |
 | `tests/unit/index-search-and-recommendations.test.ts` | `A` | +743 / -0 | Unit tests for search and recommendation service |
-| `tests/unit/sync-all-sources.test.ts` | `A` | +422 / -0 | Unit tests for sync-all-sources and live assertions |
+| `tests/unit/sync-all-sources.test.ts` | `A` | +719 / -0 | Unit tests for sync-all-sources, overdue SLA detection, and missed-run recovery |
 | `tests/unit/ticketmaster-adapter.test.ts` | `M` | +55 / -8 | Unit tests for Ticketmaster adapter and client |
 | `tests/unit/ticketmaster-bisection.test.ts` | `A` | +628 / -0 | Unit tests for date partitioning and pipeline bisection |
 | `tests/unit/ticketmaster-canonicalization.test.ts` | `M` | +0 / -1 | Cleaned canonicalization test |
-| `tests/unit/ticketmaster-quota-concurrency.test.ts` | `A` | +222 / -0 | Unit tests for atomic file-locked quota coordination |
+| `tests/unit/ticketmaster-quota-concurrency.test.ts` | `A` | +541 / -0 | Unit tests for atomic file-locked quota coordination, race condition prevention, and fault injection |
 | `tests/unit/ticketmaster-quota.test.ts` | `A` | +295 / -0 | Unit tests for quota guard and header sync |
+| `tests/unit/ticketmaster-run-budget.test.ts` | `A` | +187 / -0 | Unit tests for atomic request budgets |
+| `tests/unit/verify-live-ingestion-safety.test.ts` | `A` | +74 / -0 | Unit tests for double-gated test cleanup safety |
 | `tests/unit/z2-adapter.test.ts` | `A` | +219 / -0 | Unit tests for Z2 adapter |
 | `tests/unit/z2-parser.test.ts` | `A` | +403 / -0 | Unit tests for Z2 HTML parser |
 
@@ -280,8 +288,8 @@ Below is the complete file listing comparing `feature/encore-v2-index-ticketmast
 | **Formatting** (`npm run format:check`) | **PASS** | 4.10s | 100% Prettier compliant across all project files |
 | **Linting** (`npm run lint`) | **PASS** | 3.80s | 0 ESLint warnings, 0 errors |
 | **Typecheck** (`npm run typecheck`) | **PASS** | 1.80s | `tsc --noEmit`, 0 TypeScript errors |
-| **Unit Tests** (`npm test`) | **PASS** | 16.06s | **66/66 test files passed, 894/894 tests passed** |
-| **Integration Tests** (`npm run test:integration`) | **PASS** | 29.83s | **14/14 test files passed, 108/108 tests passed** (including >520 event pagination test) |
-| **Playwright E2E** (`npx playwright test`) | **PASS** | 28.80s | **16/16 browser tests passed in Chromium** |
-| **Production Build** (`npm run build`) | **PASS** | 3.90s | Clean Next.js 15.5.27 production build (19 routes) |
-| **Live Ingestion Runner** (`verify-live-ingestion.ts`) | **PASS** | 4.20s | 306 canonical events; Pass 2 100% idempotent (0 duplicates); 10 relations verified (0 orphans) |
+| **Unit Tests** (`npm test`) | **PASS** | 6.67s | **68/68 test files passed, 922/922 tests passed** |
+| **Integration Tests** (`npm run test:integration`) | **PASS** | 24.56s | **14/14 test files passed, 108/108 tests passed** (including >520 event pagination test) |
+| **Playwright E2E** (`npx playwright test`) | **PASS** | 25.0s | **17/17 browser tests passed in Chromium** (including current-run live Ticketmaster event trace) |
+| **Production Build** (`npm run build`) | **PASS** | 1.04s | Clean Next.js 15.5.27 production build (19 routes) |
+| **Live Ingestion Runner** (`verify-live-ingestion.ts`) | **PASS** | 4.20s | 306 canonical events; Pass 2 100% idempotent (0 duplicates); 282 relations verified (0 orphans) |

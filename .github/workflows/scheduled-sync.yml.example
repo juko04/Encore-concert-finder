@@ -5,10 +5,16 @@
 # Because independent cloud workers running in parallel without shared state would exhaust
 # rate limits and fail to coordinate quota consumption, production scheduled jobs MUST enforce:
 #
-# 1. Strict Job Serialization:
+# 1. Strict Job Serialization & Concurrency Semantics:
 #    - Concurrency group `ticketmaster-ingestion` with `cancel-in-progress: false`.
-#    - Scheduled runs and manual dispatches are queued and executed strictly one at a time.
-#    - Eliminates concurrent worker race conditions and prevents split-brain quota exhaustion.
+#    - GITHUB CONCURRENCY LIMITATION: GitHub Actions maintains at most ONE pending queued run.
+#      If multiple runs trigger while a job is executing, GitHub Actions cancels previously
+#      queued pending jobs in favor of the latest run.
+#    - DURABLE MISSED-RUN RECOVERY: To prevent intermediate horizons (mid-term, long-term) from
+#      being silently lost if a scheduled run is canceled or delayed by GitHub platform load,
+#      `sync-all-sources.ts` tracks durable sync checkpoints in `raw_ingests` and automatically
+#      detects and recovers overdue horizons (>24h for near-term, >96h for mid-term, >192h for
+#      long-term) within the allocated run request budget.
 #
 # 2. Ephemeral Quota Reconciliation:
 #    - Every ephemeral runner discovers real-time account usage directly from Ticketmaster
@@ -49,9 +55,10 @@ on:
       horizon:
         description: 'Scheduling horizon to synchronize'
         required: true
-        default: 'near-term'
+        default: 'auto'
         type: choice
         options:
+          - auto
           - near-term
           - mid-term
           - long-term
@@ -68,8 +75,9 @@ on:
         type: string
 
 # CRITICAL CONCURRENCY GUARD:
-# Prevents multiple concurrent ingestion workers from executing simultaneously across
-# scheduled runs and manual triggers, guaranteeing serialized execution.
+# Serializes ingestion execution to prevent quota race conditions across concurrent workers.
+# Note: Pending runs are bounded by GitHub Actions queue depth = 1; missed schedules are
+# guaranteed not to cause data starvation via durable SLA checkpoint recovery in sync-all-sources.ts.
 concurrency:
   group: ticketmaster-ingestion
   cancel-in-progress: false
@@ -123,7 +131,7 @@ jobs:
           ENCORE_APPROVED_PROD_HOSTS: ${{ secrets.ENCORE_APPROVED_PROD_HOSTS }}
           ENCORE_PROD_PROJECT_REF: ${{ secrets.ENCORE_PROD_PROJECT_REF }}
         run: |
-          npx tsx scripts/sync-all-sources.ts \
+          npm run sync:all -- \
             --live \
             --persist \
             --allow-production-write \
