@@ -3,7 +3,7 @@
 **Pull Request:** [#20](https://github.com/juko04/Encore-concert-finder/pull/20)  
 **Title:** `feat(v2): Encore V2 Unified Index UI, Ticketmaster V2 Engine & Colorado Venue Coverage`  
 **Base Branch:** `main` (commit `3adbf59`)  
-**Feature Branch:** `feature/encore-v2-index-ticketmaster` (latest commit `bd0a337`)  
+**Feature Branch:** `feature/encore-v2-index-ticketmaster` (latest commit `9d26eb5`)  
 **Incorporated Baseline:** `feature/spotify-integration-repair` (commit `4009277`)  
 **Repository:** `juko04/Encore-concert-finder`  
 
@@ -32,17 +32,17 @@ This Pull Request delivers **Encore V2** by integrating three coordinated system
 FULL PR #20 DIFF AGAINST origin/main (including Spotify foundation & V2 Engine)
 ========================================================================================
 Files Changed:     137 files
-Insertions (+):    34,355 lines
+Insertions (+):    34,372 lines
 Deletions (-):     364 lines
-Net Delta:         +33,991 lines
+Net Delta:         +34,008 lines
 
 ========================================================================================
 LATEST SOURCE-VERIFIED CORRECTIONS SPRINT
 ========================================================================================
-Files Changed:     7 files
-Insertions (+):    656 lines
-Deletions (-):     94 lines
-Net Delta:         +562 lines
+Files Changed:     12 files (7 code/test, 5 documentation/screenshots)
+Insertions (+):    703 lines
+Deletions (-):     124 lines
+Net Delta:         +579 lines
 ========================================================================================
 ```
 
@@ -69,6 +69,8 @@ Net Delta:         +562 lines
 | `f18047d` | `docs` | record verified green remote CI run 44794056401 on commit f5962dc | Updates evidence manifest and handoff with CI run 44794056401 |
 | `d47ec9e` | `docs` | update PR diff report with 137-file metrics and latest commit history | Updates PR diff report with 137-file metrics and commit table |
 | `bd0a337` | `fix(ingestion)` | resolve quota lock recovery race and implement durable missed-run recovery | Eliminates dead-lock TOCTOU race via atomic reclamation tokens, adds durable SLA checkpoints in raw_ingests, and missed-run recovery |
+| `b7a80d4` | `docs` | finalize PR diff report with commit bd0a337 | Records full diff metrics and verified local test passes |
+| `9d26eb5` | `docs` | record verified green remote CI run 44804316574 on commit b7a80d4 | Records passing GitHub Actions CI run in AI_HANDOFF |
 
 ---
 
