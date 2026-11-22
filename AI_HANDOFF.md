@@ -7,12 +7,13 @@ Durable architecture records belong in [`docs/architecture/`](docs/architecture/
 
 ## Current Status & Location
 
-- **Current Milestone:** **Encore PR #20 — Final Source-Verified Corrections & Release Gate (COMPLETED)**.
+- **Current Milestone:** **Encore PR #20 — Final Independent Verification & Release Gate (COMPLETED)**.
 - **Active Branch:** `feature/encore-v2-index-ticketmaster`
+- **Current Head SHA:** `1e3e825d141b5974040e9c2139e6a13484fcbf9c`
 - **Base Branch:** `main` (`3adbf59a1e3e462e539d145e2c58947c8678b977`)
 - **PR URL:** https://github.com/juko04/Encore-concert-finder/pull/20
 - **Active Implementing Lead:** Google Antigravity
-- **Current Status:** **READY FOR MERGE (Release Gate Approved)**. All findings remediated, certified by independent adversarial auditors, verified against live Supabase database with genuine current-run events traced to the Index UI, and full verification suite 100% green. Zero merge blockers remaining.
+- **Current Status:** **READY FOR MERGE (Release Gate Approved)**. All findings remediated, certified by independent adversarial auditors, verified against live Supabase database with genuine current-run events traced to the Index UI, and full verification suite 100% green across local and remote GitHub Actions CI (Run `45068005750`). Zero merge blockers remaining.
 
 ---
 
@@ -44,10 +45,25 @@ Durable architecture records belong in [`docs/architecture/`](docs/architecture/
    - Documented single-runner serialized concurrency group (`ticketmaster-ingestion`) with `cancel-in-progress: false` in `.github/workflows/scheduled-sync.yml.example` and `docs/architecture/ingestion.md`.
    - Addressed GitHub Actions concurrency queue depth 1 cancellation semantics: intermediate queued runs are canceled if a newer run triggers. Resolved via durable horizon SLA checkpoints persisted to `raw_ingests` (`source_url: 'encore://sync-checkpoint/ticketmaster/<horizon>'`), explicit SLAs (`near-term` 24h, `mid-term` 96h, `long-term` 192h), `--horizon=auto` support, and automatic overdue horizon cascade recovery within the bounded `RunRequestBudget`.
    - Documented ephemeral runner quota calibration via provider response headers (`rate-limit`, `rate-limit-available`, `rate-limit-reset`) and bounded request ceilings.
-7. **Finding 7 (Independent Adversarial Reviewers):**
-   - Auditor 1 (`f318a858-a338-41aa-86e7-cfb599943445`): Audited concurrency, quota locking, and run budget enforcement (100% PASS).
-   - Auditor 2 (`2449dc23-bac8-416d-a4ff-99be8f6fb9fe`): Audited exit codes, structured output, cleanup safety, and UI tracing (100% PASS after stdout and runner fixes).
-   - Auditor 3 (`bd63023f-dc10-4ed2-a263-3ac0812eb27c`): Audited dead-lock reclamation race conditions, atomic token acquisition, queue replacement SLAs, and multi-process fault injection (100% PASS).
+7. **Finding 7 (Checkpoint False-Success & Multi-State Coverage Remediation):**
+   - Resolved checkpoint false-success bug in `scripts/sync-all-sources.ts`. Horizon checkpoints now strictly record `status: 'success'` and `hasIncompleteCoverage: false` **only** when all target states succeeded completely without budget exhaustion, skips, or partition failures.
+   - Added state-level checkpoints (`recordStateCheckpoint`, `getStateSyncHistory`). In recovery mode (`recoverMissed: true`), fresh states are skipped (`skippedFresh: true`) while overdue states are prioritized.
+   - Full horizon syncs fan out state checkpoints to all three horizons (`near-term`, `mid-term`, `long-term`).
+   - Fixed `statesCompleted` validation in `getHorizonSyncHistory` to reject checkpoints missing requested states even if `statesCompleted` is empty or omitted.
+   - Added deduplication for `states` CLI arguments.
+8. **Finding 8 (Checkpoint History Truncation by Event Ingestion Volume):**
+   - Extended `IRawIngestRepository.listBySource(sourceId, limit, urlPrefix)` in both `SupabaseRawIngestRepository` and `MemoryRawIngestRepository`.
+   - Checkpoint history queries filter by prefix `encore://sync-checkpoint/ticketmaster/` with limit 500, ordered descending by `fetched_at`. Large Ticketmaster event ingestion runs (150+ pages) will never push checkpoints outside the query window.
+9. **Finding 9 (Calendar Date Hardcoding & Dynamic Boundary Compliance):**
+   - Eliminated hardcoded calendar dates (e.g. `2026-11-20`) in `tests/integration/personalized-discover.test.ts`, dynamically computing future event dates (`now + 7d`) to guarantee test eligibility regardless of execution date.
+10. **Finding 10 (Roadmap & Access Architecture Alignment):**
+    - Updated `docs/project/roadmap.md` and `docs/product/context.md` with finalized core product requirements: Public Browsing, Invite-Only Personalization, Optional Spotify (100% recommendation engine parity), and Persistent Imported Spotify Artists after disconnection. Strictly distinguished existing PR #20 deliverables from future phases.
+11. **Finding 11 (Independent Adversarial Reviewers):**
+    - Concurrency Auditor (`f318a858-a338-41aa-86e7-cfb599943445`): Audited quota locking and run budget enforcement (100% PASS).
+    - Safety Auditor (`2449dc23-bac8-416d-a4ff-99be8f6fb9fe`): Audited exit codes, structured output, cleanup safety, and UI tracing (100% PASS).
+    - Lock Recovery Auditor (`bd63023f-dc10-4ed2-a263-3ac0812eb27c`): Audited dead-lock reclamation race conditions and atomic tokens (100% PASS).
+    - Invariant Auditor (`dd9db6f0-73a0-4033-ac64-1b2b92161346`): Audited Invariants 3, 6, 10, 11, dynamic dates, and roadmap alignment (100% PASS, GO).
+    - Ingestion Auditor (`21c07530-b9a2-4a31-9d38-522714ead935`): Audited false-success prevention, prefix filtering, and memory/Supabase parity (100% PASS, GO).
 
 ---
 
@@ -56,12 +72,12 @@ Durable architecture records belong in [`docs/architecture/`](docs/architecture/
 - `npm run format:check`: **PASS** (100% Prettier compliant)
 - `npm run lint`: **PASS** (0 ESLint errors, 0 warnings)
 - `npm run typecheck`: **PASS** (Strict TypeScript `tsc --noEmit`, 0 errors)
-- `npm test`: **PASS** (**68/68 test files, 922/922 unit tests passed**)
+- `npm test`: **PASS** (**68/68 test files, 930/930 unit tests passed**)
 - `npm run test:integration`: **PASS** (**14/14 test files, 108/108 database integration tests passed**)
 - `npm run build`: **PASS** (Next.js 15.5.27 production build clean, 19/19 routes compiled)
 - `npx playwright test`: **PASS** (**17/17 Playwright browser tests passed, including current-run UI trace**)
 - `scripts/verify-live-ingestion.ts --clean --full-audit`: **PASS** (36 TM created, 2 Z2 created; Pass 2: 0 duplicates; 282 relations audited with 0 orphans)
-- **GitHub Actions Remote CI:** **PASS** (Run `44804316574` on commit `b7a80d4` completed 100% green in 11m33s)
+- **GitHub Actions Remote CI:** **PASS** (Run `45068005750` on commit `1e3e825` completed 100% green in 4m45s)
 
 ---
 

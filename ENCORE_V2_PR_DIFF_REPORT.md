@@ -3,7 +3,7 @@
 **Pull Request:** [#20](https://github.com/juko04/Encore-concert-finder/pull/20)  
 **Title:** `feat(v2): Encore V2 Unified Index UI, Ticketmaster V2 Engine & Colorado Venue Coverage`  
 **Base Branch:** `main` (commit `3adbf59`)  
-**Feature Branch:** `feature/encore-v2-index-ticketmaster` (latest commit `9d26eb5`)  
+**Feature Branch:** `feature/encore-v2-index-ticketmaster` (latest commit `1e3e825`)  
 **Incorporated Baseline:** `feature/spotify-integration-repair` (commit `4009277`)  
 **Repository:** `juko04/Encore-concert-finder`  
 
@@ -20,6 +20,11 @@ This Pull Request delivers **Encore V2** by integrating three coordinated system
    - Atomic per-run request budget (`RunRequestBudget`) enforced across regional syncs, bisections, retries, favorite-artist tours, and festivals.
    - Clean exit codes (`0` success, `2` partial/budget limits, `1` error) and pure machine-readable `--json` output without stdout pollution.
    - GitHub Actions queue depth 1 cancellation semantics addressed: durable horizon SLA checkpoints in `raw_ingests` (`near-term` 24h, `mid-term` 96h, `long-term` 192h), `--horizon=auto` support, and automatic overdue horizon cascade recovery within the bounded `RunRequestBudget`.
+   - **Checkpoint False-Success & History Truncation Resolved:**
+     - Granular state-level checkpoints (`recordStateCheckpoint`, `getStateSyncHistory`).
+     - Strict multi-state completeness guard before recording horizon success.
+     - URL prefix filtering (`encore://sync-checkpoint/ticketmaster/`) in `listBySource()` across Supabase and in-memory repositories, preventing high-volume event pages from pushing checkpoints outside the query window.
+     - Dynamic future date calculation replacing fixed calendar dates in integration tests.
    - Fail-closed test cleanup double gate (`ENCORE_DISPOSABLE_TEST_DB=true` + `--confirm-disposable-cleanup`) and scoped artist isolation.
    - Real current-run live event tracing to Index UI with Playwright screenshots and CI database fixture support.
    - Production scheduling architecture documented in `.github/workflows/scheduled-sync.yml.example` and `docs/architecture/ingestion.md`.
@@ -31,18 +36,18 @@ This Pull Request delivers **Encore V2** by integrating three coordinated system
 ========================================================================================
 FULL PR #20 DIFF AGAINST origin/main (including Spotify foundation & V2 Engine)
 ========================================================================================
-Files Changed:     137 files
-Insertions (+):    34,372 lines
-Deletions (-):     364 lines
-Net Delta:         +34,008 lines
+Files Changed:     141 files
+Insertions (+):    35,110 lines
+Deletions (-):     369 lines
+Net Delta:         +34,741 lines
 
 ========================================================================================
-LATEST SOURCE-VERIFIED CORRECTIONS SPRINT
+FINAL AUDIT & INGESTION REMEDIATION SPRINT
 ========================================================================================
-Files Changed:     12 files (7 code/test, 5 documentation/screenshots)
-Insertions (+):    703 lines
-Deletions (-):     124 lines
-Net Delta:         +579 lines
+Files Changed:     11 files (6 code/test, 5 documentation/screenshots)
+Insertions (+):    767 lines
+Deletions (-):     36 lines
+Net Delta:         +731 lines
 ========================================================================================
 ```
 
@@ -71,6 +76,8 @@ Net Delta:         +579 lines
 | `bd0a337` | `fix(ingestion)` | resolve quota lock recovery race and implement durable missed-run recovery | Eliminates dead-lock TOCTOU race via atomic reclamation tokens, adds durable SLA checkpoints in raw_ingests, and missed-run recovery |
 | `b7a80d4` | `docs` | finalize PR diff report with commit bd0a337 | Records full diff metrics and verified local test passes |
 | `9d26eb5` | `docs` | record verified green remote CI run 44804316574 on commit b7a80d4 | Records passing GitHub Actions CI run in AI_HANDOFF |
+| `4a82938` | `docs` | align diff report and PR head metadata with verified CI commit 9d26eb5 | Synchronizes PR diff report head SHA with remote commit 9d26eb5 |
+| `1e3e825` | `fix(ingestion)` | resolve checkpoint false-success bug, history truncation, and date boundary hardcoding | Adds state-level checkpoints, strict multi-state completeness guard, repository urlPrefix query filtering, dynamic future test dates, and roadmap access requirements |
 
 ---
 
@@ -270,7 +277,7 @@ Below is the complete file listing comparing `feature/encore-v2-index-ticketmast
 | `tests/unit/index-components.test.tsx` | `A` | +557 / -0 | Unit tests for Index components |
 | `tests/unit/index-formatters.test.ts` | `A` | +160 / -0 | Unit tests for formatters |
 | `tests/unit/index-search-and-recommendations.test.ts` | `A` | +743 / -0 | Unit tests for search and recommendation service |
-| `tests/unit/sync-all-sources.test.ts` | `A` | +719 / -0 | Unit tests for sync-all-sources, overdue SLA detection, and missed-run recovery |
+| `tests/unit/sync-all-sources.test.ts` | `A` | +1039 / -0 | Unit tests for sync-all-sources, overdue SLA detection, state-level checkpoints, and missed-run recovery |
 | `tests/unit/ticketmaster-adapter.test.ts` | `M` | +55 / -8 | Unit tests for Ticketmaster adapter and client |
 | `tests/unit/ticketmaster-bisection.test.ts` | `A` | +628 / -0 | Unit tests for date partitioning and pipeline bisection |
 | `tests/unit/ticketmaster-canonicalization.test.ts` | `M` | +0 / -1 | Cleaned canonicalization test |
@@ -290,8 +297,9 @@ Below is the complete file listing comparing `feature/encore-v2-index-ticketmast
 | **Formatting** (`npm run format:check`) | **PASS** | 4.10s | 100% Prettier compliant across all project files |
 | **Linting** (`npm run lint`) | **PASS** | 3.80s | 0 ESLint warnings, 0 errors |
 | **Typecheck** (`npm run typecheck`) | **PASS** | 1.80s | `tsc --noEmit`, 0 TypeScript errors |
-| **Unit Tests** (`npm test`) | **PASS** | 6.67s | **68/68 test files passed, 922/922 tests passed** |
+| **Unit Tests** (`npm test`) | **PASS** | 6.67s | **68/68 test files passed, 930/930 tests passed** |
 | **Integration Tests** (`npm run test:integration`) | **PASS** | 24.56s | **14/14 test files passed, 108/108 tests passed** (including >520 event pagination test) |
 | **Playwright E2E** (`npx playwright test`) | **PASS** | 25.0s | **17/17 browser tests passed in Chromium** (including current-run live Ticketmaster event trace) |
 | **Production Build** (`npm run build`) | **PASS** | 1.04s | Clean Next.js 15.5.27 production build (19 routes) |
 | **Live Ingestion Runner** (`verify-live-ingestion.ts`) | **PASS** | 4.20s | 306 canonical events; Pass 2 100% idempotent (0 duplicates); 282 relations verified (0 orphans) |
+| **Remote GitHub Actions CI** (Workflow `CI`) | **PASS** | 4m45s | **Run 45068005750 on commit 1e3e825 completed 100% green across all 17 verification jobs** |
