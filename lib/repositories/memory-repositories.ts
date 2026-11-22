@@ -163,9 +163,18 @@ export class MemoryRawIngestRepository implements IRawIngestRepository {
   async listBySource(
     sourceId: string,
     limit = 50,
+    urlPrefix?: string,
   ): Promise<Array<RawIngest & { id: string }>> {
     return Array.from(this.ingests.values())
-      .filter((i) => i.sourceId === sourceId)
+      .filter(
+        (i) =>
+          i.sourceId === sourceId &&
+          (!urlPrefix || i.sourceUrl.startsWith(urlPrefix)),
+      )
+      .sort(
+        (a, b) =>
+          new Date(b.fetchedAt).getTime() - new Date(a.fetchedAt).getTime(),
+      )
       .slice(0, limit);
   }
 }

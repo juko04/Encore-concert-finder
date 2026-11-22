@@ -122,11 +122,18 @@ export class SupabaseRawIngestRepository implements IRawIngestRepository {
   async listBySource(
     sourceId: string,
     limit = 50,
+    urlPrefix?: string,
   ): Promise<Array<RawIngest & { id: string }>> {
-    const { data, error } = await this.client
+    let query = this.client
       .from('raw_ingests')
       .select('*')
-      .eq('source_id', sourceId)
+      .eq('source_id', sourceId);
+
+    if (urlPrefix) {
+      query = query.like('source_url', `${urlPrefix}%`);
+    }
+
+    const { data, error } = await query
       .order('fetched_at', { ascending: false })
       .limit(limit);
 

@@ -182,6 +182,12 @@ describe('PostgreSQL Integration: Personalized Discover Experience', () => {
     }
     testVenueId = venueRow.id;
 
+    // Dynamic future event dates to guarantee upcoming discover eligibility across test dates
+    const futureDate = new Date();
+    futureDate.setDate(futureDate.getDate() + 7);
+    const localStartDate = futureDate.toISOString().slice(0, 10);
+    const startsAt = `${localStartDate}T20:00:00Z`;
+
     const { data: eventRow, error: eventErr } = await adminClient
       .from('events')
       .insert({
@@ -196,8 +202,8 @@ describe('PostgreSQL Integration: Personalized Discover Experience', () => {
         lat: 39.7738,
         lng: -104.9789,
         timezone: 'America/Denver',
-        local_start_date: '2026-11-20',
-        starts_at: '2026-11-21T03:00:00Z',
+        local_start_date: localStartDate,
+        starts_at: startsAt,
         start_time_precision: 'instant',
         is_multi_day: false,
       })

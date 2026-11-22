@@ -5,6 +5,8 @@ import {
   determineDueHorizons,
   getHorizonSyncHistory,
   recordHorizonCheckpoint,
+  recordStateCheckpoint,
+  getStateSyncHistory,
   HORIZON_SLA_MS,
 } from '@/scripts/sync-all-sources';
 import { MemoryRawIngestRepository } from '@/lib/repositories/memory-repositories';
@@ -714,6 +716,324 @@ describe('Sync All Sources & Live Verification (PR #20 Remediations)', () => {
       expect(result.exitCode).toBe(0);
       expect(result.horizonsExecuted).toBeDefined();
       expect(result.horizonsExecuted?.length).toBeGreaterThanOrEqual(1);
+    });
+  });
+
+  describe('Checkpoint False-Success & History Truncation Remediations (PR #20 Final Fixes)', () => {
+    const tmSourceId = 'b0000000-0000-0000-0000-000000000003';
+
+    it('does not recognize partial or incomplete horizon checkpoints as valid recovery history', async () => {
+      const rawRepo = new MemoryRawIngestRepository();
+
+      // Record a partial checkpoint with incomplete coverage
+      await recordHorizonCheckpoint(rawRepo, tmSourceId, 'near-term', {
+        status: 'partial',
+        hasIncompleteCoverage: true,
+        statesCompleted: ['CO'],
+        statesIncomplete: ['UT'],
+        statesFailed: [],
+        fetchedAt: new Date('2026-11-20T10:00:00Z'),
+      });
+
+      const history = await getHorizonSyncHistory(rawRepo, tmSourceId);
+      // Partial status must fail closed so overdue horizon remains eligible for recovery
+      expect(history['near-term']).toBeNull();
+    });
+
+    it('does not recognize failed horizon checkpoints as valid recovery history', async () => {
+      const rawRepo = new MemoryRawIngestRepository();
+
+      // Record a failed checkpoint
+      await recordHorizonCheckpoint(rawRepo, tmSourceId, 'mid-term', {
+        status: 'failed',
+        hasIncompleteCoverage: true,
+        statesCompleted: [],
+        statesFailed: ['CO', 'UT'],
+        fetchedAt: new Date('2026-11-20T10:00:00Z'),
+      });
+
+      const history = await getHorizonSyncHistory(rawRepo, tmSourceId);
+      expect(history['mid-term']).toBeNull();
+    });
+
+    it('fails closed on malformed checkpoint content', async () => {
+      const rawRepo = new MemoryRawIngestRepository();
+
+      await rawRepo.create({
+        sourceId: tmSourceId,
+        sourceUrl: 'encore://sync-checkpoint/ticketmaster/long-term',
+        acquisitionMethod: 'api',
+        fetchedAt: new Date('2026-11-20T10:00:00Z').toISOString(),
+        contentHash: 'malformed_hash',
+        contentType: 'application/json',
+        rawContent: '{ corrupted: true, json: invalid ',
+        externalStorageRef: null,
+        httpStatus: 200,
+        parserVersion: '1.0.0',
+      });
+
+      const history = await getHorizonSyncHistory(rawRepo, tmSourceId);
+      expect(history['long-term']).toBeNull();
+    });
+
+    it('verifies all requested states are completed before accepting a horizon checkpoint', async () => {
+      const rawRepo = new MemoryRawIngestRepository();
+      const validDate = new Date('2026-11-20T12:00:00Z');
+
+      // Checkpoint only completed CO
+      await recordHorizonCheckpoint(rawRepo, tmSourceId, 'near-term', {
+        status: 'success',
+        hasIncompleteCoverage: false,
+        statesCompleted: ['CO'],
+        statesIncomplete: [],
+        statesFailed: [],
+        fetchedAt: validDate,
+      });
+
+      // Querying for only CO should accept this checkpoint
+      const coHistory = await getHorizonSyncHistory(rawRepo, tmSourceId, [
+        'CO',
+      ]);
+      expect(coHistory['near-term']?.toISOString()).toBe(
+        validDate.toISOString(),
+      );
+
+      // Querying for CO and UT must reject this checkpoint because UT was not completed
+      const multiStateHistory = await getHorizonSyncHistory(
+        rawRepo,
+        tmSourceId,
+        ['CO', 'UT'],
+      );
+      expect(multiStateHistory['near-term']).toBeNull();
+    });
+
+    it('rejects checkpoints with empty statesCompleted when states are requested (prevents validation bypass)', async () => {
+      const rawRepo = new MemoryRawIngestRepository();
+      const validDate = new Date('2026-11-20T12:00:00Z');
+
+      // Checkpoint with empty statesCompleted (e.g. legacy checkpoint or default empty array)
+      await recordHorizonCheckpoint(rawRepo, tmSourceId, 'near-term', {
+        status: 'success',
+        hasIncompleteCoverage: false,
+        statesCompleted: [],
+        fetchedAt: validDate,
+      });
+
+      // Querying for ['CO'] must reject this checkpoint because CO was not completed
+      const history = await getHorizonSyncHistory(rawRepo, tmSourceId, ['CO']);
+      expect(history['near-term']).toBeNull();
+    });
+
+    it('prevents raw-ingest history truncation: retrieves checkpoint even with 150+ raw event pages ahead of it', async () => {
+      const rawRepo = new MemoryRawIngestRepository();
+      const checkpointDate = new Date('2026-11-20T08:00:00Z');
+
+      // Record a valid near-term checkpoint
+      await recordHorizonCheckpoint(rawRepo, tmSourceId, 'near-term', {
+        status: 'success',
+        hasIncompleteCoverage: false,
+        statesCompleted: ['CO'],
+        fetchedAt: checkpointDate,
+      });
+
+      // Now simulate a heavy ingestion run that creates 150 raw event ingests with newer timestamps
+      for (let i = 0; i < 150; i++) {
+        const fetchTime = new Date(checkpointDate.getTime() + (i + 1) * 1000);
+        await rawRepo.create({
+          sourceId: tmSourceId,
+          sourceUrl: `https://app.ticketmaster.com/discovery/v2/events.json?stateCode=CO&page=${i}`,
+          acquisitionMethod: 'api',
+          fetchedAt: fetchTime.toISOString(),
+          contentHash: `hash_${i}`,
+          contentType: 'application/json',
+          rawContent: JSON.stringify({
+            _embedded: { events: [] },
+            page: { number: i },
+          }),
+          externalStorageRef: null,
+          httpStatus: 200,
+          parserVersion: '1.0.0',
+        });
+      }
+
+      // getHorizonSyncHistory must use the urlPrefix filter to bypass the 150 raw API ingests
+      // and successfully find the checkpoint
+      const history = await getHorizonSyncHistory(rawRepo, tmSourceId);
+      expect(history['near-term']?.toISOString()).toBe(
+        checkpointDate.toISOString(),
+      );
+    });
+
+    it('records and queries state-level checkpoints independently', async () => {
+      const rawRepo = new MemoryRawIngestRepository();
+      const coDate = new Date('2026-11-20T09:00:00Z');
+      const utDate = new Date('2026-11-20T09:15:00Z');
+
+      await recordStateCheckpoint(rawRepo, tmSourceId, 'near-term', 'CO', {
+        status: 'success',
+        hasIncompleteCoverage: false,
+        fetchedAt: coDate,
+        eventsFetched: 42,
+      });
+
+      await recordStateCheckpoint(rawRepo, tmSourceId, 'near-term', 'UT', {
+        status: 'failed',
+        hasIncompleteCoverage: true,
+        fetchedAt: utDate,
+        eventsFetched: 0,
+      });
+
+      const coStatus = await getStateSyncHistory(
+        rawRepo,
+        tmSourceId,
+        'near-term',
+        'CO',
+      );
+      expect(coStatus.isSuccess).toBe(true);
+      expect(coStatus.hasIncompleteCoverage).toBe(false);
+      expect(coStatus.lastSyncAt?.toISOString()).toBe(coDate.toISOString());
+
+      const utStatus = await getStateSyncHistory(
+        rawRepo,
+        tmSourceId,
+        'near-term',
+        'UT',
+      );
+      expect(utStatus.isSuccess).toBe(false);
+      expect(utStatus.hasIncompleteCoverage).toBe(true);
+      expect(utStatus.lastSyncAt).toBeNull();
+    });
+
+    it('fans out state checkpoints to near-term, mid-term, and long-term when horizon is full', async () => {
+      const rawRepo = new MemoryRawIngestRepository();
+      const date = new Date('2026-11-20T14:00:00Z');
+
+      await recordStateCheckpoint(rawRepo, tmSourceId, 'full', 'CO', {
+        status: 'success',
+        hasIncompleteCoverage: false,
+        fetchedAt: date,
+      });
+
+      const nearHist = await getStateSyncHistory(
+        rawRepo,
+        tmSourceId,
+        'near-term',
+        'CO',
+      );
+      const midHist = await getStateSyncHistory(
+        rawRepo,
+        tmSourceId,
+        'mid-term',
+        'CO',
+      );
+      const longHist = await getStateSyncHistory(
+        rawRepo,
+        tmSourceId,
+        'long-term',
+        'CO',
+      );
+
+      expect(nearHist.isSuccess).toBe(true);
+      expect(nearHist.lastSyncAt?.toISOString()).toBe(date.toISOString());
+      expect(midHist.isSuccess).toBe(true);
+      expect(midHist.lastSyncAt?.toISOString()).toBe(date.toISOString());
+      expect(longHist.isSuccess).toBe(true);
+      expect(longHist.lastSyncAt?.toISOString()).toBe(date.toISOString());
+    });
+
+    it('deduplicates duplicate states passed to runMultiSourceSync', async () => {
+      const result = await runMultiSourceSync({
+        horizon: 'near-term',
+        live: false,
+        persist: false,
+        states: ['CO', 'CO', 'co'],
+        sources: ['ticketmaster'],
+        syncFavoriteArtists: false,
+        syncFestivals: false,
+        silent: true,
+      });
+
+      expect(result.regionsCovered).toEqual(['CO']);
+      expect(result.reports).toHaveLength(1);
+    });
+
+    it('skips fresh states and synchronizes overdue states in multi-state recovery run', async () => {
+      const rawRepo = new MemoryRawIngestRepository();
+      const tmSourceId = 'b0000000-0000-0000-0000-000000000003';
+
+      // Pre-seed CO as already freshly synced
+      await recordStateCheckpoint(rawRepo, tmSourceId, 'near-term', 'CO', {
+        status: 'success',
+        hasIncompleteCoverage: false,
+        fetchedAt: new Date(),
+        eventsFetched: 20,
+      });
+
+      // Run multi-source sync for CO and UT with recovery enabled
+      const result = await runMultiSourceSync({
+        horizon: 'near-term',
+        live: false,
+        persist: true,
+        rawIngestRepo: rawRepo,
+        states: ['CO', 'UT'],
+        sources: ['ticketmaster'],
+        syncFavoriteArtists: false,
+        syncFestivals: false,
+        recoverMissed: true,
+        force: false,
+        silent: true,
+      });
+
+      // CO should have been skipped as fresh
+      const coReport = result.reports.find(
+        (r) => r.stateCode === 'CO' && r.horizon === 'near-term',
+      );
+      expect(coReport).toBeDefined();
+      expect(coReport?.status).toBe('skipped');
+      expect(coReport?.skippedFresh).toBe(true);
+
+      // UT should have been executed
+      const utReport = result.reports.find(
+        (r) => r.stateCode === 'UT' && r.horizon === 'near-term',
+      );
+      expect(utReport).toBeDefined();
+      expect(utReport?.status).toBe('success');
+
+      // Both states are now complete, so the horizon checkpoint should be recorded as success
+      const horizonHistory = await getHorizonSyncHistory(rawRepo, tmSourceId, [
+        'CO',
+        'UT',
+      ]);
+      expect(horizonHistory['near-term']).not.toBeNull();
+    });
+
+    it('records partial status and leaves horizon uncheckpointed when run budget is exhausted', async () => {
+      const rawRepo = new MemoryRawIngestRepository();
+      const tmSourceId = 'b0000000-0000-0000-0000-000000000003';
+
+      // Run with budget limit of 1 request across 2 states
+      const result = await runMultiSourceSync({
+        horizon: 'near-term',
+        live: false,
+        persist: true,
+        rawIngestRepo: rawRepo,
+        states: ['CO', 'UT'],
+        sources: ['ticketmaster'],
+        syncFavoriteArtists: false,
+        syncFestivals: false,
+        maxRequestsPerRun: 1,
+        silent: true,
+      });
+
+      expect(result.overallStatus).toBe('partial');
+      expect(result.exitCode).toBe(2);
+
+      // Verify that the horizon was NOT checkpointed as successful
+      const horizonHistory = await getHorizonSyncHistory(rawRepo, tmSourceId, [
+        'CO',
+        'UT',
+      ]);
+      expect(horizonHistory['near-term']).toBeNull();
     });
   });
 });

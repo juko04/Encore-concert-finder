@@ -231,6 +231,7 @@ export interface IRawIngestRepository {
   listBySource(
     sourceId: string,
     limit?: number,
+    urlPrefix?: string,
   ): Promise<Array<RawIngest & { id: string }>>;
 }
 
