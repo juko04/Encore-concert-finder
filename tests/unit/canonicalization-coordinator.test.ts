@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   CanonicalizationCoordinator,
   mapEventUpdatesToCanonicalizationPayload,
@@ -84,6 +84,114 @@ describe('CanonicalizationCoordinator Unit Tests', () => {
     const event = await catalogRepo.getEventById(res1.eventId!);
     expect(event?.ticketLinks[0].minPrice).toBe(50);
     expect(event?.ticketLinks[0].maxPrice).toBe(95);
+  });
+
+  it('preserves inventory_status as sold_out in canonicalization payload when candidate has inventoryStatus: sold_out or rawPayload.isSoldOut: true', async () => {
+    const applySpy = vi.spyOn(catalogRepo, 'applyCanonicalization');
+
+    // Case 1: candidate with explicit inventoryStatus: 'sold_out'
+    const candidateStatus = {
+      ...fixtures.single_show,
+      id: crypto.randomUUID(),
+      sourceEventId: 'upstream_evt_soldout_status',
+      inventoryStatus: 'sold_out' as const,
+    };
+    const res1 = await coordinator.canonicalize(candidateStatus);
+    expect(res1.status).toBe('created');
+    expect(applySpy).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        ticketLinks: expect.arrayContaining([
+          expect.objectContaining({
+            inventory_status: 'sold_out',
+          }),
+        ]),
+      }),
+    );
+    const event1 = await catalogRepo.getEventById(res1.eventId!);
+    expect(event1?.ticketLinks[0].inventoryStatus).toBe('sold_out');
+
+    // Case 2: candidate with rawPayload: { isSoldOut: true }
+    const candidateRaw = {
+      ...fixtures.single_show,
+      id: crypto.randomUUID(),
+      sourceEventId: 'upstream_evt_soldout_raw',
+      localStartDate: '2026-10-16',
+      startsAt: '2026-10-16T20:00:00-06:00',
+      rawPayload: { isSoldOut: true },
+    };
+    const res2 = await coordinator.canonicalize(candidateRaw);
+    expect(res2.status).toBe('created');
+    expect(applySpy).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        ticketLinks: expect.arrayContaining([
+          expect.objectContaining({
+            inventory_status: 'sold_out',
+          }),
+        ]),
+      }),
+    );
+    const event2 = await catalogRepo.getEventById(res2.eventId!);
+    expect(event2?.ticketLinks[0].inventoryStatus).toBe('sold_out');
+  });
+
+  it('updates ticket link inventory_status to sold_out when candidate matches an existing canonical event', async () => {
+    const applySpy = vi.spyOn(catalogRepo, 'applyCanonicalization');
+
+    // Initial show created as available
+    const candidateInitial = {
+      ...fixtures.single_show,
+      id: crypto.randomUUID(),
+      sourceEventId: 'upstream_evt_matched_soldout',
+      inventoryStatus: 'available' as const,
+    };
+    const resInitial = await coordinator.canonicalize(candidateInitial);
+    expect(resInitial.status).toBe('created');
+    const initialEvent = await catalogRepo.getEventById(resInitial.eventId!);
+    expect(initialEvent?.ticketLinks[0].inventoryStatus).toBe('available');
+
+    // Candidate matches existing canonical event and is sold out via inventoryStatus
+    const candidateSoldOut = {
+      ...fixtures.single_show,
+      id: crypto.randomUUID(),
+      sourceEventId: 'upstream_evt_matched_soldout',
+      inventoryStatus: 'sold_out' as const,
+    };
+    const resSoldOut = await coordinator.canonicalize(candidateSoldOut);
+    expect(resSoldOut.status).toBe('matched');
+    expect(resSoldOut.eventId).toBe(resInitial.eventId);
+    expect(applySpy).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        ticketLinks: expect.arrayContaining([
+          expect.objectContaining({
+            inventory_status: 'sold_out',
+          }),
+        ]),
+      }),
+    );
+    const updatedEvent = await catalogRepo.getEventById(resInitial.eventId!);
+    expect(updatedEvent?.ticketLinks[0].inventoryStatus).toBe('sold_out');
+
+    // Candidate matches existing canonical event and is sold out via rawPayload.isSoldOut
+    const candidateRawSoldOut = {
+      ...fixtures.single_show,
+      id: crypto.randomUUID(),
+      sourceEventId: 'upstream_evt_matched_soldout',
+      rawPayload: { isSoldOut: true },
+    };
+    const resRawSoldOut = await coordinator.canonicalize(candidateRawSoldOut);
+    expect(resRawSoldOut.status).toBe('matched');
+    expect(resRawSoldOut.eventId).toBe(resInitial.eventId);
+    expect(applySpy).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        ticketLinks: expect.arrayContaining([
+          expect.objectContaining({
+            inventory_status: 'sold_out',
+          }),
+        ]),
+      }),
+    );
+    const finalEvent = await catalogRepo.getEventById(resInitial.eventId!);
+    expect(finalEvent?.ticketLinks[0].inventoryStatus).toBe('sold_out');
   });
 
   it('routes candidate to needs_review when artist name is ambiguous across multiple entities (Finding 5)', async () => {

@@ -41,6 +41,26 @@ Goal: a usable event browser with canonical data.
 - Cheap & Nearby
 - Worth Planning For
 
+### Product Principles & Access Architecture (Phase 2 & Phase 8)
+
+The product architecture enforces four core tenets:
+
+1. **Public Browsing (PR #20 Core Deliverable):**
+   - Public visitors can freely explore, search, filter, and inspect canonical concert inventory, venue details, and ticketing options without creating an account or signing in.
+   - PR #20 establishes the live public Index view (`/`) backed by Ticketmaster and independent venue adapters.
+
+2. **Invite-Only Personalization & Access Gating (Phase 2 / Phase 8):**
+   - Deep personalization features—such as tailored match scores, "Worth It" rankings, custom price curve evaluations, and saved events—are unlocked upon authentication.
+   - Account creation is invite-only and allowlist-gated during closed beta to maintain quality and platform compliance.
+
+3. **Optional Spotify Integration (PR #20 Core Principle):**
+   - Spotify OAuth is completely optional. Users have full access to personalized recommendations by manually managing their artist preferences (Favorite, Liked, Disliked) and setting custom taste profiles directly in the app.
+   - The multi-factor scoring engine functions with complete parity whether taste data originates from Spotify or manual user selections.
+
+4. **Persistent Per-User Imported Spotify Artists (Data Durability Invariant):**
+   - When a user imports their top artists or library from Spotify, the resolved preferences are durably written to `user_artist_preferences` in PostgreSQL.
+   - Disconnecting Spotify, removing Spotify account authorization, or encountering Spotify API allowlist limits does **not** purge or reset these preferences. Imported artists remain permanently attached to the user profile until explicitly edited or deleted by the user.
+
 ## Phase 3 — Direct public source adapters
 
 Start with a small test set:

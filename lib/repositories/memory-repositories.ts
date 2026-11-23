@@ -163,9 +163,18 @@ export class MemoryRawIngestRepository implements IRawIngestRepository {
   async listBySource(
     sourceId: string,
     limit = 50,
+    urlPrefix?: string,
   ): Promise<Array<RawIngest & { id: string }>> {
     return Array.from(this.ingests.values())
-      .filter((i) => i.sourceId === sourceId)
+      .filter(
+        (i) =>
+          i.sourceId === sourceId &&
+          (!urlPrefix || i.sourceUrl.startsWith(urlPrefix)),
+      )
+      .sort(
+        (a, b) =>
+          new Date(b.fetchedAt).getTime() - new Date(a.fetchedAt).getTime(),
+      )
       .slice(0, limit);
   }
 }
@@ -394,9 +403,28 @@ export class MemoryCatalogRepository implements ICatalogRepository {
     };
   }
 
-  async listEvents(
-    filters?: EventListFilters,
-  ): Promise<CanonicalEventSummary[]> {
+  private getEventMinPrice(eventId: string, eventKind?: string): number | null {
+    const event = this.events.get(eventId);
+    if (event?.minPrice !== undefined && event?.minPrice !== null) {
+      return event.minPrice;
+    }
+    let min: number | null = null;
+    for (const tl of this.eventTicketLinks.values()) {
+      if (
+        tl.eventId === eventId &&
+        tl.minPrice !== null &&
+        tl.minPrice !== undefined
+      ) {
+        min = min === null ? tl.minPrice : Math.min(min, tl.minPrice);
+      }
+    }
+    if (min === null && eventKind === 'free_event') {
+      return 0;
+    }
+    return min;
+  }
+
+  private getFilteredEvents(filters?: EventListFilters): Event[] {
     let result = Array.from(this.events.values());
 
     if (filters?.fromDate) {
@@ -460,11 +488,89 @@ export class MemoryCatalogRepository implements ICatalogRepository {
       result = result.filter((e) => matchingEventIds.has(e.id));
     }
 
-    result.sort(
-      (a, b) =>
-        a.localStartDate.localeCompare(b.localStartDate) ||
-        a.id.localeCompare(b.id),
-    );
+    if (filters?.freeOnly) {
+      result = result.filter((e) => {
+        if (e.eventKind === 'free_event') return true;
+        const minP = this.getEventMinPrice(e.id, e.eventKind);
+        return minP === 0;
+      });
+    }
+
+    if (filters?.minPrice !== undefined) {
+      result = result.filter((e) => {
+        const minP = this.getEventMinPrice(e.id, e.eventKind);
+        return minP !== null && minP >= filters.minPrice!;
+      });
+    }
+
+    if (filters?.maxPrice !== undefined) {
+      const includeUnknown = filters.includeUnknownPrice ?? true;
+      result = result.filter((e) => {
+        if (e.eventKind === 'free_event') return true;
+        const minP = this.getEventMinPrice(e.id, e.eventKind);
+        if (minP === null) {
+          return includeUnknown;
+        }
+        return minP <= filters.maxPrice!;
+      });
+    }
+
+    return result;
+  }
+
+  async countEvents(filters?: EventListFilters): Promise<number> {
+    const events = this.getFilteredEvents(filters);
+    return events.length;
+  }
+
+  async listEvents(
+    filters?: EventListFilters,
+  ): Promise<CanonicalEventSummary[]> {
+    const result = this.getFilteredEvents(filters);
+
+    const sortBy = filters?.sortBy ?? 'date_asc';
+    if (sortBy === 'price_asc') {
+      result.sort((a, b) => {
+        const priceA = this.getEventMinPrice(a.id, a.eventKind);
+        const priceB = this.getEventMinPrice(b.id, b.eventKind);
+        const valA = priceA ?? Infinity;
+        const valB = priceB ?? Infinity;
+        if (valA !== valB) return valA - valB;
+        const dateComp = a.localStartDate.localeCompare(b.localStartDate);
+        if (dateComp !== 0) return dateComp;
+        return a.id.localeCompare(b.id);
+      });
+    } else if (sortBy === 'price_desc') {
+      result.sort((a, b) => {
+        const priceA = this.getEventMinPrice(a.id, a.eventKind);
+        const priceB = this.getEventMinPrice(b.id, b.eventKind);
+        const valA = priceA ?? -Infinity;
+        const valB = priceB ?? -Infinity;
+        if (valA !== valB) return valB - valA;
+        const dateComp = a.localStartDate.localeCompare(b.localStartDate);
+        if (dateComp !== 0) return dateComp;
+        return a.id.localeCompare(b.id);
+      });
+    } else if (sortBy === 'date_desc') {
+      result.sort(
+        (a, b) =>
+          b.localStartDate.localeCompare(a.localStartDate) ||
+          a.id.localeCompare(b.id),
+      );
+    } else if (sortBy === 'title_asc') {
+      result.sort(
+        (a, b) =>
+          a.name.localeCompare(b.name) ||
+          a.localStartDate.localeCompare(b.localStartDate) ||
+          a.id.localeCompare(b.id),
+      );
+    } else {
+      result.sort(
+        (a, b) =>
+          a.localStartDate.localeCompare(b.localStartDate) ||
+          a.id.localeCompare(b.id),
+      );
+    }
 
     const offset = filters?.offset ?? 0;
     const limit = filters?.limit ?? 50;
@@ -502,9 +608,11 @@ export class MemoryCatalogRepository implements ICatalogRepository {
       let minPrice: number | null = null;
       let maxPrice: number | null = null;
       let currency: string | null = null;
+      const eventTicketLinks: EventTicketLink[] = [];
 
       for (const tl of this.eventTicketLinks.values()) {
         if (tl.eventId === event.id) {
+          eventTicketLinks.push(tl);
           if (tl.minPrice !== null && tl.minPrice !== undefined) {
             minPrice =
               minPrice === null ? tl.minPrice : Math.min(minPrice, tl.minPrice);
@@ -515,6 +623,10 @@ export class MemoryCatalogRepository implements ICatalogRepository {
           }
           if (tl.currency) currency = tl.currency;
         }
+      }
+
+      if (minPrice === null && event.eventKind === 'free_event') {
+        minPrice = 0;
       }
 
       const eventSources: CanonicalEventSourceSummary[] = [];
@@ -560,6 +672,7 @@ export class MemoryCatalogRepository implements ICatalogRepository {
         title: event.name,
         venueName: venue?.name ?? 'Venue TBA',
         venueId: event.venueId,
+        venue,
         city: venue?.city ?? event.city ?? undefined,
         region: venue?.region ?? event.region ?? undefined,
         lat: venue?.lat ?? event.lat ?? null,
@@ -577,6 +690,7 @@ export class MemoryCatalogRepository implements ICatalogRepository {
         currency,
         sourceName: eventSources.length > 0 ? eventSources[0].name : undefined,
         sources: eventSources,
+        ticketLinks: eventTicketLinks,
       });
     }
 
@@ -835,6 +949,9 @@ export class MemoryCatalogRepository implements ICatalogRepository {
     const created: Event = {
       id,
       ...event,
+      minPrice: event.minPrice ?? (event.eventKind === 'free_event' ? 0 : null),
+      maxPrice: event.maxPrice ?? null,
+      currency: event.currency ?? null,
       countryCode: event.countryCode ?? null,
       createdAt: now,
       updatedAt: now,
@@ -914,6 +1031,34 @@ export class MemoryCatalogRepository implements ICatalogRepository {
       updatedAt: new Date().toISOString(),
     };
     this.eventTicketLinks.set(key, link);
+
+    // Sync event pricing rollups
+    const ev = this.events.get(ticketLink.eventId);
+    if (ev) {
+      let minP: number | null = null;
+      let maxP: number | null = null;
+      let curr: string | null = null;
+      for (const tl of this.eventTicketLinks.values()) {
+        if (tl.eventId === ev.id) {
+          if (tl.minPrice !== null && tl.minPrice !== undefined) {
+            minP = minP === null ? tl.minPrice : Math.min(minP, tl.minPrice);
+          }
+          if (tl.maxPrice !== null && tl.maxPrice !== undefined) {
+            maxP = maxP === null ? tl.maxPrice : Math.max(maxP, tl.maxPrice);
+          }
+          if (tl.currency && !curr) {
+            curr = tl.currency;
+          }
+        }
+      }
+      if (minP === null && ev.eventKind === 'free_event') {
+        minP = 0;
+      }
+      ev.minPrice = minP;
+      ev.maxPrice = maxP;
+      if (curr) ev.currency = curr;
+    }
+
     return link;
   }
 

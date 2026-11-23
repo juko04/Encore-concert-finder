@@ -1,5 +1,6 @@
 # Dependencies
 node_modules/
+node_modules
 
 # Next.js
 .next/
@@ -31,3 +32,4 @@ scratch/
 .agents/local/
 *.pem
 *.key
+.ticketmaster-quota.json

@@ -32,6 +32,7 @@ import {
   IndependentVenueAdapter,
   VelvetElkAdapter,
   RootsMusicProjectAdapter,
+  Z2EntertainmentAdapter,
   runVenueIngestion,
   CERVANTES_CONFIG,
   DENVER_INDEPENDENT_VENUE_CONFIGS,
@@ -39,6 +40,7 @@ import {
   ALL_SUPPORTED_VENUE_CONFIGS,
   VELVET_ELK_CONFIG,
   ROOTS_MUSIC_PROJECT_CONFIG,
+  Z2_ENTERTAINMENT_CONFIG,
   getVenueSourceConfig,
   type VenueSourceConfig,
   type VenueIngestionResult,
@@ -200,6 +202,7 @@ async function main(): Promise<void> {
       supabaseUrl,
       args.allowProductionWrite,
       'Venue Ingestion CLI Runner',
+      args.useFixture,
     );
   }
 
@@ -265,7 +268,9 @@ async function main(): Promise<void> {
           ? new VelvetElkAdapter(config)
           : config.slug === ROOTS_MUSIC_PROJECT_CONFIG.slug
             ? new RootsMusicProjectAdapter(config)
-            : new IndependentVenueAdapter(config);
+            : config.slug === Z2_ENTERTAINMENT_CONFIG.slug
+              ? new Z2EntertainmentAdapter(config)
+              : new IndependentVenueAdapter(config);
 
     try {
       console.log(`\n>>> Processing ${config.name} (${config.slug})...`);

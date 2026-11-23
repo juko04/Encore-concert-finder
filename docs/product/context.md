@@ -200,6 +200,27 @@ The agreed initial direction is:
 - responsive PWA before native iOS/Android apps
 - GitHub repository as the shared source of truth
 
+## Core Access Model & Taste Durability Requirements
+
+To ensure clear alignment between early beta releases and long-term product vision:
+
+1. **Public Catalog Browsing:**
+   - Unauthenticated users can search, filter, and inspect canonical concert listings, venue maps, and ticketing links.
+   - Public access requires zero credentials and zero friction.
+
+2. **Invite-Only Closed Beta Personalization:**
+   - Account creation is gated by invite codes or allowlists during early development.
+   - Authentication unlocks the personalized recommendation feed ("Worth It", "Worth Planning For", "Cheap & Nearby"), price elasticity curves, and watchlist notifications.
+
+3. **Full Functional Parity Without Spotify:**
+   - Spotify OAuth is an optional onboarding accelerator, not a barrier to entry.
+   - Users can manually configure their Favorite, Liked, and Disliked artists, genre affinities, and price sensitivities directly within the application.
+   - The recommendation and lineup suppression algorithms operate identically whether taste signals come from Spotify or manual in-app controls.
+
+4. **Permanent Preference Retention for Imported Spotify Artists:**
+   - When a user imports Spotify artists, the data is transformed into canonical entities and persisted in the user's private `user_artist_preferences` table.
+   - If the user disconnects Spotify, if access tokens expire, or if Spotify developer account allowlist changes revoke external API connectivity, the imported artist preferences remain permanently saved. Preferences are only removed upon explicit user deletion.
+
 ## Multi-agent development decision
 
 The development environment is expected to include VS Code plus multiple AI assistants, including ChatGPT Personal, Antigravity, and Claude.

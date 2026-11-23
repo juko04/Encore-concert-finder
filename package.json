@@ -20,6 +20,7 @@
     "db:stop": "supabase stop",
     "ingest:ticketmaster": "vite-node --config vitest.config.ts scripts/ingest-ticketmaster.ts",
     "ingest:venue": "vite-node --config vitest.config.ts scripts/ingest-venue.ts",
+    "sync:all": "vite-node --config vitest.config.ts scripts/sync-all-sources.ts",
     "cleanup:synthetic": "vite-node --config vitest.config.ts scripts/cleanup-synthetic-data.ts",
     "audit:synthetic": "vite-node --config vitest.config.ts scripts/cleanup-synthetic-data.ts"
   },

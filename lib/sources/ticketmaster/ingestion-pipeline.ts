@@ -15,8 +15,14 @@ import { ensureTicketmasterSource } from './source-registry';
 import {
   PipelineDatabaseError,
   TicketmasterError,
+  TicketmasterRunBudgetExceededError,
   TicketmasterValidationError,
 } from './errors';
+import type { RunRequestBudget } from './run-budget';
+import type {
+  PartitionCoordinatorOptions,
+  PartitionSummary,
+} from './partitioner';
 import type { TicketmasterEventQueryParams } from './types';
 
 export interface TicketmasterIngestionOptions {
@@ -30,6 +36,9 @@ export interface TicketmasterIngestionOptions {
   fixtureJson?: string;
   persist?: boolean;
   reprocess?: boolean;
+  usePartitioner?: boolean;
+  partitionOptions?: Partial<PartitionCoordinatorOptions>;
+  runBudget?: RunRequestBudget;
 }
 
 export interface TicketmasterIngestionResult {
@@ -52,6 +61,10 @@ export interface TicketmasterIngestionResult {
   durationMs: number;
   startedAt: string;
   completedAt: string;
+  hasIncompleteCoverage?: boolean;
+  partitionsProcessed?: number;
+  bisectionsCount?: number;
+  truncatedPartitions?: PartitionSummary[];
 }
 
 /**
@@ -64,7 +77,11 @@ export async function runTicketmasterIngestion(
   const startedAt = new Date().toISOString();
   const startMs = Date.now();
 
-  const adapter = options.adapter ?? new TicketmasterDiscoveryAdapter();
+  const adapter =
+    options.adapter ??
+    new TicketmasterDiscoveryAdapter(
+      options.runBudget ? { runBudget: options.runBudget } : undefined,
+    );
   const source = await ensureTicketmasterSource(options.sourceRepo);
 
   // Link in-memory catalog repo with sourceRepo if supported
@@ -78,40 +95,95 @@ export async function runTicketmasterIngestion(
 
   const persist = Boolean(options.persist);
   const useFixture = Boolean(options.useFixture);
+  const usePartitioner = Boolean(options.usePartitioner);
 
   let rawIngests: RawIngest[] = [];
+  let hasIncompleteCoverage = false;
+  let partitionsProcessed = 0;
+  let bisectionsCount = 0;
+  let truncatedPartitions: PartitionSummary[] = [];
 
   if (useFixture) {
-    let rawJson = options.fixtureJson;
-    if (!rawJson) {
-      const fixturePath = path.resolve(
-        process.cwd(),
-        'tests/fixtures/ticketmaster-events-response.json',
-      );
-      rawJson = fs.readFileSync(fixturePath, 'utf-8');
+    const activeBudget =
+      options.runBudget ?? options.adapter?.getClient()?.getRunBudget();
+    let budgetExceeded = false;
+    if (activeBudget) {
+      try {
+        activeBudget.reserveRequest();
+      } catch (err) {
+        if (err instanceof TicketmasterRunBudgetExceededError) {
+          hasIncompleteCoverage = true;
+          budgetExceeded = true;
+        } else {
+          throw err;
+        }
+      }
     }
 
-    const contentHash = crypto
-      .createHash('sha256')
-      .update(rawJson)
-      .digest('hex');
+    if (budgetExceeded) {
+      rawIngests = [];
+    } else {
+      let rawJson = options.fixtureJson;
+      if (!rawJson) {
+        const fixturePath = path.resolve(
+          process.cwd(),
+          'tests/fixtures/ticketmaster-events-response.json',
+        );
+        rawJson = fs.readFileSync(fixturePath, 'utf-8');
+      }
 
-    const stateCode = options.queryParams?.stateCode ?? 'CO';
+      const contentHash = crypto
+        .createHash('sha256')
+        .update(rawJson)
+        .digest('hex');
 
-    rawIngests = [
-      {
-        id: crypto.randomUUID(),
-        sourceId: source.id,
-        sourceUrl: `https://app.ticketmaster.com/discovery/v2/events.json?classificationName=Music&stateCode=${stateCode}`,
-        acquisitionMethod: 'api',
-        fetchedAt: new Date().toISOString(),
-        contentHash,
-        contentType: 'application/json',
-        rawContent: rawJson,
-        httpStatus: 200,
-        parserVersion: adapter.parserVersion,
-      },
-    ];
+      const stateCode = options.queryParams?.stateCode ?? 'CO';
+
+      rawIngests = [
+        {
+          id: crypto.randomUUID(),
+          sourceId: source.id,
+          sourceUrl: `https://app.ticketmaster.com/discovery/v2/events.json?classificationName=Music&stateCode=${stateCode}`,
+          acquisitionMethod: 'api',
+          fetchedAt: new Date().toISOString(),
+          contentHash,
+          contentType: 'application/json',
+          rawContent: rawJson,
+          httpStatus: 200,
+          parserVersion: adapter.parserVersion,
+        },
+      ];
+    }
+  } else if (usePartitioner) {
+    try {
+      rawIngests = await adapter.fetchPartitioned(
+        {
+          sourceId: source.id,
+          sourceType: adapter.sourceType,
+          acquisitionMethod: adapter.acquisitionMethod,
+          targetUrl: 'https://app.ticketmaster.com/discovery/v2/events.json',
+          crawlStartedAt: new Date().toISOString(),
+          metadata: (options.queryParams ?? {}) as Record<string, unknown>,
+        },
+        options.partitionOptions,
+      );
+      hasIncompleteCoverage =
+        adapter.lastPartitionResult?.hasIncompleteCoverage ?? false;
+      partitionsProcessed =
+        adapter.lastPartitionResult?.partitionsProcessed ?? 0;
+      bisectionsCount = adapter.lastPartitionResult?.bisectionsCount ?? 0;
+      truncatedPartitions =
+        adapter.lastPartitionResult?.truncatedPartitions ?? [];
+    } catch (fetchErr) {
+      if (fetchErr instanceof TicketmasterRunBudgetExceededError) {
+        hasIncompleteCoverage = true;
+      } else {
+        if (persist) {
+          await options.sourceRepo.recordFailure(source.id).catch(() => {});
+        }
+        throw fetchErr;
+      }
+    }
   } else {
     try {
       rawIngests = await adapter.fetch({
@@ -123,16 +195,33 @@ export async function runTicketmasterIngestion(
         metadata: (options.queryParams ?? {}) as Record<string, unknown>,
       });
     } catch (fetchErr) {
-      if (persist) {
-        await options.sourceRepo.recordFailure(source.id).catch(() => {});
+      if (fetchErr instanceof TicketmasterRunBudgetExceededError) {
+        hasIncompleteCoverage = true;
+      } else {
+        if (persist) {
+          await options.sourceRepo.recordFailure(source.id).catch(() => {});
+        }
+        throw fetchErr;
       }
-      throw fetchErr;
     }
   }
 
   // 1. Dry-run mode: parse in memory without writing to database
   if (!persist) {
-    const parsedCandidates = await adapter.parse(rawIngests);
+    const allParsedCandidates = await adapter.parse(rawIngests);
+    const parsedCandidates: EventCandidate[] = [];
+    const seenEventIds = new Set<string>();
+
+    for (const cand of allParsedCandidates) {
+      if (cand.sourceEventId) {
+        if (seenEventIds.has(cand.sourceEventId)) {
+          continue;
+        }
+        seenEventIds.add(cand.sourceEventId);
+      }
+      parsedCandidates.push(cand);
+    }
+
     const reviewReasons: Record<string, number> = {};
 
     for (const cand of parsedCandidates) {
@@ -174,6 +263,10 @@ export async function runTicketmasterIngestion(
       startedAt,
       completedAt,
       durationMs: Math.max(1, Date.now() - startMs),
+      hasIncompleteCoverage,
+      partitionsProcessed,
+      bisectionsCount,
+      truncatedPartitions,
     };
   }
 
@@ -214,7 +307,19 @@ export async function runTicketmasterIngestion(
     // Parse candidates using the actually persisted raw ingest rows so IDs match
     let candidates: EventCandidate[];
     try {
-      candidates = await adapter.parse(persistedRawIngests);
+      const allParsed = await adapter.parse(persistedRawIngests);
+      const deduplicated: EventCandidate[] = [];
+      const seenEventIds = new Set<string>();
+      for (const cand of allParsed) {
+        if (cand.sourceEventId) {
+          if (seenEventIds.has(cand.sourceEventId)) {
+            continue;
+          }
+          seenEventIds.add(cand.sourceEventId);
+        }
+        deduplicated.push(cand);
+      }
+      candidates = deduplicated;
     } catch (parseErr) {
       if (parseErr instanceof TicketmasterError) {
         throw parseErr;
@@ -356,6 +461,10 @@ export async function runTicketmasterIngestion(
       startedAt,
       completedAt,
       durationMs: Math.max(1, Date.now() - startMs),
+      hasIncompleteCoverage,
+      partitionsProcessed,
+      bisectionsCount,
+      truncatedPartitions,
     };
   } catch (err) {
     await options.sourceRepo.recordFailure(source.id).catch(() => {});

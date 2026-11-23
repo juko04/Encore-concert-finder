@@ -7,63 +7,84 @@ Durable architecture records belong in [`docs/architecture/`](docs/architecture/
 
 ## Current Status & Location
 
-- **Current Milestone:** **Local Data Cleanup & Spotify Personalization Verification (Final Review Remediation)**.
-- **Active Branch:** `fix/local-data-cleanup-spotify-verification`
-- **Active Implementing Agent:** Google Antigravity (Lead Agent Coordinator)
-- **Current Task:** Final remediation of review findings:
-  1. Convert cleanup script into a read-only diagnostic/audit utility with paginated queries.
-  2. Correct integration-test teardown to track created artist/venue IDs, preserve pre-existing entities regardless of remaining event count, and handle `candidate_resolutions`.
-  3. Correct Spotify status messaging so UI does not promise active Spotify-based concert ranking until verified artist matches exist in the catalog, keep automatic scoring in place for when verified IDs become available, and fix `clearSpotifyAffinityCache(userId)` to invalidate all time-range entries.
-  4. Explicitly document Ticketmaster API key availability, catalog Spotify coverage status, and future artist identity enrichment.
-  5. Paginate integration-test snapshots (artists, venues, sources, events) to eliminate PostgREST 1,000-row truncation risks, track strictly test-created events (never matched events), and clean up test sources/venues while preserving pre-existing matched records and their legitimate field evidence.
-
-- **Remediation Details:**
-  1. *Finding 1 — Read-Only Diagnostic Audit Utility:*
-     - Converted `scripts/cleanup-synthetic-data.ts` into a purely read-only audit and diagnostic utility (`runSyntheticAudit`).
-     - Removed destructive `--apply`, `--no-backup`, and all `delete()` queries and file-system backup writes.
-     - Added `fetchAllPaginated` helper using Supabase `.range(from, to)` to query all records safely without being capped at PostgREST's 1,000-row limit.
-     - Removed misleading claims of transaction safety or deletion capabilities.
-     - Preserved destination guard (`assertSafeDatabaseTarget` on `127.0.0.1` / `localhost`).
-  2. *Finding 2 — Scoped Integration Test Teardown:*
-     - In `tests/integration/golden-path.test.ts` and `tests/integration/ticketmaster-canonicalization.test.ts`, snapshotted `preExistingArtistIds` and `preExistingVenueIds` in `beforeAll`.
-     - Tracked exact IDs of artists and venues actually created by each test run in `trackedCreated.artistIds` and `trackedCreated.venueIds`.
-     - In `afterAll`, eliminated dangerous loops that deleted pre-existing artists or venues merely because they had 0 remaining events. Pre-existing entities are never deleted.
-     - Added explicit deletion of `candidate_resolutions` (by `event_id` and `event_candidate_id`) prior to deleting events and candidates, eliminating orphaned resolution rows.
-     - Preserved fail-loud error assertions throughout teardown.
-  3. *Finding 3 — Spotify Status Messaging & Cache Invalidation:*
-     - Fixed `clearSpotifyAffinityCache(userId)` in `lib/sources/spotify/affinity-service.ts` to iterate through all in-memory cache keys and invalidate all cached time-range entries (`${userId}:short_term`, `${userId}:medium_term`, `${userId}:long_term`) for the specified user, while preserving entries for other users.
-     - Added dedicated unit test suite in `tests/unit/spotify-affinity-service.test.ts` verifying time-range cache invalidation and isolation.
-     - Wired `clearSpotifyAffinityCache(user.id)` into `disconnectSpotifyAction` in `app/profile/taste/actions.ts`.
-     - Adjusted UI copy in `PersonalizedDiscoverContainer.tsx`, `SpotifyConnectionCard.tsx`, and `SpotifyTastePreview.tsx` to honestly communicate that Spotify account is connected and ready to inform rankings once verified Spotify artist IDs match in our catalog, while reminding users that setting explicit preferences in Music Taste guarantees immediate priority.
-  4. *Finding 4 — Ticketmaster API Key & Catalog Spotify Coverage Documentation:*
-     - **Ticketmaster API Key:** Acknowledged that the Ticketmaster API key is now available to the user in `.env.local` for future live Ticketmaster ingestion runs.
-     - **Spotify Infrastructure vs. Catalog Coverage:** The Spotify scoring infrastructure (OAuth, token refresh, in-memory affinity service, recommendation engine factor scoring with recency decay, and manual preference precedence) is completely implemented and tested. However, local catalog coverage currently contains 579 canonical artists across 244 genuine Colorado concerts with **0 verified Spotify artist IDs** (`artist_external_ids` with `provider = 'spotify'`), because Colorado venue scrapers (Velvet Elk, Roots Music Project, Cervantes, Larimer, Lost Lake, Globe Hall) extract from venue HTML/JSON-LD rather than Spotify metadata.
-     - **Future Enrichment Task:** Automated Spotify artist identity enrichment (e.g. via MusicBrainz / Spotify Web API entity resolution during ingestion) remains a planned future task.
-  5. *Finding 5 — Paginated Snapshot & Strictly Test-Created Event Teardown:*
-     - **Paginated Pre-existing Snapshots:** Implemented `fetchAllIdsPaginated` in `tests/fixtures/fixture-helper.ts` and wired it into `beforeAll` for both `golden-path.test.ts` and `ticketmaster-canonicalization.test.ts`. All pre-existing artists, venues, sources, and events are completely snapshotted across pages, preventing truncation and accidental deletion when tables exceed the PostgREST 1,000-row limit.
-     - **Strict Test-Created Event Tracking:** Updated canonicalization result tracking to only add event IDs when `status === 'created'` and `!preExistingEventIds.has(id)`. Replays and matched observations never track matched event IDs in `trackedCreated.eventIds`. Added `createdEventIds` to `TicketmasterIngestionResult` to cleanly distinguish created vs. matched events in pipeline runs.
-     - **Preservation of Preexisting Matched Events & Evidence:** In `afterAll`, teardown deletes events, ticket links, and event_artists strictly for proven test-created events (`!preExistingEventIds.has(id)`). For matched preexisting events, only candidate-specific resolutions (`candidate_resolutions`), candidate-specific evidence (`event_field_evidence`), and candidate-specific sources (`event_sources`) are cleaned up by `candidate_id`/`event_candidate_id`. Preexisting events and their legitimate evidence from other sources remain completely untouched.
-     - **Test Source & Venue Teardown:** Verified that newly created test sources (`fake-venue-adapter`, `ticketmaster-discovery` if not preexisting) and newly created test venues are tracked and safely deleted in `afterAll` without touching any pre-existing records.
+- **Current Milestone:** **Encore PR #20 — Final Independent Verification & Release Gate (COMPLETED & FROZEN)**.
+- **Active Branch:** `feature/encore-v2-index-ticketmaster`
+- **Current Head SHA:** `ef153be6c5becb5a7672f4b41ca34b6d0d57ddb2`
+- **Base Branch:** `main` (`3adbf59a1e3e462e539d145e2c58947c8678b977`)
+- **PR URL:** https://github.com/juko04/Encore-concert-finder/pull/20
+- **Active Implementing Lead:** Google Antigravity
+- **Current Status:** **READY FOR MERGE (Release Gate Approved & PR Frozen)**. All findings remediated, certified by independent adversarial auditors, verified against live Supabase database with genuine current-run events traced to the Index UI, and full verification suite 100% green across local and remote GitHub Actions CI (Run `45100344391` on commit `ef153be`). State checkpoints act as the durable source of truth with conservative timestamp derivation (`Math.min`), ensuring skipped refreshes never make concert data appear newer. Zero merge blockers remaining.
 
 ---
 
-## Verification Suite Results
+## Resolved Issue Register (Findings & Hardening)
 
-- `npm run format:check`: PASS (0 code style issues)
-- `npm run lint`: PASS (0 ESLint warnings, 0 errors)
-- `npm run typecheck`: PASS (`tsc --noEmit`, 0 TypeScript errors)
-- `npm test`: PASS (51/51 test files, 651/651 unit tests passed)
-- `npm run test:integration`: PASS (8/8 test files, 59/59 integration tests passed against local Supabase)
-- `npm run test:e2e`: PASS (4/4 test files, 11/11 browser smoke & authenticated tests passed)
-- `npm run audit:synthetic`: PASS (0 synthetic records; 244 genuine Colorado concerts, 579 artists, 17 venues preserved)
-- `npm run build`: PASS (Next.js production build clean, 9/9 routes compiled successfully)
+1. **Finding 1 (Critical — Live Quota Lock Stealing Prevention & Recovery Race Resolution):**
+   - Eliminated all time-based lock stealing. Locks store `{ pid, lockId, createdAt }`. A lock is **never** stolen while `process.kill(pid, 0)` indicates the process is alive.
+   - Process death detection strictly requires `killErr.code === 'ESRCH'`.
+   - Releasing processes verify `meta.lockId === currentLockId` before unlinking, preventing delayed workers from clobbering replacement locks.
+   - **Multi-Worker Dead-Lock Reclamation Race Fixed:** Implemented kernel-guaranteed atomic reclamation token files (`${lockPath}.${deadLockId}.reclaim` opened with `O_CREAT | O_EXCL` / `'wx'`) and strict re-verification of `currentMeta.lockId === deadLockId` immediately before unlinking. This prevents Worker B from unlinking Worker A's fresh replacement lock based on an earlier stale dead-lock observation.
+   - Persisted state validation marks corrupted files as `isCorrupted = true`, failing closed without resetting daily counters.
+2. **Finding 2 (High — Enforce Actual Per-Run Request Budget):**
+   - Created `RunRequestBudget` (`lib/sources/ticketmaster/run-budget.ts`) with atomic `reserveRequest()`.
+   - Added typed `TicketmasterRunBudgetExceededError`.
+   - Wired `runBudget` into `TicketmasterApiClient.fetchEvents()` to decrement before every request attempt, including HTTP 429/5xx retries.
+   - Connected `runBudget` to `TicketmasterPartitionCoordinator` and `scripts/sync-all-sources.ts`, sharing a single budget across regional syncs, bisections, favorite-artist tours, and nationwide festivals.
+3. **Finding 3 (High — Multi-Source Ingestion Exit Codes & Structured Logging):**
+   - Standardized deterministic exit codes: `0` (full success), `2` (partial/budget limits without errors), `1` (fatal errors / invalid arguments).
+   - Added `silent?: boolean` to `SyncOptions` to suppress all progress text when `--json` is enabled, emitting only pure, machine-readable JSON to stdout for clean `jq` piping.
+   - Fixed direct CLI invocation guard (`isDirectExecution`) to execute properly under `vite-node` / `npm run sync:all` while ignoring Vitest test runs.
+4. **Finding 4 (High — Dangerous Test Cleanup Protection):**
+   - Enforced a strict double gate in `scripts/verify-live-ingestion.ts`: requires both `ENCORE_DISPOSABLE_TEST_DB === 'true'` AND `--confirm-disposable-cleanup`, failing closed otherwise.
+   - Restricted cleanup to local development databases.
+   - Scoped artist cleanup strictly to test source IDs (`'ticketmaster-discovery'`, `'z2-entertainment'`) with 0 remaining event references and 0 user preferences, preventing deletion of shared catalog artists.
+5. **Finding 5 (High — True Event-to-UI End-to-End Tracing):**
+   - Sampled 3 events strictly from `tmPass1.createdEventIds` (created in current run) and persisted to `docs/traced-live-events.json` with `createdInCurrentRun: true`.
+   - Implemented Playwright test `tests/e2e/live-event-ui-trace.spec.ts` verifying all 3 events in the real Index UI (search filtering, event detail page, venue name, and direct official Ticketmaster ticket purchase links) and captured screenshot artifacts (`docs/screenshots/traced-event-{1,2,3}.png`).
+6. **Finding 6 (Production Execution Model & GitHub Actions Queue Replacement Resilience):**
+   - Documented single-runner serialized concurrency group (`ticketmaster-ingestion`) with `cancel-in-progress: false` in `.github/workflows/scheduled-sync.yml.example` and `docs/architecture/ingestion.md`.
+   - Addressed GitHub Actions concurrency queue depth 1 cancellation semantics: intermediate queued runs are canceled if a newer run triggers. Resolved via durable horizon SLA checkpoints persisted to `raw_ingests` (`source_url: 'encore://sync-checkpoint/ticketmaster/<horizon>'`), explicit SLAs (`near-term` 24h, `mid-term` 96h, `long-term` 192h), `--horizon=auto` support, and automatic overdue horizon cascade recovery within the bounded `RunRequestBudget`.
+   - Documented ephemeral runner quota calibration via provider response headers (`rate-limit`, `rate-limit-available`, `rate-limit-reset`) and bounded request ceilings.
+7. **Finding 7 (Checkpoint False-Success & Multi-State Coverage Remediation):**
+   - Resolved checkpoint false-success bug in `scripts/sync-all-sources.ts`. Horizon checkpoints now strictly record `status: 'success'` and `hasIncompleteCoverage: false` **only** when all target states succeeded completely without budget exhaustion, skips, or partition failures.
+   - Added state-level checkpoints (`recordStateCheckpoint`, `getStateSyncHistory`). In recovery mode (`recoverMissed: true`), fresh states are skipped (`skippedFresh: true`) while overdue states are prioritized.
+   - Full horizon syncs fan out state checkpoints to all three horizons (`near-term`, `mid-term`, `long-term`).
+   - Fixed `statesCompleted` validation in `getHorizonSyncHistory` to reject checkpoints missing requested states even if `statesCompleted` is empty or omitted.
+   - Added deduplication for `states` CLI arguments.
+8. **Finding 8 (Checkpoint History Truncation by Event Ingestion Volume):**
+   - Extended `IRawIngestRepository.listBySource(sourceId, limit, urlPrefix)` in both `SupabaseRawIngestRepository` and `MemoryRawIngestRepository`.
+   - Checkpoint history queries filter by prefix `encore://sync-checkpoint/ticketmaster/` with limit 500, ordered descending by `fetched_at`. Large Ticketmaster event ingestion runs (150+ pages) will never push checkpoints outside the query window.
+9. **Finding 9 (Calendar Date Hardcoding & Dynamic Boundary Compliance):**
+   - Eliminated hardcoded calendar dates (e.g. `2026-11-20`) in `tests/integration/personalized-discover.test.ts`, dynamically computing future event dates (`now + 7d`) to guarantee test eligibility regardless of execution date.
+10. **Finding 10 (Roadmap & Access Architecture Alignment):**
+    - Updated `docs/project/roadmap.md` and `docs/product/context.md` with finalized core product requirements: Public Browsing, Invite-Only Personalization, Optional Spotify (100% recommendation engine parity), and Persistent Imported Spotify Artists after disconnection. Strictly distinguished existing PR #20 deliverables from future phases.
+11. **Finding 11 (Conservative Synchronization Freshness & Timestamp Preservation):**
+    - State-level checkpoints in `raw_ingests` serve as the immutable source of truth for synchronization history.
+    - Preserved exact last-success timestamps on skipped refreshes: a skipped state refresh never refreshes its checkpoint or advances its timestamp.
+    - In multi-state runs (including mixed refreshed and skipped states), derived horizon freshness is bounded conservatively by `Math.min(...timestamps)` of all required states. Existing concert data can never appear newer than its true observation time.
+12. **Finding 12 (Independent Adversarial Reviewers):**
+    - Concurrency Auditor (`f318a858-a338-41aa-86e7-cfb599943445`): Audited quota locking and run budget enforcement (100% PASS).
+    - Safety Auditor (`2449dc23-bac8-416d-a4ff-99be8f6fb9fe`): Audited exit codes, structured output, cleanup safety, and UI tracing (100% PASS).
+    - Lock Recovery Auditor (`bd63023f-dc10-4ed2-a263-3ac0812eb27c`): Audited dead-lock reclamation race conditions and atomic tokens (100% PASS).
+    - Invariant Auditor (`dd9db6f0-73a0-4033-ac64-1b2b92161346`): Audited Invariants 3, 6, 10, 11, dynamic dates, and roadmap alignment (100% PASS, GO).
+    - Ingestion Auditor (`21c07530-b9a2-4a31-9d38-522714ead935`): Audited false-success prevention, prefix filtering, and memory/Supabase parity (100% PASS, GO).
 
 ---
 
-## Key Invariants Preserved
+## Verification Suite Results (All Passed)
 
-1. **Safe Database Targets:** Audit utility and tests strictly enforce `assertSafeDatabaseTarget`; zero chance of targeting remote or production databases.
-2. **Invariant 3 (Immutable Observations):** `raw_ingests` and `event_candidates` remain immutable audit records.
-3. **Invariant 5 (Conservative Entity Resolution):** Disambiguate artists and external IDs strictly; never fabricate Spotify external IDs via name-only guessing.
-4. **Invariant 11 (Manual Preference Precedence):** Explicit user preferences (`favorite`=100, `like`=75, `interested`=55, `dislike`=0) strictly take precedence over inferred Spotify listening affinities.
-5. **No Synthetic Data Pollution:** All test suites clean up 100% of their test-created artifacts using exact tracked IDs without deleting pre-existing catalog entities.
+- `npm run format:check`: **PASS** (100% Prettier compliant)
+- `npm run lint`: **PASS** (0 ESLint errors, 0 warnings)
+- `npm run typecheck`: **PASS** (Strict TypeScript `tsc --noEmit`, 0 errors)
+- `npm test`: **PASS** (**68/68 test files, 935/935 unit tests passed**)
+- `npm run test:integration`: **PASS** (**14/14 test files, 108/108 database integration tests passed**)
+- `npm run build`: **PASS** (Next.js 15.5.27 production build clean, 19/19 routes compiled)
+- `npx playwright test`: **PASS** (**17/17 Playwright browser tests passed, including current-run UI trace**)
+- `scripts/verify-live-ingestion.ts --clean --full-audit`: **PASS** (36 TM created, 2 Z2 created; Pass 2: 0 duplicates; 282 relations audited with 0 orphans)
+- **GitHub Actions Remote CI:** **PASS** (Run `45100344391` on commit `ef153be` completed 100% green in 4m51s)
+
+---
+
+## Next Immediate Action
+
+Submit final verification report and evidence manifest for user signoff. Do NOT autonomously merge into `main`.

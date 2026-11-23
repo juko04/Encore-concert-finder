@@ -208,9 +208,9 @@ test.describe('Discover Page E2E Suite', () => {
     testVenueIdNear = venueRowNear.id;
 
     // 4. Seed Event A: Favorite Artist, Farther away, Expensive ($120)
-    const futureDateA = new Date(Date.now() + 1 * 86400 * 1000)
-      .toISOString()
-      .split('T')[0];
+    // Seed for today to ensure it ranks within the first 50 public discover results
+    const todayStr = new Date().toISOString().split('T')[0];
+    const futureDateA = todayStr;
 
     const { data: eventRowA, error: eventErrA } = await adminClient
       .from('events')
@@ -227,7 +227,7 @@ test.describe('Discover Page E2E Suite', () => {
         lng: -104.82,
         timezone: 'America/Denver',
         local_start_date: futureDateA,
-        starts_at: `${futureDateA}T20:00:00-07:00`,
+        starts_at: `${futureDateA}T23:58:00-07:00`,
         start_time_precision: 'instant',
         is_multi_day: false,
       })
@@ -256,9 +256,7 @@ test.describe('Discover Page E2E Suite', () => {
     });
 
     // 5. Seed Event B: Interested Artist, Nearby (0 mi), Affordable ($25)
-    const futureDateB = new Date(Date.now() + 2 * 86400 * 1000)
-      .toISOString()
-      .split('T')[0];
+    const futureDateB = todayStr;
 
     const { data: eventRowB, error: eventErrB } = await adminClient
       .from('events')
@@ -275,7 +273,7 @@ test.describe('Discover Page E2E Suite', () => {
         lng: -104.99,
         timezone: 'America/Denver',
         local_start_date: futureDateB,
-        starts_at: `${futureDateB}T20:00:00-07:00`,
+        starts_at: `${futureDateB}T23:59:00-07:00`,
         start_time_precision: 'instant',
         is_multi_day: false,
       })

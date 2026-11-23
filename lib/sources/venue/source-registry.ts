@@ -153,6 +153,32 @@ export const ROOTS_MUSIC_PROJECT_CONFIG: VenueSourceConfig = {
   },
 };
 
+// Z2 Entertainment (Shared Adapter: Boulder Theater, Fox Theatre, Aggie Theatre)
+export const Z2_ENTERTAINMENT_SOURCE_SLUG = 'z2-entertainment';
+export const Z2_ENTERTAINMENT_DEFAULT_SOURCE_ID =
+  'b0000000-0000-0000-0000-000000000010';
+export const Z2_ENTERTAINMENT_SOURCE_ID = Z2_ENTERTAINMENT_DEFAULT_SOURCE_ID;
+
+export const Z2_ENTERTAINMENT_CONFIG: VenueSourceConfig = {
+  id: Z2_ENTERTAINMENT_DEFAULT_SOURCE_ID,
+  slug: Z2_ENTERTAINMENT_SOURCE_SLUG,
+  name: 'Z2 Entertainment',
+  baseUrl: 'https://z2ent.com',
+  calendarUrl: 'https://z2ent.com/events',
+  city: 'Boulder',
+  state: 'CO',
+  country: 'US',
+  defaultTimezone: 'America/Denver',
+  reliabilityScore: 0.98,
+  parserVersion: '1.0.0',
+  defaultAddress: '2032 14th St',
+  defaultPostalCode: '80302',
+  defaultCoordinates: {
+    latitude: 40.0172,
+    longitude: -105.2783,
+  },
+};
+
 export const DENVER_INDEPENDENT_VENUE_CONFIGS: VenueSourceConfig[] = [
   LARIMER_LOUNGE_CONFIG,
   LOST_LAKE_CONFIG,
@@ -162,6 +188,7 @@ export const DENVER_INDEPENDENT_VENUE_CONFIGS: VenueSourceConfig[] = [
 export const BOULDER_VENUE_CONFIGS: VenueSourceConfig[] = [
   VELVET_ELK_CONFIG,
   ROOTS_MUSIC_PROJECT_CONFIG,
+  Z2_ENTERTAINMENT_CONFIG,
 ];
 
 export const ALL_SUPPORTED_VENUE_CONFIGS: VenueSourceConfig[] = [
@@ -171,6 +198,7 @@ export const ALL_SUPPORTED_VENUE_CONFIGS: VenueSourceConfig[] = [
   GLOBE_HALL_CONFIG,
   VELVET_ELK_CONFIG,
   ROOTS_MUSIC_PROJECT_CONFIG,
+  Z2_ENTERTAINMENT_CONFIG,
 ];
 
 /**
@@ -222,6 +250,20 @@ export function getVenueSourceConfig(
   ) {
     return ROOTS_MUSIC_PROJECT_CONFIG;
   }
+  if (
+    norm === 'z2' ||
+    norm === 'z2ent' ||
+    norm === 'z2 entertainment' ||
+    norm === 'z2-entertainment' ||
+    norm === 'boulder theater' ||
+    norm === 'bouldertheater' ||
+    norm === 'fox theatre' ||
+    norm === 'fox theater' ||
+    norm === 'aggie theatre' ||
+    norm === 'aggie theater'
+  ) {
+    return Z2_ENTERTAINMENT_CONFIG;
+  }
 
   return undefined;
 }
@@ -244,8 +286,15 @@ export async function ensureVenueSource(
 
   // 2. Fallback check: ensure default ID is not claimed by another entity
   const preferredId = config.id ?? crypto.randomUUID();
-  const existingById = await sourceRepo.getById(preferredId);
-  const targetId = existingById ? crypto.randomUUID() : preferredId;
+  let targetId = preferredId;
+  try {
+    const existingById = await sourceRepo.getById(preferredId);
+    targetId = existingById ? crypto.randomUUID() : preferredId;
+  } catch {
+    // If preferredId is not a valid UUID (e.g. 'z2-entertainment') in a Postgres environment,
+    // safely generate a deterministic/standard UUID for persistence.
+    targetId = 'b0000000-0000-0000-0000-000000000010';
+  }
 
   // 3. Upsert deterministic source registration
   return sourceRepo.upsert({

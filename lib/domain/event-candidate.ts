@@ -21,6 +21,7 @@ export interface CandidatePrice {
   max?: number;
   currency?: string;
   isFree?: boolean;
+  feeStatus?: 'all_inclusive' | 'fees_excluded' | 'unknown';
   estimatedFees?: number;
 }
 
@@ -54,6 +55,8 @@ export interface EventCandidate {
   doorsOpenAt?: string;
   ticketUrl?: string;
   price?: CandidatePrice;
+  inventoryStatus?:
+    'available' | 'low_inventory' | 'sold_out' | 'cancelled' | 'unknown';
   isFestival?: boolean;
   eventKind?: EventKind;
   confidence: number;
