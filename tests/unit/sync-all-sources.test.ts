@@ -1035,5 +1035,122 @@ describe('Sync All Sources & Live Verification (PR #20 Remediations)', () => {
       ]);
       expect(horizonHistory['near-term']).toBeNull();
     });
+
+    it('preserves actual last-success timestamp on skipped refresh and never makes concert data appear newer', async () => {
+      const rawRepo = new MemoryRawIngestRepository();
+      const tmSourceId = 'b0000000-0000-0000-0000-000000000003';
+
+      // Pre-seed CO with a timestamp from 4 hours ago
+      const originalTime = new Date(Date.now() - 4 * 60 * 60 * 1000);
+      await recordStateCheckpoint(rawRepo, tmSourceId, 'near-term', 'CO', {
+        status: 'success',
+        hasIncompleteCoverage: false,
+        fetchedAt: originalTime,
+        eventsFetched: 15,
+      });
+
+      // Run sync with recovery enabled (4h < 24h SLA -> state will be skipped)
+      const result = await runMultiSourceSync({
+        horizon: 'near-term',
+        live: false,
+        persist: true,
+        rawIngestRepo: rawRepo,
+        states: ['CO'],
+        sources: ['ticketmaster'],
+        syncFavoriteArtists: false,
+        syncFestivals: false,
+        recoverMissed: true,
+        force: false,
+        silent: true,
+      });
+
+      expect(result.reports[0].status).toBe('skipped');
+      expect(result.reports[0].skippedFresh).toBe(true);
+
+      // Verify state-level checkpoint retained the exact original timestamp
+      const stateHistory = await getStateSyncHistory(
+        rawRepo,
+        tmSourceId,
+        'near-term',
+        'CO',
+      );
+      expect(stateHistory.lastSyncAt?.toISOString()).toBe(
+        originalTime.toISOString(),
+      );
+
+      // Verify derived horizon freshness is bounded by the actual last-success timestamp
+      const horizonHistory = await getHorizonSyncHistory(rawRepo, tmSourceId, [
+        'CO',
+      ]);
+      expect(horizonHistory['near-term']?.toISOString()).toBe(
+        originalTime.toISOString(),
+      );
+    });
+
+    it('derives horizon freshness conservatively as the oldest last-success timestamp among mixed refreshed and skipped states', async () => {
+      const rawRepo = new MemoryRawIngestRepository();
+      const tmSourceId = 'b0000000-0000-0000-0000-000000000003';
+
+      // CO was synced 6 hours ago (fresh for 24h SLA)
+      const coSyncTime = new Date(Date.now() - 6 * 60 * 60 * 1000);
+      await recordStateCheckpoint(rawRepo, tmSourceId, 'near-term', 'CO', {
+        status: 'success',
+        hasIncompleteCoverage: false,
+        fetchedAt: coSyncTime,
+        eventsFetched: 15,
+      });
+
+      // UT has never been synced (overdue)
+      // Run sync for both CO and UT
+      const runStartTime = new Date();
+      const result = await runMultiSourceSync({
+        horizon: 'near-term',
+        live: false,
+        persist: true,
+        rawIngestRepo: rawRepo,
+        states: ['CO', 'UT'],
+        sources: ['ticketmaster'],
+        syncFavoriteArtists: false,
+        syncFestivals: false,
+        recoverMissed: true,
+        force: false,
+        silent: true,
+      });
+
+      const coReport = result.reports.find((r) => r.stateCode === 'CO');
+      const utReport = result.reports.find((r) => r.stateCode === 'UT');
+      expect(coReport?.skippedFresh).toBe(true);
+      expect(utReport?.status).toBe('success');
+
+      // State-level checkpoints preserve their respective actual timestamps
+      const coStateHist = await getStateSyncHistory(
+        rawRepo,
+        tmSourceId,
+        'near-term',
+        'CO',
+      );
+      const utStateHist = await getStateSyncHistory(
+        rawRepo,
+        tmSourceId,
+        'near-term',
+        'UT',
+      );
+      expect(coStateHist.lastSyncAt?.toISOString()).toBe(
+        coSyncTime.toISOString(),
+      );
+      expect(utStateHist.lastSyncAt!.getTime()).toBeGreaterThanOrEqual(
+        runStartTime.getTime(),
+      );
+
+      // Crucial assertion: Horizon freshness across CO and UT must be conservatively derived
+      // from the OLDEST covered state (CO), NOT the newly refreshed UT timestamp!
+      const horizonHistory = await getHorizonSyncHistory(rawRepo, tmSourceId, [
+        'CO',
+        'UT',
+      ]);
+      expect(horizonHistory['near-term']?.toISOString()).toBe(
+        coSyncTime.toISOString(),
+      );
+    });
   });
 });

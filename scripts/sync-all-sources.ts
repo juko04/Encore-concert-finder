@@ -310,8 +310,59 @@ export async function getHorizonSyncHistory(
 
   if (!tmSourceId) return result;
 
+  const horizons: Exclude<SyncHorizon, 'full' | 'auto'>[] = [
+    'near-term',
+    'mid-term',
+    'long-term',
+  ];
+
   try {
-    // Query raw_ingests with checkpoint URL prefix filter so partition event pages never crowd out checkpoints
+    // When states are specified, reuse existing state-level checkpoints as the source of truth.
+    // Derive horizon freshness conservatively as the oldest (minimum) last-success timestamp
+    // among all required states. A skipped refresh never makes existing data appear newer.
+    if (states && states.length > 0) {
+      const uniqueStates = Array.from(
+        new Set(states.map((s) => s.trim().toUpperCase())),
+      );
+
+      let allCheckedFromStates = true;
+      for (const h of horizons) {
+        const stateHistories = await Promise.all(
+          uniqueStates.map((stateCode) =>
+            getStateSyncHistory(rawIngestRepo, tmSourceId, h, stateCode),
+          ),
+        );
+
+        const hasAnyStateCheckpoints = stateHistories.some(
+          (hist) => hist.lastSyncAt !== null,
+        );
+
+        if (hasAnyStateCheckpoints) {
+          // If state checkpoints exist, all requested states must be completely successful
+          const allSuccessful = stateHistories.every(
+            (hist) =>
+              hist.isSuccess && !hist.hasIncompleteCoverage && hist.lastSyncAt,
+          );
+
+          if (allSuccessful) {
+            const timestamps = stateHistories.map((hist) =>
+              hist.lastSyncAt!.getTime(),
+            );
+            result[h] = new Date(Math.min(...timestamps));
+          } else {
+            result[h] = null;
+          }
+        } else {
+          allCheckedFromStates = false;
+        }
+      }
+
+      if (allCheckedFromStates) {
+        return result;
+      }
+    }
+
+    // Fallback: Query raw_ingests with checkpoint URL prefix filter so partition event pages never crowd out checkpoints
     const checkpoints = await rawIngestRepo.listBySource(
       tmSourceId,
       500,
@@ -322,7 +373,9 @@ export async function getHorizonSyncHistory(
         new Date(b.fetchedAt).getTime() - new Date(a.fetchedAt).getTime(),
     );
 
-    for (const h of ['near-term', 'mid-term', 'long-term'] as const) {
+    for (const h of horizons) {
+      if (result[h] !== null) continue;
+
       const exactHorizonUrl = `encore://sync-checkpoint/ticketmaster/${h}`;
       for (const cp of sorted) {
         if (cp.sourceUrl === exactHorizonUrl) {
@@ -837,6 +890,32 @@ export async function runMultiSourceSync(
           const isHorizonComplete =
             states.length > 0 && statesCompleted.length === states.length;
 
+          // Derive conservative timestamp from state-level checkpoints for completed states.
+          // A skipped refresh must never make existing concert data appear newer than it actually is.
+          let conservativeFetchedAt: Date | undefined;
+          if (isHorizonComplete) {
+            try {
+              const stateHistories = await Promise.all(
+                statesCompleted.map((s) =>
+                  getStateSyncHistory(
+                    rawIngestRepo,
+                    tmSource.id,
+                    currentHorizon,
+                    s,
+                  ),
+                ),
+              );
+              const validTimestamps = stateHistories
+                .map((sh) => sh.lastSyncAt?.getTime())
+                .filter((t): t is number => typeof t === 'number');
+              if (validTimestamps.length > 0) {
+                conservativeFetchedAt = new Date(Math.min(...validTimestamps));
+              }
+            } catch {
+              // Fall back to default fetchedAt on error
+            }
+          }
+
           await recordHorizonCheckpoint(
             rawIngestRepo,
             tmSource.id,
@@ -851,6 +930,7 @@ export async function runMultiSourceSync(
               statesCompleted,
               statesIncomplete,
               statesFailed,
+              fetchedAt: conservativeFetchedAt,
             },
           );
         } catch (cpErr) {
