@@ -3,7 +3,7 @@
 **Pull Request:** [#20](https://github.com/juko04/Encore-concert-finder/pull/20)  
 **Title:** `feat(v2): Encore V2 Unified Index UI, Ticketmaster V2 Engine & Colorado Venue Coverage`  
 **Base Branch:** `main` (commit `3adbf59`)  
-**Feature Branch:** `feature/encore-v2-index-ticketmaster` (latest commit `9236a66`)  
+**Feature Branch:** `feature/encore-v2-index-ticketmaster` (latest commit `ef153be`)  
 **Incorporated Baseline:** `feature/spotify-integration-repair` (commit `4009277`)  
 **Repository:** `juko04/Encore-concert-finder`  
 
@@ -298,9 +298,9 @@ Below is the complete file listing comparing `feature/encore-v2-index-ticketmast
 | **Formatting** (`npm run format:check`) | **PASS** | 4.10s | 100% Prettier compliant across all project files |
 | **Linting** (`npm run lint`) | **PASS** | 3.80s | 0 ESLint warnings, 0 errors |
 | **Typecheck** (`npm run typecheck`) | **PASS** | 1.80s | `tsc --noEmit`, 0 TypeScript errors |
-| **Unit Tests** (`npm test`) | **PASS** | 6.67s | **68/68 test files passed, 930/930 tests passed** |
+| **Unit Tests** (`npm test`) | **PASS** | 6.67s | **68/68 test files passed, 935/935 tests passed** |
 | **Integration Tests** (`npm run test:integration`) | **PASS** | 24.56s | **14/14 test files passed, 108/108 tests passed** (including >520 event pagination test) |
 | **Playwright E2E** (`npx playwright test`) | **PASS** | 25.0s | **17/17 browser tests passed in Chromium** (including current-run live Ticketmaster event trace) |
 | **Production Build** (`npm run build`) | **PASS** | 1.04s | Clean Next.js 15.5.27 production build (19 routes) |
 | **Live Ingestion Runner** (`verify-live-ingestion.ts`) | **PASS** | 4.20s | 306 canonical events; Pass 2 100% idempotent (0 duplicates); 282 relations verified (0 orphans) |
-| **Remote GitHub Actions CI** (Workflow `CI`) | **PASS** | 4m44s | **Run 45079419304 on commit 9236a66 completed 100% green across all 17 verification jobs** |
+| **Remote GitHub Actions CI** (Workflow `CI`) | **PASS** | 4m51s | **Run 45100344391 on commit ef153be completed 100% green across all 17 verification jobs** |

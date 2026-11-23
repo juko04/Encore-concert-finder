@@ -7,13 +7,13 @@ Durable architecture records belong in [`docs/architecture/`](docs/architecture/
 
 ## Current Status & Location
 
-- **Current Milestone:** **Encore PR #20 — Final Independent Verification & Release Gate (COMPLETED)**.
+- **Current Milestone:** **Encore PR #20 — Final Independent Verification & Release Gate (COMPLETED & FROZEN)**.
 - **Active Branch:** `feature/encore-v2-index-ticketmaster`
-- **Current Head SHA:** `9236a66a52f4659a8b3c0b5a6c4bafe987714278`
+- **Current Head SHA:** `ef153be6c5becb5a7672f4b41ca34b6d0d57ddb2`
 - **Base Branch:** `main` (`3adbf59a1e3e462e539d145e2c58947c8678b977`)
 - **PR URL:** https://github.com/juko04/Encore-concert-finder/pull/20
 - **Active Implementing Lead:** Google Antigravity
-- **Current Status:** **READY FOR MERGE (Release Gate Approved)**. All findings remediated, certified by independent adversarial auditors, verified against live Supabase database with genuine current-run events traced to the Index UI, and full verification suite 100% green across local and remote GitHub Actions CI (Run `45079419304`). Zero merge blockers remaining.
+- **Current Status:** **READY FOR MERGE (Release Gate Approved & PR Frozen)**. All findings remediated, certified by independent adversarial auditors, verified against live Supabase database with genuine current-run events traced to the Index UI, and full verification suite 100% green across local and remote GitHub Actions CI (Run `45100344391` on commit `ef153be`). State checkpoints act as the durable source of truth with conservative timestamp derivation (`Math.min`), ensuring skipped refreshes never make concert data appear newer. Zero merge blockers remaining.
 
 ---
 
@@ -58,7 +58,11 @@ Durable architecture records belong in [`docs/architecture/`](docs/architecture/
    - Eliminated hardcoded calendar dates (e.g. `2026-11-20`) in `tests/integration/personalized-discover.test.ts`, dynamically computing future event dates (`now + 7d`) to guarantee test eligibility regardless of execution date.
 10. **Finding 10 (Roadmap & Access Architecture Alignment):**
     - Updated `docs/project/roadmap.md` and `docs/product/context.md` with finalized core product requirements: Public Browsing, Invite-Only Personalization, Optional Spotify (100% recommendation engine parity), and Persistent Imported Spotify Artists after disconnection. Strictly distinguished existing PR #20 deliverables from future phases.
-11. **Finding 11 (Independent Adversarial Reviewers):**
+11. **Finding 11 (Conservative Synchronization Freshness & Timestamp Preservation):**
+    - State-level checkpoints in `raw_ingests` serve as the immutable source of truth for synchronization history.
+    - Preserved exact last-success timestamps on skipped refreshes: a skipped state refresh never refreshes its checkpoint or advances its timestamp.
+    - In multi-state runs (including mixed refreshed and skipped states), derived horizon freshness is bounded conservatively by `Math.min(...timestamps)` of all required states. Existing concert data can never appear newer than its true observation time.
+12. **Finding 12 (Independent Adversarial Reviewers):**
     - Concurrency Auditor (`f318a858-a338-41aa-86e7-cfb599943445`): Audited quota locking and run budget enforcement (100% PASS).
     - Safety Auditor (`2449dc23-bac8-416d-a4ff-99be8f6fb9fe`): Audited exit codes, structured output, cleanup safety, and UI tracing (100% PASS).
     - Lock Recovery Auditor (`bd63023f-dc10-4ed2-a263-3ac0812eb27c`): Audited dead-lock reclamation race conditions and atomic tokens (100% PASS).
@@ -72,12 +76,12 @@ Durable architecture records belong in [`docs/architecture/`](docs/architecture/
 - `npm run format:check`: **PASS** (100% Prettier compliant)
 - `npm run lint`: **PASS** (0 ESLint errors, 0 warnings)
 - `npm run typecheck`: **PASS** (Strict TypeScript `tsc --noEmit`, 0 errors)
-- `npm test`: **PASS** (**68/68 test files, 930/930 unit tests passed**)
+- `npm test`: **PASS** (**68/68 test files, 935/935 unit tests passed**)
 - `npm run test:integration`: **PASS** (**14/14 test files, 108/108 database integration tests passed**)
 - `npm run build`: **PASS** (Next.js 15.5.27 production build clean, 19/19 routes compiled)
 - `npx playwright test`: **PASS** (**17/17 Playwright browser tests passed, including current-run UI trace**)
 - `scripts/verify-live-ingestion.ts --clean --full-audit`: **PASS** (36 TM created, 2 Z2 created; Pass 2: 0 duplicates; 282 relations audited with 0 orphans)
-- **GitHub Actions Remote CI:** **PASS** (Run `45079419304` on commit `9236a66` completed 100% green in 4m44s)
+- **GitHub Actions Remote CI:** **PASS** (Run `45100344391` on commit `ef153be` completed 100% green in 4m51s)
 
 ---
 
