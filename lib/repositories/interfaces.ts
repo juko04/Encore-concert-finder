@@ -54,12 +54,14 @@ export interface EventListFilters {
   fromDate?: string;
   toDate?: string;
   venueId?: string;
+  venueName?: string;
   artistId?: string;
   artistIds?: string[];
   city?: string;
   region?: string;
   status?: Event['status'] | Event['status'][];
   searchQuery?: string;
+  genre?: string;
   minPrice?: number;
   maxPrice?: number;
   includeUnknownPrice?: boolean;
@@ -67,6 +69,8 @@ export interface EventListFilters {
   sortBy?: EventSortOption;
   limit?: number;
   offset?: number;
+  excludePastShowtimes?: boolean;
+  referenceNowIso?: string;
 }
 
 export interface ICatalogRepository {
@@ -75,6 +79,11 @@ export interface ICatalogRepository {
   listEvents(filters?: EventListFilters): Promise<CanonicalEventSummary[]>;
   countEvents(filters?: EventListFilters): Promise<number>;
   listCities(): Promise<string[]>;
+  getFacets?(): Promise<{
+    venues: Array<{ id: string; name: string; city?: string }>;
+    cities: string[];
+    genres: string[];
+  }>;
   getArtistById(id: string): Promise<Artist | null>;
   searchArtists(query: string, limit?: number): Promise<Artist[]>;
   findArtistByName(normalizedName: string): Promise<Artist | null>;

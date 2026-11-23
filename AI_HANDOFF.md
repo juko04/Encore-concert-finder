@@ -7,13 +7,16 @@ Durable architecture records belong in [`docs/architecture/`](docs/architecture/
 
 ## Current Status & Location
 
-- **Current Milestone:** **Encore PR #20 — Final Independent Verification & Release Gate (COMPLETED & FROZEN)**.
-- **Active Branch:** `feature/encore-v2-index-ticketmaster`
-- **Current Head SHA:** `ef153be6c5becb5a7672f4b41ca34b6d0d57ddb2`
-- **Base Branch:** `main` (`3adbf59a1e3e462e539d145e2c58947c8678b977`)
-- **PR URL:** https://github.com/juko04/Encore-concert-finder/pull/20
-- **Active Implementing Lead:** Google Antigravity
-- **Current Status:** **READY FOR MERGE (Release Gate Approved & PR Frozen)**. All findings remediated, certified by independent adversarial auditors, verified against live Supabase database with genuine current-run events traced to the Index UI, and full verification suite 100% green across local and remote GitHub Actions CI (Run `45100344391` on commit `ef153be`). State checkpoints act as the durable source of truth with conservative timestamp derivation (`Math.min`), ensuring skipped refreshes never make concert data appear newer. Zero merge blockers remaining.
+- **Current Milestone:** **Catalog Search Pagination, Availability Hardening, Invite-Only Passwordless Authentication & Price Persistence (Version 3)**.
+- **Active Branch:** `main`
+- **Current Status:** **COMMITTED & VERIFIED ON MAIN**. Catalog search pagination, mountain timezone derivation, dynamic genre facets, source-verified sold-out protections, passwordless magic-link authentication with origin validation, and database-level price persistence triggers verified.
+- **Verification Suite Results (All Passed):**
+  - `npm run lint`: **PASS** (0 ESLint errors, 0 warnings)
+  - `npm run typecheck`: **PASS** (Strict TypeScript `tsc --noEmit`, 0 errors)
+  - `npm test`: **PASS** (**70/70 test files, 967/967 unit tests passed**)
+  - `npm run test:integration`: **PASS** (**15/15 test files, 125/125 database integration tests passed against live local Supabase PostgreSQL**)
+  - `npm run build`: **PASS** (Next.js 15.5.27 production build clean, 21/21 routes compiled)
+- **Next Immediate Action:** Proceed to improving actual ticket price coverage and ingesting more concerts. Zero speculative fixes.
 
 ---
 

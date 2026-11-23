@@ -19,6 +19,7 @@ import type {
   EventTicketLink,
   Promoter,
   PromoterRelationshipType,
+  TicketInventoryStatus,
   Venue,
 } from '@/lib/domain/catalog';
 import type { EventCandidate } from '@/lib/domain/event-candidate';
@@ -427,14 +428,50 @@ export class MemoryCatalogRepository implements ICatalogRepository {
   private getFilteredEvents(filters?: EventListFilters): Event[] {
     let result = Array.from(this.events.values());
 
-    if (filters?.fromDate) {
+    if (filters?.excludePastShowtimes && filters?.fromDate) {
+      const today = filters.fromDate;
+      const nowIso = filters.referenceNowIso || new Date().toISOString();
+      result = result.filter((e) => {
+        if (e.localStartDate > today) return true;
+        if (e.localStartDate === today) {
+          if (!e.startsAt) return true;
+          return e.startsAt >= nowIso;
+        }
+        return false;
+      });
+    } else if (filters?.fromDate) {
       result = result.filter((e) => e.localStartDate >= filters.fromDate!);
     }
     if (filters?.toDate) {
       result = result.filter((e) => e.localStartDate <= filters.toDate!);
     }
     if (filters?.venueId) {
-      result = result.filter((e) => e.venueId === filters.venueId);
+      result = result.filter((e) => {
+        if (e.venueId === filters.venueId) return true;
+        const venue = e.venueId ? this.venues.get(e.venueId) : null;
+        return (
+          venue?.name.toLowerCase().includes(filters.venueId!.toLowerCase()) ??
+          false
+        );
+      });
+    }
+    if (filters?.venueName) {
+      result = result.filter((e) => {
+        const venue = e.venueId ? this.venues.get(e.venueId) : null;
+        return (
+          venue?.name
+            .toLowerCase()
+            .includes(filters.venueName!.toLowerCase()) ?? false
+        );
+      });
+    }
+    if (filters?.genre) {
+      const g = filters.genre.toLowerCase();
+      result = result.filter(
+        (e) =>
+          e.eventKind?.toLowerCase().includes(g) ||
+          e.name.toLowerCase().includes(g),
+      );
     }
     if (filters?.city) {
       const c = filters.city.toLowerCase();
@@ -667,6 +704,22 @@ export class MemoryCatalogRepository implements ICatalogRepository {
         }
       }
 
+      let summaryInventoryStatus: TicketInventoryStatus = 'unknown';
+      if (eventTicketLinks.length > 0) {
+        const statuses = eventTicketLinks.map((tl) => tl.inventoryStatus);
+        if (statuses.every((s) => s === 'sold_out')) {
+          summaryInventoryStatus = 'sold_out';
+        } else if (statuses.some((s) => s === 'low_inventory')) {
+          summaryInventoryStatus = 'low_inventory';
+        } else if (statuses.some((s) => s === 'available')) {
+          summaryInventoryStatus = 'available';
+        } else if (statuses.some((s) => s === 'cancelled')) {
+          summaryInventoryStatus = 'cancelled';
+        }
+      } else if (event.status === 'cancelled') {
+        summaryInventoryStatus = 'cancelled';
+      }
+
       summaries.push({
         id: event.id,
         title: event.name,
@@ -691,6 +744,7 @@ export class MemoryCatalogRepository implements ICatalogRepository {
         sourceName: eventSources.length > 0 ? eventSources[0].name : undefined,
         sources: eventSources,
         ticketLinks: eventTicketLinks,
+        inventoryStatus: summaryInventoryStatus,
       });
     }
 
@@ -709,6 +763,42 @@ export class MemoryCatalogRepository implements ICatalogRepository {
       }
     }
     return Array.from(citySet).sort();
+  }
+
+  async getFacets(): Promise<{
+    venues: Array<{ id: string; name: string; city?: string }>;
+    cities: string[];
+    genres: string[];
+  }> {
+    const venues = Array.from(this.venues.values()).map((v) => ({
+      id: v.id,
+      name: v.name,
+      city: v.city ?? undefined,
+    }));
+    const cities = await this.listCities();
+    const genreSet = new Set<string>([
+      'Rock',
+      'Indie',
+      'Electronic',
+      'Pop',
+      'Hip-Hop',
+      'Jazz',
+      'Folk',
+      'Country',
+      'Metal',
+      'Punk',
+      'R&B',
+      'Classical',
+      'Festival',
+    ]);
+    for (const e of this.events.values()) {
+      if (e.genre) genreSet.add(e.genre);
+    }
+    return {
+      venues: venues.sort((a, b) => a.name.localeCompare(b.name)),
+      cities: cities.sort((a, b) => a.localeCompare(b)),
+      genres: Array.from(genreSet).sort((a, b) => a.localeCompare(b)),
+    };
   }
 
   async getArtistById(id: string): Promise<Artist | null> {
@@ -1026,7 +1116,7 @@ export class MemoryCatalogRepository implements ICatalogRepository {
     const link: EventTicketLink = {
       id: crypto.randomUUID(),
       ...ticketLink,
-      inventoryStatus: ticketLink.inventoryStatus ?? 'available',
+      inventoryStatus: ticketLink.inventoryStatus ?? 'unknown',
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };

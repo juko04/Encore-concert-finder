@@ -226,26 +226,19 @@ describe('Taste UI Components', () => {
   });
 
   describe('LoginForm', () => {
-    it('switches between Sign In and Create Account modes', () => {
+    it('renders invite-only login with passwordless default and no create account tab', () => {
       render(<LoginForm redirectTo="/profile/taste" />);
 
       expect(screen.getByText('Welcome Back')).toBeInTheDocument();
       expect(screen.getByTestId('auth-submit-btn')).toHaveTextContent(
-        'Sign In',
+        'Sign In with Magic Link',
       );
+      // Public create account tab is completely removed for invite-only beta
+      expect(screen.queryByTestId('tab-signup')).not.toBeInTheDocument();
 
-      // Click Create Account tab
-      fireEvent.click(screen.getByTestId('tab-signup'));
-
-      expect(screen.getByText('Create an Account')).toBeInTheDocument();
-      expect(screen.getByTestId('auth-submit-btn')).toHaveTextContent(
-        'Create Account',
-      );
-
-      // Click Sign In tab
-      fireEvent.click(screen.getByTestId('tab-signin'));
-
-      expect(screen.getByText('Welcome Back')).toBeInTheDocument();
+      // Switch to password sign in
+      fireEvent.click(screen.getByTestId('method-password'));
+      expect(screen.getByTestId('password-input')).toBeInTheDocument();
       expect(screen.getByTestId('auth-submit-btn')).toHaveTextContent(
         'Sign In',
       );

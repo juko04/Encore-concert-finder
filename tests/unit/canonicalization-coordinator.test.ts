@@ -660,4 +660,56 @@ describe('CanonicalizationCoordinator Unit Tests', () => {
       expect(mapped.primary_ticket_url).toBeNull();
     });
   });
+
+  describe('Availability-Status and Pricing Canonicalization Invariants (Phase 4 Regression)', () => {
+    it('preserves verified sold_out inventoryStatus in ticket link without reverting to available', async () => {
+      const candidateSoldOut = {
+        ...fixtures.single_show,
+        id: crypto.randomUUID(),
+        inventoryStatus: 'sold_out' as const,
+        ticketUrl: 'https://tickets.example.com/sold-out-show',
+        price: { min: 30, max: 30, currency: 'USD', isFree: false },
+      };
+
+      const res = await coordinator.canonicalize(candidateSoldOut);
+      expect(res.status).toBe('created');
+      expect(res.eventId).toBeDefined();
+
+      const event = await catalogRepo.getEventById(res.eventId!);
+      expect(event).toBeDefined();
+      expect(event?.ticketLinks?.[0]?.inventoryStatus).toBe('sold_out');
+      expect(event?.minPrice).toBe(30);
+      expect(event?.maxPrice).toBe(30);
+    });
+
+    it('infers sold_out when candidate.rawPayload.isSoldOut is true', async () => {
+      const candidateRawSoldOut = {
+        ...fixtures.single_show,
+        id: crypto.randomUUID(),
+        inventoryStatus: undefined,
+        rawPayload: { isSoldOut: true },
+        ticketUrl: 'https://tickets.example.com/raw-sold-out',
+      };
+
+      const res = await coordinator.canonicalize(candidateRawSoldOut);
+      expect(res.status).toBe('created');
+      const event = await catalogRepo.getEventById(res.eventId!);
+      expect(event?.ticketLinks?.[0]?.inventoryStatus).toBe('sold_out');
+    });
+
+    it('defaults inventoryStatus to unknown when no inventory signal exists (never defaulting to available)', async () => {
+      const candidateUnknownStatus = {
+        ...fixtures.single_show,
+        id: crypto.randomUUID(),
+        inventoryStatus: undefined,
+        rawPayload: {},
+        ticketUrl: 'https://tickets.example.com/unknown-inventory',
+      };
+
+      const res = await coordinator.canonicalize(candidateUnknownStatus);
+      expect(res.status).toBe('created');
+      const event = await catalogRepo.getEventById(res.eventId!);
+      expect(event?.ticketLinks?.[0]?.inventoryStatus).toBe('unknown');
+    });
+  });
 });

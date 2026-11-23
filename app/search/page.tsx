@@ -62,9 +62,17 @@ export default async function SearchPage({ searchParams }: SearchPageProps) {
       ? (resolvedParams.sort as EventSortOption)
       : 'date_asc';
 
+  const UUID_PATTERN =
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+  const isVenueUuid = resolvedParams.venue
+    ? UUID_PATTERN.test(resolvedParams.venue)
+    : false;
+
   const filters: EventListFilters = {
     searchQuery: resolvedParams.q || undefined,
-    venueId: resolvedParams.venue || undefined,
+    venueId: isVenueUuid ? resolvedParams.venue : undefined,
+    venueName:
+      !isVenueUuid && resolvedParams.venue ? resolvedParams.venue : undefined,
     city: resolvedParams.city || undefined,
     fromDate: resolvedParams.startDate || undefined,
     toDate: resolvedParams.endDate || undefined,

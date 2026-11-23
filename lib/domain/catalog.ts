@@ -113,6 +113,8 @@ export interface Event {
   maxPrice?: number | null;
   currency?: string | null;
   announcedAt?: string | null;
+  genre?: string | null;
+  genres?: string[];
   createdAt?: string;
   updatedAt?: string;
 }
@@ -234,6 +236,8 @@ export interface CanonicalEventSummary {
   sources?: CanonicalEventSourceSummary[];
   ticketLinks?: EventTicketLink[];
   inventoryStatus?: TicketInventoryStatus;
+  genre?: string | null;
+  genres?: string[];
 }
 
 export interface CanonicalEventDetail extends Event {

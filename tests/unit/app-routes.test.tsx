@@ -445,7 +445,7 @@ describe('App Router Catalog Integration Routes', () => {
         maxPrice: 200,
       };
 
-      mockListEvents.mockResolvedValueOnce([cheapEvent, expensiveEvent]);
+      mockListEvents.mockResolvedValueOnce([cheapEvent]);
 
       const req = new Request(
         'http://localhost/api/catalog/search?q=rock&minPrice=10&maxPrice=50&sort=price_asc',
@@ -454,6 +454,13 @@ describe('App Router Catalog Integration Routes', () => {
       const data = await res.json();
 
       expect(res.status).toBe(200);
+      expect(mockListEvents).toHaveBeenCalledWith(
+        expect.objectContaining({
+          minPrice: 10,
+          maxPrice: 50,
+          sortBy: 'price_asc',
+        }),
+      );
       expect(Array.isArray(data.events)).toBe(true);
       expect(data.events).toHaveLength(1);
       expect(data.events[0].id).toBe('event-cheap');

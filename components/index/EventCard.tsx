@@ -209,6 +209,7 @@ export function EventCard({
                 event.maxPrice,
                 event.currency,
                 event.eventKind,
+                event.ticketUrl,
               )}
             </span>
 

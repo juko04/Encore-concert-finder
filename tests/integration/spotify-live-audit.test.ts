@@ -88,10 +88,11 @@ describe('Spotify Live Activation & End-to-End Database Integration Audit', () =
       auth: { persistSession: false, autoRefreshToken: false },
     });
 
-    const { error: pingError } = await supabase
+    const { data: targetConn, error: pingError } = await supabase
       .from('user_spotify_connections')
       .select('user_id')
-      .limit(1);
+      .eq('user_id', TARGET_USER_ID)
+      .maybeSingle();
 
     if (pingError) {
       if (process.env.CI) {
@@ -99,6 +100,13 @@ describe('Spotify Live Activation & End-to-End Database Integration Audit', () =
           `Local Supabase connection check failed: ${pingError.message}`,
         );
       }
+      return;
+    }
+
+    if (!targetConn) {
+      console.warn(
+        `Skipping Spotify Live Audit tests: TARGET_USER_ID ('${TARGET_USER_ID}') has no connection row in local database.`,
+      );
       return;
     }
 

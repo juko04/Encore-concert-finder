@@ -63,20 +63,24 @@ describe('GET /api/catalog/search (Server-side Pagination & Filter Route)', () =
     const data = await res.json();
 
     // Verify filters passed to listEvents
-    expect(mockListEvents).toHaveBeenCalledWith({
-      searchQuery: 'National',
-      venueId: 'venue-mb',
-      city: 'Denver',
-      fromDate: '2026-10-01',
-      toDate: '2026-10-31',
-      minPrice: 40,
-      maxPrice: 100,
-      freeOnly: undefined,
-      includeUnknownPrice: true,
-      sortBy: 'price_asc',
-      limit: 50,
-      offset: 50, // (page 2 - 1) * 50
-    });
+    expect(mockListEvents).toHaveBeenCalledWith(
+      expect.objectContaining({
+        searchQuery: 'National',
+        venueId: 'venue-mb',
+        venueName: undefined,
+        city: 'Denver',
+        genre: undefined,
+        fromDate: '2026-10-01',
+        toDate: '2026-10-31',
+        minPrice: 40,
+        maxPrice: 100,
+        freeOnly: undefined,
+        includeUnknownPrice: true,
+        sortBy: 'price_asc',
+        limit: 50,
+        offset: 50, // (page 2 - 1) * 50
+      }),
+    );
 
     // Verify filters passed to countEvents
     expect(mockCountEvents).toHaveBeenCalledWith(
@@ -186,5 +190,35 @@ describe('GET /api/catalog/search (Server-side Pagination & Filter Route)', () =
 
     expect(res.status).toBe(500);
     expect(data.error).toBe('Database unavailable');
+  });
+
+  it('handles GET /api/catalog/search?venueId=Red+Rocks+Amphitheatre&sort=date_asc&limit=50&page=2 gracefully without HTTP 500', async () => {
+    mockListEvents.mockResolvedValueOnce([]);
+    mockCountEvents.mockResolvedValueOnce(3);
+
+    const url =
+      'http://localhost/api/catalog/search?venueId=Red+Rocks+Amphitheatre&sort=date_asc&limit=50&page=2';
+    const req = new Request(url);
+
+    const res = await GET(req);
+    expect(res.status).toBe(200);
+
+    const data = await res.json();
+    expect(mockListEvents).toHaveBeenCalledWith(
+      expect.objectContaining({
+        venueId: 'Red Rocks Amphitheatre',
+        sortBy: 'date_asc',
+        limit: 50,
+        offset: 50,
+      }),
+    );
+    expect(data.events).toEqual([]);
+    expect(data.pagination).toEqual({
+      page: 2,
+      limit: 50,
+      totalCount: 3,
+      totalPages: 1,
+      hasMore: false,
+    });
   });
 });

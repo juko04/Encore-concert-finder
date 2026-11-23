@@ -204,6 +204,7 @@ test.describe('Spotify Personalized Discover E2E — John Summit Fixture', () =>
     await page.goto('/login?redirectTo=/discover');
     await expect(page.getByTestId('login-container')).toBeVisible();
 
+    await page.getByTestId('method-password').click();
     await page.getByTestId('email-input').fill(targetUserEmail);
     await page.getByTestId('password-input').fill(TEST_AUTH_PASSWORD);
     await page.getByTestId('auth-submit-btn').click();

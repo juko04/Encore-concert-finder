@@ -245,6 +245,7 @@ export function ConcertDetailClient({
                       event.maxPrice,
                       event.currency,
                       event.eventKind,
+                      event.ticketUrl,
                     )}
                   </div>
                   <div className="text-[11px] text-zinc-400">

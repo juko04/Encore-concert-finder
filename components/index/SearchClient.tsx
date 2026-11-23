@@ -36,6 +36,11 @@ export interface SearchClientProps {
   initialQuery?: string;
   initialSortBy?: IndexSortBy;
   referenceDate?: string;
+  initialFacets?: {
+    venues?: Array<{ id: string; name: string; city?: string }>;
+    cities?: string[];
+    genres?: string[];
+  };
 }
 
 export function SearchClient({
@@ -45,6 +50,7 @@ export function SearchClient({
   initialQuery = '',
   initialSortBy = 'date_asc',
   referenceDate,
+  initialFacets,
 }: SearchClientProps) {
   const baseRaw = rawInitialEvents ?? rawEvents ?? [];
   const [eventsList, setEventsList] = useState<IndexEventItem[]>(() =>
@@ -62,7 +68,46 @@ export function SearchClient({
   });
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [isServerSearching, setIsServerSearching] = useState(false);
+  const [searchError, setSearchError] = useState<string | null>(null);
   const isInitialMount = useRef(true);
+  const abortControllerRef = useRef<AbortController | null>(null);
+  const requestIdRef = useRef<number>(0);
+
+  // Catalog-wide facets
+  const [catalogFacets, setCatalogFacets] = useState<{
+    venues: Array<{ id?: string; name: string }>;
+    cities: string[];
+    genres: string[];
+  }>({
+    venues: initialFacets?.venues || [],
+    cities: initialFacets?.cities || [],
+    genres: initialFacets?.genres || [],
+  });
+
+  useEffect(() => {
+    let cancelled = false;
+    async function fetchCatalogFacets() {
+      try {
+        const res = await fetch('/api/catalog/facets');
+        if (res.ok) {
+          const data = await res.json();
+          if (!cancelled && data.venues) {
+            setCatalogFacets({
+              venues: data.venues || [],
+              cities: data.cities || [],
+              genres: data.genres || [],
+            });
+          }
+        }
+      } catch {
+        // Fall back gracefully
+      }
+    }
+    fetchCatalogFacets();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     const list = (rawInitialEvents ?? rawEvents ?? []).map(toIndexEventItem);
@@ -97,24 +142,41 @@ export function SearchClient({
   const [layout, setLayout] = useState<'grid' | 'list'>('grid');
   const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false);
 
-  // Facet extraction
+  // Catalog-wide facet options with fallback to local events
   const uniqueVenues = useMemo(() => {
-    const set = new Set<string>();
+    if (catalogFacets.venues.length > 0) {
+      return catalogFacets.venues;
+    }
+    const map = new Map<string, { id?: string; name: string }>();
     normalizedEvents.forEach((e) => {
-      if (e.venueName && e.venueName !== 'Venue TBA') set.add(e.venueName);
+      if (e.venueName && e.venueName !== 'Venue TBA') {
+        const existing = map.get(e.venueName);
+        if (!existing || (!existing.id && e.venueId)) {
+          map.set(e.venueName, {
+            id: e.venueId ?? undefined,
+            name: e.venueName,
+          });
+        }
+      }
     });
-    return Array.from(set).sort();
-  }, [normalizedEvents]);
+    return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name));
+  }, [catalogFacets.venues, normalizedEvents]);
 
   const uniqueCities = useMemo(() => {
+    if (catalogFacets.cities.length > 0) {
+      return catalogFacets.cities;
+    }
     const set = new Set<string>();
     normalizedEvents.forEach((e) => {
       if (e.city) set.add(e.city);
     });
     return Array.from(set).sort();
-  }, [normalizedEvents]);
+  }, [catalogFacets.cities, normalizedEvents]);
 
   const uniqueGenres = useMemo(() => {
+    if (catalogFacets.genres.length > 0) {
+      return catalogFacets.genres;
+    }
     const set = new Set<string>();
     normalizedEvents.forEach((e) => {
       if (e.genre) {
@@ -123,7 +185,7 @@ export function SearchClient({
       }
     });
     return Array.from(set).sort();
-  }, [normalizedEvents]);
+  }, [catalogFacets.genres, normalizedEvents]);
 
   // Active filter count
   const activeFilterCount = useMemo(() => {
@@ -161,14 +223,26 @@ export function SearchClient({
     setSelectedGenre('all');
     setStatusFilter('all');
     setSortBy('date_asc');
+    setSearchError(null);
+    setCurrentPage(1);
   };
 
   const buildSearchParams = useCallback(
     (pageNumber: number) => {
       const params = new URLSearchParams();
       if (query.trim()) params.set('q', query.trim());
-      if (selectedVenue !== 'all') params.set('venueId', selectedVenue);
+      if (selectedVenue !== 'all') {
+        const found = uniqueVenues.find(
+          (v) => v.name === selectedVenue || v.id === selectedVenue,
+        );
+        if (found?.id) {
+          params.set('venueId', found.id);
+        } else {
+          params.set('venue', selectedVenue);
+        }
+      }
       if (selectedCity !== 'all') params.set('city', selectedCity);
+      if (selectedGenre !== 'all') params.set('genre', selectedGenre);
 
       const ref = referenceDate
         ? new Date(`${referenceDate}T12:00:00Z`)
@@ -229,6 +303,8 @@ export function SearchClient({
       query,
       selectedVenue,
       selectedCity,
+      selectedGenre,
+      uniqueVenues,
       dateFilter,
       customStartDate,
       customEndDate,
@@ -240,19 +316,25 @@ export function SearchClient({
     ],
   );
 
-  useEffect(() => {
-    if (isInitialMount.current) {
-      isInitialMount.current = false;
-      return;
-    }
+  const executeSearch = useCallback(
+    async (pageNumber: number = 1) => {
+      if (typeof fetch !== 'function') return;
 
-    if (typeof fetch !== 'function') return;
+      abortControllerRef.current?.abort();
+      const controller = new AbortController();
+      abortControllerRef.current = controller;
+      const currentRequestId = ++requestIdRef.current;
 
-    const timer = setTimeout(async () => {
       try {
         setIsServerSearching(true);
-        const params = buildSearchParams(1);
-        const res = await fetch(`/api/catalog/search?${params.toString()}`);
+        setSearchError(null);
+        const params = buildSearchParams(pageNumber);
+        const res = await fetch(`/api/catalog/search?${params.toString()}`, {
+          signal: controller.signal,
+        });
+
+        if (currentRequestId !== requestIdRef.current) return;
+
         if (res.ok) {
           const data = await res.json();
           const items: Array<CanonicalEventSummary | IndexEventItem> =
@@ -260,7 +342,7 @@ export function SearchClient({
           const pagination = Array.isArray(data) ? null : data.pagination;
 
           setEventsList(items.map(toIndexEventItem));
-          setCurrentPage(1);
+          setCurrentPage(pageNumber);
           if (pagination) {
             setServerTotalCount(pagination.totalCount);
             setHasMore(pagination.hasMore);
@@ -268,25 +350,78 @@ export function SearchClient({
             setServerTotalCount(items.length);
             setHasMore(items.length >= 50);
           }
+        } else {
+          const errData = await res.json().catch(() => ({}));
+          setSearchError(
+            errData.error || 'Failed to search concerts. Please try again.',
+          );
         }
-      } catch (err) {
-        console.error('[SearchClient] Error searching events:', err);
+      } catch (err: unknown) {
+        if (err instanceof Error && err.name === 'AbortError') {
+          return;
+        }
+        if (currentRequestId === requestIdRef.current) {
+          console.error('[SearchClient] Error searching events:', err);
+          setSearchError(
+            'Network error while searching concerts. Please check your connection.',
+          );
+        }
       } finally {
-        setIsServerSearching(false);
+        if (currentRequestId === requestIdRef.current) {
+          setIsServerSearching(false);
+        }
       }
+    },
+    [buildSearchParams],
+  );
+
+  useEffect(() => {
+    if (isInitialMount.current) {
+      isInitialMount.current = false;
+      return;
+    }
+
+    // Immediately cancel any in-flight load-more or search requests when filter dependencies change
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+    requestIdRef.current++;
+
+    const timer = setTimeout(() => {
+      executeSearch(1);
     }, 250);
 
     return () => clearTimeout(timer);
-  }, [buildSearchParams]);
+  }, [executeSearch]);
 
   const handleLoadMore = async () => {
     if (isLoadingMore || !hasMore || typeof fetch !== 'function') return;
     setIsLoadingMore(true);
+    setSearchError(null);
+
+    // Participate in request-version tracking so filter changes cancel stale Load More
+    const loadMoreRequestId = ++requestIdRef.current;
 
     try {
       const nextPage = currentPage + 1;
       const params = buildSearchParams(nextPage);
-      const res = await fetch(`/api/catalog/search?${params.toString()}`);
+
+      // Use AbortController so filter changes can cancel this request
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+      const controller = new AbortController();
+      abortControllerRef.current = controller;
+
+      const res = await fetch(`/api/catalog/search?${params.toString()}`, {
+        signal: controller.signal,
+      });
+
+      // If filters changed while this was in-flight, discard the result
+      if (loadMoreRequestId !== requestIdRef.current) {
+        return;
+      }
+
       if (res.ok) {
         const data = await res.json();
         const items: Array<CanonicalEventSummary | IndexEventItem> =
@@ -306,11 +441,21 @@ export function SearchClient({
         } else {
           setHasMore(normalized.length >= 50);
         }
+      } else {
+        const errData = await res.json().catch(() => ({}));
+        setSearchError(errData.error || 'Failed to load more concerts.');
       }
     } catch (err) {
+      // Ignore abort errors from filter changes
+      if (err instanceof DOMException && err.name === 'AbortError') {
+        return;
+      }
       console.error('[SearchClient] Error loading more events:', err);
+      setSearchError('Network error while loading more concerts.');
     } finally {
-      setIsLoadingMore(false);
+      if (loadMoreRequestId === requestIdRef.current) {
+        setIsLoadingMore(false);
+      }
     }
   };
 
@@ -406,12 +551,17 @@ export function SearchClient({
         return false;
       }
 
-      // 6. Genre Filter
+      // 6. Genre Filter (checks event genre metadata and subgenres)
       if (selectedGenre !== 'all') {
-        if (
-          !event.genre ||
-          !event.genre.toLowerCase().includes(selectedGenre.toLowerCase())
-        ) {
+        const matchesPrimary =
+          event.genre &&
+          event.genre.toLowerCase().includes(selectedGenre.toLowerCase());
+        const matchesSub =
+          event.subgenres &&
+          event.subgenres.some((s) =>
+            s.toLowerCase().includes(selectedGenre.toLowerCase()),
+          );
+        if (!matchesPrimary && !matchesSub) {
           return false;
         }
       }
@@ -684,8 +834,8 @@ export function SearchClient({
               >
                 <option value="all">All Venues</option>
                 {uniqueVenues.map((v) => (
-                  <option key={v} value={v}>
-                    {v}
+                  <option key={v.name} value={v.name}>
+                    {v.name}
                   </option>
                 ))}
               </select>
@@ -756,6 +906,25 @@ export function SearchClient({
 
         {/* Results Column */}
         <main className="space-y-4 md:col-span-3">
+          {searchError && (
+            <div
+              className="flex items-center justify-between rounded-xl border border-red-200 bg-red-50 p-4 text-xs text-red-800"
+              role="alert"
+            >
+              <span>{searchError}</span>
+              <button
+                type="button"
+                data-testid="search-retry-btn"
+                onClick={() => {
+                  executeSearch(currentPage);
+                }}
+                className="rounded-lg bg-red-800 px-3 py-1 font-semibold text-white hover:bg-red-900"
+              >
+                Retry
+              </button>
+            </div>
+          )}
+
           {/* Controls Bar: Results Count + Sort Dropdown */}
           <div className="shadow-2xs flex flex-wrap items-center justify-between gap-3 rounded-xl border border-zinc-200/90 bg-white px-4 py-2.5">
             <span className="text-xs text-zinc-600">

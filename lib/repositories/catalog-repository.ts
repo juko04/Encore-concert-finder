@@ -87,6 +87,8 @@ interface EventRow {
   max_price?: number | null;
   currency?: string | null;
   announced_at: string | null;
+  genre?: string | null;
+  genres?: string[] | null;
   created_at: string;
   updated_at: string;
 }
@@ -247,6 +249,8 @@ function mapEventRow(row: EventRow): Event {
         : undefined,
     currency: row.currency,
     announcedAt: row.announced_at,
+    genre: row.genre ?? null,
+    genres: Array.isArray(row.genres) ? row.genres : [],
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -612,20 +616,71 @@ export class SupabaseCatalogRepository implements ICatalogRepository {
       query = query.or(orClauses.join(','));
     }
 
-    if (filters?.fromDate) {
+    if (filters?.excludePastShowtimes && filters?.fromDate) {
+      const today = filters.fromDate;
+      const nowIso = filters.referenceNowIso || new Date().toISOString();
+      query = query.or(
+        `local_start_date.gt.${today},and(local_start_date.eq.${today},starts_at.gte.${nowIso}),and(local_start_date.eq.${today},starts_at.is.null)`,
+      );
+    } else if (filters?.fromDate) {
       query = query.gte('local_start_date', filters.fromDate);
     }
     if (filters?.toDate) {
       query = query.lte('local_start_date', filters.toDate);
     }
     if (filters?.venueId) {
-      query = query.eq('venue_id', filters.venueId);
+      const UUID_PATTERN =
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+      if (UUID_PATTERN.test(filters.venueId)) {
+        query = query.eq('venue_id', filters.venueId);
+      } else {
+        const escaped = escapeLikePattern(filters.venueId.trim());
+        const { data: vData, error: vErr } = await this.client
+          .from('venues')
+          .select('id')
+          .ilike('name', `%${escaped}%`);
+        if (vErr) {
+          throw new Error(`Failed to query venues by name: ${vErr.message}`);
+        }
+        const vIds = (vData || []).map((v) => v.id);
+        if (vIds.length === 0) {
+          return [];
+        }
+        query = query.in('venue_id', vIds);
+      }
+    } else if (filters?.venueName) {
+      const escaped = escapeLikePattern(filters.venueName.trim());
+      const { data: vData, error: vErr } = await this.client
+        .from('venues')
+        .select('id')
+        .ilike('name', `%${escaped}%`);
+      if (vErr) {
+        throw new Error(`Failed to query venues by name: ${vErr.message}`);
+      }
+      const vIds = (vData || []).map((v) => v.id);
+      if (vIds.length === 0) {
+        return [];
+      }
+      query = query.in('venue_id', vIds);
     }
     if (filters?.city) {
       query = query.ilike('city', `%${filters.city}%`);
     }
     if (filters?.region) {
       query = query.eq('region', filters.region);
+    }
+    if (filters?.genre) {
+      const g = filters.genre.trim().toLowerCase();
+      if (g === 'festival') {
+        query = query.or(
+          'event_kind.eq.festival,event_kind.eq.multi_day_festival,genre.ilike.festival,genres.cs.{festival}',
+        );
+      } else {
+        const escapedG = escapeLikePattern(filters.genre.trim());
+        query = query.or(
+          `genre.ilike."%${escapedG}%",genres.cs.{"${g}"}`,
+        );
+      }
     }
 
     // Database-level price filtering BEFORE pagination
@@ -663,6 +718,7 @@ export class SupabaseCatalogRepository implements ICatalogRepository {
     } else if (sortBy === 'date_desc') {
       query = query
         .order('local_start_date', { ascending: false })
+        .order('starts_at', { ascending: false, nullsFirst: false })
         .order('id', { ascending: true });
     } else if (sortBy === 'title_asc') {
       query = query
@@ -673,6 +729,7 @@ export class SupabaseCatalogRepository implements ICatalogRepository {
       // date_asc (default)
       query = query
         .order('local_start_date', { ascending: true })
+        .order('starts_at', { ascending: true, nullsFirst: false })
         .order('id', { ascending: true });
     }
 
@@ -852,6 +909,22 @@ export class SupabaseCatalogRepository implements ICatalogRepository {
 
       const currency = ticketLinks.find((tl) => tl.currency)?.currency ?? null;
 
+      let inventoryStatus: TicketInventoryStatus = 'unknown';
+      if (ticketLinks.length > 0) {
+        const statuses = ticketLinks.map((tl) => tl.inventoryStatus);
+        if (statuses.every((s) => s === 'sold_out')) {
+          inventoryStatus = 'sold_out';
+        } else if (statuses.some((s) => s === 'low_inventory')) {
+          inventoryStatus = 'low_inventory';
+        } else if (statuses.some((s) => s === 'available')) {
+          inventoryStatus = 'available';
+        } else if (statuses.some((s) => s === 'cancelled')) {
+          inventoryStatus = 'cancelled';
+        }
+      } else if (event.status === 'cancelled') {
+        inventoryStatus = 'cancelled';
+      }
+
       summaries.push({
         id: event.id,
         title: event.name,
@@ -876,6 +949,14 @@ export class SupabaseCatalogRepository implements ICatalogRepository {
         sourceName: sources.length > 0 ? sources[0].name : undefined,
         sources,
         ticketLinks,
+        inventoryStatus,
+        genre:
+          event.genre ??
+          (event.eventKind === 'festival' ||
+          event.eventKind === 'multi_day_festival'
+            ? 'Festival'
+            : null),
+        genres: event.genres ?? [],
       });
     }
 
@@ -1028,20 +1109,71 @@ export class SupabaseCatalogRepository implements ICatalogRepository {
       query = query.or(orClauses.join(','));
     }
 
-    if (filters?.fromDate) {
+    if (filters?.excludePastShowtimes && filters?.fromDate) {
+      const today = filters.fromDate;
+      const nowIso = filters.referenceNowIso || new Date().toISOString();
+      query = query.or(
+        `local_start_date.gt.${today},and(local_start_date.eq.${today},starts_at.gte.${nowIso}),and(local_start_date.eq.${today},starts_at.is.null)`,
+      );
+    } else if (filters?.fromDate) {
       query = query.gte('local_start_date', filters.fromDate);
     }
     if (filters?.toDate) {
       query = query.lte('local_start_date', filters.toDate);
     }
     if (filters?.venueId) {
-      query = query.eq('venue_id', filters.venueId);
+      const UUID_PATTERN =
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+      if (UUID_PATTERN.test(filters.venueId)) {
+        query = query.eq('venue_id', filters.venueId);
+      } else {
+        const escaped = escapeLikePattern(filters.venueId.trim());
+        const { data: vData, error: vErr } = await this.client
+          .from('venues')
+          .select('id')
+          .ilike('name', `%${escaped}%`);
+        if (vErr) {
+          throw new Error(`Failed to query venues by name: ${vErr.message}`);
+        }
+        const vIds = (vData || []).map((v) => v.id);
+        if (vIds.length === 0) {
+          return 0;
+        }
+        query = query.in('venue_id', vIds);
+      }
+    } else if (filters?.venueName) {
+      const escaped = escapeLikePattern(filters.venueName.trim());
+      const { data: vData, error: vErr } = await this.client
+        .from('venues')
+        .select('id')
+        .ilike('name', `%${escaped}%`);
+      if (vErr) {
+        throw new Error(`Failed to query venues by name: ${vErr.message}`);
+      }
+      const vIds = (vData || []).map((v) => v.id);
+      if (vIds.length === 0) {
+        return 0;
+      }
+      query = query.in('venue_id', vIds);
     }
     if (filters?.city) {
       query = query.ilike('city', `%${filters.city}%`);
     }
     if (filters?.region) {
       query = query.eq('region', filters.region);
+    }
+    if (filters?.genre) {
+      const g = filters.genre.trim().toLowerCase();
+      if (g === 'festival') {
+        query = query.or(
+          'event_kind.eq.festival,event_kind.eq.multi_day_festival,genre.ilike.festival,genres.cs.{festival}',
+        );
+      } else {
+        const escapedG = escapeLikePattern(filters.genre.trim());
+        query = query.or(
+          `genre.ilike."%${escapedG}%",genres.cs.{"${g}"}`,
+        );
+      }
     }
 
     if (filters?.freeOnly) {
@@ -1110,6 +1242,46 @@ export class SupabaseCatalogRepository implements ICatalogRepository {
     }
 
     return Array.from(citySet).sort();
+  }
+
+  async getFacets(): Promise<{
+    venues: Array<{ id: string; name: string; city?: string }>;
+    cities: string[];
+    genres: string[];
+  }> {
+    const [venuesRes, citiesList, genresRes] = await Promise.all([
+      this.client
+        .from('venues')
+        .select('id, name, city')
+        .order('name', { ascending: true }),
+      this.listCities().catch(() => []),
+      this.client
+        .from('events')
+        .select('genre')
+        .not('genre', 'is', null),
+    ]);
+
+    const venues = (venuesRes.data || []).map((v) => ({
+      id: v.id,
+      name: v.name,
+      city: v.city ?? undefined,
+    }));
+
+    const genreSet = new Set<string>();
+
+    if (genresRes.data) {
+      for (const row of genresRes.data as Array<{ genre?: string | null }>) {
+        if (row.genre && row.genre.trim().length > 0) {
+          genreSet.add(row.genre.trim());
+        }
+      }
+    }
+
+    return {
+      venues,
+      cities: citiesList.sort((a, b) => a.localeCompare(b)),
+      genres: Array.from(genreSet).sort((a, b) => a.localeCompare(b)),
+    };
   }
 
   async getArtistById(id: string): Promise<Artist | null> {
@@ -1640,7 +1812,7 @@ export class SupabaseCatalogRepository implements ICatalogRepository {
         min_price: ticketLink.minPrice ?? null,
         max_price: ticketLink.maxPrice ?? null,
         currency: ticketLink.currency ?? null,
-        inventory_status: ticketLink.inventoryStatus ?? 'available',
+        inventory_status: ticketLink.inventoryStatus ?? 'unknown',
         verified_at: ticketLink.verifiedAt ?? null,
       })
       .select('*')

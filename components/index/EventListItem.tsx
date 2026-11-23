@@ -129,6 +129,7 @@ export function EventListItem({
               event.maxPrice,
               event.currency,
               event.eventKind,
+              event.ticketUrl,
             )}
           </div>
           {event.ageRestriction &&

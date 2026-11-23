@@ -1,6 +1,9 @@
 import { NextResponse } from 'next/server';
+import { createServerClient } from '@supabase/ssr';
 import { createClient } from '@/lib/supabase/server';
+import { getPublicEnv } from '@/lib/env/public';
 import { SupabaseCatalogRepository } from '@/lib/repositories/catalog-repository';
+import { deriveLocalDateFromInstant } from '@/lib/domain/value-objects';
 import type {
   EventListFilters,
   EventSortOption,
@@ -12,10 +15,36 @@ export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
     const q = searchParams.get('q')?.trim() || undefined;
+
     const venueId = searchParams.get('venueId')?.trim() || undefined;
+    const venueParam =
+      searchParams.get('venue')?.trim() ||
+      searchParams.get('venueName')?.trim() ||
+      undefined;
+    const venueName = venueParam || undefined;
+
     const city = searchParams.get('city')?.trim() || undefined;
-    const startDate = searchParams.get('startDate')?.trim() || undefined;
-    const endDate = searchParams.get('endDate')?.trim() || undefined;
+    const genre = searchParams.get('genre')?.trim() || undefined;
+
+    // Local calendar date derived in validated target timezone (never naive UTC split)
+    const timezone = searchParams.get('timezone')?.trim() || 'America/Denver';
+    const now = new Date();
+    const nowIso = now.toISOString();
+    const todayLocalDate = deriveLocalDateFromInstant(nowIso, timezone);
+    const twelveMonthsFuture = new Date(now.getTime() + 365 * 86400000);
+    const twelveMonthsLocalDate = deriveLocalDateFromInstant(
+      twelveMonthsFuture.toISOString(),
+      timezone,
+    );
+
+    const startDateParam = searchParams.get('startDate')?.trim();
+    const endDateParam = searchParams.get('endDate')?.trim();
+
+    const startDate = startDateParam || todayLocalDate;
+    const endDate = endDateParam || twelveMonthsLocalDate;
+    // Exclude completed past showtimes on current day inside the database query unless explicit past startDate is provided
+    const excludePastShowtimes = !startDateParam;
+
     const minPriceParam = searchParams.get('minPrice');
     const maxPriceParam = searchParams.get('maxPrice');
     const minPrice =
@@ -50,7 +79,22 @@ export async function GET(request: Request) {
         ? Math.max(Number(offsetParam) || 0, 0)
         : (page - 1) * limit;
 
-    const supabase = await createClient();
+    let supabase;
+    try {
+      supabase = await createClient();
+    } catch {
+      const env = getPublicEnv();
+      supabase = createServerClient(
+        env.NEXT_PUBLIC_SUPABASE_URL,
+        env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY,
+        {
+          cookies: {
+            getAll: () => [],
+            setAll: () => {},
+          },
+        },
+      );
+    }
     const catalogRepo = new SupabaseCatalogRepository(supabase);
 
     const validSorts: EventSortOption[] = [
@@ -69,7 +113,9 @@ export async function GET(request: Request) {
     const filters: EventListFilters = {
       searchQuery: q,
       venueId,
+      venueName,
       city,
+      genre,
       fromDate: startDate,
       toDate: endDate,
       minPrice:
@@ -85,68 +131,18 @@ export async function GET(request: Request) {
       sortBy: repoSortBy,
       limit,
       offset,
+      excludePastShowtimes,
+      referenceNowIso: nowIso,
     };
 
-    const [rawEvents, countResult] = await Promise.all([
+    const [events, countResult] = await Promise.all([
       catalogRepo.listEvents(filters),
       typeof catalogRepo.countEvents === 'function'
         ? catalogRepo.countEvents(filters)
         : Promise.resolve(0),
     ]);
 
-    let events = [...rawEvents];
-
-    // Client price safety filter (also ensures mocks without DB filtering adhere to bounds)
-    if (minPrice !== undefined && !Number.isNaN(minPrice)) {
-      events = events.filter(
-        (e) =>
-          (e.minPrice !== null &&
-            e.minPrice !== undefined &&
-            e.minPrice >= minPrice) ||
-          (includeUnknownPrice &&
-            (e.minPrice === null || e.minPrice === undefined)),
-      );
-    }
-
-    if (maxPrice !== undefined && !Number.isNaN(maxPrice)) {
-      events = events.filter((e) => {
-        if (e.eventKind === 'free_event') return true;
-        if (e.minPrice === null || e.minPrice === undefined) {
-          return includeUnknownPrice;
-        }
-        return e.minPrice <= maxPrice;
-      });
-    }
-
-    if (freeOnly) {
-      events = events.filter(
-        (e) => e.eventKind === 'free_event' || e.minPrice === 0,
-      );
-    }
-
-    const totalCount = Math.max(countResult, offset + events.length);
-
-    // Client-requested sorts not handled at repository level
-    if (sort === 'date_desc') {
-      events.sort(
-        (a, b) =>
-          b.localStartDate.localeCompare(a.localStartDate) ||
-          b.id.localeCompare(a.id),
-      );
-    } else if (sort === 'price_desc') {
-      events.sort((a, b) => {
-        const aPrice = a.minPrice ?? -Infinity;
-        const bPrice = b.minPrice ?? -Infinity;
-        return (
-          bPrice - aPrice ||
-          a.localStartDate.localeCompare(b.localStartDate) ||
-          a.id.localeCompare(b.id)
-        );
-      });
-    } else if (sort === 'title_asc') {
-      events.sort((a, b) => a.title.localeCompare(b.title));
-    }
-
+    const totalCount = countResult;
     const totalPages = Math.ceil(totalCount / limit) || 1;
     const hasMore = offset + events.length < totalCount;
     const currentPage = Math.floor(offset / limit) + 1;

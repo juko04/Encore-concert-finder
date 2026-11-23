@@ -146,6 +146,7 @@ test.describe('Authenticated Music Taste Profile Browser E2E Flow', () => {
     await expect(page.getByTestId('login-container')).toBeVisible();
 
     // 2. Perform sign in with isolated test user credentials
+    await page.getByTestId('method-password').click();
     await page.getByTestId('email-input').fill(testEmail);
     await page.getByTestId('password-input').fill(testPassword);
     await page.getByTestId('auth-submit-btn').click();

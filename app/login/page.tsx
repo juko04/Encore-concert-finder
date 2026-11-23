@@ -5,12 +5,17 @@ import { sanitizeRedirectPath } from '@/lib/auth/redirect';
 interface LoginPageProps {
   searchParams?: Promise<{
     redirectTo?: string;
+    error?: string;
+    method?: string;
   }>;
 }
 
 export default async function LoginPage({ searchParams }: LoginPageProps) {
   const resolvedParams = searchParams ? await searchParams : {};
   const redirectTo = sanitizeRedirectPath(resolvedParams.redirectTo);
+  const error = resolvedParams.error;
+  const method =
+    resolvedParams.method === 'password' ? 'password' : 'magic_link';
 
   return (
     <main className="flex min-h-screen flex-col items-center justify-center bg-zinc-950 px-4 py-12 text-zinc-100 sm:px-6 lg:px-8">
@@ -29,7 +34,11 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
         </h1>
       </div>
 
-      <LoginForm redirectTo={redirectTo} />
+      <LoginForm
+        redirectTo={redirectTo}
+        initialError={error}
+        defaultMethod={method}
+      />
     </main>
   );
 }

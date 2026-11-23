@@ -40,6 +40,7 @@ const MOCK_CANONICAL_EVENT: CanonicalEventSummary = {
   startTimePrecision: 'instant',
   status: 'scheduled',
   eventKind: 'concert',
+  inventoryStatus: 'available',
   artists: [
     {
       id: 'art-cure',
@@ -529,6 +530,61 @@ describe('Index Components Unit Tests', () => {
       expect(
         screen.queryByText('Denver Jazz Collective'),
       ).not.toBeInTheDocument();
+    });
+
+    it('cancels stale in-flight Load More requests when filters change', async () => {
+      const mockAbort = vi.fn();
+      let capturedSignal: AbortSignal | undefined;
+
+      const globalFetch = global.fetch;
+      global.fetch = vi.fn().mockImplementation((_url: string, opts?: { signal?: AbortSignal }) => {
+        capturedSignal = opts?.signal;
+        if (capturedSignal) {
+          capturedSignal.addEventListener('abort', mockAbort);
+        }
+        return new Promise((resolve) => {
+          setTimeout(() => {
+            resolve({
+              ok: true,
+              json: async () => ({
+                events: [
+                  {
+                    id: 'stale-event-1',
+                    title: 'Stale Event That Should Be Discarded',
+                    venueName: 'Stale Venue',
+                    localStartDate: '2026-12-01',
+                    genres: [],
+                  },
+                ],
+                pagination: { totalCount: 100, hasMore: true },
+              }),
+            });
+          }, 100);
+        });
+      });
+
+      try {
+        render(
+          <SearchClient
+            events={MOCK_INDEX_ITEMS}
+            totalCount={100}
+            referenceDate="2026-11-14"
+          />,
+        );
+
+        // Click Load More to start in-flight request
+        const loadMoreBtn = screen.getByRole('button', { name: /load more concerts/i });
+        fireEvent.click(loadMoreBtn);
+
+        // Change filter before Load More completes
+        const searchInput = screen.getByPlaceholderText(/search by artist, headliner, venue/i);
+        fireEvent.change(searchInput, { target: { value: 'Different Filter' } });
+
+        // Verify previous in-flight request was aborted
+        expect(mockAbort).toHaveBeenCalled();
+      } finally {
+        global.fetch = globalFetch;
+      }
     });
   });
 

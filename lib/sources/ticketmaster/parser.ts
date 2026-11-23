@@ -195,6 +195,31 @@ export function parseTicketmasterEvent(
     ticketingStatus = event.ticketing.status.code;
   }
 
+  // Derive inventory status from dates status and ticketing status
+  const statusCode = event.dates.status?.code?.toLowerCase();
+  const ticketingCode = ticketingStatus?.toLowerCase();
+
+  let inventoryStatus:
+    | 'available'
+    | 'low_inventory'
+    | 'sold_out'
+    | 'cancelled'
+    | 'unknown' = 'unknown';
+
+  if (statusCode === 'canceled' || statusCode === 'cancelled') {
+    inventoryStatus = 'cancelled';
+  } else if (
+    statusCode === 'sold_out' ||
+    statusCode === 'soldout' ||
+    ticketingCode === 'sold_out' ||
+    ticketingCode === 'soldout'
+  ) {
+    inventoryStatus = 'sold_out';
+  } else {
+    // Note: statusCode === 'onsale' indicates an active onsale window, not proof of remaining inventory
+    inventoryStatus = 'unknown';
+  }
+
   // 7. Event Kind & Festival Detection
   const isMultiDay = Boolean(
     event.dates.end?.localDate && event.dates.end.localDate !== localStartDate,
@@ -266,6 +291,7 @@ export function parseTicketmasterEvent(
     startTimePrecision,
     ticketUrl,
     price,
+    inventoryStatus,
     isFestival,
     eventKind,
     confidence: isComplete ? 0.95 : 0.5,

@@ -143,6 +143,13 @@ export default async function TasteProfilePage({
           {user ? (
             <div className="flex items-center gap-3">
               <span className="text-xs text-zinc-400">{user.email}</span>
+              <Link
+                href="/login/reset-password"
+                data-testid="change-password-link"
+                className="rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-1.5 text-xs font-medium text-zinc-300 hover:border-zinc-700 hover:text-white"
+              >
+                Change Password
+              </Link>
               <form action={signOutAction}>
                 <button
                   type="submit"

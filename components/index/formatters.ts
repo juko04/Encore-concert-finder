@@ -108,6 +108,7 @@ export function formatIndexPrice(
   maxPrice?: number | null,
   currency?: string | null,
   eventKind?: string | null,
+  ticketUrl?: string | null,
 ): string {
   // 1. Explicit free event kind
   if (eventKind === 'free_event') {
@@ -134,7 +135,7 @@ export function formatIndexPrice(
     (minPrice === null || minPrice === undefined) &&
     (maxPrice === null || maxPrice === undefined)
   ) {
-    return 'Price TBA';
+    return ticketUrl ? 'Check ticket prices' : 'Price TBA';
   }
 
   // Determine currency symbol or prefix
@@ -160,7 +161,7 @@ export function formatIndexPrice(
     return `Up to ${sym}${maxPrice}`;
   }
 
-  return 'Price TBA';
+  return ticketUrl ? 'Check ticket prices' : 'Price TBA';
 }
 
 export const formatPrice = formatIndexPrice;
@@ -195,7 +196,7 @@ export function getStatusBadge(
     case 'sold_out':
       return {
         label: 'Sold Out',
-        bg: 'bg-rose-50 text-rose-700 border-rose-200',
+        bg: 'bg-rose-100 text-rose-800 border-rose-300 font-bold',
       };
     case 'cancelled':
       return {
@@ -205,8 +206,8 @@ export function getStatusBadge(
     case 'unknown':
     default:
       return {
-        label: 'Tickets Available',
-        bg: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+        label: 'Check Tickets',
+        bg: 'bg-zinc-100 text-zinc-600 border-zinc-200',
       };
   }
 }

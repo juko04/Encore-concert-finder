@@ -583,7 +583,7 @@ export function parseZ2Events(
             isFree: raw.price.isFree,
           }
         : undefined,
-      inventoryStatus: raw.isSoldOut ? 'sold_out' : 'available',
+      inventoryStatus: raw.isSoldOut ? 'sold_out' : 'unknown',
       eventKind: raw.price?.isFree ? 'free_event' : 'concert',
       isFestival: false,
       confidence: 0.98,

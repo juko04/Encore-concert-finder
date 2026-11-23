@@ -115,9 +115,12 @@ describe('Index Formatters Unit Tests', () => {
       expect(formatIndexPrice(30, 45, 'CAD')).toBe('CAD 30–CAD 45');
     });
 
-    it('formats missing prices as Price TBA', () => {
+    it('formats missing prices as Price TBA or Check ticket prices when url exists', () => {
       expect(formatIndexPrice(null, null)).toBe('Price TBA');
       expect(formatIndexPrice(undefined, undefined)).toBe('Price TBA');
+      expect(
+        formatIndexPrice(null, null, 'USD', undefined, 'https://example.com/tickets'),
+      ).toBe('Check ticket prices');
     });
 
     it('provides formatPrice alias identical to formatIndexPrice', () => {
@@ -130,10 +133,10 @@ describe('Index Formatters Unit Tests', () => {
       expect(getStatusBadge('available').label).toBe('Tickets Available');
       expect(getStatusBadge('low_inventory').label).toBe('Low Inventory');
       expect(getStatusBadge('sold_out').label).toBe('Sold Out');
-      expect(getStatusBadge('sold_out').bg).toContain('text-rose-700');
+      expect(getStatusBadge('sold_out').bg).toContain('text-rose-800');
       expect(getStatusBadge('cancelled').label).toBe('Cancelled');
       expect(getStatusBadge('presale').label).toBe('Presale Soon');
-      expect(getStatusBadge('unknown').label).toBe('Tickets Available');
+      expect(getStatusBadge('unknown').label).toBe('Check Tickets');
     });
   });
 

@@ -1,7 +1,9 @@
 import * as cheerio from 'cheerio';
 import type {
   CandidateArtist,
+  CandidatePrice,
   EventCandidate,
+  EventKind,
   StartTimePrecision,
 } from '@/lib/domain/event-candidate';
 import type { SourceProvenance } from '@/lib/domain/source';
@@ -363,11 +365,71 @@ export function parseCervantesEvents(
       // 1. Title, Status & Artist parsing
       const { cleanTitle, isCanceled, isFestival, artists } =
         parseArtistsFromTitle(rawTitle);
-      const isSoldOut = statusClass.includes('sold-out');
+      const ctaText = $el.find('.rhp-event-cta a').text().trim().toLowerCase();
+      const isSoldOut =
+        statusClass.includes('sold-out') ||
+        ctaText.includes('sold out') ||
+        /\bsold\s*out\b/i.test(rawTitle);
       const isStatusCanceled =
         isCanceled ||
         statusClass.includes('Canceled') ||
         statusClass.includes('canceled');
+
+      // Price extraction
+      const rawPriceText = $el
+        .find('.eventPrice, .rhp-event__price, .price')
+        .text()
+        .trim();
+      const isCtaFree =
+        statusClass.split(/\s+/).includes('free') ||
+        ctaText.includes('free event') ||
+        ctaText.includes('free show') ||
+        ctaText === 'free';
+      const isVerifiedFree =
+        isCtaFree || /\bfree\s+(?:show|event|admission)\b/i.test(rawTitle);
+
+      let price: CandidatePrice | undefined;
+      let eventKind: EventKind = isFestival ? 'festival' : 'concert';
+
+      if (isVerifiedFree) {
+        eventKind = 'free_event';
+        price = { isFree: true, min: 0, max: 0, currency: 'USD' };
+      } else if (rawPriceText && rawPriceText.length > 0) {
+        // Strictly parse designated price element, NEVER title or promotional text
+        const dollarMatches = [
+          ...rawPriceText.matchAll(/\$\s*(\d+(?:\.\d{2})?)/g),
+        ];
+        const parsedValues = dollarMatches
+          .map((m) => parseFloat(m[1]))
+          .filter((v) => !isNaN(v) && v > 0);
+
+        if (parsedValues.length > 0) {
+          price = {
+            min: Math.min(...parsedValues),
+            max: Math.max(...parsedValues),
+            currency: 'USD',
+            isFree: false,
+          };
+        }
+      }
+
+      // Ticket URL normalization
+      let ticketUrl: string | undefined;
+      if (rawTicketUrl) {
+        try {
+          ticketUrl = normalizeUrl(rawTicketUrl);
+        } catch {
+          ticketUrl = rawTicketUrl;
+        }
+      }
+
+      // A ticket URL establishes existence of a ticketing link, not verified inventory availability
+      const inventoryStatus: EventCandidate['inventoryStatus'] =
+        isStatusCanceled
+          ? 'cancelled'
+          : isSoldOut
+            ? 'sold_out'
+            : 'unknown';
 
       // 2. Date & Time normalization in local timezone
       const localStartDate = parseDateString(currentMonthYear, dateText);
@@ -406,17 +468,7 @@ export function parseCervantesEvents(
       // 3. Venue locality
       const venue = resolveVenue(venueText, eventUrl);
 
-      // 4. Ticket URL normalization
-      let ticketUrl: string | undefined;
-      if (rawTicketUrl) {
-        try {
-          ticketUrl = normalizeUrl(rawTicketUrl);
-        } catch {
-          ticketUrl = rawTicketUrl;
-        }
-      }
-
-      // 5. Source Event ID
+      // 4. Source Event ID
       const sourceEventId = extractSourceEventId(eventUrl, rawTicketUrl);
 
       // 6. Provenance
@@ -449,7 +501,9 @@ export function parseCervantesEvents(
         doorsOpenAt,
         startTimePrecision,
         ticketUrl,
-        eventKind: isFestival ? 'festival' : 'concert',
+        price,
+        inventoryStatus,
+        eventKind,
         isFestival,
         confidence: 0.98,
         verificationStatus: 'unverified',

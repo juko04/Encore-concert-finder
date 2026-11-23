@@ -262,7 +262,7 @@ describe('Z2 Entertainment Parser', () => {
       const motetShow = candidates.find((c) => c.title.includes('The Motet'));
 
       expect(motetShow).toBeDefined();
-      expect(motetShow?.inventoryStatus).toBe('available');
+      expect(motetShow?.inventoryStatus).toBe('unknown');
       expect(motetShow?.rawPayload?.isSoldOut).toBe(false);
 
       const rawEvents = parseZ2RawEvents(fixtureHtml);

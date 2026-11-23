@@ -563,7 +563,9 @@ export class CanonicalizationCoordinator {
     const inventoryStatus:
       'available' | 'low_inventory' | 'sold_out' | 'cancelled' | 'unknown' =
       candidate.inventoryStatus ||
-      (candidate.rawPayload?.isSoldOut === true ? 'sold_out' : 'available');
+      (candidate.rawPayload?.isSoldOut === true
+        ? 'sold_out'
+        : 'unknown');
 
     // 7. Assemble Atomic Transaction Payload (zero upfront writes)
     let payload: CanonicalizationPayload;
@@ -603,6 +605,9 @@ export class CanonicalizationCoordinator {
         is_multi_day: isMultiDay,
         official_url: null,
         primary_ticket_url: candidate.ticketUrl ?? null,
+        min_price: candidate.price?.min ?? null,
+        max_price: candidate.price?.max ?? null,
+        currency: candidate.price?.currency ?? null,
       };
 
       const creationEvidences: NonNullable<

@@ -82,10 +82,11 @@ describe('Spotify Live Authentication & Data Retrieval Integration Test', () => 
       auth: { persistSession: false, autoRefreshToken: false },
     });
 
-    const { error: probeError } = await supabase
+    const { data: targetConn, error: probeError } = await supabase
       .from('user_spotify_connections')
       .select('user_id')
-      .limit(1);
+      .eq('user_id', TARGET_USER_ID)
+      .maybeSingle();
 
     if (probeError) {
       if (process.env.CI) {
@@ -93,6 +94,13 @@ describe('Spotify Live Authentication & Data Retrieval Integration Test', () => 
           `user_spotify_connections table probe failed: ${probeError.message}`,
         );
       }
+      return;
+    }
+
+    if (!targetConn) {
+      console.warn(
+        `Skipping Spotify Live Auth tests: TARGET_USER_ID ('${TARGET_USER_ID}') has no connection row in local database.`,
+      );
       return;
     }
 

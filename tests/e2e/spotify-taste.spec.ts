@@ -153,6 +153,7 @@ test.describe('Spotify Taste Explorer & Preview E2E Flow', () => {
     await page.goto('/login?redirectTo=/profile/taste');
     await expect(page.getByTestId('login-container')).toBeVisible();
 
+    await page.getByTestId('method-password').click();
     await page.getByTestId('email-input').fill(testEmail);
     await page.getByTestId('password-input').fill(testPassword);
     await page.getByTestId('auth-submit-btn').click();

@@ -1,15 +1,28 @@
 'use client';
 
 import React, { useState, useTransition } from 'react';
-import { signInAction, signUpAction } from '@/app/login/actions';
+import {
+  signInAction,
+  signInWithMagicLinkAction,
+  requestPasswordResetAction,
+} from '@/app/login/actions';
 
 interface LoginFormProps {
   redirectTo?: string;
+  initialError?: string;
+  defaultMethod?: 'magic_link' | 'password';
 }
 
-export function LoginForm({ redirectTo = '/profile/taste' }: LoginFormProps) {
-  const [mode, setMode] = useState<'signin' | 'signup'>('signin');
-  const [error, setError] = useState<string | null>(null);
+export function LoginForm({
+  redirectTo = '/profile/taste',
+  initialError,
+  defaultMethod = 'magic_link',
+}: LoginFormProps) {
+  const [mode, setMode] = useState<'signin' | 'forgot_password'>('signin');
+  const [authMethod, setAuthMethod] = useState<'magic_link' | 'password'>(
+    defaultMethod,
+  );
+  const [error, setError] = useState<string | null>(initialError || null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
 
@@ -23,8 +36,21 @@ export function LoginForm({ redirectTo = '/profile/taste' }: LoginFormProps) {
 
     startTransition(async () => {
       try {
-        const action = mode === 'signin' ? signInAction : signUpAction;
-        const result = await action(formData);
+        if (mode === 'forgot_password') {
+          const result = await requestPasswordResetAction(formData);
+          if (result?.error) {
+            setError(result.error);
+          } else if (result?.message) {
+            setSuccessMessage(result.message);
+          }
+          return;
+        }
+
+        // Mode is 'signin'
+        const result =
+          authMethod === 'magic_link'
+            ? await signInWithMagicLinkAction(formData)
+            : await signInAction(formData);
 
         if (result?.error) {
           setError(result.error);
@@ -52,49 +78,75 @@ export function LoginForm({ redirectTo = '/profile/taste' }: LoginFormProps) {
       data-testid="login-container"
       className="w-full max-w-md rounded-2xl border border-zinc-800/80 bg-zinc-900/60 p-8 shadow-2xl backdrop-blur"
     >
-      <div className="mb-6 flex border-b border-zinc-800">
-        <button
-          type="button"
-          data-testid="tab-signin"
-          onClick={() => {
-            setMode('signin');
-            setError(null);
-            setSuccessMessage(null);
-          }}
-          className={`pb-3 text-sm font-semibold transition-colors ${
-            mode === 'signin'
-              ? 'border-b-2 border-indigo-500 text-white'
-              : 'text-zinc-400 hover:text-zinc-200'
-          }`}
-        >
-          Sign In
-        </button>
-        <button
-          type="button"
-          data-testid="tab-signup"
-          onClick={() => {
-            setMode('signup');
-            setError(null);
-            setSuccessMessage(null);
-          }}
-          className={`ml-6 pb-3 text-sm font-semibold transition-colors ${
-            mode === 'signup'
-              ? 'border-b-2 border-indigo-500 text-white'
-              : 'text-zinc-400 hover:text-zinc-200'
-          }`}
-        >
-          Create Account
-        </button>
+      {/* Invite-Only Beta Badge */}
+      <div className="mb-4 flex items-center justify-between">
+        <span className="inline-flex items-center rounded-full border border-indigo-500/30 bg-indigo-500/10 px-2.5 py-0.5 text-[11px] font-semibold tracking-wide text-indigo-400">
+          Invite-Only Beta
+        </span>
+        {mode === 'forgot_password' && (
+          <button
+            type="button"
+            data-testid="back-to-signin-btn"
+            onClick={() => {
+              setMode('signin');
+              setError(null);
+              setSuccessMessage(null);
+            }}
+            className="inline-flex items-center gap-1 text-xs font-medium text-zinc-400 hover:text-zinc-200"
+          >
+            ← Back to Sign In
+          </button>
+        )}
       </div>
 
       <h2 className="text-xl font-bold tracking-tight text-white">
-        {mode === 'signin' ? 'Welcome Back' : 'Create an Account'}
+        {mode === 'signin' ? 'Welcome Back' : 'Reset Your Password'}
       </h2>
       <p className="mt-1 text-sm text-zinc-400">
         {mode === 'signin'
-          ? 'Sign in to access your saved music taste and personal recommendations.'
-          : 'Create your Encore profile to curate your music taste and track concerts.'}
+          ? authMethod === 'magic_link'
+            ? 'Enter your invited email address to receive a secure, passwordless login link.'
+            : 'Sign in with your password to access your saved music taste and recommendations.'
+          : 'Enter your email address and we will send you a secure link to reset your password.'}
       </p>
+
+      {/* Sign-in Method Switcher (Magic Link vs Password) */}
+      {mode === 'signin' && (
+        <div className="mt-4 flex items-center justify-between rounded-lg border border-zinc-800 bg-zinc-950 p-1 text-xs font-medium">
+          <button
+            type="button"
+            data-testid="method-magic-link"
+            onClick={() => {
+              setAuthMethod('magic_link');
+              setError(null);
+              setSuccessMessage(null);
+            }}
+            className={`flex-1 rounded-md py-1.5 text-center transition-colors ${
+              authMethod === 'magic_link'
+                ? 'bg-zinc-800 font-semibold text-white shadow-xs'
+                : 'text-zinc-400 hover:text-zinc-200'
+            }`}
+          >
+            Passwordless Link
+          </button>
+          <button
+            type="button"
+            data-testid="method-password"
+            onClick={() => {
+              setAuthMethod('password');
+              setError(null);
+              setSuccessMessage(null);
+            }}
+            className={`flex-1 rounded-md py-1.5 text-center transition-colors ${
+              authMethod === 'password'
+                ? 'bg-zinc-800 font-semibold text-white shadow-xs'
+                : 'text-zinc-400 hover:text-zinc-200'
+            }`}
+          >
+            Password
+          </button>
+        </div>
+      )}
 
       {error && (
         <div
@@ -136,26 +188,44 @@ export function LoginForm({ redirectTo = '/profile/taste' }: LoginFormProps) {
           />
         </div>
 
-        <div>
-          <label
-            htmlFor="password"
-            className="block text-xs font-medium uppercase tracking-wider text-zinc-400"
-          >
-            Password
-          </label>
-          <input
-            id="password"
-            name="password"
-            type="password"
-            autoComplete={
-              mode === 'signin' ? 'current-password' : 'new-password'
-            }
-            required
-            data-testid="password-input"
-            className="mt-1 block w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 placeholder-zinc-500 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
-            placeholder="••••••••"
-          />
-        </div>
+        {/* Password input shown only in password signin */}
+        {mode === 'signin' && authMethod === 'password' && (
+          <div>
+            <label
+              htmlFor="password"
+              className="block text-xs font-medium uppercase tracking-wider text-zinc-400"
+            >
+              Password
+            </label>
+            <input
+              id="password"
+              name="password"
+              type="password"
+              autoComplete="current-password"
+              required
+              data-testid="password-input"
+              className="mt-1 block w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 placeholder-zinc-500 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+              placeholder="••••••••"
+            />
+          </div>
+        )}
+
+        {mode === 'signin' && (
+          <div className="flex items-center justify-end">
+            <button
+              type="button"
+              data-testid="forgot-password-link"
+              onClick={() => {
+                setMode('forgot_password');
+                setError(null);
+                setSuccessMessage(null);
+              }}
+              className="text-xs font-medium text-indigo-400 hover:text-indigo-300"
+            >
+              Forgot password?
+            </button>
+          </div>
+        )}
 
         <button
           type="submit"
@@ -169,9 +239,13 @@ export function LoginForm({ redirectTo = '/profile/taste' }: LoginFormProps) {
               Processing...
             </span>
           ) : mode === 'signin' ? (
-            'Sign In'
+            authMethod === 'magic_link' ? (
+              'Sign In with Magic Link'
+            ) : (
+              'Sign In'
+            )
           ) : (
-            'Create Account'
+            'Send Reset Link'
           )}
         </button>
       </form>

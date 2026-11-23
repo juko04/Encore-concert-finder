@@ -389,6 +389,9 @@ export function parseVelvetElkEvents(
         price: isExplicitFree
           ? { isFree: true, min: 0, max: 0, currency: 'USD' }
           : undefined,
+        inventoryStatus: isCanceled
+          ? 'cancelled'
+          : 'unknown',
         eventKind: isExplicitFree ? 'free_event' : 'concert',
         confidence: 0.98,
         resolutionProvenance: isCanceled ? { status: 'cancelled' } : undefined,
@@ -455,6 +458,13 @@ export function parseVelvetElkEvents(
     const titleToParse = remainingTitle || heading;
     const { cleanTitle, isCanceled, isExplicitFree, artists } =
       parseVelvetElkArtistsFromTitle(titleToParse);
+    const isSoldOut =
+      /\bsold\s*out\b/i.test(heading) || /\bsold\s*out\b/i.test($card.text());
+    const inventoryStatus: EventCandidate['inventoryStatus'] = isCanceled
+      ? 'cancelled'
+      : isSoldOut
+        ? 'sold_out'
+        : 'unknown';
 
     const candidate: EventCandidate = {
       title: cleanTitle,
@@ -471,6 +481,7 @@ export function parseVelvetElkEvents(
       price: isExplicitFree
         ? { isFree: true, min: 0, max: 0, currency: 'USD' }
         : undefined,
+      inventoryStatus,
       eventKind: isExplicitFree ? 'free_event' : 'concert',
       confidence: 0.95,
       resolutionProvenance: isCanceled ? { status: 'cancelled' } : undefined,

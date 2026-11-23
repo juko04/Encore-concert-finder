@@ -680,7 +680,11 @@ export function parseIndependentVenueEvents(
       }
     }
 
-    const isSoldOut = statusClass.includes('sold-out');
+    const ctaText = $el.find('.rhp-event-cta a').text().trim().toLowerCase();
+    const isSoldOut =
+      statusClass.includes('sold-out') ||
+      ctaText.includes('sold out') ||
+      /\bsold\s*out\b/i.test(rawTitle);
     const { cleanTitle, isCanceled, isFestival, isExplicitFree, artists } =
       parseArtistsFromTitle(rawTitle);
     const isStatusCanceled =
@@ -689,7 +693,6 @@ export function parseIndependentVenueEvents(
       statusClass.includes('Canceled');
 
     // Free admission verification: explicit free label in title or free CTA
-    const ctaText = $el.find('.rhp-event-cta a').text().trim().toLowerCase();
     const isCtaFree =
       statusClass.split(/\s+/).includes('free') ||
       ctaText.includes('free event') ||
@@ -703,9 +706,9 @@ export function parseIndependentVenueEvents(
       .find('.eventPrice, .rhp-event__price, .price')
       .text()
       .trim();
-    const hasConflictingPaidPrice =
-      /\$\s*[1-9]\d*(?:\.\d{2})?/.test(rawPriceText) ||
-      /\$\s*[1-9]\d*(?:\.\d{2})?/.test(rawTitle);
+    const hasConflictingPaidPrice = /\$\s*[1-9]\d*(?:\.\d{2})?/.test(
+      rawPriceText,
+    );
 
     let eventKind: EventKind = isFestival ? 'festival' : 'concert';
     let price: CandidatePrice | undefined;
@@ -719,7 +722,31 @@ export function parseIndependentVenueEvents(
         max: 0,
         currency: 'USD',
       };
+    } else if (rawPriceText && rawPriceText.length > 0) {
+      // Strictly extract structured dollar prices from designated price element, NEVER title text
+      const dollarMatches = [
+        ...rawPriceText.matchAll(/\$\s*(\d+(?:\.\d{2})?)/g),
+      ];
+      const parsedValues = dollarMatches
+        .map((m) => parseFloat(m[1]))
+        .filter((v) => !isNaN(v) && v > 0);
+
+      if (parsedValues.length > 0) {
+        price = {
+          min: Math.min(...parsedValues),
+          max: Math.max(...parsedValues),
+          currency: 'USD',
+          isFree: false,
+        };
+      }
     }
+
+    // A ticket URL establishes existence of a ticketing link, not verified inventory availability
+    const inventoryStatus: EventCandidate['inventoryStatus'] = isStatusCanceled
+      ? 'cancelled'
+      : isSoldOut
+        ? 'sold_out'
+        : 'unknown';
 
     // 7. Source Event ID
     const sourceEventId = extractSourceEventId(eventUrl, ticketUrl);
@@ -755,6 +782,7 @@ export function parseIndependentVenueEvents(
       startTimePrecision,
       ticketUrl,
       price,
+      inventoryStatus,
       eventKind,
       isFestival,
       confidence: 0.98,

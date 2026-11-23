@@ -433,10 +433,11 @@ test.describe('Discover Page E2E Suite', () => {
       return;
     }
 
-    // 1. Sign in via /login
+    // 1. Sign in via /login with password method
     await page.goto('/login?redirectTo=/discover');
     await expect(page.getByTestId('login-container')).toBeVisible();
 
+    await page.getByTestId('method-password').click();
     await page.getByTestId('email-input').fill(testEmail);
     await page.getByTestId('password-input').fill(testPassword);
     await page.getByTestId('auth-submit-btn').click();

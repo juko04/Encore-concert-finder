@@ -348,6 +348,14 @@ export function parseRootsMusicProjectEvents(
         }
 
         const ticketUrl = isValidHttpUrl(e.url) ? e.url : undefined;
+        const inventoryStatus: EventCandidate['inventoryStatus'] =
+          isCanceled || e.is_cancelled === true
+            ? 'cancelled'
+            : e.ticket_availability?.is_sold_out
+              ? 'sold_out'
+              : e.ticket_availability?.has_available_tickets
+                ? 'available'
+                : 'unknown';
         const venueName =
           e.primary_venue?.name || defaultVenue?.name || 'Roots Music Project';
         const city =
@@ -374,6 +382,7 @@ export function parseRootsMusicProjectEvents(
           startTimePrecision,
           ticketUrl,
           price,
+          inventoryStatus,
           eventKind,
           confidence: 0.98,
           resolutionProvenance:
@@ -450,6 +459,9 @@ export function parseRootsMusicProjectEvents(
           price: isExplicitFree
             ? { isFree: true, min: 0, max: 0, currency: 'USD' }
             : undefined,
+          inventoryStatus: isCanceled
+            ? 'cancelled'
+            : 'unknown',
           eventKind: isExplicitFree ? 'free_event' : 'concert',
           confidence: 0.95,
           resolutionProvenance: isCanceled

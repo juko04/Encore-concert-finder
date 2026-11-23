@@ -75,6 +75,9 @@ test.describe('Application Smoke Tests', () => {
     await expect(page.getByTestId('login-container')).toBeVisible();
     await expect(page.getByText('Welcome Back')).toBeVisible();
     await expect(page.getByTestId('email-input')).toBeVisible();
+    await expect(page.getByTestId('method-magic-link')).toBeVisible();
+    await expect(page.getByTestId('method-password')).toBeVisible();
+    await page.getByTestId('method-password').click();
     await expect(page.getByTestId('password-input')).toBeVisible();
     await expect(page.getByTestId('auth-submit-btn')).toBeVisible();
   });

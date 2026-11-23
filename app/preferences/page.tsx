@@ -1,4 +1,5 @@
 import React from 'react';
+import Link from 'next/link';
 import { getAuthenticatedUser } from '@/lib/auth/session';
 import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
@@ -176,12 +177,27 @@ export default async function PreferencesPage({
 
           {/* Authenticated Manager or Guest Prompt */}
           {user ? (
-            <TasteProfileManager
-              initialPreferences={preferences}
-              userEmail={user.email}
-              initialSpotifyStatus={spotifyStatus}
-              spotifyBanner={spotifyBanner}
-            />
+            <div className="space-y-6">
+              <div className="shadow-xs flex items-center justify-between rounded-xl border border-zinc-200 bg-white px-5 py-3 text-xs text-zinc-600">
+                <span>
+                  Signed in as{' '}
+                  <strong className="text-zinc-900">{user.email}</strong>
+                </span>
+                <Link
+                  href="/login/reset-password"
+                  data-testid="preferences-change-password-link"
+                  className="font-medium text-indigo-600 hover:text-indigo-500"
+                >
+                  Change Password →
+                </Link>
+              </div>
+              <TasteProfileManager
+                initialPreferences={preferences}
+                userEmail={user.email}
+                initialSpotifyStatus={spotifyStatus}
+                spotifyBanner={spotifyBanner}
+              />
+            </div>
           ) : (
             <GuestTastePrompt />
           )}

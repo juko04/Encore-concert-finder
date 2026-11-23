@@ -187,7 +187,7 @@ export function resolveInventoryStatus(
   if (eventStatus === 'cancelled') return 'cancelled';
 
   if (!explicitStatus) {
-    return 'available';
+    return 'unknown';
   }
 
   const normalized = explicitStatus.toLowerCase().trim();
@@ -198,7 +198,7 @@ export function resolveInventoryStatus(
   if (normalized === 'available' || normalized === 'presale')
     return 'available';
 
-  return 'available';
+  return 'unknown';
 }
 
 /**
