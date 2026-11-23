@@ -3,7 +3,7 @@
 **Pull Request:** [#20](https://github.com/juko04/Encore-concert-finder/pull/20)  
 **Title:** `feat(v2): Encore V2 Unified Index UI, Ticketmaster V2 Engine & Colorado Venue Coverage`  
 **Base Branch:** `main` (commit `3adbf59`)  
-**Feature Branch:** `feature/encore-v2-index-ticketmaster` (latest commit `5d20c8c`)  
+**Feature Branch:** `feature/encore-v2-index-ticketmaster` (latest commit `9236a66`)  
 **Incorporated Baseline:** `feature/spotify-integration-repair` (commit `4009277`)  
 **Repository:** `juko04/Encore-concert-finder`  
 
@@ -303,4 +303,4 @@ Below is the complete file listing comparing `feature/encore-v2-index-ticketmast
 | **Playwright E2E** (`npx playwright test`) | **PASS** | 25.0s | **17/17 browser tests passed in Chromium** (including current-run live Ticketmaster event trace) |
 | **Production Build** (`npm run build`) | **PASS** | 1.04s | Clean Next.js 15.5.27 production build (19 routes) |
 | **Live Ingestion Runner** (`verify-live-ingestion.ts`) | **PASS** | 4.20s | 306 canonical events; Pass 2 100% idempotent (0 duplicates); 282 relations verified (0 orphans) |
-| **Remote GitHub Actions CI** (Workflow `CI`) | **PASS** | 4m41s | **Run 45073033186 on commit 5d20c8c completed 100% green across all 17 verification jobs** |
+| **Remote GitHub Actions CI** (Workflow `CI`) | **PASS** | 4m44s | **Run 45079419304 on commit 9236a66 completed 100% green across all 17 verification jobs** |
