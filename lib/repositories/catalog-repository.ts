@@ -339,6 +339,91 @@ function mapResolutionRow(row: CandidateResolutionRow): CandidateResolution {
   };
 }
 
+/** Internal option: a single, already-resolved PostgREST `or=` search group. */
+interface SearchOpts {
+  searchOr?: string;
+}
+
+const ID_PAGE_SIZE = 1000;
+/** ~37 chars per uuid => ~3 KB of ids per request, safely under URL limits. */
+const SEARCH_IDS_PER_GROUP = 80;
+const SEARCH_GROUP_CONCURRENCY = 6;
+
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  concurrency: number,
+  fn: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let next = 0;
+  const workers = Array.from(
+    { length: Math.min(concurrency, items.length) },
+    async () => {
+      while (next < items.length) {
+        const idx = next++;
+        results[idx] = await fn(items[idx]);
+      }
+    },
+  );
+  await Promise.all(workers);
+  return results;
+}
+
+const cmpStr = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
+/** Ascending/descending with NULLs always last (matches nullsFirst:false). */
+const cmpNullable = (
+  a: number | null | undefined,
+  b: number | null | undefined,
+  dir: 1 | -1,
+) => {
+  if (a == null && b == null) return 0;
+  if (a == null) return 1;
+  if (b == null) return -1;
+  return (a - b) * dir;
+};
+const startsAtMs = (e: CanonicalEventSummary) =>
+  e.startsAt ? Date.parse(e.startsAt) : null;
+
+/** In-memory mirror of the ORDER BY chains used by listEvents (id tiebreaker). */
+export function compareEventSummaries(
+  sortBy: string,
+): (a: CanonicalEventSummary, b: CanonicalEventSummary) => number {
+  return (a, b) => {
+    switch (sortBy) {
+      case 'price_asc':
+        return (
+          cmpNullable(a.minPrice, b.minPrice, 1) ||
+          cmpStr(a.localStartDate, b.localStartDate) ||
+          cmpStr(a.id, b.id)
+        );
+      case 'price_desc':
+        return (
+          cmpNullable(a.minPrice, b.minPrice, -1) ||
+          cmpStr(a.localStartDate, b.localStartDate) ||
+          cmpStr(a.id, b.id)
+        );
+      case 'date_desc':
+        return (
+          cmpStr(b.localStartDate, a.localStartDate) ||
+          cmpNullable(startsAtMs(a), startsAtMs(b), -1) ||
+          cmpStr(a.id, b.id)
+        );
+      case 'title_asc':
+        return (
+          cmpStr(a.title, b.title) ||
+          cmpStr(a.localStartDate, b.localStartDate) ||
+          cmpStr(a.id, b.id)
+        );
+      default:
+        return (
+          cmpStr(a.localStartDate, b.localStartDate) ||
+          cmpNullable(startsAtMs(a), startsAtMs(b), 1) ||
+          cmpStr(a.id, b.id)
+        );
+    }
+  };
+}
+
 export class SupabaseCatalogRepository implements ICatalogRepository {
   private client: SupabaseClient;
 
@@ -457,7 +542,15 @@ export class SupabaseCatalogRepository implements ICatalogRepository {
 
   async listEvents(
     filters?: EventListFilters,
+    opts?: SearchOpts,
   ): Promise<CanonicalEventSummary[]> {
+    if (filters?.searchQuery?.trim() && opts?.searchOr === undefined) {
+      const groups = await this.resolveSearchGroups(filters.searchQuery);
+      if (groups.length === 1) {
+        return this.listEvents(filters, { searchOr: groups[0] });
+      }
+      return this.listEventsAcrossSearchGroups(filters, groups);
+    }
     // If a large number of artist IDs is supplied, chunk into batches of 50 to avoid oversized request URIs
     const CHUNK_SIZE = 50;
     if (filters?.artistIds && filters.artistIds.length > CHUNK_SIZE) {
@@ -473,12 +566,15 @@ export class SupabaseCatalogRepository implements ICatalogRepository {
         globalLimit !== undefined ? globalOffset + globalLimit : undefined;
 
       const chunkPromises = chunks.map((chunk) =>
-        this.listEvents({
-          ...filters,
-          artistIds: chunk,
-          offset: undefined,
-          limit: chunkFetchLimit,
-        }),
+        this.listEvents(
+          {
+            ...filters,
+            artistIds: chunk,
+            offset: undefined,
+            limit: chunkFetchLimit,
+          },
+          opts,
+        ),
       );
       const chunkResults = await Promise.all(chunkPromises);
       const mergedMap = new Map<string, CanonicalEventSummary>();
@@ -537,102 +633,10 @@ export class SupabaseCatalogRepository implements ICatalogRepository {
       query = query.eq('event_artists.artist_id', filters.artistId);
     }
 
-    // Server-side text search across event title, venue name, and artist names
-    if (filters?.searchQuery?.trim()) {
-      const trimmedSearch = filters.searchQuery.trim();
-      const escaped = escapeLikePattern(trimmedSearch);
-      // PostgREST .or() requires quoting for values containing special characters (commas, parentheses, colons, quotes)
-      const quotedEscaped = escaped.replace(/"/g, '""');
-      const orClauses: string[] = [`name.ilike."%${quotedEscaped}%"`];
-
-      // Query matching venues with pagination to avoid silent truncation (Issue 4)
-      const matchedVenueIds: string[] = [];
-      const VENUE_BATCH = 1000;
-      let venueOffset = 0;
-      while (true) {
-        const { data: venuesData, error: venueError } = await this.client
-          .from('venues')
-          .select('id')
-          .ilike('name', `%${escaped}%`)
-          .order('id', { ascending: true })
-          .range(venueOffset, venueOffset + VENUE_BATCH - 1);
-        if (venueError) {
-          throw new Error(
-            `Failed to query venues for search: ${venueError.message}`,
-          );
-        }
-        if (!venuesData || venuesData.length === 0) break;
-        for (const v of venuesData) {
-          matchedVenueIds.push(v.id);
-        }
-        if (venuesData.length < VENUE_BATCH) break;
-        venueOffset += VENUE_BATCH;
-      }
-      for (let i = 0; i < matchedVenueIds.length; i += 200) {
-        const chunk = matchedVenueIds.slice(i, i + 200);
-        orClauses.push(`venue_id.in.(${chunk.join(',')})`);
-      }
-
-      // Query matching artists with pagination (Issue 4)
-      const matchedArtistIds: string[] = [];
-      const ARTIST_BATCH = 1000;
-      let artistOffset = 0;
-      while (true) {
-        const { data: artistsData, error: artistError } = await this.client
-          .from('artists')
-          .select('id')
-          .ilike('name', `%${escaped}%`)
-          .order('id', { ascending: true })
-          .range(artistOffset, artistOffset + ARTIST_BATCH - 1);
-        if (artistError) {
-          throw new Error(
-            `Failed to query artists for search: ${artistError.message}`,
-          );
-        }
-        if (!artistsData || artistsData.length === 0) break;
-        for (const a of artistsData) {
-          matchedArtistIds.push(a.id);
-        }
-        if (artistsData.length < ARTIST_BATCH) break;
-        artistOffset += ARTIST_BATCH;
-      }
-
-      if (matchedArtistIds.length > 0) {
-        // Query event_artists with pagination to prevent silent 1,000-row truncation (Issue 4)
-        const matchedEventIds: string[] = [];
-        const seenEventIds = new Set<string>();
-        const EA_BATCH = 1000;
-        let eaOffset = 0;
-        while (true) {
-          const { data: eaData, error: eaError } = await this.client
-            .from('event_artists')
-            .select('event_id')
-            .in('artist_id', matchedArtistIds)
-            .order('event_id', { ascending: true })
-            .range(eaOffset, eaOffset + EA_BATCH - 1);
-          if (eaError) {
-            throw new Error(
-              `Failed to query event_artists for search: ${eaError.message}`,
-            );
-          }
-          if (!eaData || eaData.length === 0) break;
-          for (const ea of eaData) {
-            if (!seenEventIds.has(ea.event_id)) {
-              seenEventIds.add(ea.event_id);
-              matchedEventIds.push(ea.event_id);
-            }
-          }
-          if (eaData.length < EA_BATCH) break;
-          eaOffset += EA_BATCH;
-        }
-
-        for (let i = 0; i < matchedEventIds.length; i += 200) {
-          const chunk = matchedEventIds.slice(i, i + 200);
-          orClauses.push(`id.in.(${chunk.join(',')})`);
-        }
-      }
-
-      query = query.or(orClauses.join(','));
+    // Text search is resolved up-front into request-sized OR groups (see
+    // resolveSearchGroups); each query only ever carries one bounded group.
+    if (opts?.searchOr) {
+      query = query.or(opts.searchOr);
     }
 
     if (filters?.excludePastShowtimes && filters?.fromDate) {
@@ -985,7 +989,158 @@ export class SupabaseCatalogRepository implements ICatalogRepository {
     return summaries;
   }
 
-  async countEvents(filters?: EventListFilters): Promise<number> {
+  /**
+   * Resolve a free-text query into one or more PostgREST `or=` filter strings.
+   *
+   * Short queries ("a") match hundreds of artists/venues/events. Putting every
+   * matched id into one URL used to fail with "URI too long" (HTTP 500 on
+   * /api/catalog/search). Each returned group is bounded to SEARCH_IDS_PER_GROUP
+   * ids so a single request stays well below URL limits. A match is the UNION of
+   * all groups; callers must dedupe across groups.
+   */
+  private async resolveSearchGroups(searchQuery: string): Promise<string[]> {
+    const escaped = escapeLikePattern(searchQuery.trim());
+    const quotedEscaped = escaped.replace(/"/g, '""');
+    const nameClause = `name.ilike."%${quotedEscaped}%"`;
+
+    const pageAll = async (table: 'venues' | 'artists'): Promise<string[]> => {
+      const ids: string[] = [];
+      for (let from = 0; ; from += ID_PAGE_SIZE) {
+        const { data, error } = await this.client
+          .from(table)
+          .select('id')
+          .ilike('name', `%${escaped}%`)
+          .order('id', { ascending: true })
+          .range(from, from + ID_PAGE_SIZE - 1);
+        if (error) {
+          throw new Error(
+            `Failed to query ${table} for search: ${error.message}`,
+          );
+        }
+        if (!data || data.length === 0) break;
+        for (const row of data) ids.push(row.id);
+        if (data.length < ID_PAGE_SIZE) break;
+      }
+      return ids;
+    };
+
+    const [venueIds, artistIds] = await Promise.all([
+      pageAll('venues'),
+      pageAll('artists'),
+    ]);
+
+    // Events that feature a matched artist (artist-id list is chunked too).
+    const eventIdSet = new Set<string>();
+    const artistChunks: string[][] = [];
+    for (let i = 0; i < artistIds.length; i += SEARCH_IDS_PER_GROUP) {
+      artistChunks.push(artistIds.slice(i, i + SEARCH_IDS_PER_GROUP));
+    }
+    await mapWithConcurrency(
+      artistChunks,
+      SEARCH_GROUP_CONCURRENCY,
+      async (chunk) => {
+        for (let from = 0; ; from += ID_PAGE_SIZE) {
+          const { data, error } = await this.client
+            .from('event_artists')
+            .select('event_id')
+            .in('artist_id', chunk)
+            .order('event_id', { ascending: true })
+            .range(from, from + ID_PAGE_SIZE - 1);
+          if (error) {
+            throw new Error(
+              `Failed to query event_artists for search: ${error.message}`,
+            );
+          }
+          if (!data || data.length === 0) break;
+          for (const ea of data) eventIdSet.add(ea.event_id);
+          if (data.length < ID_PAGE_SIZE) break;
+        }
+      },
+    );
+
+    const refs: Array<{ col: 'venue_id' | 'id'; id: string }> = [
+      ...venueIds.map((id) => ({ col: 'venue_id' as const, id })),
+      ...Array.from(eventIdSet)
+        .sort()
+        .map((id) => ({ col: 'id' as const, id })),
+    ];
+    if (refs.length === 0) return [nameClause];
+
+    const groups: string[] = [];
+    for (let i = 0; i < refs.length; i += SEARCH_IDS_PER_GROUP) {
+      const slice = refs.slice(i, i + SEARCH_IDS_PER_GROUP);
+      const parts: string[] = i === 0 ? [nameClause] : [];
+      for (const col of ['venue_id', 'id'] as const) {
+        const ids = slice.filter((r) => r.col === col).map((r) => r.id);
+        if (ids.length > 0) parts.push(`${col}.in.(${ids.join(',')})`);
+      }
+      groups.push(parts.join(','));
+    }
+    return groups;
+  }
+
+  /**
+   * Multi-group search: run one bounded query per group (all other filters
+   * applied), then merge, dedupe and re-apply the DB ordering in memory so
+   * pagination stays deterministic. Each group is asked for its first
+   * offset+limit rows, which is enough to build the global page.
+   */
+  private async listEventsAcrossSearchGroups(
+    filters: EventListFilters,
+    groups: string[],
+  ): Promise<CanonicalEventSummary[]> {
+    const offset = filters.offset ?? 0;
+    const limit = filters.limit;
+    const perGroupLimit = limit !== undefined ? offset + limit : undefined;
+    const results = await mapWithConcurrency(
+      groups,
+      SEARCH_GROUP_CONCURRENCY,
+      (g) =>
+        this.listEvents(
+          { ...filters, offset: undefined, limit: perGroupLimit },
+          { searchOr: g },
+        ),
+    );
+    const merged = new Map<string, CanonicalEventSummary>();
+    for (const rows of results) {
+      for (const ev of rows) if (!merged.has(ev.id)) merged.set(ev.id, ev);
+    }
+    const sorted = Array.from(merged.values()).sort(
+      compareEventSummaries(filters.sortBy ?? 'date_asc'),
+    );
+    return sorted.slice(
+      offset,
+      limit !== undefined ? offset + limit : undefined,
+    );
+  }
+
+  async countEvents(
+    filters?: EventListFilters,
+    opts?: SearchOpts & { idPage?: number; out?: string[] },
+  ): Promise<number> {
+    if (filters?.searchQuery?.trim() && opts?.searchOr === undefined) {
+      const groups = await this.resolveSearchGroups(filters.searchQuery);
+      if (groups.length === 1) {
+        return this.countEvents(filters, { searchOr: groups[0] });
+      }
+      // Groups can overlap (an event may match by title AND artist), so the
+      // exact count is the number of DISTINCT ids across all groups.
+      const seen = new Set<string>();
+      await mapWithConcurrency(groups, SEARCH_GROUP_CONCURRENCY, async (g) => {
+        for (let page = 0; ; page++) {
+          const out: string[] = [];
+          await this.countEvents(filters, {
+            searchOr: g,
+            idPage: page,
+            out,
+          });
+          for (const id of out) seen.add(id);
+          if (out.length < ID_PAGE_SIZE) break;
+        }
+      });
+      return seen.size;
+    }
+    const idMode = opts?.idPage !== undefined;
     const CHUNK_SIZE = 50;
     if (filters?.artistIds && filters.artistIds.length > CHUNK_SIZE) {
       const chunks: string[][] = [];
@@ -1018,9 +1173,12 @@ export class SupabaseCatalogRepository implements ICatalogRepository {
       selectString = 'id, event_artists!inner(artist_id)';
     }
 
-    let query = this.client
-      .from('events')
-      .select(selectString, { count: 'exact', head: true });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let query: any = idMode
+      ? this.client.from('events').select(selectString)
+      : this.client
+          .from('events')
+          .select(selectString, { count: 'exact', head: true });
 
     if (filters?.status) {
       if (Array.isArray(filters.status)) {
@@ -1036,99 +1194,8 @@ export class SupabaseCatalogRepository implements ICatalogRepository {
       query = query.eq('event_artists.artist_id', filters.artistId);
     }
 
-    if (filters?.searchQuery?.trim()) {
-      const trimmedSearch = filters.searchQuery.trim();
-      const escaped = escapeLikePattern(trimmedSearch);
-      const quotedEscaped = escaped.replace(/"/g, '""');
-      const orClauses: string[] = [`name.ilike."%${quotedEscaped}%"`];
-
-      // Query matching venues
-      const matchedVenueIds: string[] = [];
-      const VENUE_BATCH = 1000;
-      let venueOffset = 0;
-      while (true) {
-        const { data: venuesData, error: venueError } = await this.client
-          .from('venues')
-          .select('id')
-          .ilike('name', `%${escaped}%`)
-          .order('id', { ascending: true })
-          .range(venueOffset, venueOffset + VENUE_BATCH - 1);
-        if (venueError) {
-          throw new Error(
-            `Failed to query venues for search: ${venueError.message}`,
-          );
-        }
-        if (!venuesData || venuesData.length === 0) break;
-        for (const v of venuesData) {
-          matchedVenueIds.push(v.id);
-        }
-        if (venuesData.length < VENUE_BATCH) break;
-        venueOffset += VENUE_BATCH;
-      }
-      for (let i = 0; i < matchedVenueIds.length; i += 200) {
-        const chunk = matchedVenueIds.slice(i, i + 200);
-        orClauses.push(`venue_id.in.(${chunk.join(',')})`);
-      }
-
-      // Query matching artists
-      const matchedArtistIds: string[] = [];
-      const ARTIST_BATCH = 1000;
-      let artistOffset = 0;
-      while (true) {
-        const { data: artistsData, error: artistError } = await this.client
-          .from('artists')
-          .select('id')
-          .ilike('name', `%${escaped}%`)
-          .order('id', { ascending: true })
-          .range(artistOffset, artistOffset + ARTIST_BATCH - 1);
-        if (artistError) {
-          throw new Error(
-            `Failed to query artists for search: ${artistError.message}`,
-          );
-        }
-        if (!artistsData || artistsData.length === 0) break;
-        for (const a of artistsData) {
-          matchedArtistIds.push(a.id);
-        }
-        if (artistsData.length < ARTIST_BATCH) break;
-        artistOffset += ARTIST_BATCH;
-      }
-
-      if (matchedArtistIds.length > 0) {
-        const matchedEventIds: string[] = [];
-        const seenEventIds = new Set<string>();
-        const EA_BATCH = 1000;
-        let eaOffset = 0;
-        while (true) {
-          const { data: eaData, error: eaError } = await this.client
-            .from('event_artists')
-            .select('event_id')
-            .in('artist_id', matchedArtistIds)
-            .order('event_id', { ascending: true })
-            .range(eaOffset, eaOffset + EA_BATCH - 1);
-          if (eaError) {
-            throw new Error(
-              `Failed to query event_artists for search: ${eaError.message}`,
-            );
-          }
-          if (!eaData || eaData.length === 0) break;
-          for (const ea of eaData) {
-            if (!seenEventIds.has(ea.event_id)) {
-              seenEventIds.add(ea.event_id);
-              matchedEventIds.push(ea.event_id);
-            }
-          }
-          if (eaData.length < EA_BATCH) break;
-          eaOffset += EA_BATCH;
-        }
-
-        for (let i = 0; i < matchedEventIds.length; i += 200) {
-          const chunk = matchedEventIds.slice(i, i + 200);
-          orClauses.push(`id.in.(${chunk.join(',')})`);
-        }
-      }
-
-      query = query.or(orClauses.join(','));
+    if (opts?.searchOr) {
+      query = query.or(opts.searchOr);
     }
 
     if (filters?.excludePastShowtimes && filters?.fromDate) {
@@ -1213,6 +1280,20 @@ export class SupabaseCatalogRepository implements ICatalogRepository {
           `min_price.lte.${filters.maxPrice},event_kind.eq.free_event`,
         );
       }
+    }
+
+    if (idMode) {
+      const page = opts?.idPage ?? 0;
+      const { data: idRows, error: idErr } = await query
+        .order('id', { ascending: true })
+        .range(page * ID_PAGE_SIZE, page * ID_PAGE_SIZE + ID_PAGE_SIZE - 1);
+      if (idErr) {
+        throw new Error(`Failed to count events: ${idErr.message}`);
+      }
+      for (const r of (idRows ?? []) as Array<{ id: string }>) {
+        opts?.out?.push(r.id);
+      }
+      return opts?.out?.length ?? 0;
     }
 
     const { count, error } = await query;

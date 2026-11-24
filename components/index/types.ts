@@ -284,9 +284,7 @@ export function toIndexEventItem(
       currency: canonical.currency,
       ticketUrl: canonical.ticketUrl,
       presaleDate: (canonicalAny.presaleDate as string) || null,
-      genre:
-        (canonicalAny.genre as string) ||
-        (canonical.eventKind ? String(canonical.eventKind) : 'Live Music'),
+      genre: (canonicalAny.genre as string) || 'Live Music',
       subgenres: Array.isArray(canonicalAny.subgenres)
         ? (canonicalAny.subgenres as string[])
         : undefined,
@@ -411,9 +409,7 @@ export function toIndexEventItem(
     currency: canonical.currency,
     ticketUrl: canonical.ticketUrl,
     presaleDate: (canonicalAny.presaleDate as string) || null,
-    genre:
-      (canonicalAny.genre as string) ||
-      (canonical.eventKind ? String(canonical.eventKind) : 'Live Music'),
+    genre: (canonicalAny.genre as string) || 'Live Music',
     subgenres: Array.isArray(canonicalAny.subgenres)
       ? (canonicalAny.subgenres as string[])
       : undefined,

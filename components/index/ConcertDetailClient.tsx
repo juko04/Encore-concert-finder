@@ -9,11 +9,13 @@ import type { ScoredEvent } from '@/lib/recommendation/types';
 import {
   formatIndexDate,
   formatIndexPrice,
-  getStatusBadge,
+  getVerifiedAvailabilityBadge,
+  hasRealMatchScore,
   calculateDistanceMiles,
 } from './formatters';
 import { AudioPreviewPlayer } from './AudioPreviewPlayer';
 import { EventCard } from './EventCard';
+import { EventImage } from './EventImage';
 import { UndoToast } from './UndoToast';
 import { DecisionGuide } from './DecisionGuide';
 import { useWatchlist } from './useWatchlist';
@@ -68,12 +70,15 @@ export function ConcertDetailClient({
   const [preferences, setPreferences] = useState(initialPreferences);
   const [showFactorDrawer, setShowFactorDrawer] = useState(false);
 
-  const isPersonalized = Boolean(event.personalScore?.isPersonalized);
+  const isPersonalized = hasRealMatchScore(event.personalScore);
   const score = event.personalScore?.score ?? 50;
   const isDisliked = Boolean(event.personalScore?.isDisliked);
   const isFavorite = Boolean(event.personalScore?.isFavorite);
 
-  const statusBadge = getStatusBadge(event.inventoryStatus);
+  const statusBadge = getVerifiedAvailabilityBadge(
+    event.inventoryStatus,
+    event.ticketRemainingPercent,
+  );
   const isSoldOut = event.inventoryStatus === 'sold_out';
   const isCancelled = event.inventoryStatus === 'cancelled';
 
@@ -127,11 +132,7 @@ export function ConcertDetailClient({
           </Link>
         )}
 
-        <div className="flex items-center gap-2">
-          <span className="font-mono text-[11px] uppercase tracking-wider text-zinc-400">
-            Event ID: {event.id}
-          </span>
-        </div>
+        <div className="flex items-center gap-2"></div>
       </div>
 
       {/* Hero Decision Header Card */}
@@ -148,11 +149,13 @@ export function ConcertDetailClient({
           <div className="max-w-3xl space-y-4">
             {/* Badges */}
             <div className="flex flex-wrap items-center gap-2">
-              <span
-                className={`rounded-md border px-2.5 py-0.5 text-xs font-medium ${statusBadge.bg}`}
-              >
-                {statusBadge.label}
-              </span>
+              {statusBadge && (
+                <span
+                  className={`rounded-md border px-2.5 py-0.5 text-xs font-medium ${statusBadge.bg}`}
+                >
+                  {statusBadge.label}
+                </span>
+              )}
 
               {event.genre && (
                 <span className="rounded-md border border-zinc-200 bg-zinc-50 px-2.5 py-0.5 font-mono text-xs text-zinc-600">
@@ -176,11 +179,7 @@ export function ConcertDetailClient({
                     <span>{score}% Personalized Match</span>
                   </span>
                 )
-              ) : (
-                <span className="rounded-md border border-zinc-200 bg-zinc-50 px-2.5 py-0.5 font-mono text-xs text-zinc-500">
-                  Guest View · Unbiased
-                </span>
-              )}
+              ) : null}
             </div>
 
             {/* Artist & Title */}
@@ -248,7 +247,7 @@ export function ConcertDetailClient({
                       event.ticketUrl,
                     )}
                   </div>
-                  <div className="text-[11px] text-zinc-400">
+                  <div className="text-[11px] text-zinc-500">
                     Age policy: {event.ageRestriction || 'Not listed'}
                   </div>
                 </div>
@@ -258,6 +257,14 @@ export function ConcertDetailClient({
 
           {/* Action Box: Direct Ticket Link + Save + Alert */}
           <div className="flex shrink-0 flex-col gap-2.5 border-t border-zinc-100 pt-6 sm:w-72 lg:border-l lg:border-t-0 lg:pl-8 lg:pt-0">
+            <EventImage
+              event={event}
+              className="aspect-[4/3] w-full rounded-xl"
+              width={576}
+              height={432}
+              graphicSize="lg"
+              priority
+            />
             {event.ticketUrl && !isCancelled ? (
               <a
                 href={event.ticketUrl}
@@ -265,9 +272,7 @@ export function ConcertDetailClient({
                 rel="noopener noreferrer"
                 className="shadow-xs inline-flex w-full items-center justify-center gap-2 rounded-xl bg-zinc-900 px-5 py-3 text-sm font-semibold text-white transition-transform duration-150 ease-out hover:bg-zinc-800 active:scale-[0.97]"
               >
-                <span>
-                  {isSoldOut ? 'Check Verified Resale' : 'Official Tickets'}
-                </span>
+                <span>{isSoldOut ? 'Ticket site' : 'Official Tickets'}</span>
                 <ArrowUpRightIcon className="h-4 w-4" />
               </a>
             ) : isCancelled ? (

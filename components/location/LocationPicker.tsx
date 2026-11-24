@@ -38,8 +38,30 @@ export function LocationPicker({ variant = 'desktop' }: LocationPickerProps) {
 
   // Read the cookie after mount so server and client markup match on first paint.
   useEffect(() => {
-    setCurrent(readHomeLocationFromCookieString(document.cookie));
+    const fromCookie = readHomeLocationFromCookieString(document.cookie);
+    setCurrent(fromCookie);
     setMounted(true);
+    if (fromCookie) return;
+
+    // No cookie (new browser/device): restore the signed-in user's saved location from their
+    // profile. The route sets the cookie; guests get 401 and simply stay without a location.
+    const controller = new AbortController();
+    fetch('/api/location', {
+      credentials: 'same-origin',
+      signal: controller.signal,
+    })
+      .then((res) => (res.ok ? res.json() : null))
+      .then(() => {
+        const restored = readHomeLocationFromCookieString(document.cookie);
+        if (!restored) return;
+        setCurrent(restored);
+        router.refresh();
+      })
+      .catch(() => {
+        // Offline/aborted: keep the empty state; the user can still pick a city.
+      });
+    return () => controller.abort();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {

@@ -385,6 +385,49 @@ export function applyFairArtistAllocation(
 }
 
 /**
+ * Overlays a validated home-location override (lat/lng) onto the stored profile so that every
+ * distance-dependent code path (engine distance factor, nearby-mode filter, configured flag)
+ * uses the same location. Invalid/non-finite overrides are ignored. When the user has no stored
+ * profile row, a minimal default profile carrying only the override is returned.
+ */
+export function applyLocationOverride(
+  profile: UserProfile | null,
+  override: PersonalizedDiscoverOptions['locationOverride'],
+  userId: string,
+): UserProfile | null {
+  if (
+    !override ||
+    !Number.isFinite(override.lat) ||
+    !Number.isFinite(override.lng) ||
+    Math.abs(override.lat) > 90 ||
+    Math.abs(override.lng) > 180
+  ) {
+    return profile;
+  }
+  if (profile) {
+    return {
+      ...profile,
+      homeLatApprox: override.lat,
+      homeLngApprox: override.lng,
+    };
+  }
+  const now = new Date().toISOString();
+  return {
+    id: userId,
+    homeLatApprox: override.lat,
+    homeLngApprox: override.lng,
+    defaultRadiusMiles: 25,
+    maxSpontaneousPrice: null,
+    maxNormalTicketPrice: null,
+    maxFavoriteArtistPrice: null,
+    travelWillingness: null,
+    recommendationPreset: DEFAULT_PRESET,
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
+/**
  * Retrieves personalized Discover recommendations for an authenticated user.
  * Invariants:
  * 1. Scoped strictly to the verified authenticated user ID (never trusts unverified client input).
@@ -444,13 +487,23 @@ export async function getPersonalizedDiscoverData(
   }
 
   // 1. Fetch user profile, explicit artist preferences, and Spotify connection in parallel
-  const [userProfile, userPreferences, spotifyConnection] = await Promise.all([
-    profileRepo.getProfile(userId),
-    prefRepo.getPreferences(userId),
-    spotifyRepo
-      ? spotifyRepo.getConnection(userId).catch(() => null)
-      : Promise.resolve(null),
-  ]);
+  const [storedProfile, userPreferences, spotifyConnection] = await Promise.all(
+    [
+      profileRepo.getProfile(userId),
+      prefRepo.getPreferences(userId),
+      spotifyRepo
+        ? spotifyRepo.getConnection(userId).catch(() => null)
+        : Promise.resolve(null),
+    ],
+  );
+
+  // The selected/restored home location (cookie, else saved profile) is the single source of
+  // truth for distance scoring, the "nearby" mode filter, and isLocationConfigured.
+  const userProfile = applyLocationOverride(
+    storedProfile,
+    locationOverride,
+    userId,
+  );
 
   const isSpotifyConnected = spotifyConnection?.status === 'connected';
 

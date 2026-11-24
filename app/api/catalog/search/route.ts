@@ -4,12 +4,21 @@ import { createClient } from '@/lib/supabase/server';
 import { getPublicEnv } from '@/lib/env/public';
 import { SupabaseCatalogRepository } from '@/lib/repositories/catalog-repository';
 import { deriveLocalDateFromInstant } from '@/lib/domain/value-objects';
+import {
+  isIsoDate,
+  isValidTimeZone,
+  resolveCatalogFromDate,
+} from '@/lib/discover/dates';
 import type {
   EventListFilters,
   EventSortOption,
 } from '@/lib/repositories/interfaces';
 
 export const dynamic = 'force-dynamic';
+
+function badRequest(message: string) {
+  return NextResponse.json({ error: message }, { status: 400 });
+}
 
 export async function GET(request: Request) {
   try {
@@ -28,6 +37,9 @@ export async function GET(request: Request) {
 
     // Local calendar date derived in validated target timezone (never naive UTC split)
     const timezone = searchParams.get('timezone')?.trim() || 'America/Denver';
+    if (!isValidTimeZone(timezone)) {
+      return badRequest('Invalid timezone');
+    }
     const now = new Date();
     const nowIso = now.toISOString();
     const todayLocalDate = deriveLocalDateFromInstant(nowIso, timezone);
@@ -40,10 +52,24 @@ export async function GET(request: Request) {
     const startDateParam = searchParams.get('startDate')?.trim();
     const endDateParam = searchParams.get('endDate')?.trim();
 
-    const startDate = startDateParam || todayLocalDate;
+    if (startDateParam && !isIsoDate(startDateParam)) {
+      return badRequest('startDate must be a valid YYYY-MM-DD date');
+    }
+    if (endDateParam && !isIsoDate(endDateParam)) {
+      return badRequest('endDate must be a valid YYYY-MM-DD date');
+    }
+
+    // Upcoming results never include shows that already started (e.g. the
+    // "Tonight" chip passes startDate=today). includePast=true is the only opt-out.
+    const includePastParam = searchParams.get('includePast');
+    const includePast = includePastParam === 'true' || includePastParam === '1';
+    const { fromDate: startDate, excludePastShowtimes } =
+      resolveCatalogFromDate({
+        startDate: startDateParam || undefined,
+        today: todayLocalDate,
+        includePast,
+      });
     const endDate = endDateParam || twelveMonthsLocalDate;
-    // Exclude completed past showtimes on current day inside the database query unless explicit past startDate is provided
-    const excludePastShowtimes = !startDateParam;
 
     const minPriceParam = searchParams.get('minPrice');
     const maxPriceParam = searchParams.get('maxPrice');
@@ -55,6 +81,12 @@ export async function GET(request: Request) {
       maxPriceParam !== null && maxPriceParam !== ''
         ? Number(maxPriceParam)
         : undefined;
+    if (
+      (minPrice !== undefined && !Number.isFinite(minPrice)) ||
+      (maxPrice !== undefined && !Number.isFinite(maxPrice))
+    ) {
+      return badRequest('minPrice and maxPrice must be numbers');
+    }
     const freeOnlyParam = searchParams.get('freeOnly');
     const freeOnly = freeOnlyParam === 'true' || freeOnlyParam === '1';
     const includeUnknownPriceParam = searchParams.get('includeUnknownPrice');

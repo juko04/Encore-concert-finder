@@ -6,9 +6,11 @@ import type { IndexEventItem } from './types';
 import {
   formatIndexDate,
   formatIndexPrice,
-  getStatusBadge,
+  getVerifiedAvailabilityBadge,
+  hasRealMatchScore,
   getArtistAccent,
 } from './formatters';
+import { EventImage } from './EventImage';
 import {
   HeartIcon,
   BellIcon,
@@ -54,20 +56,25 @@ export function EventCard({
         setCalendarMenuOpen(false);
       }
     }
+    function handleEscape(e: KeyboardEvent) {
+      if (e.key === 'Escape') setCalendarMenuOpen(false);
+    }
     if (calendarMenuOpen) {
       document.addEventListener('mousedown', handleClickOutside);
+      document.addEventListener('keydown', handleEscape);
     }
     return () => {
       document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('keydown', handleEscape);
     };
   }, [calendarMenuOpen]);
 
-  const isPersonalized = Boolean(event.personalScore?.isPersonalized);
+  const isPersonalized = hasRealMatchScore(event.personalScore);
   const score = event.personalScore?.score ?? 50;
   const isDisliked = Boolean(event.personalScore?.isDisliked);
   const isFavorite = Boolean(event.personalScore?.isFavorite);
 
-  const statusBadge = getStatusBadge(
+  const statusBadge = getVerifiedAvailabilityBadge(
     event.inventoryStatus,
     event.ticketRemainingPercent,
   );
@@ -79,23 +86,6 @@ export function EventCard({
     (a) => a.name !== headlinerName && a.billingPosition !== 'headliner',
   );
 
-  const headlinerArtist =
-    event.artists?.find(
-      (a) => a.billingPosition === 'headliner' || a.name === headlinerName,
-    ) || event.artists?.[0];
-
-  // Fallback hierarchy:
-  // 1. Verified event image (event.imageUrl)
-  // 2. Verified artist image (headlinerArtist.imageUrl)
-  // 3. Verified venue image (event.venueImageUrl)
-  // 4. Branded neutral graphic with artist accent
-  const displayImage =
-    event.imageUrl ||
-    headlinerArtist?.imageUrl ||
-    event.artists?.find((a) => a.imageUrl)?.imageUrl ||
-    event.venueImageUrl ||
-    null;
-
   const accent = getArtistAccent(headlinerName);
   const detailUrl = href || `/concerts/${event.id}`;
 
@@ -105,67 +95,33 @@ export function EventCard({
         isDisliked ? 'border-dashed bg-zinc-50/80 opacity-60' : ''
       }`}
     >
-      {/* Visual Media Header (Image with Fallback Hierarchy) */}
-      {displayImage ? (
-        <div className="relative aspect-[16/9] w-full overflow-hidden bg-zinc-100">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src={displayImage}
-            alt={headlinerName}
-            loading="lazy"
-            className="h-full w-full object-cover transition-transform duration-300 ease-out group-hover:scale-105"
-            onError={(e) => {
-              (e.target as HTMLElement).style.display = 'none';
-            }}
-          />
-          <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/50 via-transparent to-transparent opacity-60" />
-          <div
-            className="absolute bottom-0 left-0 right-0 h-1"
-            style={{
-              background: `linear-gradient(90deg, ${accent.primary} 0%, ${accent.secondary} 100%)`,
-            }}
-          />
-        </div>
-      ) : (
+      {/* Media: event -> artist -> venue -> graphic cascade */}
+      <EventImage
+        event={event}
+        className="aspect-[16/9] w-full"
+        graphicSize="lg"
+        imgClassName="transition-transform duration-300 ease-out group-hover:scale-105"
+      >
         <div
-          className="relative flex aspect-[24/9] w-full items-center justify-between overflow-hidden px-5 py-3 transition-colors"
+          className="absolute bottom-0 left-0 right-0 h-1"
           style={{
-            background: `linear-gradient(135deg, ${accent.primary}12 0%, ${accent.secondary}20 100%)`,
+            background: `linear-gradient(90deg, ${accent.primary} 0%, ${accent.secondary} 100%)`,
           }}
-        >
-          <div className="flex flex-col">
-            <span className="font-mono text-[10px] uppercase tracking-wider text-zinc-400">
-              Live Concert
-            </span>
-            <span className="font-mono text-xs text-zinc-500">
-              {event.genre ? event.genre.split('/')[0].trim() : 'Live Music'}
-            </span>
-          </div>
-          <div
-            className="shadow-xs flex h-8 w-8 shrink-0 items-center justify-center rounded-lg font-mono text-xs font-bold text-white"
-            style={{ backgroundColor: accent.primary }}
-          >
-            {headlinerName.charAt(0).toUpperCase()}
-          </div>
-          <div
-            className="absolute bottom-0 left-0 right-0 h-1"
-            style={{
-              background: `linear-gradient(90deg, ${accent.primary} 0%, ${accent.secondary} 100%)`,
-            }}
-          />
-        </div>
-      )}
+        />
+      </EventImage>
 
       <div className="flex flex-1 flex-col p-5 sm:p-6">
         {/* Top Badges & Quick Action Controls */}
         <div className="mb-3 flex items-start justify-between gap-3">
           <div className="flex flex-wrap items-center gap-1.5">
             {/* Inventory / Status Badge */}
-            <span
-              className={`inline-flex items-center rounded-md border px-2 py-0.5 text-[11px] font-medium tracking-wide ${statusBadge.bg}`}
-            >
-              {statusBadge.label}
-            </span>
+            {statusBadge && (
+              <span
+                className={`inline-flex items-center rounded-md border px-2 py-0.5 text-[11px] font-medium tracking-wide ${statusBadge.bg}`}
+              >
+                {statusBadge.label}
+              </span>
+            )}
 
             {/* Personal Match Score vs Guest Genre Pill */}
             {isPersonalized ? (
@@ -180,7 +136,8 @@ export function EventCard({
                   <span>Favorite Artist · {score}%</span>
                 </span>
               ) : (
-                <span className="inline-flex items-center gap-1 rounded-md border border-zinc-200 bg-zinc-50 px-2 py-0.5 text-[11px] font-medium text-zinc-700">
+                <span className="inline-flex items-center gap-1 rounded-md border border-zinc-200 bg-zinc-50 px-2 py-0.5 text-[11px] font-medium text-zinc-600">
+                  <span className="sr-only">Personalized match: </span>
                   <span>{score}% match</span>
                 </span>
               )
@@ -206,7 +163,7 @@ export function EventCard({
                   : `Save ${headlinerName} to watchlist`
               }
               aria-pressed={isSaved}
-              className={`relative z-10 flex h-8 w-8 items-center justify-center rounded-lg border transition-all duration-150 ease-out active:scale-[0.92] ${
+              className={`relative z-10 flex h-10 w-10 items-center justify-center rounded-lg border transition-all duration-150 ease-out active:scale-[0.92] ${
                 isSaved
                   ? 'shadow-xs border-rose-200 bg-rose-50 text-rose-600'
                   : 'border-transparent text-zinc-400 hover:border-zinc-200 hover:bg-zinc-50 hover:text-zinc-700'
@@ -228,7 +185,7 @@ export function EventCard({
                   : `Enable ticket alerts for ${headlinerName}`
               }
               aria-pressed={hasAlert}
-              className={`relative z-10 flex h-8 w-8 items-center justify-center rounded-lg border transition-all duration-150 ease-out active:scale-[0.92] ${
+              className={`relative z-10 flex h-10 w-10 items-center justify-center rounded-lg border transition-all duration-150 ease-out active:scale-[0.92] ${
                 hasAlert
                   ? 'shadow-xs border-violet-200 bg-violet-50 text-violet-600'
                   : 'border-transparent text-zinc-400 hover:border-zinc-200 hover:bg-zinc-50 hover:text-zinc-700'
@@ -248,7 +205,7 @@ export function EventCard({
                 }}
                 aria-label={`Export ${headlinerName} to calendar`}
                 aria-expanded={calendarMenuOpen}
-                className="relative z-10 flex h-8 w-8 items-center justify-center rounded-lg border border-transparent text-zinc-400 transition-all duration-150 ease-out hover:border-zinc-200 hover:bg-zinc-50 hover:text-zinc-700 active:scale-[0.92]"
+                className="relative z-10 flex h-10 w-10 items-center justify-center rounded-lg border border-transparent text-zinc-400 transition-all duration-150 ease-out hover:border-zinc-200 hover:bg-zinc-50 hover:text-zinc-700 active:scale-[0.92]"
               >
                 <CalendarIcon className="h-4 w-4" />
               </button>

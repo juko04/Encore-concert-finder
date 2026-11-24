@@ -150,7 +150,9 @@ export async function runSpotifyCatalogEnrichment(cliArgs?: ParsedArgs) {
     console.log('Backfilling Spotify genres for already-mapped artists...');
     const result = await enricher.backfillGenres({ limit: args.limit });
     console.log(
-      `Genre backfill: ${result.updated} updated, ${result.skippedNoGenres} had no Spotify genres, ${result.candidates} candidates`,
+      args.dryRun
+        ? `Genre backfill (DRY-RUN, nothing written): ${result.wouldUpdate} would be updated, ${result.skippedNoGenres} had no Spotify genres, ${result.candidates} candidates`
+        : `Genre backfill: ${result.updated} updated, ${result.skippedNoGenres} had no Spotify genres, ${result.candidates} candidates`,
     );
     return;
   }

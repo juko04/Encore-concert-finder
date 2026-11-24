@@ -166,7 +166,8 @@ export async function getDiscoverHomeData(options: {
     ),
     safe(
       'next 7 days',
-      () => list({ toDate: windows.nextWeekEnd }),
+      // Over-fetch: the weekend's shows are removed from this row afterwards.
+      () => list({ toDate: windows.nextWeekEnd, limit: ROW_LIMIT * 3 }),
       [] as CanonicalEventSummary[],
     ),
     safe('free', () => list({ freeOnly: true }), [] as CanonicalEventSummary[]),
@@ -184,7 +185,11 @@ export async function getDiscoverHomeData(options: {
     safe(
       'plan ahead',
       () =>
-        list({ fromDate: windows.planAheadStart, toDate: windows.horizonEnd }),
+        list({
+          fromDate: windows.planAheadStart,
+          toDate: windows.horizonEnd,
+          limit: ROW_LIMIT * 3,
+        }),
       [] as CanonicalEventSummary[],
     ),
     safe(
@@ -210,7 +215,16 @@ export async function getDiscoverHomeData(options: {
   ]);
 
   const rows: DiscoverRow[] = [];
+  // Duplicate rule (keep in sync with tests/unit/review-search-home-dedupe):
+  //  - TIME rows (This weekend, Next 7 days, Plan ahead) and CITY rows
+  //    ("In <city>") each claim their shows: a show appears in at most one of
+  //    them, in page order.
+  //  - Intentional overlap is allowed for rows that answer a different
+  //    question: "Near <home city>", "Picked for you", "Free shows" and
+  //    "Under $30" never claim shows and never skip claimed ones.
+  //  - City rows additionally skip shows already shown in "Near <home city>".
   const seen = new Set<string>();
+  const nearIds = new Set<string>();
   const idOf = (e: CanonicalEventSummary | ScoredEvent) =>
     ('event' in e ? e.event : e).id;
   const take = (
@@ -221,12 +235,21 @@ export async function getDiscoverHomeData(options: {
     out.forEach((e) => seen.add(idOf(e)));
     return out;
   };
-  /** Like take(), but skips shows already featured in an earlier row. */
-  const takeFresh = (events: Array<CanonicalEventSummary | ScoredEvent>) =>
-    take(events.filter((e) => !seen.has(idOf(e))));
+  /** Like take(), but skips shows already featured in an earlier claiming row. */
+  const takeFresh = (
+    events: Array<CanonicalEventSummary | ScoredEvent>,
+    extraSkip?: Set<string>,
+  ) =>
+    take(events.filter((e) => !seen.has(idOf(e)) && !extraSkip?.has(idOf(e))));
+  /** Overlap-allowed rows: visible filter only, no claiming. */
+  const takeShared = (
+    events: Array<CanonicalEventSummary | ScoredEvent>,
+    max = ROW_LIMIT,
+  ) => events.filter(isVisible).slice(0, max);
 
   const nearEvents = await nearPromise;
-  const nearRow = take(nearEvents);
+  const nearRow = takeShared(nearEvents);
+  nearRow.forEach((e) => nearIds.add(idOf(e)));
   if (homeLocation?.city && nearRow.length > 0) {
     rows.push({
       id: 'near-home',
@@ -237,7 +260,7 @@ export async function getDiscoverHomeData(options: {
     });
   }
 
-  const pickedRow = take(picked);
+  const pickedRow = takeShared(picked);
   if (pickedRow.length > 0) {
     rows.push({
       id: 'picked',
@@ -248,7 +271,7 @@ export async function getDiscoverHomeData(options: {
     });
   }
 
-  const weekendRow = take(weekend);
+  const weekendRow = takeFresh(weekend);
   if (weekendRow.length > 0) {
     rows.push({
       id: 'weekend',
@@ -261,7 +284,7 @@ export async function getDiscoverHomeData(options: {
     });
   }
 
-  const nextWeekRow = take(nextWeek);
+  const nextWeekRow = takeFresh(nextWeek);
   if (nextWeekRow.length > 0) {
     rows.push({
       id: 'next-7-days',
@@ -274,7 +297,7 @@ export async function getDiscoverHomeData(options: {
     });
   }
 
-  const freeRow = take(free);
+  const freeRow = takeShared(free);
   if (freeRow.length > 0) {
     rows.push({
       id: 'free',
@@ -299,7 +322,7 @@ export async function getDiscoverHomeData(options: {
       id: 'under-30',
       title: `Under $${UNDER_PRICE}`,
       subtitle: 'Shows with a listed ticket price',
-      events: take(verifiedUnder),
+      events: takeShared(verifiedUnder),
       seeAllHref: search({
         maxPrice: String(UNDER_PRICE),
         includeUnknownPrice: 'false',
@@ -324,7 +347,7 @@ export async function getDiscoverHomeData(options: {
     ),
   );
   topCities.forEach(({ name }, i) => {
-    const cityRow = takeFresh(cityRows[i]);
+    const cityRow = takeFresh(cityRows[i], nearIds);
     if (cityRow.length > 0) {
       rows.push({
         id: `city-${name.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`,

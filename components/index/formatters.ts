@@ -387,3 +387,54 @@ export function getArtistAccent(name?: string | null): ArtistAccent {
   const index = Math.abs(hash) % accents.length;
   return accents[index];
 }
+
+/**
+ * Availability badge that only renders when the signal is substantiated.
+ * - sold_out / cancelled: explicit.
+ * - numeric remaining percent (0-100): <5% urgent, <25% caution. Percentages
+ *   at or above 25% show plain availability only if status is 'available'.
+ * - provider-reported 'available' status shows the plain 'Tickets Available'.
+ * - provider-reported low_inventory without a percentage: neutral "Low inventory"
+ *   with no percentage or urgency invented.
+ * Everything else (unknown, presale, missing data, a ticket URL
+ * alone) returns null: unknown stays unknown.
+ */
+export function getVerifiedAvailabilityBadge(
+  status?: IndexInventoryStatus | 'presale' | string | null,
+  remainingPercent?: number | null,
+): StatusBadgeConfig | null {
+  if (status === 'sold_out' || status === 'cancelled') {
+    return getStatusBadge(status, null);
+  }
+  if (
+    typeof remainingPercent === 'number' &&
+    Number.isFinite(remainingPercent) &&
+    remainingPercent >= 0 &&
+    remainingPercent <= 100
+  ) {
+    return remainingPercent < 25 || status === 'available'
+      ? getStatusBadge(status, remainingPercent)
+      : null;
+  }
+  if (status === 'available') return getStatusBadge(status, null);
+  if (status === 'low_inventory') {
+    return {
+      label: 'Low inventory',
+      bg: 'bg-amber-50 text-amber-800 border-amber-200 font-medium',
+      indicatorLevel: 'warning',
+    };
+  }
+  return null;
+}
+
+/** Match chip is shown only for a real score on a signed-in user's event. */
+export function hasRealMatchScore(
+  p?: { isPersonalized?: boolean; score?: number | null } | null,
+): p is { isPersonalized: true; score: number } {
+  return Boolean(
+    p &&
+    p.isPersonalized &&
+    typeof p.score === 'number' &&
+    Number.isFinite(p.score),
+  );
+}

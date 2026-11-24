@@ -10,6 +10,7 @@ import {
   CalendarIcon,
   XIcon,
   SlidersIcon,
+  MenuIcon,
   SparklesIcon,
   UserIcon,
 } from './icons';
@@ -47,13 +48,17 @@ export function Header({
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
   const accountMenuRef = useRef<HTMLDivElement>(null);
+  const menuToggleRef = useRef<HTMLButtonElement>(null);
 
   // Close account dropdown when clicking outside or pressing Escape
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
       if (e.key === 'Escape') {
         setAccountMenuOpen(false);
-        setMobileMenuOpen(false);
+        setMobileMenuOpen((open) => {
+          if (open) menuToggleRef.current?.focus();
+          return false;
+        });
       }
     }
     function handleClickOutside(e: MouseEvent) {
@@ -217,7 +222,7 @@ export function Header({
                 onClick={() => setAccountMenuOpen(!accountMenuOpen)}
                 aria-expanded={accountMenuOpen}
                 aria-haspopup="true"
-                className="flex items-center gap-1.5 rounded-full border border-zinc-200 bg-zinc-50 px-2.5 py-1 text-xs font-medium text-zinc-700 hover:bg-zinc-100"
+                className="flex min-h-10 items-center gap-1.5 rounded-full border border-zinc-200 bg-zinc-50 px-2.5 py-1 text-xs font-medium text-zinc-700 hover:bg-zinc-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-zinc-900"
                 title={userEmail || 'Account Menu'}
               >
                 <div className="flex h-4 w-4 items-center justify-center rounded-full bg-zinc-900 text-[9px] font-bold text-white">
@@ -293,15 +298,19 @@ export function Header({
           {/* Mobile Menu Button */}
           <button
             type="button"
+            ref={menuToggleRef}
             onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-            className="flex h-9 w-9 items-center justify-center rounded-lg border border-zinc-200 text-zinc-700 transition-colors hover:bg-zinc-100 md:hidden"
-            aria-label="Toggle navigation menu"
+            className="flex h-10 w-10 items-center justify-center rounded-lg border border-zinc-200 text-zinc-700 transition-colors hover:bg-zinc-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-zinc-900 md:hidden"
+            aria-label={
+              mobileMenuOpen ? 'Close navigation menu' : 'Open navigation menu'
+            }
             aria-expanded={mobileMenuOpen}
+            aria-controls="mobile-nav"
           >
             {mobileMenuOpen ? (
               <XIcon className="h-4 w-4" />
             ) : (
-              <SlidersIcon className="h-4 w-4" />
+              <MenuIcon className="h-4 w-4" />
             )}
           </button>
         </div>
@@ -309,7 +318,11 @@ export function Header({
 
       {/* Mobile Menu Drawer */}
       {mobileMenuOpen && (
-        <div className="animate-in fade-in slide-in-from-top-2 space-y-1 border-b border-zinc-200 bg-white px-4 pb-4 pt-2 duration-150 md:hidden">
+        <nav
+          id="mobile-nav"
+          aria-label="Mobile"
+          className="animate-in fade-in slide-in-from-top-2 space-y-1 border-b border-zinc-200 bg-white px-4 pb-4 pt-2 duration-150 motion-reduce:animate-none md:hidden"
+        >
           <div className="pb-2">
             <LocationPicker variant="mobile" />
           </div>
@@ -380,7 +393,7 @@ export function Header({
               </Link>
             </div>
           )}
-        </div>
+        </nav>
       )}
     </header>
   );

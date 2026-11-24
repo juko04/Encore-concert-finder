@@ -1,14 +1,15 @@
 'use client';
 
-import React, { useState } from 'react';
+import React from 'react';
 import Link from 'next/link';
 import type { IndexEventItem } from '@/components/index/types';
 import {
   formatIndexDate,
   formatIndexPrice,
   getArtistAccent,
-  getStatusBadge,
+  getVerifiedAvailabilityBadge,
 } from '@/components/index/formatters';
+import { EventImage } from '@/components/index/EventImage';
 
 export interface DiscoverEventCardProps {
   event: IndexEventItem;
@@ -21,22 +22,7 @@ export interface DiscoverEventCardProps {
  * ever invented.
  */
 export function DiscoverEventCard({ event }: DiscoverEventCardProps) {
-  const [imageFailed, setImageFailed] = useState(false);
-
   const headlinerName = event.headlinerName || event.title;
-  const headliner =
-    event.artists?.find(
-      (a) => a.billingPosition === 'headliner' || a.name === headlinerName,
-    ) || event.artists?.[0];
-
-  const image =
-    event.imageUrl ||
-    headliner?.imageUrl ||
-    event.artists?.find((a) => a.imageUrl)?.imageUrl ||
-    event.venueImageUrl ||
-    null;
-  const showImage = Boolean(image) && !imageFailed;
-
   const accent = getArtistAccent(headlinerName);
   const supportActs = (event.artists || [])
     .filter(
@@ -57,13 +43,10 @@ export function DiscoverEventCard({ event }: DiscoverEventCardProps) {
     event.eventKind,
     event.ticketUrl,
   );
-  const badge = getStatusBadge(
+  const badge = getVerifiedAvailabilityBadge(
     event.inventoryStatus,
     event.ticketRemainingPercent,
   );
-  const showBadge =
-    event.inventoryStatus === 'sold_out' ||
-    event.inventoryStatus === 'cancelled';
   const place = [event.venueName, event.city].filter(Boolean).join(' · ');
 
   return (
@@ -72,32 +55,14 @@ export function DiscoverEventCard({ event }: DiscoverEventCardProps) {
       data-testid="discover-event-card"
       className="group flex w-60 shrink-0 snap-start flex-col overflow-hidden rounded-2xl border border-zinc-200/90 bg-white transition-all duration-200 hover:border-zinc-300 hover:shadow-[0_8px_24px_rgba(0,0,0,0.06)] sm:w-64"
     >
-      <div className="relative aspect-[4/3] w-full overflow-hidden bg-zinc-100">
-        {showImage ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
-            src={image as string}
-            alt={headlinerName}
-            loading="lazy"
-            onError={() => setImageFailed(true)}
-            className="h-full w-full object-cover transition-transform duration-300 ease-out group-hover:scale-105"
-          />
-        ) : (
-          <div
-            className="flex h-full w-full items-center justify-center"
-            style={{
-              background: `linear-gradient(135deg, ${accent.primary}1f 0%, ${accent.secondary}38 100%)`,
-            }}
-            aria-hidden="true"
-          >
-            <span
-              className="select-none text-6xl font-extrabold tracking-tight"
-              style={{ color: accent.primary, opacity: 0.55 }}
-            >
-              {headlinerName.charAt(0).toUpperCase()}
-            </span>
-          </div>
-        )}
+      <EventImage
+        event={event}
+        className="aspect-[4/3] w-full"
+        width={480}
+        height={360}
+        graphicSize="lg"
+        imgClassName="transition-transform duration-300 ease-out group-hover:scale-105"
+      >
         <div
           className="absolute inset-x-0 bottom-0 h-1"
           style={{
@@ -107,14 +72,14 @@ export function DiscoverEventCard({ event }: DiscoverEventCardProps) {
         <span className="absolute left-2.5 top-2.5 rounded-md bg-white/95 px-2 py-1 text-[11px] font-semibold text-zinc-800 shadow-sm">
           {dayPart}
         </span>
-        {showBadge && (
+        {badge && (
           <span
             className={`absolute right-2.5 top-2.5 rounded-md border px-2 py-0.5 text-[11px] ${badge.bg}`}
           >
             {badge.label}
           </span>
         )}
-      </div>
+      </EventImage>
 
       <div className="flex flex-1 flex-col gap-1 p-3.5">
         <h3 className="line-clamp-2 text-sm font-bold leading-snug tracking-tight text-zinc-900">

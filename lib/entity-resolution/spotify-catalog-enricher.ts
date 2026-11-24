@@ -729,6 +729,7 @@ export class SpotifyCatalogEnricher {
   public async storeArtistGenres(
     artistId: string,
     genres: string[] | undefined | null,
+    options?: { onlyIfMissing?: boolean },
   ): Promise<boolean> {
     const clean = Array.from(
       new Set(
@@ -740,7 +741,7 @@ export class SpotifyCatalogEnricher {
     );
     if (clean.length === 0 || this.dryRun) return false;
     const now = new Date().toISOString();
-    const { error } = await this.supabase
+    let query = this.supabase
       .from('artists')
       .update({
         genres: clean,
@@ -749,6 +750,10 @@ export class SpotifyCatalogEnricher {
         updated_at: now,
       })
       .eq('id', artistId);
+    // Backfill mode: only ever fill an artist that still has NO genres (guards against races
+    // and against overwriting genres stored since the candidate list was read).
+    if (options?.onlyIfMissing) query = query.eq('genres', '{}');
+    const { data: updatedRows, error } = await query.select('id');
     if (error) {
       // 42703 = undefined_column (migration not applied) / PGRST204 = column not in schema cache
       if (error.code === '42703' || error.code === 'PGRST204') return false;
@@ -757,6 +762,7 @@ export class SpotifyCatalogEnricher {
       );
       return false;
     }
+    if (options?.onlyIfMissing) return (updatedRows ?? []).length > 0;
     return true;
   }
 
@@ -767,19 +773,11 @@ export class SpotifyCatalogEnricher {
   public async backfillGenres(options?: { limit?: number }): Promise<{
     candidates: number;
     updated: number;
+    /** Dry-run only: how many artists WOULD be updated (nothing is written). */
+    wouldUpdate: number;
     skippedNoGenres: number;
   }> {
     const limit = options?.limit ?? 500;
-    const { data, error } = await this.supabase
-      .from('artist_external_ids')
-      .select('artist_id, external_id, artists(id, genres)')
-      .eq('provider', 'spotify')
-      .limit(limit * 2);
-    if (error) {
-      throw new Error(
-        `Failed to load Spotify-mapped artists: ${error.message}`,
-      );
-    }
     type Row = {
       artist_id: string;
       external_id: string;
@@ -788,14 +786,33 @@ export class SpotifyCatalogEnricher {
         | Array<{ genres?: string[] | null }>
         | null;
     };
-    const rows = ((data ?? []) as unknown as Row[])
-      .filter((r) => {
+    // Page through the Spotify mappings until `limit` genre-less artists are found, so artists
+    // that already have genres cannot starve the ones that still need them.
+    const PAGE = 1000;
+    const rows: Row[] = [];
+    for (let offset = 0; rows.length < limit; offset += PAGE) {
+      const { data, error } = await this.supabase
+        .from('artist_external_ids')
+        .select('artist_id, external_id, artists(id, genres)')
+        .eq('provider', 'spotify')
+        .order('artist_id', { ascending: true })
+        .range(offset, offset + PAGE - 1);
+      if (error) {
+        throw new Error(
+          `Failed to load Spotify-mapped artists: ${error.message}`,
+        );
+      }
+      const page = (data ?? []) as unknown as Row[];
+      for (const r of page) {
         const a = Array.isArray(r.artists) ? r.artists[0] : r.artists;
-        return !a?.genres || a.genres.length === 0;
-      })
-      .slice(0, limit);
+        if (!a?.genres || a.genres.length === 0) rows.push(r);
+        if (rows.length >= limit) break;
+      }
+      if (page.length < PAGE) break;
+    }
 
     let updated = 0;
+    let wouldUpdate = 0;
     let skippedNoGenres = 0;
     for (let i = 0; i < rows.length; i += 50) {
       const chunk = rows.slice(i, i + 50);
@@ -808,10 +825,20 @@ export class SpotifyCatalogEnricher {
           skippedNoGenres++;
           continue;
         }
-        if (await this.storeArtistGenres(r.artist_id, sa.genres)) updated++;
+        if (this.dryRun) {
+          wouldUpdate++;
+          continue;
+        }
+        if (
+          await this.storeArtistGenres(r.artist_id, sa.genres, {
+            onlyIfMissing: true,
+          })
+        ) {
+          updated++;
+        }
       }
     }
-    return { candidates: rows.length, updated, skippedNoGenres };
+    return { candidates: rows.length, updated, wouldUpdate, skippedNoGenres };
   }
 
   /**

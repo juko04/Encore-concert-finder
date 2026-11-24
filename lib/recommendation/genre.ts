@@ -53,43 +53,73 @@ interface TaxonomyRule {
  * Ordered rules; the first match wins, so more specific patterns come first.
  */
 const TAXONOMY_RULES: readonly TaxonomyRule[] = [
+  // Latin urban (reggaeton, latin trap, ...) MUST precede reggae/hip hop/trap: "reggaeton"
+  // contains "reggae" and "trap latino" contains "trap", but neither is that genre.
+  {
+    pattern:
+      /reggaeton|dembow|perreo|urbano|moombahton|latin (urban|trap|rap|hip hop|drill)|(trap|rap|hip hop|drill) (latino|latina|argentino|chileno|mexicano|boricua|dominicano|venezolano|colombiano|peruano|espanol|en espanol)/,
+    family: 'latin',
+    cluster: 'latin_urban',
+  },
+
+  // Emo/cloud rap are hip hop, not punk
+  {
+    pattern: /\b(emo|sad|cloud|melodic) rap\b|\bemo trap\b/,
+    family: 'hip_hop',
+    cluster: 'hip_hop',
+  },
+
+  // Post-punk is rock (indie) rather than punk
+  { pattern: /post punk|post hardcore/, family: 'rock', cluster: 'indie_rock' },
+
   // Punk-adjacent before metal/rock so "hardcore punk" / "pop punk" land in punk
-  { pattern: /pop punk|emo|screamo/, family: 'punk', cluster: 'emo' },
+  { pattern: /pop punk|\bemo\b|screamo/, family: 'punk', cluster: 'emo' },
   { pattern: /\bska\b/, family: 'punk', cluster: 'ska' },
   { pattern: /punk|hardcore/, family: 'punk', cluster: 'punk' },
   { pattern: /metal|grindcore|deathcore/, family: 'metal', cluster: 'metal' },
 
-  // Electronic
-  { pattern: /house/, family: 'electronic', cluster: 'house' },
+  // Dance pop / electropop are pop even though they contain "dance"/"electro"
+  {
+    pattern: /dance pop|electropop|synthpop|hyperpop|electro pop/,
+    family: 'pop',
+    cluster: 'dance_pop',
+  },
+
+  // Electronic ("bass house" is bass-music, so it precedes the generic house rule)
+  { pattern: /bass house/, family: 'electronic', cluster: 'bass' },
+  {
+    pattern: /\bhouse\b(?! of)/,
+    family: 'electronic',
+    cluster: 'house',
+  },
   { pattern: /techno/, family: 'electronic', cluster: 'techno' },
   { pattern: /trance/, family: 'electronic', cluster: 'trance' },
   {
-    pattern: /drum and bass|drum & bass|dnb|jungle|liquid funk/,
+    pattern: /drum and bass|\bdnb\b|jungle|liquid funk|drill and bass/,
     family: 'electronic',
     cluster: 'dnb',
   },
   {
-    pattern:
-      /dubstep|riddim|brostep|future bass|bass music|trap edm|drumstep|bass house/,
+    pattern: /dubstep|riddim|brostep|future bass|bass music|trap edm|drumstep/,
     family: 'electronic',
     cluster: 'bass',
   },
   {
     pattern:
-      /ambient|idm|downtempo|chillwave|synthwave|glitch|breakbeat|electronica|trip hop/,
+      /ambient|\bidm\b|downtempo|chillwave|synthwave|glitch|breakbeat|electronica|indietronica|trip hop|lo fi beats|lofi beats|chillhop/,
     family: 'electronic',
     cluster: 'electronica',
   },
   {
-    pattern: /\bedm\b|electro|electronic|\bdance\b|big room|rave/,
+    pattern: /\bedm\b|electro|electronic|\bdance\b|big room|\brave\b/,
     family: 'electronic',
     cluster: 'edm',
   },
 
   // Hip hop
-  { pattern: /trap|drill|phonk/, family: 'hip_hop', cluster: 'trap' },
+  { pattern: /\btrap\b|\bdrill\b|phonk/, family: 'hip_hop', cluster: 'trap' },
   {
-    pattern: /hip hop|hip-hop|\brap\b|grime|boom bap|crunk/,
+    pattern: /hip hop|hiphop|\brap\b|grime|boom bap|crunk/,
     family: 'hip_hop',
     cluster: 'hip_hop',
   },
@@ -97,23 +127,27 @@ const TAXONOMY_RULES: readonly TaxonomyRule[] = [
   // Soul / R&B / funk
   { pattern: /funk/, family: 'soul_rnb', cluster: 'funk' },
   {
-    pattern: /r&b|\brnb\b|neo soul|\bsoul\b|motown|gospel/,
+    pattern: /\brnb\b|neo soul|\bsoul\b|motown|gospel/,
     family: 'soul_rnb',
     cluster: 'soul_rnb',
   },
 
   // Reggae
-  { pattern: /reggae|dancehall|\bdub\b/, family: 'reggae', cluster: 'reggae' },
+  {
+    pattern: /reggae(?!ton)|dancehall|\bdub\b/,
+    family: 'reggae',
+    cluster: 'reggae',
+  },
 
   // Latin / world
   {
     pattern:
-      /latin|reggaeton|salsa|cumbia|bachata|banda|norteno|mariachi|corrido|urbano/,
+      /latin|salsa|cumbia|bachata|\bbanda\b|norteno|mariachi|corrido|ranchera|tejano|sierreno|grupera|duranguense|regional mexican|merengue|vallenato/,
     family: 'latin',
     cluster: 'latin',
   },
   {
-    pattern: /afrobeat|afropop|world|celtic|flamenco/,
+    pattern: /afrobeat|afropop|amapiano|world|celtic|flamenco/,
     family: 'world',
     cluster: 'world',
   },
@@ -130,7 +164,7 @@ const TAXONOMY_RULES: readonly TaxonomyRule[] = [
     cluster: 'country',
   },
   {
-    pattern: /folk|americana|singer-songwriter|singer songwriter|troubadour/,
+    pattern: /folk|americana|singer songwriter|troubadour/,
     family: 'country_folk',
     cluster: 'folk',
   },
@@ -151,12 +185,7 @@ const TAXONOMY_RULES: readonly TaxonomyRule[] = [
   },
 
   // Pop (before generic rock so "pop rock" resolves predictably)
-  { pattern: /k-pop|kpop/, family: 'pop', cluster: 'k_pop' },
-  {
-    pattern: /dance pop|electropop|synthpop|hyperpop|electro pop/,
-    family: 'pop',
-    cluster: 'dance_pop',
-  },
+  { pattern: /\bk pop\b|kpop/, family: 'pop', cluster: 'k_pop' },
   {
     pattern:
       /indie pop|dream pop|bedroom pop|art pop|chamber pop|jangle pop|baroque pop/,
@@ -168,13 +197,13 @@ const TAXONOMY_RULES: readonly TaxonomyRule[] = [
   // Rock
   { pattern: /jam band|jamtronica|\bjam\b/, family: 'rock', cluster: 'jam' },
   {
-    pattern: /psychedelic|neo-psych|space rock|stoner|krautrock/,
+    pattern: /psychedelic|neo psych|space rock|stoner|krautrock/,
     family: 'rock',
     cluster: 'psychedelic',
   },
   {
     pattern:
-      /indie|alternative|alt rock|garage|shoegaze|post-punk|new wave|modern rock|lo-fi/,
+      /indie|alternative|alt rock|garage|shoegaze|new wave|modern rock|lo fi/,
     family: 'rock',
     cluster: 'indie_rock',
   },
@@ -185,8 +214,21 @@ const TAXONOMY_RULES: readonly TaxonomyRule[] = [
   },
 ];
 
+/**
+ * Canonical comparison form: lower case, diacritics stripped (norteño -> norteno), r&b -> rnb,
+ * "&" -> "and", and hyphens/underscores/other punctuation collapsed to single spaces so that
+ * "k-pop", "K Pop" and "k_pop" are the same genre.
+ */
 export function normalizeGenre(raw: string): string {
-  return raw.toLowerCase().replace(/[_]+/g, ' ').replace(/\s+/g, ' ').trim();
+  if (typeof raw !== 'string') return '';
+  return raw
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/\br\s*&\s*b\b/g, 'rnb')
+    .replace(/&/g, ' and ')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
 }
 
 export function classifyGenre(raw: string): GenreClassification {
