@@ -123,7 +123,7 @@ export function LoginForm({
             }}
             className={`flex-1 rounded-md py-1.5 text-center transition-colors ${
               authMethod === 'magic_link'
-                ? 'bg-zinc-800 font-semibold text-white shadow-xs'
+                ? 'shadow-xs bg-zinc-800 font-semibold text-white'
                 : 'text-zinc-400 hover:text-zinc-200'
             }`}
           >
@@ -139,7 +139,7 @@ export function LoginForm({
             }}
             className={`flex-1 rounded-md py-1.5 text-center transition-colors ${
               authMethod === 'password'
-                ? 'bg-zinc-800 font-semibold text-white shadow-xs'
+                ? 'shadow-xs bg-zinc-800 font-semibold text-white'
                 : 'text-zinc-400 hover:text-zinc-200'
             }`}
           >

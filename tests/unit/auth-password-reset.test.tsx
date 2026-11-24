@@ -165,7 +165,9 @@ describe('Password Reset & Change Authentication Suite', () => {
 
   describe('3. LoginForm Forgot Password Mode', () => {
     it('renders "Forgot password?" button in signin mode and transitions to reset mode', () => {
-      render(<LoginForm redirectTo="/profile/taste" defaultMethod="password" />);
+      render(
+        <LoginForm redirectTo="/profile/taste" defaultMethod="password" />,
+      );
 
       const forgotBtn = screen.getByTestId('forgot-password-link');
       expect(forgotBtn).toBeInTheDocument();

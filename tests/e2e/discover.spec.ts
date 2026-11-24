@@ -550,8 +550,10 @@ test.describe('Discover Page E2E Suite', () => {
 
     const budgetSelector = page.getByTestId('budget-selector');
     const budget80Btn = budgetSelector.getByRole('button', { name: '$80' });
+    await expect(budget80Btn).toBeEnabled();
     await budget80Btn.click();
     await expect(budget80Btn).toHaveAttribute('aria-pressed', 'true');
+    await expect(budget80Btn).toBeEnabled();
 
     // 9. Reload page to verify persistence across page reload
     await page.reload();

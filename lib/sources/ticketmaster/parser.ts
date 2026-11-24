@@ -200,11 +200,8 @@ export function parseTicketmasterEvent(
   const ticketingCode = ticketingStatus?.toLowerCase();
 
   let inventoryStatus:
-    | 'available'
-    | 'low_inventory'
-    | 'sold_out'
-    | 'cancelled'
-    | 'unknown' = 'unknown';
+    'available' | 'low_inventory' | 'sold_out' | 'cancelled' | 'unknown' =
+    'unknown';
 
   if (statusCode === 'canceled' || statusCode === 'cancelled') {
     inventoryStatus = 'cancelled';

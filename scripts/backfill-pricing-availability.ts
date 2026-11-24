@@ -7,7 +7,9 @@ if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
   console.error(
     'Error: NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY environment variables are required.',
   );
-  console.error('Usage: NEXT_PUBLIC_SUPABASE_URL=... SUPABASE_SERVICE_ROLE_KEY=... npx tsx scripts/backfill-pricing-availability.ts [--dry-run]');
+  console.error(
+    'Usage: NEXT_PUBLIC_SUPABASE_URL=... SUPABASE_SERVICE_ROLE_KEY=... npx tsx scripts/backfill-pricing-availability.ts [--dry-run]',
+  );
   process.exit(1);
 }
 
@@ -40,7 +42,9 @@ interface BackfillChange {
 }
 
 export async function backfillPricingAndAvailability() {
-  console.log(`--- Pricing & Availability Backfill (${DRY_RUN ? 'DRY RUN' : 'LIVE'}) ---`);
+  console.log(
+    `--- Pricing & Availability Backfill (${DRY_RUN ? 'DRY RUN' : 'LIVE'}) ---`,
+  );
   console.log(`Target: ${SUPABASE_URL}`);
 
   const changes: BackfillChange[] = [];
@@ -48,7 +52,9 @@ export async function backfillPricingAndAvailability() {
   // 1. Snapshot current state for before/after reporting
   const { data: allLinksBefore } = await supabase
     .from('event_ticket_links')
-    .select('id, event_id, inventory_status, min_price, max_price, currency, url, verified_at');
+    .select(
+      'id, event_id, inventory_status, min_price, max_price, currency, url, verified_at',
+    );
 
   const beforeStatusCounts: Record<string, number> = {};
   for (const l of allLinksBefore || []) {
@@ -77,7 +83,8 @@ export async function backfillPricingAndAvailability() {
       field: 'inventory_status',
       before: 'available',
       after: 'unknown',
-      reason: 'No verified_at timestamp — ticket URL alone does not prove remaining inventory',
+      reason:
+        'No verified_at timestamp — ticket URL alone does not prove remaining inventory',
     });
   }
 
@@ -102,8 +109,12 @@ export async function backfillPricingAndAvailability() {
   // 3. Do NOT blindly mark events sold out from title.
   // Only mark sold out if there is a verified_at timestamp on a ticket link
   // that explicitly came from a source parser with an is_sold_out signal.
-  console.log('\nNote: Sold-out status changes require source-level evidence (verified_at + parser signal).');
-  console.log('  No automatic title-based sold-out marking is performed by this script.');
+  console.log(
+    '\nNote: Sold-out status changes require source-level evidence (verified_at + parser signal).',
+  );
+  console.log(
+    '  No automatic title-based sold-out marking is performed by this script.',
+  );
 
   // 4. Ensure free events have structured $0 pricing (non-destructive)
   const { data: freeEvents } = await supabase
@@ -141,7 +152,9 @@ export async function backfillPricingAndAvailability() {
       updatedFreeCount += updated.length;
     }
   }
-  console.log(`\nFree event pricing: ${updatedFreeCount} ticket links need $0 USD backfill.`);
+  console.log(
+    `\nFree event pricing: ${updatedFreeCount} ticket links need $0 USD backfill.`,
+  );
 
   // 5. After state
   if (!DRY_RUN) {
@@ -171,7 +184,9 @@ export async function backfillPricingAndAvailability() {
 
   // 6. Change log
   console.log(`\n--- Change Summary ---`);
-  console.log(`Total changes: ${changes.length} (${DRY_RUN ? 'DRY RUN — no writes executed' : 'APPLIED'})`);
+  console.log(
+    `Total changes: ${changes.length} (${DRY_RUN ? 'DRY RUN — no writes executed' : 'APPLIED'})`,
+  );
 
   if (changes.length > 0) {
     console.log('\nSample changes (first 20):');

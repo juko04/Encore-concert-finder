@@ -81,6 +81,9 @@ export interface IndexEventItem {
   genre?: string | null;
   subgenres?: string[];
   ageRestriction?: string | null;
+  imageUrl?: string | null;
+  venueImageUrl?: string | null;
+  ticketRemainingPercent?: number | null;
   posterColor: string;
   posterSecondaryColor: string;
   spotifyPreviewTrack?: IndexTrackPreview | null;
@@ -266,6 +269,7 @@ export function toIndexEventItem(
         name: a.name,
         billingPosition: a.billingPosition,
         spotifyArtistId: a.spotifyArtistId,
+        imageUrl: (a as { imageUrl?: string | null }).imageUrl ?? null,
       })),
       venueName: canonical.venueName,
       venueId: canonical.venueId,
@@ -293,6 +297,17 @@ export function toIndexEventItem(
         ? (canonicalAny.subgenres as string[])
         : undefined,
       ageRestriction: (canonicalAny.ageRestriction as string) || 'All Ages',
+      imageUrl:
+        (canonicalAny.imageUrl as string) ||
+        (headliner as { imageUrl?: string | null })?.imageUrl ||
+        null,
+      venueImageUrl:
+        ((canonical.venue as { imageUrl?: string | null } | null)
+          ?.imageUrl as string) || null,
+      ticketRemainingPercent:
+        typeof canonicalAny.ticketRemainingPercent === 'number'
+          ? canonicalAny.ticketRemainingPercent
+          : null,
       posterColor: (canonicalAny.posterColor as string) || palette.primary,
       posterSecondaryColor:
         (canonicalAny.posterSecondaryColor as string) || palette.secondary,
@@ -386,6 +401,7 @@ export function toIndexEventItem(
       name: a.name,
       billingPosition: a.billingPosition,
       spotifyArtistId: a.spotifyArtistId,
+      imageUrl: (a as { imageUrl?: string | null }).imageUrl ?? null,
     })),
     venueName: canonical.venueName,
     venueId: canonical.venueId,
@@ -413,6 +429,17 @@ export function toIndexEventItem(
       ? (canonicalAny.subgenres as string[])
       : undefined,
     ageRestriction: (canonicalAny.ageRestriction as string) || 'All Ages',
+    imageUrl:
+      (canonicalAny.imageUrl as string) ||
+      (headliner as { imageUrl?: string | null })?.imageUrl ||
+      null,
+    venueImageUrl:
+      ((canonical.venue as { imageUrl?: string | null } | null)
+        ?.imageUrl as string) || null,
+    ticketRemainingPercent:
+      typeof canonicalAny.ticketRemainingPercent === 'number'
+        ? canonicalAny.ticketRemainingPercent
+        : null,
     posterColor: (canonicalAny.posterColor as string) || palette.primary,
     posterSecondaryColor:
       (canonicalAny.posterSecondaryColor as string) || palette.secondary,

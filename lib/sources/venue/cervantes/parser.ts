@@ -425,11 +425,7 @@ export function parseCervantesEvents(
 
       // A ticket URL establishes existence of a ticketing link, not verified inventory availability
       const inventoryStatus: EventCandidate['inventoryStatus'] =
-        isStatusCanceled
-          ? 'cancelled'
-          : isSoldOut
-            ? 'sold_out'
-            : 'unknown';
+        isStatusCanceled ? 'cancelled' : isSoldOut ? 'sold_out' : 'unknown';
 
       // 2. Date & Time normalization in local timezone
       const localStartDate = parseDateString(currentMonthYear, dateText);

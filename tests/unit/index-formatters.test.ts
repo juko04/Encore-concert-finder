@@ -7,6 +7,7 @@ import {
   formatPrice,
   getStatusBadge,
   calculateDistanceMiles,
+  getArtistAccent,
 } from '@/components/index/formatters';
 
 describe('Index Formatters Unit Tests', () => {
@@ -119,7 +120,13 @@ describe('Index Formatters Unit Tests', () => {
       expect(formatIndexPrice(null, null)).toBe('Price TBA');
       expect(formatIndexPrice(undefined, undefined)).toBe('Price TBA');
       expect(
-        formatIndexPrice(null, null, 'USD', undefined, 'https://example.com/tickets'),
+        formatIndexPrice(
+          null,
+          null,
+          'USD',
+          undefined,
+          'https://example.com/tickets',
+        ),
       ).toBe('Check ticket prices');
     });
 
@@ -137,6 +144,34 @@ describe('Index Formatters Unit Tests', () => {
       expect(getStatusBadge('cancelled').label).toBe('Cancelled');
       expect(getStatusBadge('presale').label).toBe('Presale Soon');
       expect(getStatusBadge('unknown').label).toBe('Check Tickets');
+    });
+
+    it('returns verified percentage warnings when reliable percentage is provided', () => {
+      expect(getStatusBadge('available', 3).label).toBe('Almost Gone (<5%)');
+      expect(getStatusBadge('available', 3).indicatorLevel).toBe('urgent');
+      expect(getStatusBadge('available', 15).label).toBe('Low Tickets (<25%)');
+      expect(getStatusBadge('available', 15).indicatorLevel).toBe('warning');
+      expect(getStatusBadge('available', 50).label).toBe('Tickets Available');
+      expect(getStatusBadge('available', 50).indicatorLevel).toBe('standard');
+      // Sold out takes precedence
+      expect(getStatusBadge('sold_out', 10).label).toBe('Sold Out');
+    });
+  });
+
+  describe('getArtistAccent', () => {
+    it('returns deterministic artist visual accent palette', () => {
+      const accent1 = getArtistAccent('Tycho');
+      const accent2 = getArtistAccent('Tycho');
+      expect(accent1).toEqual(accent2);
+      expect(accent1.primary).toMatch(/^#[0-9a-f]{6}$/i);
+      expect(accent1.subtleBg).toContain('bg-');
+      expect(accent1.subtleBorder).toContain('border-');
+    });
+
+    it('handles empty or missing artist names gracefully', () => {
+      const defaultAccent = getArtistAccent(null);
+      expect(defaultAccent).toBeDefined();
+      expect(defaultAccent.primary).toBeDefined();
     });
   });
 

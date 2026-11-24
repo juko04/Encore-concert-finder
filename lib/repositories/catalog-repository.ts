@@ -677,9 +677,7 @@ export class SupabaseCatalogRepository implements ICatalogRepository {
         );
       } else {
         const escapedG = escapeLikePattern(filters.genre.trim());
-        query = query.or(
-          `genre.ilike."%${escapedG}%",genres.cs.{"${g}"}`,
-        );
+        query = query.or(`genre.ilike."%${escapedG}%",genres.cs.{"${g}"}`);
       }
     }
 
@@ -835,6 +833,7 @@ export class SupabaseCatalogRepository implements ICatalogRepository {
         name: string;
         billingPosition: BillingPosition;
         spotifyArtistId?: string | null;
+        imageUrl?: string | null;
       }>
     >();
     for (const aRow of (allArtistLinks as unknown as EventArtistWithExtIds[]) ||
@@ -848,8 +847,9 @@ export class SupabaseCatalogRepository implements ICatalogRepository {
       list.push({
         id: aRow.artist_id,
         name: aRow.artists?.name ?? 'Unknown Artist',
-        billingPosition: aRow.billing_position,
+        billingPosition: aRow.billing_position as BillingPosition,
         spotifyArtistId,
+        imageUrl: aRow.artists?.image_url ?? null,
       });
       artistsByEventId.set(aRow.event_id, list);
     }
@@ -1170,9 +1170,7 @@ export class SupabaseCatalogRepository implements ICatalogRepository {
         );
       } else {
         const escapedG = escapeLikePattern(filters.genre.trim());
-        query = query.or(
-          `genre.ilike."%${escapedG}%",genres.cs.{"${g}"}`,
-        );
+        query = query.or(`genre.ilike."%${escapedG}%",genres.cs.{"${g}"}`);
       }
     }
 
@@ -1255,10 +1253,7 @@ export class SupabaseCatalogRepository implements ICatalogRepository {
         .select('id, name, city')
         .order('name', { ascending: true }),
       this.listCities().catch(() => []),
-      this.client
-        .from('events')
-        .select('genre')
-        .not('genre', 'is', null),
+      this.client.from('events').select('genre').not('genre', 'is', null),
     ]);
 
     const venues = (venuesRes.data || []).map((v) => ({

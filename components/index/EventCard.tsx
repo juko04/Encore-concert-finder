@@ -1,12 +1,13 @@
 'use client';
 
-import React from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import Link from 'next/link';
 import type { IndexEventItem } from './types';
 import {
   formatIndexDate,
   formatIndexPrice,
   getStatusBadge,
+  getArtistAccent,
 } from './formatters';
 import {
   HeartIcon,
@@ -16,7 +17,13 @@ import {
   SparklesIcon,
   ArrowRightIcon,
   AlertCircleIcon,
+  DownloadIcon,
+  ExternalLinkIcon,
 } from './icons';
+import {
+  downloadIcsFile,
+  generateGoogleCalendarUrl,
+} from '@/lib/utils/calendar-export';
 
 export interface EventCardProps {
   event: IndexEventItem;
@@ -35,12 +42,35 @@ export function EventCard({
   onToggleAlert,
   href,
 }: EventCardProps) {
+  const [calendarMenuOpen, setCalendarMenuOpen] = useState(false);
+  const calendarMenuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (
+        calendarMenuRef.current &&
+        !calendarMenuRef.current.contains(e.target as Node)
+      ) {
+        setCalendarMenuOpen(false);
+      }
+    }
+    if (calendarMenuOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [calendarMenuOpen]);
+
   const isPersonalized = Boolean(event.personalScore?.isPersonalized);
   const score = event.personalScore?.score ?? 50;
   const isDisliked = Boolean(event.personalScore?.isDisliked);
   const isFavorite = Boolean(event.personalScore?.isFavorite);
 
-  const statusBadge = getStatusBadge(event.inventoryStatus);
+  const statusBadge = getStatusBadge(
+    event.inventoryStatus,
+    event.ticketRemainingPercent,
+  );
   const isSoldOut = event.inventoryStatus === 'sold_out';
   const isCancelled = event.inventoryStatus === 'cancelled';
 
@@ -49,6 +79,24 @@ export function EventCard({
     (a) => a.name !== headlinerName && a.billingPosition !== 'headliner',
   );
 
+  const headlinerArtist =
+    event.artists?.find(
+      (a) => a.billingPosition === 'headliner' || a.name === headlinerName,
+    ) || event.artists?.[0];
+
+  // Fallback hierarchy:
+  // 1. Verified event image (event.imageUrl)
+  // 2. Verified artist image (headlinerArtist.imageUrl)
+  // 3. Verified venue image (event.venueImageUrl)
+  // 4. Branded neutral graphic with artist accent
+  const displayImage =
+    event.imageUrl ||
+    headlinerArtist?.imageUrl ||
+    event.artists?.find((a) => a.imageUrl)?.imageUrl ||
+    event.venueImageUrl ||
+    null;
+
+  const accent = getArtistAccent(headlinerName);
   const detailUrl = href || `/concerts/${event.id}`;
 
   return (
@@ -57,13 +105,56 @@ export function EventCard({
         isDisliked ? 'border-dashed bg-zinc-50/80 opacity-60' : ''
       }`}
     >
-      {/* Visual Accent Top Bar (Derived from Poster Palette) */}
-      <div
-        className="h-1.5 w-full transition-opacity duration-200 group-hover:h-2"
-        style={{
-          background: `linear-gradient(90deg, ${event.posterColor} 0%, ${event.posterSecondaryColor} 100%)`,
-        }}
-      />
+      {/* Visual Media Header (Image with Fallback Hierarchy) */}
+      {displayImage ? (
+        <div className="relative aspect-[16/9] w-full overflow-hidden bg-zinc-100">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={displayImage}
+            alt={headlinerName}
+            loading="lazy"
+            className="h-full w-full object-cover transition-transform duration-300 ease-out group-hover:scale-105"
+            onError={(e) => {
+              (e.target as HTMLElement).style.display = 'none';
+            }}
+          />
+          <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/50 via-transparent to-transparent opacity-60" />
+          <div
+            className="absolute bottom-0 left-0 right-0 h-1"
+            style={{
+              background: `linear-gradient(90deg, ${accent.primary} 0%, ${accent.secondary} 100%)`,
+            }}
+          />
+        </div>
+      ) : (
+        <div
+          className="relative flex aspect-[24/9] w-full items-center justify-between overflow-hidden px-5 py-3 transition-colors"
+          style={{
+            background: `linear-gradient(135deg, ${accent.primary}12 0%, ${accent.secondary}20 100%)`,
+          }}
+        >
+          <div className="flex flex-col">
+            <span className="font-mono text-[10px] uppercase tracking-wider text-zinc-400">
+              Live Concert
+            </span>
+            <span className="font-mono text-xs text-zinc-500">
+              {event.genre ? event.genre.split('/')[0].trim() : 'Live Music'}
+            </span>
+          </div>
+          <div
+            className="shadow-xs flex h-8 w-8 shrink-0 items-center justify-center rounded-lg font-mono text-xs font-bold text-white"
+            style={{ backgroundColor: accent.primary }}
+          >
+            {headlinerName.charAt(0).toUpperCase()}
+          </div>
+          <div
+            className="absolute bottom-0 left-0 right-0 h-1"
+            style={{
+              background: `linear-gradient(90deg, ${accent.primary} 0%, ${accent.secondary} 100%)`,
+            }}
+          />
+        </div>
+      )}
 
       <div className="flex flex-1 flex-col p-5 sm:p-6">
         {/* Top Badges & Quick Action Controls */}
@@ -100,7 +191,7 @@ export function EventCard({
             ) : null}
           </div>
 
-          {/* Quick Action Buttons (Save & Alert) */}
+          {/* Quick Action Controls (Save, Alert, Calendar Export) */}
           <div className="-mr-1 flex items-center gap-1">
             <button
               type="button"
@@ -115,7 +206,7 @@ export function EventCard({
                   : `Save ${headlinerName} to watchlist`
               }
               aria-pressed={isSaved}
-              className={`flex h-8 w-8 items-center justify-center rounded-lg border transition-all duration-150 ease-out active:scale-[0.92] ${
+              className={`relative z-10 flex h-8 w-8 items-center justify-center rounded-lg border transition-all duration-150 ease-out active:scale-[0.92] ${
                 isSaved
                   ? 'shadow-xs border-rose-200 bg-rose-50 text-rose-600'
                   : 'border-transparent text-zinc-400 hover:border-zinc-200 hover:bg-zinc-50 hover:text-zinc-700'
@@ -137,7 +228,7 @@ export function EventCard({
                   : `Enable ticket alerts for ${headlinerName}`
               }
               aria-pressed={hasAlert}
-              className={`flex h-8 w-8 items-center justify-center rounded-lg border transition-all duration-150 ease-out active:scale-[0.92] ${
+              className={`relative z-10 flex h-8 w-8 items-center justify-center rounded-lg border transition-all duration-150 ease-out active:scale-[0.92] ${
                 hasAlert
                   ? 'shadow-xs border-violet-200 bg-violet-50 text-violet-600'
                   : 'border-transparent text-zinc-400 hover:border-zinc-200 hover:bg-zinc-50 hover:text-zinc-700'
@@ -145,6 +236,52 @@ export function EventCard({
             >
               <BellIcon className="h-4 w-4" filled={hasAlert} />
             </button>
+
+            {/* Calendar Export Menu */}
+            <div className="relative" ref={calendarMenuRef}>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setCalendarMenuOpen(!calendarMenuOpen);
+                }}
+                aria-label={`Export ${headlinerName} to calendar`}
+                aria-expanded={calendarMenuOpen}
+                className="relative z-10 flex h-8 w-8 items-center justify-center rounded-lg border border-transparent text-zinc-400 transition-all duration-150 ease-out hover:border-zinc-200 hover:bg-zinc-50 hover:text-zinc-700 active:scale-[0.92]"
+              >
+                <CalendarIcon className="h-4 w-4" />
+              </button>
+
+              {calendarMenuOpen && (
+                <div
+                  className="absolute right-0 top-9 z-30 w-44 rounded-xl border border-zinc-200 bg-white py-1.5 text-xs shadow-lg"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <button
+                    type="button"
+                    onClick={() => {
+                      downloadIcsFile(event);
+                      setCalendarMenuOpen(false);
+                    }}
+                    className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-zinc-700 hover:bg-zinc-50"
+                  >
+                    <DownloadIcon className="h-3.5 w-3.5 text-zinc-500" />
+                    <span>Apple / iCal (.ics)</span>
+                  </button>
+                  <a
+                    href={generateGoogleCalendarUrl(event)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    onClick={() => setCalendarMenuOpen(false)}
+                    className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-zinc-700 hover:bg-zinc-50"
+                  >
+                    <ExternalLinkIcon className="h-3.5 w-3.5 text-zinc-500" />
+                    <span>Google Calendar</span>
+                  </a>
+                </div>
+              )}
+            </div>
           </div>
         </div>
 

@@ -38,8 +38,27 @@ export function EventListItem({
   const isDisliked = Boolean(event.personalScore?.isDisliked);
   const isFavorite = Boolean(event.personalScore?.isFavorite);
 
-  const statusBadge = getStatusBadge(event.inventoryStatus);
   const headlinerName = event.headlinerName || event.title;
+  const headlinerArtist =
+    event.artists?.find(
+      (a) => a.billingPosition === 'headliner' || a.name === headlinerName,
+    ) || event.artists?.[0];
+
+  const displayImage =
+    event.imageUrl ||
+    headlinerArtist?.imageUrl ||
+    event.artists?.find((a) => a.imageUrl)?.imageUrl ||
+    event.venueImageUrl ||
+    null;
+
+  const supportActs = (event.artists || []).filter(
+    (a) => a.name !== headlinerName && a.billingPosition !== 'headliner',
+  );
+
+  const statusBadge = getStatusBadge(
+    event.inventoryStatus,
+    event.ticketRemainingPercent,
+  );
   const detailUrl = href || `/concerts/${event.id}`;
 
   return (
@@ -48,17 +67,32 @@ export function EventListItem({
         isDisliked ? 'bg-zinc-50 opacity-60' : ''
       }`}
     >
-      {/* Left Column: Artwork Dot / Badge + Name + Date + Venue */}
+      {/* Left Column: Artwork Thumbnail / Dot + Name + Date + Venue */}
       <div className="flex min-w-0 flex-1 items-start gap-3.5 sm:items-center">
-        {/* Poster Swatch Avatar */}
-        <div
-          className="shadow-xs relative flex h-10 w-10 shrink-0 items-center justify-center rounded-lg font-mono text-xs font-bold text-white transition-transform duration-150 group-hover:scale-105"
-          style={{
-            background: `linear-gradient(135deg, ${event.posterColor} 0%, ${event.posterSecondaryColor} 100%)`,
-          }}
-        >
-          {headlinerName.charAt(0) || 'E'}
-        </div>
+        {/* Media Thumbnail with Fallback Hierarchy */}
+        {displayImage ? (
+          <div className="shadow-xs relative h-12 w-12 shrink-0 overflow-hidden rounded-lg bg-zinc-100">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={displayImage}
+              alt={headlinerName}
+              loading="lazy"
+              className="h-full w-full object-cover transition-transform duration-150 group-hover:scale-105"
+              onError={(e) => {
+                (e.target as HTMLElement).style.display = 'none';
+              }}
+            />
+          </div>
+        ) : (
+          <div
+            className="shadow-xs relative flex h-12 w-12 shrink-0 items-center justify-center rounded-lg font-mono text-sm font-bold text-white transition-transform duration-150 group-hover:scale-105"
+            style={{
+              background: `linear-gradient(135deg, ${event.posterColor} 0%, ${event.posterSecondaryColor} 100%)`,
+            }}
+          >
+            {headlinerName.charAt(0) || 'E'}
+          </div>
+        )}
 
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
@@ -94,6 +128,12 @@ export function EventListItem({
                 </span>
               ))}
           </div>
+
+          {supportActs.length > 0 && (
+            <p className="line-clamp-1 text-[11px] text-zinc-500">
+              with {supportActs.map((a) => a.name).join(', ')}
+            </p>
+          )}
 
           <div className="mt-0.5 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-xs text-zinc-500">
             <span className="font-medium text-zinc-700">

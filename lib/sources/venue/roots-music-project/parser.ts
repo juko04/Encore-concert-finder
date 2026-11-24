@@ -459,9 +459,7 @@ export function parseRootsMusicProjectEvents(
           price: isExplicitFree
             ? { isFree: true, min: 0, max: 0, currency: 'USD' }
             : undefined,
-          inventoryStatus: isCanceled
-            ? 'cancelled'
-            : 'unknown',
+          inventoryStatus: isCanceled ? 'cancelled' : 'unknown',
           eventKind: isExplicitFree ? 'free_event' : 'concert',
           confidence: 0.95,
           resolutionProvenance: isCanceled

@@ -3,10 +3,7 @@
 import React from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
-import {
-  signInWithMagicLinkAction,
-  signUpAction,
-} from '@/app/login/actions';
+import { signInWithMagicLinkAction, signUpAction } from '@/app/login/actions';
 import { LoginForm } from '@/components/auth/LoginForm';
 
 // Mock Supabase Server Client
@@ -32,7 +29,8 @@ vi.mock('next/cache', () => ({
 vi.mock('next/navigation', () => ({
   redirect: vi.fn((url: string) => {
     const err = new Error('NEXT_REDIRECT');
-    (err as unknown as { digest: string }).digest = `NEXT_REDIRECT;replace;${url};307;`;
+    (err as unknown as { digest: string }).digest =
+      `NEXT_REDIRECT;replace;${url};307;`;
     throw err;
   }),
 }));
@@ -87,7 +85,9 @@ describe('Invite-Only Passwordless Magic Link Suite', () => {
         email: 'invited-user@encore.live',
         options: {
           shouldCreateUser: false,
-          emailRedirectTo: expect.stringContaining('/auth/callback?next=%2Fprofile%2Ftaste'),
+          emailRedirectTo: expect.stringContaining(
+            '/auth/callback?next=%2Fprofile%2Ftaste',
+          ),
         },
       });
 
@@ -142,7 +142,9 @@ describe('Invite-Only Passwordless Magic Link Suite', () => {
     it('switches to passwordless magic link method and submits successfully', async () => {
       mockSignInWithOtp.mockResolvedValueOnce({ data: {}, error: null });
 
-      render(<LoginForm redirectTo="/profile/taste" defaultMethod="password" />);
+      render(
+        <LoginForm redirectTo="/profile/taste" defaultMethod="password" />,
+      );
 
       // Switch to Passwordless Link method
       fireEvent.click(screen.getByTestId('method-magic-link'));
@@ -175,7 +177,9 @@ describe('Invite-Only Passwordless Magic Link Suite', () => {
         error: { message: 'User not found' },
       });
 
-      render(<LoginForm redirectTo="/profile/taste" defaultMethod="magic_link" />);
+      render(
+        <LoginForm redirectTo="/profile/taste" defaultMethod="magic_link" />,
+      );
 
       fireEvent.change(screen.getByTestId('email-input'), {
         target: { value: 'uninvited@example.com' },
@@ -197,7 +201,9 @@ describe('Invite-Only Passwordless Magic Link Suite', () => {
       const mockExchangeCode = vi.fn().mockResolvedValue({ error: null });
       mockAuth.exchangeCodeForSession = mockExchangeCode;
 
-      const req = new Request('http://localhost:3000/auth/callback?code=valid-auth-code&next=/profile/taste');
+      const req = new Request(
+        'http://localhost:3000/auth/callback?code=valid-auth-code&next=/profile/taste',
+      );
       const res = await GET(req);
 
       expect(mockExchangeCode).toHaveBeenCalledWith('valid-auth-code');
@@ -212,7 +218,9 @@ describe('Invite-Only Passwordless Magic Link Suite', () => {
       });
       mockAuth.exchangeCodeForSession = mockExchangeCode;
 
-      const req = new Request('http://localhost:3000/auth/callback?code=expired-code');
+      const req = new Request(
+        'http://localhost:3000/auth/callback?code=expired-code',
+      );
       const res = await GET(req);
 
       expect(res.status).toBe(307);

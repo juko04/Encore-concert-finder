@@ -7,15 +7,17 @@ Durable architecture records belong in [`docs/architecture/`](docs/architecture/
 
 ## Current Status & Location
 
-- **Current Milestone:** **Catalog Search Pagination, Availability Hardening, Invite-Only Passwordless Authentication & Price Persistence (Version 3)**.
+- **Current Milestone:** **Encore V2 UI Migration & Production Foundation (Homepage Discovery, Calendar View, Opener Search, Card Hardening)**.
 - **Active Branch:** `main`
-- **Current Status:** **COMMITTED & VERIFIED ON MAIN**. Catalog search pagination, mountain timezone derivation, dynamic genre facets, source-verified sold-out protections, passwordless magic-link authentication with origin validation, and database-level price persistence triggers verified.
+- **Current Status:** **COMMITTED & VERIFIED ON MAIN**. Encore now opens directly to the live concert discovery homepage at `/`. Features integrated calendar month view with `.ics` and Google Calendar exports (`/calendar`), dynamic compact header (`Discover`, `Calendar`, `Saved`, and accessible `Account` menu), opener and support act search across the full catalog, accessible cards with fallback image hierarchy, honest availability percentage badges, and upcoming saved show ticker.
 - **Verification Suite Results (All Passed):**
+  - `npm run format:check`: **PASS** (100% Prettier compliant)
   - `npm run lint`: **PASS** (0 ESLint errors, 0 warnings)
   - `npm run typecheck`: **PASS** (Strict TypeScript `tsc --noEmit`, 0 errors)
-  - `npm test`: **PASS** (**70/70 test files, 967/967 unit tests passed**)
+  - `npm test`: **PASS** (**72/72 test files, 979/979 unit tests passed**)
   - `npm run test:integration`: **PASS** (**15/15 test files, 125/125 database integration tests passed against live local Supabase PostgreSQL**)
-  - `npm run build`: **PASS** (Next.js 15.5.27 production build clean, 21/21 routes compiled)
+  - `npm run build`: **PASS** (Next.js 15.5.27 production build clean, 22/22 routes compiled including `/` and `/calendar`)
+  - `npx playwright test`: **PASS** (**17/17 browser tests passed / 1 skipped for Spotify creds**)
 - **Next Immediate Action:** Proceed to improving actual ticket price coverage and ingesting more concerts. Zero speculative fixes.
 
 ---

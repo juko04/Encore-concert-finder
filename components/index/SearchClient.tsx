@@ -19,6 +19,7 @@ import { EventCard } from './EventCard';
 import { EventListItem } from './EventListItem';
 import { UndoToast } from './UndoToast';
 import { useWatchlist } from './useWatchlist';
+import { SavedShowTicker } from './SavedShowTicker';
 import {
   SearchIcon,
   SlidersIcon,
@@ -36,6 +37,8 @@ export interface SearchClientProps {
   initialQuery?: string;
   initialSortBy?: IndexSortBy;
   referenceDate?: string;
+  title?: string;
+  subtitle?: string;
   initialFacets?: {
     venues?: Array<{ id: string; name: string; city?: string }>;
     cities?: string[];
@@ -50,6 +53,8 @@ export function SearchClient({
   initialQuery = '',
   initialSortBy = 'date_asc',
   referenceDate,
+  title = 'Discover Live Music',
+  subtitle = 'Curated concerts, transparent pricing, and personalized music discovery.',
   initialFacets,
 }: SearchClientProps) {
   const baseRaw = rawInitialEvents ?? rawEvents ?? [];
@@ -159,7 +164,9 @@ export function SearchClient({
         }
       }
     });
-    return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name));
+    return Array.from(map.values()).sort((a, b) =>
+      a.name.localeCompare(b.name),
+    );
   }, [catalogFacets.venues, normalizedEvents]);
 
   const uniqueCities = useMemo(() => {
@@ -626,15 +633,17 @@ export function SearchClient({
 
   return (
     <div className="space-y-6 pb-16">
+      {/* Saved Shows Ticker Notification */}
+      <SavedShowTicker events={eventsList} />
+
       {/* Search Header */}
       <div className="flex flex-col justify-between gap-4 border-b border-zinc-200/80 pb-6 sm:flex-row sm:items-end">
         <div>
           <h1 className="text-3xl font-extrabold tracking-tight text-zinc-900">
-            Search Concert Catalog
+            {title}
           </h1>
           <p className="mt-1 max-w-xl text-xs text-zinc-500 sm:text-sm">
-            Search live music by artist, venue, price, dates, and personalized
-            taste fit.
+            {subtitle}
           </p>
         </div>
 

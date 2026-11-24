@@ -227,7 +227,9 @@ export interface CanonicalEventSummary {
     name: string;
     billingPosition: BillingPosition;
     spotifyArtistId?: string | null;
+    imageUrl?: string | null;
   }>;
+  imageUrl?: string | null;
   ticketUrl?: string | null;
   minPrice?: number | null;
   maxPrice?: number | null;

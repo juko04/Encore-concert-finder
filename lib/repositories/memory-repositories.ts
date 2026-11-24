@@ -622,6 +622,7 @@ export class MemoryCatalogRepository implements ICatalogRepository {
         name: string;
         billingPosition: BillingPosition;
         spotifyArtistId?: string | null;
+        imageUrl?: string | null;
       }> = [];
       for (const ea of this.eventArtists.values()) {
         if (ea.eventId === event.id) {

@@ -59,7 +59,9 @@ describe('PostgreSQL Live Integration: Red Rocks Search, Deep Pagination, Timezo
 
   beforeAll(() => {
     if (!credentials) {
-      throw new Error('Supabase integration credentials could not be resolved.');
+      throw new Error(
+        'Supabase integration credentials could not be resolved.',
+      );
     }
 
     assertSafeDatabaseTarget(
@@ -100,7 +102,9 @@ describe('PostgreSQL Live Integration: Red Rocks Search, Deep Pagination, Timezo
       });
       redRocksUpcomingCount = events.length;
       expect(redRocksUpcomingCount).toBeGreaterThanOrEqual(0);
-      console.log(`Red Rocks upcoming events in database: ${redRocksUpcomingCount}`);
+      console.log(
+        `Red Rocks upcoming events in database: ${redRocksUpcomingCount}`,
+      );
     });
 
     it('executes GET /api/catalog/search with venue name string and page=2 returning HTTP 200 without crashing', async () => {
@@ -258,8 +262,14 @@ describe('PostgreSQL Live Integration: Red Rocks Search, Deep Pagination, Timezo
 
   describe('5. Database-Side Sorting for All Supported Modes', () => {
     it('supports date_asc and date_desc sorting in database', async () => {
-      const asc = await catalogRepo.listEvents({ sortBy: 'date_asc', limit: 10 });
-      const desc = await catalogRepo.listEvents({ sortBy: 'date_desc', limit: 10 });
+      const asc = await catalogRepo.listEvents({
+        sortBy: 'date_asc',
+        limit: 10,
+      });
+      const desc = await catalogRepo.listEvents({
+        sortBy: 'date_desc',
+        limit: 10,
+      });
 
       expect(asc.length).toBe(10);
       expect(desc.length).toBe(10);
@@ -269,20 +279,34 @@ describe('PostgreSQL Live Integration: Red Rocks Search, Deep Pagination, Timezo
     });
 
     it('supports price_asc and price_desc sorting in database', async () => {
-      const priceAsc = await catalogRepo.listEvents({ sortBy: 'price_asc', limit: 10 });
+      const priceAsc = await catalogRepo.listEvents({
+        sortBy: 'price_asc',
+        limit: 10,
+      });
       expect(priceAsc.length).toBe(10);
       // First events are free ($0)
       expect(priceAsc[0].minPrice).toBe(0);
 
-      const priceDesc = await catalogRepo.listEvents({ sortBy: 'price_desc', limit: 10 });
+      const priceDesc = await catalogRepo.listEvents({
+        sortBy: 'price_desc',
+        limit: 10,
+      });
       expect(priceDesc.length).toBe(10);
-      if (typeof priceDesc[0].minPrice === 'number' && typeof priceDesc[1].minPrice === 'number') {
-        expect(priceDesc[0].minPrice).toBeGreaterThanOrEqual(priceDesc[1].minPrice);
+      if (
+        typeof priceDesc[0].minPrice === 'number' &&
+        typeof priceDesc[1].minPrice === 'number'
+      ) {
+        expect(priceDesc[0].minPrice).toBeGreaterThanOrEqual(
+          priceDesc[1].minPrice,
+        );
       }
     });
 
     it('supports title_asc sorting in database', async () => {
-      const titleAsc = await catalogRepo.listEvents({ sortBy: 'title_asc', limit: 10 });
+      const titleAsc = await catalogRepo.listEvents({
+        sortBy: 'title_asc',
+        limit: 10,
+      });
       expect(titleAsc.length).toBe(10);
       for (let i = 1; i < titleAsc.length; i++) {
         expect(
@@ -318,7 +342,9 @@ describe('PostgreSQL Live Integration: Red Rocks Search, Deep Pagination, Timezo
 
   describe('7. Multi-Page Catalog Pagination (>100 concerts)', () => {
     it('loads multiple pages across the catalog and verifies combined IDs equal the database result set with no duplicates', async () => {
-      const totalInDb = await catalogRepo.countEvents({ fromDate: '2026-01-01' });
+      const totalInDb = await catalogRepo.countEvents({
+        fromDate: '2026-01-01',
+      });
       expect(totalInDb).toBeGreaterThan(100);
 
       const pageSize = 50;
@@ -364,55 +390,58 @@ describe('PostgreSQL Live Integration: Red Rocks Search, Deep Pagination, Timezo
 
       try {
         // Upsert canonical event with ticket links
-        const { error: rpcError } = await adminClient.rpc('apply_canonicalization', {
-          payload: {
-            venueToCreate: {
-              id: testVenueId,
-              name: 'Price Test Venue',
-              normalized_name: 'price test venue',
-              city: 'Denver',
-              region: 'CO',
-              country_code: 'US',
-              timezone: 'America/Denver',
-            },
-            event: {
-              id: testEventId,
-              name: 'Pricing Persistence Invariant Show',
-              normalized_name: 'pricing persistence invariant show',
-              venue_id: testVenueId,
-              city: 'Denver',
-              region: 'CO',
-              country_code: 'US',
-              timezone: 'America/Denver',
-              local_start_date: '2027-01-15',
-              starts_at: '2027-01-16T03:00:00Z',
-              status: 'scheduled',
-              event_kind: 'concert',
-            },
-            ticketLinks: [
-              {
-                ticket_provider_source_id: null,
-                url: 'https://tickets.example.com/tier1',
-                normalized_url: 'https://tickets.example.com/tier1',
-                min_price: 35.0,
-                max_price: 45.0,
-                currency: 'USD',
-                inventory_status: 'available',
-                verified_at: new Date().toISOString(),
+        const { error: rpcError } = await adminClient.rpc(
+          'apply_canonicalization',
+          {
+            payload: {
+              venueToCreate: {
+                id: testVenueId,
+                name: 'Price Test Venue',
+                normalized_name: 'price test venue',
+                city: 'Denver',
+                region: 'CO',
+                country_code: 'US',
+                timezone: 'America/Denver',
               },
-              {
-                ticket_provider_source_id: null,
-                url: 'https://tickets.example.com/tier2',
-                normalized_url: 'https://tickets.example.com/tier2',
-                min_price: 55.0,
-                max_price: 75.0,
-                currency: 'USD',
-                inventory_status: 'available',
-                verified_at: new Date().toISOString(),
+              event: {
+                id: testEventId,
+                name: 'Pricing Persistence Invariant Show',
+                normalized_name: 'pricing persistence invariant show',
+                venue_id: testVenueId,
+                city: 'Denver',
+                region: 'CO',
+                country_code: 'US',
+                timezone: 'America/Denver',
+                local_start_date: '2027-01-15',
+                starts_at: '2027-01-16T03:00:00Z',
+                status: 'scheduled',
+                event_kind: 'concert',
               },
-            ],
+              ticketLinks: [
+                {
+                  ticket_provider_source_id: null,
+                  url: 'https://tickets.example.com/tier1',
+                  normalized_url: 'https://tickets.example.com/tier1',
+                  min_price: 35.0,
+                  max_price: 45.0,
+                  currency: 'USD',
+                  inventory_status: 'available',
+                  verified_at: new Date().toISOString(),
+                },
+                {
+                  ticket_provider_source_id: null,
+                  url: 'https://tickets.example.com/tier2',
+                  normalized_url: 'https://tickets.example.com/tier2',
+                  min_price: 55.0,
+                  max_price: 75.0,
+                  currency: 'USD',
+                  inventory_status: 'available',
+                  verified_at: new Date().toISOString(),
+                },
+              ],
+            },
           },
-        });
+        );
 
         expect(rpcError).toBeNull();
 
@@ -430,7 +459,10 @@ describe('PostgreSQL Live Integration: Red Rocks Search, Deep Pagination, Timezo
         expect(eventRow!.currency).toBe('USD');
       } finally {
         // Cleanup test fixtures
-        await adminClient.from('event_ticket_links').delete().eq('event_id', testEventId);
+        await adminClient
+          .from('event_ticket_links')
+          .delete()
+          .eq('event_id', testEventId);
         await adminClient.from('events').delete().eq('id', testEventId);
         await adminClient.from('venues').delete().eq('id', testVenueId);
       }
@@ -512,7 +544,10 @@ describe('PostgreSQL Live Integration: Red Rocks Search, Deep Pagination, Timezo
           .eq('event_id', testEventId);
         expect(hardenedLinks?.[0]?.inventory_status).toBe('sold_out');
       } finally {
-        await adminClient.from('event_ticket_links').delete().eq('event_id', testEventId);
+        await adminClient
+          .from('event_ticket_links')
+          .delete()
+          .eq('event_id', testEventId);
         await adminClient.from('events').delete().eq('id', testEventId);
         await adminClient.from('venues').delete().eq('id', testVenueId);
       }

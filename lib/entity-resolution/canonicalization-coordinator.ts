@@ -563,9 +563,7 @@ export class CanonicalizationCoordinator {
     const inventoryStatus:
       'available' | 'low_inventory' | 'sold_out' | 'cancelled' | 'unknown' =
       candidate.inventoryStatus ||
-      (candidate.rawPayload?.isSoldOut === true
-        ? 'sold_out'
-        : 'unknown');
+      (candidate.rawPayload?.isSoldOut === true ? 'sold_out' : 'unknown');
 
     // 7. Assemble Atomic Transaction Payload (zero upfront writes)
     let payload: CanonicalizationPayload;

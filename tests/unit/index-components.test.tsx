@@ -422,13 +422,13 @@ describe('Index Components Unit Tests', () => {
 
   describe('Header Component', () => {
     it('renders site title "ENCORE // INDEX" and main navigation tabs with badge', () => {
-      render(<Header savedCount={3} alertCount={1} />);
+      render(<Header savedCount={3} alertCount={1} isAuthenticated={true} />);
 
       expect(screen.getByText('ENCORE')).toBeInTheDocument();
       expect(screen.getByText('// INDEX')).toBeInTheDocument();
       expect(screen.getByText('Curated Live Music')).toBeInTheDocument();
-      expect(screen.getByText('Shows')).toBeInTheDocument();
-      expect(screen.getByText('Search')).toBeInTheDocument();
+      expect(screen.getByText('Discover')).toBeInTheDocument();
+      expect(screen.getByText('Calendar')).toBeInTheDocument();
       expect(screen.getAllByText('Saved')[0]).toBeInTheDocument();
       expect(screen.getByText('3')).toBeInTheDocument(); // Badge count
     });
@@ -537,31 +537,33 @@ describe('Index Components Unit Tests', () => {
       let capturedSignal: AbortSignal | undefined;
 
       const globalFetch = global.fetch;
-      global.fetch = vi.fn().mockImplementation((_url: string, opts?: { signal?: AbortSignal }) => {
-        capturedSignal = opts?.signal;
-        if (capturedSignal) {
-          capturedSignal.addEventListener('abort', mockAbort);
-        }
-        return new Promise((resolve) => {
-          setTimeout(() => {
-            resolve({
-              ok: true,
-              json: async () => ({
-                events: [
-                  {
-                    id: 'stale-event-1',
-                    title: 'Stale Event That Should Be Discarded',
-                    venueName: 'Stale Venue',
-                    localStartDate: '2026-12-01',
-                    genres: [],
-                  },
-                ],
-                pagination: { totalCount: 100, hasMore: true },
-              }),
-            });
-          }, 100);
+      global.fetch = vi
+        .fn()
+        .mockImplementation((_url: string, opts?: { signal?: AbortSignal }) => {
+          capturedSignal = opts?.signal;
+          if (capturedSignal) {
+            capturedSignal.addEventListener('abort', mockAbort);
+          }
+          return new Promise((resolve) => {
+            setTimeout(() => {
+              resolve({
+                ok: true,
+                json: async () => ({
+                  events: [
+                    {
+                      id: 'stale-event-1',
+                      title: 'Stale Event That Should Be Discarded',
+                      venueName: 'Stale Venue',
+                      localStartDate: '2026-12-01',
+                      genres: [],
+                    },
+                  ],
+                  pagination: { totalCount: 100, hasMore: true },
+                }),
+              });
+            }, 100);
+          });
         });
-      });
 
       try {
         render(
@@ -573,12 +575,18 @@ describe('Index Components Unit Tests', () => {
         );
 
         // Click Load More to start in-flight request
-        const loadMoreBtn = screen.getByRole('button', { name: /load more concerts/i });
+        const loadMoreBtn = screen.getByRole('button', {
+          name: /load more concerts/i,
+        });
         fireEvent.click(loadMoreBtn);
 
         // Change filter before Load More completes
-        const searchInput = screen.getByPlaceholderText(/search by artist, headliner, venue/i);
-        fireEvent.change(searchInput, { target: { value: 'Different Filter' } });
+        const searchInput = screen.getByPlaceholderText(
+          /search by artist, headliner, venue/i,
+        );
+        fireEvent.change(searchInput, {
+          target: { value: 'Different Filter' },
+        });
 
         // Verify previous in-flight request was aborted
         expect(mockAbort).toHaveBeenCalled();

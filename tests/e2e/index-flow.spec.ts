@@ -20,26 +20,20 @@ test.describe('Encore V2 Index E2E Flow', () => {
     await expect(page.getByRole('link', { name: /ENCORE/ })).toBeVisible();
     await expect(page.getByText('// INDEX')).toBeVisible();
 
-    // Verify mode chips
-    const allShowsButton = page.getByRole('button', {
-      name: 'All Shows',
-      exact: true,
-    });
-    const weekendButton = page.getByRole('button', {
-      name: 'This Weekend',
-      exact: true,
-    });
-    const freeButton = page.getByRole('button', {
-      name: 'Free ($0)',
-      exact: true,
-    });
+    // Verify search input on direct discovery homepage
+    const searchInput = page.getByPlaceholder(
+      /Search by artist, headliner, venue, city, or genre/i,
+    );
+    await expect(searchInput).toBeVisible();
 
-    await expect(allShowsButton).toBeVisible();
-    await expect(weekendButton).toBeVisible();
-    await expect(freeButton).toBeVisible();
+    // Verify grid / list layout toggle buttons
+    const gridBtn = page.getByRole('button', { name: 'Grid layout' });
+    const listBtn = page.getByRole('button', { name: 'List layout' });
+    await expect(gridBtn).toBeVisible();
+    await expect(listBtn).toBeVisible();
 
-    // Switch mode
-    await weekendButton.click();
+    // Switch view layout to list
+    await listBtn.click();
     await page.waitForTimeout(300);
 
     // Capture screenshot

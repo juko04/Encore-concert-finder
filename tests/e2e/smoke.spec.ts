@@ -17,21 +17,12 @@ test.describe('Application Smoke Tests', () => {
     ).toBeVisible();
 
     // Verify navigation tabs
-    await expect(page.getByRole('link', { name: 'Shows' })).toBeVisible();
-    await expect(page.getByRole('link', { name: 'Search' })).toBeVisible();
-    await expect(page.getByRole('link', { name: /Saved/ })).toBeVisible();
-    await expect(page.getByRole('link', { name: 'Preferences' })).toBeVisible();
+    await expect(page.getByRole('link', { name: 'Discover' })).toBeVisible();
+    await expect(page.getByRole('link', { name: 'Calendar' })).toBeVisible();
+    await expect(page.getByRole('link', { name: 'Sign In' })).toBeVisible();
 
-    // Verify mode selector chips
-    await expect(
-      page.getByRole('button', { name: 'All Shows', exact: true }),
-    ).toBeVisible();
-    await expect(
-      page.getByRole('button', { name: 'This Weekend', exact: true }),
-    ).toBeVisible();
-    await expect(
-      page.getByRole('button', { name: 'Free ($0)', exact: true }),
-    ).toBeVisible();
+    // Verify search input
+    await expect(page.getByPlaceholder(/Search by artist/i)).toBeVisible();
   });
 
   test('successfully loads the discover catalog page', async ({ page }) => {

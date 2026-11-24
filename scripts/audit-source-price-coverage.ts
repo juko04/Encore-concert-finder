@@ -46,7 +46,8 @@ export async function runCoverageAudit() {
   // Fetch events with ticket links and sources
   const { data: events, error } = await supabase
     .from('events')
-    .select(`
+    .select(
+      `
       id,
       name,
       event_kind,
@@ -56,7 +57,8 @@ export async function runCoverageAudit() {
       venues (id, name),
       event_ticket_links (id, url, min_price, max_price, currency, inventory_status, verified_at),
       event_sources (source_id, source_url)
-    `)
+    `,
+    )
     .limit(200);
 
   if (error || !events) {
@@ -95,11 +97,13 @@ export async function runCoverageAudit() {
 
     if (inventoryStatus === 'sold_out' && hasVerifiedAt) {
       verdict = 'VERIFIED_SOLD_OUT';
-      verdictReason = 'Source parser explicitly reported sold_out with verified timestamp';
+      verdictReason =
+        'Source parser explicitly reported sold_out with verified timestamp';
       verifiedSoldOutCount++;
     } else if (inventoryStatus === 'sold_out' && !hasVerifiedAt) {
       verdict = 'NEEDS_REVIEW';
-      verdictReason = 'Marked sold_out but no verified_at timestamp — verify against source';
+      verdictReason =
+        'Marked sold_out but no verified_at timestamp — verify against source';
       needsReviewCount++;
     } else if (minPrice === 0 || ev.event_kind === 'free_event') {
       verdict = 'VERIFIED_FREE';
