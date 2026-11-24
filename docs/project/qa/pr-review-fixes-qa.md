@@ -33,3 +33,10 @@ Not yet covered: apply_canonicalization/migrations (needs Postgres), city restor
 - `/search?startDate=2026-11-24&endDate=2026-11-24` (375px): PASS renders 3 shows; NOTE a "Cancelled" show is listed in normal results.
 - Console: transient Header.tsx syntax error from an in-progress edit (not a product bug once fixed); re-verify in Phase 2.
 - Login/invite-only, password reset, Spotify, 768/1280 layouts, Load More: NOT RUN (Phase 2).
+
+## Phase 2 — independent verification of e2c75ea (fresh `git archive` copy)
+- tsc PASS; vitest unit 88 files / 1177 tests PASS; tests/regression 5 files / 16 tests PASS.
+- eslint 35 errors / 29 warnings (unchanged from baseline; only tests + next-env.d.ts). prettier: same 5 HTML fixtures + 2 new `tests/sql/*.mjs` files unformatted.
+- Integration, Playwright, SQL migration scripts: NOT RUN (VM has no Docker/Chromium/Postgres).
+- Live (Mac dev server, real local data, 173 events): `q=a` p1/p2 200 (totalCount 173), page=500 -> 200 empty hasMore=false; bad startDate/minPrice -> 400; Tonight URL returns only same-day shows; homepage chip + See-all hrefs keep date/free/genre filters; mobile 375 menu opens (Close button, nav links); 768 /search renders; /login (invite-only magic link + password tab + Forgot password) and /login/reset-password render; /search with garbage dates renders.
+- NOT RUN live: client-side navigation control re-sync (value of search box), sold-out/low-inventory chips against verified data, image fallback with real 404 images, signed-in flows, Spotify.

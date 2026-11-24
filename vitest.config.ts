@@ -9,7 +9,10 @@ export default defineConfig({
     globals: true,
     setupFiles: ['./tests/setup.ts'],
     testTimeout: 15000,
-    include: ['tests/unit/**/*.{test,spec}.{ts,tsx}'],
+    include: [
+      'tests/unit/**/*.{test,spec}.{ts,tsx}',
+      'tests/regression/**/*.{test,spec}.{ts,tsx}',
+    ],
     coverage: {
       provider: 'v8',
       reporter: ['text', 'json', 'html'],
