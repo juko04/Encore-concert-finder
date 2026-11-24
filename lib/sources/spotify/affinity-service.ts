@@ -22,6 +22,7 @@ import {
   VALID_SPOTIFY_TIME_RANGES,
 } from '@/lib/domain/spotify';
 import type { ICatalogRepository } from '@/lib/repositories/interfaces';
+import { computeSpotifyAffinity } from '@/lib/recommendation/spotify-affinity';
 import {
   SpotifyArtistMatcher,
   type SpotifyArtistCandidate,
@@ -32,6 +33,9 @@ declare module '@/lib/domain/spotify' {
     canonicalArtistId?: string | null;
     ranksByRange?: Partial<Record<SpotifyTimeRange, number>>;
     syncedAt?: string;
+    /** 0..1 trend-aware listening affinity (see lib/recommendation/spotify-affinity.ts). */
+    affinity?: number;
+    affinityReason?: string;
   }
 }
 
@@ -309,11 +313,13 @@ export async function syncSpotifyTopArtistsAcrossTimeRanges(
     const consolidatedArtists: SpotifyTopArtist[] = Array.from(
       artistMap.values(),
     ).map(({ artist, ranks }) => {
-      const trend = calculateArtistTrend(ranks);
-      const unifiedScore = calculateUnifiedAffinityScore(ranks);
+      const result = computeSpotifyAffinity(ranks);
+      const unifiedScore = result.affinity;
       return {
         ...artist,
-        trend,
+        trend: result.trend,
+        affinity: result.affinity,
+        affinityReason: result.reason,
         ranksByRange: ranks,
         timeRange: ranks.short_term ? 'short_term' : 'medium_term',
         _unifiedScore: unifiedScore,

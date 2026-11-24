@@ -28,6 +28,10 @@ import type {
 } from '@/lib/domain/user-preference';
 import type { SpotifyTopArtist } from '@/lib/domain/spotify';
 import type { FactorScore, MatchedArtistInfo, GenreMatchInfo } from '../types';
+import {
+  computeSpotifyAffinity,
+  spotifyAffinityToArtistScore,
+} from '../spotify-affinity';
 import { calculateGenreFit, type GenreTasteProfile } from '../genre';
 
 declare module '@/lib/domain/spotify' {
@@ -390,8 +394,21 @@ export function calculateArtistInterestFactor(
       }
 
       if (sa) {
-        // Tiered listening affinity: top 5 -> 70, top 10 -> 65, top 20 -> 60
-        const score = sa.rank <= 5 ? 70 : sa.rank <= 10 ? 65 : 60;
+        // Trend-aware affinity (rising / near-top-of-all-three-lists score highest; long-term-only
+        // listening is capped low). Falls back to rank tiers when no per-window ranks are known.
+        const affinity =
+          sa.affinity ??
+          (sa.ranksByRange
+            ? computeSpotifyAffinity(sa.ranksByRange).affinity
+            : undefined);
+        const score =
+          affinity !== undefined
+            ? spotifyAffinityToArtistScore(affinity)
+            : sa.rank <= 5
+              ? 70
+              : sa.rank <= 10
+                ? 65
+                : 60;
         spotifyMatches.push({
           artist,
           spotifyArtist: sa,
@@ -405,7 +422,9 @@ export function calculateArtistInterestFactor(
       spotifyMatches.sort((a, b) => b.score - a.score);
       const best = spotifyMatches[0];
 
-      let explanation = `🎧 Spotify top artist (#${best.spotifyArtist.rank} in your listening history)`;
+      let explanation = best.spotifyArtist.affinityReason
+        ? `🎧 Spotify: ${best.spotifyArtist.affinityReason}`
+        : `🎧 Spotify top artist (#${best.spotifyArtist.rank} in your listening history)`;
       if (spotifyMatches.length > 1) {
         explanation += ` (+${spotifyMatches.length - 1} more on lineup)`;
       }

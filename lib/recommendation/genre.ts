@@ -14,6 +14,7 @@
  */
 
 import type { SpotifyTopArtist } from '@/lib/domain/spotify';
+import { computeSpotifyAffinity } from './spotify-affinity';
 import type {
   PreferenceLevel,
   UserArtistPreference,
@@ -410,10 +411,17 @@ export function buildGenreTasteProfile(
       }
       continue;
     }
+    // Genre weight is the SUM of its artists' trend-aware affinities, so many artists in one
+    // genre (e.g. lots of EDM) means a stronger interest in that genre.
+    const affinity =
+      sa.affinity ??
+      (sa.ranksByRange
+        ? computeSpotifyAffinity(sa.ranksByRange).affinity
+        : undefined);
     addContribution(
       positive,
       sa.genres,
-      spotifyRankGenreWeight(sa.rank),
+      affinity !== undefined ? affinity : spotifyRankGenreWeight(sa.rank),
       sa.name,
     );
   }
