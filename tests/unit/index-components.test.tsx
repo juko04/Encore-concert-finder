@@ -8,6 +8,11 @@ import {
   renderHook,
   act,
 } from '@testing-library/react';
+vi.mock('next/navigation', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('next/navigation')>()),
+  useRouter: () => ({ refresh: vi.fn(), push: vi.fn(), replace: vi.fn() }),
+}));
+
 import type { CanonicalEventSummary } from '@/lib/domain/catalog';
 import type { ScoredEvent } from '@/lib/recommendation/types';
 import {
@@ -94,18 +99,9 @@ const MOCK_SCORED_EVENT: ScoredEvent = {
       fieldStatus: 'verified',
       explanation: '$65 is within your favorite artist ceiling ($150).',
     },
-    timing: {
-      factor: 'timing',
-      score: 95,
-      weight: 15,
-      weightedContribution: 14.25,
-      isAvailable: true,
-      fieldStatus: 'verified',
-      explanation: 'Saturday night matches your preferred concert schedule.',
-    },
   },
   presetUsed: 'balanced',
-  weights: { artist: 45, distance: 20, price: 20, timing: 15 },
+  weights: { artist: 55, distance: 25, price: 20 },
   explanation:
     'High affinity match for The Cure with convenient Saturday timing.',
   matchedArtist: {
@@ -123,7 +119,7 @@ const MOCK_SCORED_EVENT: ScoredEvent = {
       hasArtistMatch: true,
       hasPriceData: true,
       hasCoordinates: true,
-      hasTimingPreferences: true,
+      hasGenreSignal: false,
     },
     rawMetrics: {
       distanceMiles: 14.2,
@@ -231,7 +227,6 @@ describe('Index Components Unit Tests', () => {
       expect(item.personalScore?.factors?.artist?.score).toBe(100);
       expect(item.personalScore?.factors?.distance?.score).toBe(92);
       expect(item.personalScore?.factors?.price?.score).toBe(90);
-      expect(item.personalScore?.factors?.timing?.score).toBe(95);
     });
 
     it('resolves cancelled status correctly', () => {
@@ -504,8 +499,6 @@ describe('Index Components Unit Tests', () => {
       expect(screen.getByText('92/100')).toBeInTheDocument();
       expect(screen.getByText('Price Fit')).toBeInTheDocument();
       expect(screen.getByText('90/100')).toBeInTheDocument();
-      expect(screen.getByText('Timing Fit')).toBeInTheDocument();
-      expect(screen.getByText('95/100')).toBeInTheDocument();
     });
   });
 

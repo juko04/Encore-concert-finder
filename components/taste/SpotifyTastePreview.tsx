@@ -63,25 +63,25 @@ export function SpotifyTastePreview({
   return (
     <div
       data-testid="spotify-taste-preview"
-      className="space-y-6 rounded-2xl border border-zinc-800 bg-zinc-900/60 p-6 backdrop-blur"
+      className="space-y-6 rounded-2xl border border-zinc-200 bg-white p-6 backdrop-blur"
     >
       {/* Header and Time Range Tabs */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <div className="flex items-center gap-2">
-            <h3 className="text-base font-bold text-white">
+            <h3 className="text-base font-bold text-zinc-900">
               Spotify Listening History
             </h3>
             {isSyntheticPreview && (
               <span
                 data-testid="synthetic-preview-pill"
-                className="rounded border border-indigo-700/50 bg-indigo-950/60 px-2 py-0.5 text-[10px] font-semibold text-indigo-300"
+                className="rounded border border-indigo-200 bg-indigo-50 px-2 py-0.5 text-[10px] font-semibold text-indigo-700"
               >
                 Synthetic Demo
               </span>
             )}
           </div>
-          <p className="mt-0.5 text-xs text-zinc-400">
+          <p className="mt-0.5 text-xs text-zinc-500">
             Spotify affinity scoring is ready to rank concerts (scores 60–70) as
             verified Spotify artist IDs match in our catalog. Set an explicit
             preference below to guarantee priority right away:
@@ -94,7 +94,7 @@ export function SpotifyTastePreview({
         {/* Time Horizon Tabs */}
         <div
           data-testid="time-range-tabs"
-          className="flex rounded-lg border border-zinc-800 bg-zinc-950 p-1"
+          className="flex rounded-lg border border-zinc-200 bg-white p-1"
         >
           <button
             type="button"
@@ -102,8 +102,8 @@ export function SpotifyTastePreview({
             onClick={() => onChangeTimeRange('short_term')}
             className={`rounded-md px-3 py-1.5 text-xs font-semibold transition ${
               timeRange === 'short_term'
-                ? 'bg-zinc-800 text-white shadow-sm'
-                : 'text-zinc-400 hover:text-zinc-200'
+                ? 'bg-zinc-100 text-zinc-900 shadow-sm'
+                : 'text-zinc-500 hover:text-zinc-900'
             }`}
           >
             Past 4 Weeks
@@ -114,8 +114,8 @@ export function SpotifyTastePreview({
             onClick={() => onChangeTimeRange('medium_term')}
             className={`rounded-md px-3 py-1.5 text-xs font-semibold transition ${
               timeRange === 'medium_term'
-                ? 'bg-zinc-800 text-white shadow-sm'
-                : 'text-zinc-400 hover:text-zinc-200'
+                ? 'bg-zinc-100 text-zinc-900 shadow-sm'
+                : 'text-zinc-500 hover:text-zinc-900'
             }`}
           >
             Past 6 Months
@@ -126,8 +126,8 @@ export function SpotifyTastePreview({
             onClick={() => onChangeTimeRange('long_term')}
             className={`rounded-md px-3 py-1.5 text-xs font-semibold transition ${
               timeRange === 'long_term'
-                ? 'bg-zinc-800 text-white shadow-sm'
-                : 'text-zinc-400 hover:text-zinc-200'
+                ? 'bg-zinc-100 text-zinc-900 shadow-sm'
+                : 'text-zinc-500 hover:text-zinc-900'
             }`}
           >
             All-Time / 1 Year
@@ -138,12 +138,12 @@ export function SpotifyTastePreview({
       {/* Recency Hypothesis Explanation Banner */}
       <div
         data-testid="recency-hypothesis-banner"
-        className="rounded-xl border border-indigo-950/80 bg-indigo-950/20 p-4 text-xs text-indigo-200/90"
+        className="rounded-xl border border-indigo-200 bg-indigo-50 p-4 text-xs text-indigo-700"
       >
         <div className="flex items-start gap-2.5">
           <span className="text-base">✦</span>
           <div>
-            <strong className="font-semibold text-indigo-100">
+            <strong className="font-semibold text-indigo-900">
               Recency-Weighted Taste Hypothesis:
             </strong>{' '}
             Spotify listening affinity scoring is built in and will
@@ -166,19 +166,19 @@ export function SpotifyTastePreview({
       ) : error ? (
         <div
           data-testid="spotify-preview-error-state"
-          className="rounded-xl border border-red-900/60 bg-red-950/40 p-6 text-center text-xs text-red-200"
+          className="rounded-xl border border-red-200 bg-red-50 p-6 text-center text-xs text-red-800"
         >
           {error}
         </div>
       ) : artists.length === 0 ? (
         <div
           data-testid="spotify-taste-empty"
-          className="rounded-xl border border-dashed border-zinc-800 p-8 text-center text-xs text-zinc-500"
+          className="rounded-xl border border-dashed border-zinc-200 p-8 text-center text-xs text-zinc-500"
         >
           No top artists returned for this time window.
         </div>
       ) : (
-        <div className="divide-y divide-zinc-800/60 rounded-xl border border-zinc-800 bg-zinc-950/40">
+        <div className="divide-y divide-zinc-200 rounded-xl border border-zinc-200 bg-zinc-50">
           {artists.map((artist) => {
             const existingPref = findMatchingPreference(
               artist,
@@ -200,7 +200,7 @@ export function SpotifyTastePreview({
               <div
                 key={artist.id}
                 data-testid={`spotify-artist-row-${artist.id}`}
-                className="flex flex-col gap-3 p-4 transition-colors hover:bg-zinc-900/30 sm:flex-row sm:items-center sm:justify-between"
+                className="flex flex-col gap-3 p-4 transition-colors hover:bg-zinc-50 sm:flex-row sm:items-center sm:justify-between"
               >
                 <div className="flex items-center gap-3.5">
                   <span className="w-5 text-right font-mono text-xs font-bold text-zinc-500">
@@ -212,10 +212,10 @@ export function SpotifyTastePreview({
                     <img
                       src={artist.imageUrl}
                       alt={artist.name}
-                      className="h-10 w-10 rounded-full object-cover ring-1 ring-zinc-700"
+                      className="h-10 w-10 rounded-full object-cover ring-1 ring-zinc-200"
                     />
                   ) : (
-                    <div className="flex h-10 w-10 items-center justify-center rounded-full bg-zinc-800 text-xs font-bold text-zinc-300">
+                    <div className="flex h-10 w-10 items-center justify-center rounded-full bg-zinc-100 text-xs font-bold text-zinc-700">
                       {artist.name.charAt(0)}
                     </div>
                   )}
@@ -226,7 +226,7 @@ export function SpotifyTastePreview({
                         href={artist.spotifyUrl}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="text-sm font-bold text-white transition hover:text-[#1DB954]"
+                        className="text-sm font-bold text-zinc-900 transition hover:text-[#1DB954]"
                       >
                         {artist.name}
                       </a>
@@ -235,7 +235,7 @@ export function SpotifyTastePreview({
                       {hasNameCollision && (
                         <span
                           data-testid={`name-collision-badge-${artist.id}`}
-                          className="rounded border border-amber-800/40 bg-amber-950/60 px-2 py-0.5 text-[10px] font-semibold text-amber-300"
+                          className="rounded border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-700"
                           title="An artist preference with this name already exists in your profile. Adding this will register it as a distinct Spotify artist."
                         >
                           Distinct Act
@@ -246,7 +246,7 @@ export function SpotifyTastePreview({
                       {artist.trend === 'rising' && (
                         <span
                           data-testid="trend-badge-rising"
-                          className="rounded-full border border-emerald-800/40 bg-emerald-950/60 px-2 py-0.5 text-[10px] font-semibold text-emerald-400"
+                          className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-700"
                         >
                           ▲ Rising
                         </span>
@@ -254,7 +254,7 @@ export function SpotifyTastePreview({
                       {artist.trend === 'consistent' && (
                         <span
                           data-testid="trend-badge-consistent"
-                          className="rounded-full border border-indigo-800/40 bg-indigo-950/60 px-2 py-0.5 text-[10px] font-semibold text-indigo-400"
+                          className="rounded-full border border-indigo-200 bg-indigo-50 px-2 py-0.5 text-[10px] font-semibold text-indigo-600"
                         >
                           ● Consistent Staple
                         </span>
@@ -262,7 +262,7 @@ export function SpotifyTastePreview({
                       {artist.trend === 'fading' && (
                         <span
                           data-testid="trend-badge-fading"
-                          className="rounded-full border border-amber-800/40 bg-amber-950/60 px-2 py-0.5 text-[10px] font-semibold text-amber-400"
+                          className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-700"
                         >
                           ▼ Historical Favorite
                         </span>
@@ -270,7 +270,7 @@ export function SpotifyTastePreview({
                     </div>
 
                     {artist.genres.length > 0 && (
-                      <p className="mt-0.5 text-[11px] text-zinc-400">
+                      <p className="mt-0.5 text-[11px] text-zinc-500">
                         {artist.genres.slice(0, 3).join(' · ')}
                       </p>
                     )}
@@ -282,7 +282,7 @@ export function SpotifyTastePreview({
                   {existingPref ? (
                     <span
                       data-testid={`already-saved-badge-${artist.id}`}
-                      className="inline-flex items-center gap-1 rounded-lg border border-zinc-800 bg-zinc-900 px-2.5 py-1 text-xs font-medium text-zinc-300"
+                      className="inline-flex items-center gap-1 rounded-lg border border-zinc-200 bg-white px-2.5 py-1 text-xs font-medium text-zinc-700"
                     >
                       {existingPref.preferenceLevel === 'favorite' &&
                         '★ Favorite'}
@@ -301,7 +301,7 @@ export function SpotifyTastePreview({
                           onChange={(e) =>
                             setSelectedLevel(e.target.value as PreferenceLevel)
                           }
-                          className="rounded-lg border border-zinc-700 bg-zinc-950 px-2 py-1 text-xs font-medium text-white focus:outline-none"
+                          className="rounded-lg border border-zinc-200 bg-white px-2 py-1 text-xs font-medium text-zinc-900 focus:outline-none"
                         >
                           <option value="favorite">
                             ★ Favorite (100 — Max Priority)
@@ -316,20 +316,20 @@ export function SpotifyTastePreview({
                           data-testid={`confirm-import-btn-${artist.id}`}
                           onClick={() => handleConfirmAdd(artist)}
                           disabled={isSubmittingThis}
-                          className="rounded-lg bg-indigo-600 px-3 py-1 text-xs font-semibold text-white shadow hover:bg-indigo-500 disabled:opacity-50"
+                          className="rounded-lg bg-zinc-900 px-3 py-1 text-xs font-semibold text-white shadow hover:bg-zinc-800 disabled:opacity-50"
                         >
                           {isSubmittingThis ? 'Adding...' : 'Save'}
                         </button>
                         <button
                           type="button"
                           onClick={() => setAddingArtistId(null)}
-                          className="rounded-lg border border-zinc-700 bg-transparent px-2 py-1 text-xs font-medium text-zinc-400 hover:text-white"
+                          className="rounded-lg border border-zinc-200 bg-transparent px-2 py-1 text-xs font-medium text-zinc-500 hover:text-zinc-900"
                         >
                           Cancel
                         </button>
                       </div>
                       {selectedLevel === 'interested' && (
-                        <p className="text-[10px] text-amber-400">
+                        <p className="text-[10px] text-amber-700">
                           Notice: Setting &quot;Interested&quot; (score 55) sets
                           priority lower than your automated Spotify listening
                           affinity (60–70).
@@ -344,7 +344,7 @@ export function SpotifyTastePreview({
                         setAddingArtistId(artist.id);
                         setSelectedLevel('favorite');
                       }}
-                      className="rounded-lg border border-indigo-900/60 bg-indigo-950/40 px-3 py-1.5 text-xs font-semibold text-indigo-300 transition-colors hover:border-indigo-700 hover:bg-indigo-900/60 hover:text-white"
+                      className="rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-xs font-semibold text-indigo-700 transition-colors hover:border-indigo-300 hover:bg-indigo-100 hover:text-zinc-900"
                     >
                       + Set Priority
                     </button>

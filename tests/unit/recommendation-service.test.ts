@@ -626,7 +626,7 @@ describe('Production Recommendation Service (getPersonalizedDiscoverData)', () =
       });
 
       // Paged past 110 preferred past events; future favorite show is ranked #1
-      // Score in artist_first preset (65% artist + 15% distance*0.5 + 10% price*0.5 + 10% timing*0.5) is 82.5
+      // Score in artist_first preset (70% artist + 15% distance*0.5 + 15% price*0.5) is 85
       expect(result.isEmptyCatalog).toBe(false);
       expect(result.totalCandidateCount).toBe(111);
       expect(result.ineligibleCount).toBe(110);
@@ -634,7 +634,7 @@ describe('Production Recommendation Service (getPersonalizedDiscoverData)', () =
       expect(result.recommendations[0].eventId).toBe(
         'event-phoebe-future-survivor',
       );
-      expect(result.recommendations[0].score).toBe(82.5);
+      expect(result.recommendations[0].score).toBe(85);
       expect(result.recommendations[0].factors.artist.score).toBe(100);
       expect(result.recommendations[0].explanation).toContain(
         'Favorite artist',
@@ -903,7 +903,7 @@ describe('Production Recommendation Service (getPersonalizedDiscoverData)', () =
       expect(result.recommendations[0].eventId).toBe(
         'event-phoebe-scheduled-survivor',
       );
-      expect(result.recommendations[0].score).toBe(82.5);
+      expect(result.recommendations[0].score).toBe(85);
       expect(result.recommendations[0].factors.artist.score).toBe(100);
       expect(result.recommendations[0].explanation).toContain(
         'Favorite artist',

@@ -15,6 +15,7 @@ import {
 import { AudioPreviewPlayer } from './AudioPreviewPlayer';
 import { EventCard } from './EventCard';
 import { UndoToast } from './UndoToast';
+import { DecisionGuide } from './DecisionGuide';
 import { useWatchlist } from './useWatchlist';
 import {
   ArrowLeftIcon,
@@ -25,7 +26,6 @@ import {
   TicketIcon,
   SparklesIcon,
   AlertCircleIcon,
-  CheckIcon,
   ArrowUpRightIcon,
   StarIcon,
   BanIcon,
@@ -249,7 +249,7 @@ export function ConcertDetailClient({
                     )}
                   </div>
                   <div className="text-[11px] text-zinc-400">
-                    Age policy: {event.ageRestriction || 'All Ages'}
+                    Age policy: {event.ageRestriction || 'Not listed'}
                   </div>
                 </div>
               </div>
@@ -393,108 +393,7 @@ export function ConcertDetailClient({
       <div className="grid grid-cols-1 gap-8 lg:grid-cols-3">
         {/* Left 2 Columns: Decision Guide & Lineup */}
         <div className="space-y-6 lg:col-span-2">
-          {/* Honest Decision Guide */}
-          <div className="shadow-xs overflow-hidden rounded-3xl border border-zinc-200/90 bg-white">
-            <div className="border-b border-zinc-100 bg-zinc-50/70 px-6 py-4">
-              <h2 className="flex items-center gap-2 text-base font-bold text-zinc-900">
-                <SparklesIcon className="h-4 w-4 text-zinc-700" />
-                <span>Editorial Decision Guide</span>
-              </h2>
-              <p className="mt-0.5 text-xs text-zinc-500">
-                Authentic evaluation of this show’s strengths and practical
-                considerations before purchasing tickets.
-              </p>
-            </div>
-
-            <div className="grid grid-cols-1 gap-6 divide-y divide-zinc-100 p-6 md:grid-cols-2 md:divide-x md:divide-y-0">
-              {/* Why This Suits You */}
-              <div className="space-y-3">
-                <div className="flex items-center gap-2 text-sm font-semibold text-emerald-800">
-                  <div className="flex h-5 w-5 items-center justify-center rounded-full bg-emerald-100">
-                    <CheckIcon className="h-3 w-3 text-emerald-700" />
-                  </div>
-                  <span>Why This Suits You</span>
-                </div>
-
-                <ul className="space-y-2.5 text-xs leading-relaxed text-zinc-600">
-                  {event.whyItSuitsYou && event.whyItSuitsYou.length > 0 ? (
-                    event.whyItSuitsYou.map((reason, i) => (
-                      <li key={i} className="flex items-start gap-2">
-                        <span className="mt-0.5 font-bold text-emerald-500">
-                          ✓
-                        </span>
-                        <span>{reason}</span>
-                      </li>
-                    ))
-                  ) : (
-                    <>
-                      <li className="flex items-start gap-2">
-                        <span className="mt-0.5 font-bold text-emerald-500">
-                          ✓
-                        </span>
-                        <span>
-                          Headlining performance featuring {headlinerName}.
-                        </span>
-                      </li>
-                      <li className="flex items-start gap-2">
-                        <span className="mt-0.5 font-bold text-emerald-500">
-                          ✓
-                        </span>
-                        <span>
-                          Genuine venue listing with direct ticket purchase
-                          verification.
-                        </span>
-                      </li>
-                    </>
-                  )}
-                </ul>
-              </div>
-
-              {/* What to Consider Before Attending */}
-              <div className="space-y-3 pt-6 md:pt-0">
-                <div className="flex items-center gap-2 text-sm font-semibold text-amber-800">
-                  <div className="flex h-5 w-5 items-center justify-center rounded-full bg-amber-100">
-                    <AlertCircleIcon className="h-3 w-3 text-amber-700" />
-                  </div>
-                  <span>What to Consider Before Attending</span>
-                </div>
-
-                <ul className="space-y-2.5 text-xs leading-relaxed text-zinc-600">
-                  {event.considerations && event.considerations.length > 0 ? (
-                    event.considerations.map((con, i) => (
-                      <li key={i} className="flex items-start gap-2">
-                        <span className="mt-0.5 font-bold text-amber-500">
-                          !
-                        </span>
-                        <span>{con}</span>
-                      </li>
-                    ))
-                  ) : (
-                    <>
-                      <li className="flex items-start gap-2">
-                        <span className="mt-0.5 font-bold text-amber-500">
-                          !
-                        </span>
-                        <span>
-                          Verify door times and venue age restrictions before
-                          arrival.
-                        </span>
-                      </li>
-                      <li className="flex items-start gap-2">
-                        <span className="mt-0.5 font-bold text-amber-500">
-                          !
-                        </span>
-                        <span>
-                          Check parking availability and local transport
-                          options.
-                        </span>
-                      </li>
-                    </>
-                  )}
-                </ul>
-              </div>
-            </div>
-          </div>
+          <DecisionGuide event={event} />
 
           {/* Lineup & Billing Details with Preference Modifiers */}
           <div className="shadow-xs space-y-4 rounded-3xl border border-zinc-200/90 bg-white p-6">
@@ -503,8 +402,8 @@ export function ConcertDetailClient({
             </h2>
             <p className="text-xs text-zinc-500">
               Manage your artist affinity. Favoriting a headliner ensures high
-              priority; ignoring a headliner suppresses the show per Invariant
-              11.
+              priority; ignoring a headliner hides the show from your
+              recommendations.
             </p>
 
             <div className="space-y-3 pt-2">

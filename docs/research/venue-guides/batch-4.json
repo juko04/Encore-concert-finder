@@ -1,0 +1,143 @@
+{
+  "batch": 4,
+  "researchedOn": "2026-11-24",
+  "venues": [
+    {
+      "name": "Cervantes' Masterpiece Ballroom",
+      "aliases": ["Cervantes Masterpiece", "Cervantes' Ballroom", "Masterpiece Ballroom"],
+      "city": "Denver",
+      "region": "CO",
+      "capacity": {"value": 1000, "sourceUrls": ["https://cervantesmasterpiece.com/rentals/", "https://www.303happenings.com/venue/cervantes-masterpiece-ballroom"]},
+      "seatingFormat": {"value": "mixed", "note": "Mostly standing general admission, with a wraparound balcony (per venue page). Community-reported: seating exists but is limited at standing-room shows. Shared building with the Other Side (2637 Welton St, same owners per Wikipedia).", "sourceUrls": ["https://cervantesmasterpiece.com/?p=167163", "https://lovelydenver.com/places/cervantes-masterpiece-ballroom", "https://en.wikipedia.org/wiki/Cervantes%27_Masterpiece_Ballroom"]},
+      "agePolicy": {"text": "Venue-wide: most shows are 16+; at 16+ shows, 14 and 15 year olds can enter only with a parent or guardian and nobody under 14 is admitted. Some shows are 18+ or 21+; check each event page. Alcohol requires 21+ with valid ID. Applies to both rooms.", "sourceUrls": ["https://cervantesmasterpiece.com/?p=167163"], "evidence": "official"},
+      "doors": {"text": "Doors and show times differ by event and are listed on each event page. Venue suggests arriving at least 30 minutes before doors for popular shows because general admission is first come, first served. A community listing says shows mostly start around 8 PM.", "sourceUrls": ["https://cervantesmasterpiece.com/?p=167163", "https://www.303happenings.com/venue/cervantes-other-side"]},
+      "parking": {"summary": "No dedicated lot. Street parking in Five Points exists but fills quickly, and the venue recommends light rail or rideshare for big shows; rideshare drop-off is directly out front. Community sources say street parking is tight at peak times, especially weekends, with metered spots and nearby paid lots or garages; one reviewer found street parking on a Friday night.", "difficulty": "hard", "sourceUrls": ["https://cervantesmasterpiece.com/?p=167163", "https://lovelydenver.com/places/cervantes-masterpiece-ballroom", "https://www.303happenings.com/venue/cervantes-masterpiece-ballroom"], "evidence": "official"},
+      "transit": {"summary": "The 27th & Welton stop on the D, E and F light rail lines is right at the venue.", "sourceUrls": ["https://cervantesmasterpiece.com/?p=167163"]},
+      "policies": {"bag": null, "reentry": null, "other": "Coat check in the main lobby (and at the back of the Other Side), free with optional tips, runs in winter or bad weather; call ahead to confirm. Bars are mostly card or digital wallet, though the page also says cash is accepted. Valid ID needed to buy alcohol.", "sourceUrls": ["https://cervantesmasterpiece.com/?p=167163"]},
+      "accessibility": {"summary": "Venue states it is wheelchair accessible. For special assistance, submit the accessibility request form (ticket purchase required first, at least 48 hours before the event). A community listing mentions accessible parking and seating but one reviewer said the main side did not give access to the full venue.", "sourceUrls": ["https://cervantesmasterpiece.com/?p=167163", "https://www.303happenings.com/venue/cervantes-masterpiece-ballroom"]},
+      "area": {"summary": "Five Points, a historic Denver cultural district with a jazz-era past. The building dates to the mid-1920s and has had several names. Nearby late-night details were not verified.", "sourceUrls": ["https://cervantesmasterpiece.com/?p=167163", "https://en.wikipedia.org/wiki/Cervantes%27_Masterpiece_Ballroom"]},
+      "sound": {"summary": "Community reviewers (small sample) praise the sound; one said a bartender offered earplugs, so it can be loud. No technical or sightline detail verified.", "sourceUrls": ["https://www.303happenings.com/venue/cervantes-masterpiece-ballroom"], "evidence": "community"},
+      "whyPeopleLikeIt": [
+        {"text": "Two rooms in one historic building mean varied lineups across electronic, hip-hop, bluegrass and jam acts.", "sourceUrls": ["https://en.wikipedia.org/wiki/Cervantes%27_Masterpiece_Ballroom"], "evidence": "community"},
+        {"text": "Light rail stop at the door and free coat check in cold weather.", "sourceUrls": ["https://cervantesmasterpiece.com/?p=167163"], "evidence": "official"},
+        {"text": "Reviewers describe good sound and a friendly, orderly crowd and staff.", "sourceUrls": ["https://www.303happenings.com/venue/cervantes-masterpiece-ballroom"], "evidence": "community"}
+      ],
+      "considerBeforeAttending": [
+        {"text": "No parking lot and street spots fill fast; plan on light rail or rideshare.", "sourceUrls": ["https://cervantesmasterpiece.com/?p=167163"], "evidence": "official"},
+        {"text": "Popular shows can be standing room and crowded, with a line forming before doors; arrive early for a good spot.", "sourceUrls": ["https://www.303happenings.com/venue/cervantes-masterpiece-ballroom", "https://lovelydenver.com/places/cervantes-masterpiece-ballroom"], "evidence": "community"},
+        {"text": "Age limit varies (mostly 16+, some 18+ or 21+); confirm on the event page.", "sourceUrls": ["https://cervantesmasterpiece.com/?p=167163"], "evidence": "official"},
+        {"text": "One reviewer called the restrooms poor on both sides.", "sourceUrls": ["https://www.303happenings.com/venue/cervantes-masterpiece-ballroom"], "evidence": "community"}
+      ],
+      "confidence": "medium",
+      "notes": "Shared with Other Side: address, owners, age policy, ID and payment rules, light rail, parking situation, coat check, ADA request process. Room-specific: capacity, stage and balcony. Capacity: official rentals page says 1,000; 303Happenings repeats 1,000 as the venue-stated figure; unclear whether standing or seated. Page footer lists 2635 Welton St while the body lists 2637 Welton St. 303Happenings RTD bus stop listings appeared inconsistent with the venue location, so they were not used. Bag policy and re-entry not stated on sources found."
+    },
+    {
+      "name": "Cervantes' Other Side",
+      "aliases": ["Cervantes Other Side", "The Other Side"],
+      "city": "Denver",
+      "region": "CO",
+      "capacity": {"value": 450, "sourceUrls": ["https://cervantesmasterpiece.com/rentals/"]},
+      "seatingFormat": {"value": "standing_ga", "note": "Not explicitly stated by the venue; smaller room in the same building, reported as a concert hall that can host a separate show at the same time as the Ballroom. Standing format is inferred as a music room, so treat as low certainty.", "sourceUrls": ["https://cervantesmasterpiece.com/?p=167163", "https://www.303happenings.com/venue/cervantes-other-side"]},
+      "agePolicy": {"text": "Same venue-wide policy as the Ballroom: most shows 16+ (14 and 15 year olds only with a parent or guardian, none under 14); some 18+ or 21+. Check each event page.", "sourceUrls": ["https://cervantesmasterpiece.com/?p=167163"], "evidence": "official"},
+      "doors": {"text": "Varies by show and listed on event pages; community listing says shows usually start around 8 PM.", "sourceUrls": ["https://cervantesmasterpiece.com/?p=167163", "https://www.303happenings.com/venue/cervantes-other-side"]},
+      "parking": {"summary": "Same as the Ballroom: no lot, street parking in Five Points fills quickly; venue recommends light rail or rideshare for major shows.", "difficulty": "hard", "sourceUrls": ["https://cervantesmasterpiece.com/?p=167163"], "evidence": "official"},
+      "transit": {"summary": "Same stop as the Ballroom: 27th & Welton on the D, E and F light rail lines.", "sourceUrls": ["https://cervantesmasterpiece.com/?p=167163"]},
+      "policies": {"bag": null, "reentry": null, "other": "Coat check at the back of the Other Side during winter or bad weather, free with optional tips. Card or digital wallet mostly used at bars. Valid ID for alcohol.", "sourceUrls": ["https://cervantesmasterpiece.com/?p=167163"]},
+      "accessibility": {"summary": "Venue-wide: stated as wheelchair accessible; accessibility request form needs a ticket and 48 hours notice.", "sourceUrls": ["https://cervantesmasterpiece.com/?p=167163"]},
+      "area": {"summary": "Five Points, Denver (same building as the Ballroom).", "sourceUrls": ["https://cervantesmasterpiece.com/?p=167163"]},
+      "sound": {"summary": null, "sourceUrls": [], "evidence": "community"},
+      "whyPeopleLikeIt": [
+        {"text": "A smaller, more intimate room than the Ballroom, described by venue as the same production setup scaled down.", "sourceUrls": ["https://cervantesmasterpiece.com/rentals/"], "evidence": "official"},
+        {"text": "Features bluegrass and indie programming per community listings.", "sourceUrls": ["https://www.303happenings.com/venue/cervantes-other-side"], "evidence": "community"}
+      ],
+      "considerBeforeAttending": [
+        {"text": "Shares the building with the Ballroom, so two shows may run at once and crowds and street parking get tight.", "sourceUrls": ["https://cervantesmasterpiece.com/?p=167163"], "evidence": "official"},
+        {"text": "Plan on transit or rideshare rather than parking nearby.", "sourceUrls": ["https://cervantesmasterpiece.com/?p=167163"], "evidence": "official"}
+      ],
+      "confidence": "low",
+      "notes": "Capacity conflict: official rentals page says 450; 303Happenings says about 400; Lovely Denver says roughly 300. Used the official figure. Standing vs seated not confirmed by any source. No Other Side specific sound or sightline information found."
+    },
+    {
+      "name": "Larimer Lounge",
+      "aliases": ["Larimer Lounge Denver"],
+      "city": "Denver",
+      "region": "CO",
+      "capacity": {"value": 250, "sourceUrls": ["https://www.303happenings.com/venue/larimer-lounge"]},
+      "seatingFormat": {"value": null, "note": "No source verified the format; likely a standing room but not confirmed.", "sourceUrls": []},
+      "agePolicy": {"text": "Varies by event: the venue's calendar shows most shows 21+, many 16+, occasional 18+ or all ages. Venue FAQ says 16+ shows are all-ages, with under-16s needing a ticketed parent or guardian. Valid ID required at the door for transferred tickets.", "sourceUrls": ["https://larimerlounge.com/", "https://larimerlounge.com/faq/"], "evidence": "official"},
+      "doors": {"text": "Varies by show. Typical pattern on the calendar: doors around 7 PM and show at 8 PM; some early shows with doors around 3 to 4 PM; some Open House nights with doors at 8 PM and show at 9 PM.", "sourceUrls": ["https://larimerlounge.com/"]},
+      "parking": {"summary": "No official parking info found. Community listing says both free and paid street parking are available nearby, with SpotHero for reserving a spot.", "difficulty": "unknown", "sourceUrls": ["https://www.303happenings.com/venue/larimer-lounge"], "evidence": "community"},
+      "transit": {"summary": null, "sourceUrls": []},
+      "policies": {"bag": null, "reentry": null, "other": "Tickets sold through Etix; one community reviewer warned that tickets from a third-party app were not valid, so buy from the official channel. Box office takes cash or credit; bar tabs place a hold on credit cards. The FAQ is shared with sister venue Globe Hall.", "sourceUrls": ["https://larimerlounge.com/", "https://larimerlounge.com/faq/", "https://www.303happenings.com/venue/larimer-lounge"]},
+      "accessibility": {"summary": null, "sourceUrls": []},
+      "area": {"summary": "2721 Larimer St, in the RiNo (River North) Art District. Community listing: Saturdays are the usual show nights, and the space has a gritty, divey bar feel.", "sourceUrls": ["https://larimerlounge.com/", "https://www.303happenings.com/venue/larimer-lounge"]},
+      "sound": {"summary": "No sound or sightline detail verified; community listing only notes a divey feel with strong lighting and visuals.", "sourceUrls": ["https://www.303happenings.com/venue/larimer-lounge"], "evidence": "community"},
+      "whyPeopleLikeIt": [
+        {"text": "Frequent bands, DJs and electronic nights, and many free shows (about 10 of 82 listed events).", "sourceUrls": ["https://www.303happenings.com/venue/larimer-lounge", "https://larimerlounge.com/"], "evidence": "community"},
+        {"text": "Reviewers praise the music and lighting, and one felt safe with good staff.", "sourceUrls": ["https://www.303happenings.com/venue/larimer-lounge"], "evidence": "community"}
+      ],
+      "considerBeforeAttending": [
+        {"text": "Age limits vary widely; many shows are 21+, so check the event listing.", "sourceUrls": ["https://larimerlounge.com/"], "evidence": "official"},
+        {"text": "Buy tickets directly from the venue's ticketing link; a reviewer said third-party app tickets were refused.", "sourceUrls": ["https://www.303happenings.com/venue/larimer-lounge"], "evidence": "community"},
+        {"text": "Parking and transit not officially published; plan ahead.", "sourceUrls": ["https://larimerlounge.com/faq/"], "evidence": "official"}
+      ],
+      "confidence": "low",
+      "notes": "The FAQ page text for Larimer Lounge matches Globe Hall's and Lost Lake's (shared operator and phone number 303.296.1003). Capacity of 250 comes from an aggregator quoting the venue, not the official site. A community listing's RTD bus stops looked inconsistent with the address and were excluded. Wheree and some aggregators list a different neighbourhood name; the official site says RiNo."
+    },
+    {
+      "name": "Globe Hall",
+      "aliases": ["Globe Hall Live Music and BBQ"],
+      "city": "Denver",
+      "region": "CO",
+      "capacity": {"value": 250, "sourceUrls": ["https://303magazine.com/2017/12/globe-hall-denver-venue-review/", "https://www.303happenings.com/venue/globe-hall-co"]},
+      "seatingFormat": {"value": "standing_ga", "note": "The music hall is standing general admission only; seating is available in the bar and restaurant area. Restaurant reservations do not include a show ticket.", "sourceUrls": ["https://globehall.com/find-us/", "https://globehall.com/faq/", "https://globehall.com/"]},
+      "agePolicy": {"text": "Varies by show. Venue says attendees under the event's age limit must be with a parent or guardian, valid government ID is required and student IDs are not accepted; 21+ shows admit only those 21 and over. Restaurant side is described as all-ages in the sister venue FAQ.", "sourceUrls": ["https://globehall.com/find-us/", "https://larimerlounge.com/faq/"], "evidence": "official"},
+      "doors": {"text": "Most listed shows have doors at 7 PM and show at 8 PM; some early shows have doors at 4 PM and show at 5 PM. The venue and kitchen open at 5 PM on show nights; on Sundays the venue opens an hour before the show.", "sourceUrls": ["https://globehall.com/", "https://globehall.com/find-us/"]},
+      "parking": {"summary": "Venue has a lot or guests can park along 45th Street; it asks guests not to park on Logan Street to keep spaces for residents. Community listing describes parking as plentiful and easy to find.", "difficulty": "easy", "sourceUrls": ["https://globehall.com/find-us/", "https://www.303happenings.com/venue/globe-hall-co"], "evidence": "official"},
+      "transit": {"summary": null, "sourceUrls": []},
+      "policies": {"bag": null, "reentry": null, "other": "Ticket transfers require valid photo ID at the door. Box office sells tickets on certain evenings, cash or credit. Restaurant and bar have no cover charge.", "sourceUrls": ["https://globehall.com/faq/", "https://globehall.com/find-us/"]},
+      "accessibility": {"summary": "Music hall has no seating. Guests with accessibility needs can request accommodations from staff on arrival or email the venue (per FAQ).", "sourceUrls": ["https://globehall.com/find-us/", "https://globehall.com/faq/"]},
+      "area": {"summary": "4483 Logan St in Globeville at the northern edge of RiNo, near Brighton Blvd and the Mission Ballroom. Combines a Texas-style BBQ restaurant in the front, a back patio and the band room. Kitchen serves from about 5 PM until it runs out, usually 9 or 10 PM. Official homepage calls the location RiNo.", "sourceUrls": ["https://globehall.com/find-us/", "https://303magazine.com/2017/12/globe-hall-denver-venue-review/", "https://globehall.com/"]},
+      "sound": {"summary": "A 2017 magazine piece says speakers are placed mid-room so the back still gets the full sound, and the crowd thins out away from the stage. Community listing describes an intimate room with strong sound and a skilled engineer.", "sourceUrls": ["https://303magazine.com/2017/12/globe-hall-denver-venue-review/", "https://www.303happenings.com/venue/globe-hall-co"], "evidence": "community"},
+      "whyPeopleLikeIt": [
+        {"text": "Pairs live shows with BBQ food and a back patio, so you can eat before the show.", "sourceUrls": ["https://globehall.com/", "https://303magazine.com/2017/12/globe-hall-denver-venue-review/"], "evidence": "official"},
+        {"text": "Small room where shows sell out but it rarely feels overpacked and is easy to move around, per a magazine review.", "sourceUrls": ["https://303magazine.com/2017/12/globe-hall-denver-venue-review/"], "evidence": "community"},
+        {"text": "Easy parking according to community listing.", "sourceUrls": ["https://www.303happenings.com/venue/globe-hall-co"], "evidence": "community"}
+      ],
+      "considerBeforeAttending": [
+        {"text": "Standing only in the music hall; no seats there.", "sourceUrls": ["https://globehall.com/find-us/"], "evidence": "official"},
+        {"text": "Do not park on Logan Street; use the lot or 45th Street.", "sourceUrls": ["https://globehall.com/find-us/"], "evidence": "official"},
+        {"text": "Student IDs not accepted; bring government-issued ID.", "sourceUrls": ["https://globehall.com/find-us/"], "evidence": "official"},
+        {"text": "The front of a sold-out show can get hot and tight (the 2017 piece mentions people passing out).", "sourceUrls": ["https://303magazine.com/2017/12/globe-hall-denver-venue-review/"], "evidence": "community"}
+      ],
+      "confidence": "medium",
+      "notes": "Capacity 250 comes from a 2017 magazine article and a community listing quoting the venue, not the official site. Official sites differ on neighbourhood: homepage says RiNo, find-us page says Globeville at RiNo's northern edge. The Larimer Lounge FAQ shares text and phone with this venue. Community-listed bus stops were not used because they looked inconsistent with the Logan St address."
+    },
+    {
+      "name": "Lost Lake Lounge",
+      "aliases": ["Lost Lake", "Lost Lake Denver"],
+      "city": "Denver",
+      "region": "CO",
+      "capacity": {"value": 150, "sourceUrls": ["https://www.westword.com/music/a-look-at-lost-lake-lounges-complete-overhaul-with-two-new-sound-systems-and-a-new-stage-5710406/"]},
+      "seatingFormat": {"value": null, "note": "Front bar plus a back band room with a stage; no source verified standing vs seated.", "sourceUrls": ["https://www.westword.com/music/a-look-at-lost-lake-lounges-complete-overhaul-with-two-new-sound-systems-and-a-new-stage-5710406/"]},
+      "agePolicy": {"text": "Official event pages list shows as 16+ (under-16s need a ticketed parent or guardian per the shared FAQ). An aggregator page claims 21+ with no exceptions, which conflicts with the official listings.", "sourceUrls": ["https://lost-lake.com/event/confetti/lost-lake/denver-colorado/", "https://lost-lake.com/faq/", "https://concerts.consequence.net/venues/lost-lake-lounge"], "evidence": "official"},
+      "doors": {"text": "Most listed shows have doors at 7 PM and show at 8 PM; some early shows have doors at 4 PM and show at 5 PM; one festival date had doors at 6 PM.", "sourceUrls": ["https://lost-lake.com/event/confetti/lost-lake/denver-colorado/"]},
+      "parking": {"summary": "Per the venue FAQ: a free lot behind the venue, free street parking, and a community lot two blocks west on Colfax between Cook and Adams. An aggregator page instead says on-site parking is limited and recommends rideshare at peak times.", "difficulty": "unknown", "sourceUrls": ["https://lost-lake.com/faq/", "https://concerts.consequence.net/venues/lost-lake-lounge"], "evidence": "official"},
+      "transit": {"summary": null, "sourceUrls": []},
+      "policies": {"bag": null, "reentry": null, "other": "Tickets mostly sold via Etix. Box office sells tickets on Fridays and accepts cash or credit.", "sourceUrls": ["https://lost-lake.com/event/confetti/lost-lake/denver-colorado/", "https://lost-lake.com/faq/"]},
+      "accessibility": {"summary": null, "sourceUrls": []},
+      "area": {"summary": "3602 E Colfax Ave, two blocks east of the Bluebird Theater, in central Denver on East Colfax. Westword describes a dim, wood-paneled cabin-style lounge that opened in 2010 and was bought by Scott Campbell in 2013, who replaced the stage and sound.", "sourceUrls": ["https://lost-lake.com/event/confetti/lost-lake/denver-colorado/", "https://www.westword.com/location/lost-lake-5175022"]},
+      "sound": {"summary": "Westword reports both rooms got new sound systems, including subwoofers, ceiling-hung speakers and monitors in the back room, with a two-stage setup. Article is undated and may predate current conditions.", "sourceUrls": ["https://www.westword.com/music/a-look-at-lost-lake-lounges-complete-overhaul-with-two-new-sound-systems-and-a-new-stage-5710406/"], "evidence": "community"},
+      "whyPeopleLikeIt": [
+        {"text": "Small, cozy, dark lounge with a dedicated back band room and upgraded sound.", "sourceUrls": ["https://www.westword.com/location/lost-lake-5175022", "https://www.westword.com/music/a-look-at-lost-lake-lounges-complete-overhaul-with-two-new-sound-systems-and-a-new-stage-5710406/"], "evidence": "community"},
+        {"text": "Free parking lot behind the venue and free street parking per venue FAQ.", "sourceUrls": ["https://lost-lake.com/faq/"], "evidence": "official"}
+      ],
+      "considerBeforeAttending": [
+        {"text": "Age rules conflict across sources; verify on the event page before bringing anyone under 21.", "sourceUrls": ["https://lost-lake.com/event/confetti/lost-lake/denver-colorado/", "https://concerts.consequence.net/venues/lost-lake-lounge"], "evidence": "official"},
+        {"text": "Very small room; capacity of about 150 may mean quick sellouts.", "sourceUrls": ["https://www.westword.com/music/a-look-at-lost-lake-lounges-complete-overhaul-with-two-new-sound-systems-and-a-new-stage-5710406/"], "evidence": "community"}
+      ],
+      "confidence": "low",
+      "notes": "Capacity of about 150 is from an undated Westword article; not on the official site. Official site (event page and FAQ) shows 16+ events and a free lot, while the consequence aggregator says 21+ and limited parking; official sources preferred. The lost-lake.com FAQ text is shared with Larimer Lounge and Globe Hall (same operator). The lostlakedenver.com domain was not fetchable; lost-lake.com was used. Transit, bag, re-entry and ADA not found."
+    }
+  ]
+}

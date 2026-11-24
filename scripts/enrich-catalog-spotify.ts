@@ -15,6 +15,9 @@
  *
  *   # Limited run (e.g. first 20 headliners):
  *   vite-node --config vitest.config.ts scripts/enrich-catalog-spotify.ts -- --limit=20
+ *
+ * Backfill genres for already-mapped artists (requires migration 20261124010000):
+ *   vite-node --config vitest.config.ts scripts/enrich-catalog-spotify.ts -- --backfill-genres
  */
 
 import fs from 'node:fs';
@@ -31,6 +34,7 @@ interface ParsedArgs {
   limit?: number;
   region?: string;
   verbose: boolean;
+  backfillGenres?: boolean;
 }
 
 function parseCliArgs(): ParsedArgs {
@@ -39,6 +43,7 @@ function parseCliArgs(): ParsedArgs {
     dryRun: false,
     allowProductionWrite: false,
     verbose: false,
+    backfillGenres: false,
   };
 
   for (const arg of args) {
@@ -46,6 +51,8 @@ function parseCliArgs(): ParsedArgs {
       parsed.dryRun = true;
     } else if (arg === '--allow-production-write') {
       parsed.allowProductionWrite = true;
+    } else if (arg === '--backfill-genres') {
+      parsed.backfillGenres = true;
     } else if (arg === '--verbose') {
       parsed.verbose = true;
     } else if (arg.startsWith('--limit=')) {
@@ -137,6 +144,16 @@ export async function runSpotifyCatalogEnrichment(cliArgs?: ParsedArgs) {
     dryRun: args.dryRun,
     rateLimitDelayMs: 100, // 100ms spacing
   });
+
+  if (args.backfillGenres) {
+    // Genre-only backfill for artists that already have a Spotify mapping (no matching/search)
+    console.log('Backfilling Spotify genres for already-mapped artists...');
+    const result = await enricher.backfillGenres({ limit: args.limit });
+    console.log(
+      `Genre backfill: ${result.updated} updated, ${result.skippedNoGenres} had no Spotify genres, ${result.candidates} candidates`,
+    );
+    return;
+  }
 
   console.log('Querying canonical headliners from events in local Supabase...');
   const headliners = await enricher.getHeadlinersToEnrich({

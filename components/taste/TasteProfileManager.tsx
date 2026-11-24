@@ -419,15 +419,15 @@ export function TasteProfileManager({
           data-testid="spotify-status-banner"
           className={`flex items-start justify-between rounded-xl p-4 text-xs ${
             banner.type === 'success'
-              ? 'border border-emerald-800/60 bg-emerald-950/40 text-emerald-200'
-              : 'border border-red-800/60 bg-red-950/40 text-red-200'
+              ? 'border border-emerald-200 bg-emerald-50 text-emerald-800'
+              : 'border border-red-200 bg-red-50 text-red-800'
           }`}
         >
           <div>{banner.message}</div>
           <button
             type="button"
             onClick={() => setBanner(null)}
-            className="text-zinc-400 hover:text-white"
+            className="text-zinc-500 hover:text-zinc-900"
           >
             ✕
           </button>
@@ -468,20 +468,20 @@ export function TasteProfileManager({
       {isSyntheticDemo && simulatedDemoPreferences.length > 0 && (
         <div
           data-testid="simulated-demo-preferences-container"
-          className="rounded-2xl border border-amber-900/60 bg-amber-950/20 p-5 backdrop-blur"
+          className="rounded-2xl border border-amber-200 bg-amber-50 p-5 backdrop-blur"
         >
-          <div className="flex flex-col gap-2 border-b border-amber-900/40 pb-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex flex-col gap-2 border-b border-amber-200 pb-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <div className="flex items-center gap-2">
-                <span className="rounded bg-amber-500/20 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-amber-300">
+                <span className="rounded bg-amber-500/20 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-amber-700">
                   Interactive Preview Simulation
                 </span>
-                <span className="text-xs font-medium text-amber-200/80">
+                <span className="text-xs font-medium text-amber-800">
                   ({simulatedDemoPreferences.length} simulated selection
                   {simulatedDemoPreferences.length > 1 ? 's' : ''})
                 </span>
               </div>
-              <p className="mt-1 text-xs text-zinc-400">
+              <p className="mt-1 text-xs text-zinc-500">
                 Simulated selections are kept separate from your actual saved
                 profile and will be discarded when exiting demo mode.
               </p>
@@ -490,7 +490,7 @@ export function TasteProfileManager({
               type="button"
               data-testid="clear-demo-selections-btn"
               onClick={() => setSimulatedDemoPreferences([])}
-              className="text-xs text-zinc-400 underline hover:text-amber-300"
+              className="text-xs text-zinc-500 underline hover:text-amber-800"
             >
               Clear Simulated
             </button>
@@ -523,11 +523,11 @@ export function TasteProfileManager({
       )}
 
       {/* Search and Add Area */}
-      <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-6 backdrop-blur">
-        <h2 className="text-base font-semibold text-white">
+      <div className="rounded-2xl border border-zinc-200 bg-white p-6 backdrop-blur">
+        <h2 className="text-base font-semibold text-zinc-900">
           Add Artist to Live Music Taste Profile
         </h2>
-        <p className="mt-1 text-xs text-zinc-400">
+        <p className="mt-1 text-xs text-zinc-500">
           Search upcoming concert artists or enter any artist you listen to.
         </p>
 
@@ -542,23 +542,23 @@ export function TasteProfileManager({
         {selectedArtist && (
           <div
             data-testid="add-artist-dialog"
-            className="mt-4 rounded-xl border border-indigo-900/60 bg-indigo-950/30 p-4"
+            className="mt-4 rounded-xl border border-indigo-200 bg-indigo-50 p-4"
           >
             <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
               <div>
-                <span className="text-xs uppercase tracking-wider text-indigo-400">
+                <span className="text-xs uppercase tracking-wider text-indigo-600">
                   Selected Artist
                 </span>
                 <div className="flex items-center gap-2">
-                  <h3 className="text-base font-bold text-white">
+                  <h3 className="text-base font-bold text-zinc-900">
                     {selectedArtist.name}
                   </h3>
                   {selectedArtist.id ? (
-                    <span className="rounded border border-indigo-800/40 bg-indigo-950 px-2 py-0.5 text-[10px] font-semibold text-indigo-300">
+                    <span className="rounded border border-indigo-200 bg-indigo-50 px-2 py-0.5 text-[10px] font-semibold text-indigo-700">
                       In Catalog
                     </span>
                   ) : (
-                    <span className="rounded bg-zinc-800 px-2 py-0.5 text-[10px] font-medium text-zinc-400">
+                    <span className="rounded bg-zinc-100 px-2 py-0.5 text-[10px] font-medium text-zinc-500">
                       Not in Catalog
                     </span>
                   )}
@@ -577,7 +577,7 @@ export function TasteProfileManager({
                     onChange={(e) =>
                       setAddLevel(e.target.value as PreferenceLevel)
                     }
-                    className="rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-xs font-medium text-zinc-100 focus:border-indigo-500 focus:outline-none"
+                    className="rounded-lg border border-zinc-200 bg-white px-3 py-2 text-xs font-medium text-zinc-900 focus:border-indigo-500 focus:outline-none"
                   >
                     <option value="favorite">★ Favorite (Must-see)</option>
                     <option value="like">♥ Like (Want to see)</option>
@@ -591,7 +591,7 @@ export function TasteProfileManager({
                   data-testid="confirm-add-btn"
                   onClick={handleConfirmAdd}
                   disabled={isPending}
-                  className="rounded-lg bg-indigo-600 px-4 py-2 text-xs font-semibold text-white shadow transition-colors hover:bg-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:opacity-50"
+                  className="rounded-lg bg-zinc-900 px-4 py-2 text-xs font-semibold text-white shadow transition-colors hover:bg-zinc-800 focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:opacity-50"
                 >
                   {isPending ? 'Saving...' : 'Save Preference'}
                 </button>
@@ -601,7 +601,7 @@ export function TasteProfileManager({
                   data-testid="cancel-add-btn"
                   onClick={() => setSelectedArtist(null)}
                   disabled={isPending}
-                  className="rounded-lg border border-zinc-700 bg-transparent px-3 py-2 text-xs font-medium text-zinc-400 hover:text-zinc-200"
+                  className="rounded-lg border border-zinc-200 bg-transparent px-3 py-2 text-xs font-medium text-zinc-500 hover:text-zinc-900"
                 >
                   Cancel
                 </button>
@@ -615,7 +615,7 @@ export function TasteProfileManager({
         <div
           data-testid="profile-error-alert"
           role="alert"
-          className="rounded-xl border border-red-800/60 bg-red-950/40 p-4 text-sm text-red-200"
+          className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-800"
         >
           {error}
         </div>
@@ -624,7 +624,7 @@ export function TasteProfileManager({
       {/* Tabs and Preference List */}
       <div>
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex flex-wrap gap-1 border-b border-zinc-800 pb-2">
+          <div className="flex flex-wrap gap-1 border-b border-zinc-200 pb-2">
             {(
               [
                 ['all', 'All', countByTier.all],
@@ -641,8 +641,8 @@ export function TasteProfileManager({
                 onClick={() => setFilter(tierKey)}
                 className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${
                   filter === tierKey
-                    ? 'bg-zinc-800 font-semibold text-white'
-                    : 'text-zinc-400 hover:text-zinc-200'
+                    ? 'bg-zinc-100 font-semibold text-zinc-900'
+                    : 'text-zinc-500 hover:text-zinc-900'
                 }`}
               >
                 {label} ({count})
@@ -653,7 +653,7 @@ export function TasteProfileManager({
           {userEmail && (
             <div className="text-xs text-zinc-500">
               Preferences synced for{' '}
-              <span className="font-mono text-zinc-400">{userEmail}</span>
+              <span className="font-mono text-zinc-500">{userEmail}</span>
             </div>
           )}
         </div>
@@ -662,9 +662,9 @@ export function TasteProfileManager({
           {filteredPreferences.length === 0 ? (
             <div
               data-testid="empty-preferences-view"
-              className="rounded-xl border border-dashed border-zinc-800 p-12 text-center"
+              className="rounded-xl border border-dashed border-zinc-200 p-12 text-center"
             >
-              <h3 className="text-sm font-semibold text-zinc-300">
+              <h3 className="text-sm font-semibold text-zinc-700">
                 {filter === 'all'
                   ? 'No artist preferences added yet'
                   : `No artists marked as "${filter}"`}

@@ -6,11 +6,12 @@ import { createAdminClient } from '@/lib/supabase/admin';
 import type { CanonicalEventSummary } from '@/lib/domain/catalog';
 import type { UserProfile } from '@/lib/domain/profile';
 import {
+  compareFeedOrder,
   compareScoredEvents,
   rankEvents,
   scoreEvent,
 } from '@/lib/recommendation/engine';
-import { calculateTimingFactor } from '@/lib/recommendation/factors/timing';
+import { checkEventEligibility } from '@/lib/recommendation/factors/eligibility';
 import {
   calculate14DayLookaheadEndDate,
   calculateWeekendWindow,
@@ -57,6 +58,11 @@ export interface PersonalizedDiscoverOptions {
   spotifyRepo?: ISpotifyConnectionRepository;
   spotifyTopArtists?: SpotifyTopArtist[];
   presetOverride?: unknown;
+  locationOverride?: {
+    lat: number;
+    lng: number;
+    radiusMiles?: number | null;
+  } | null;
   mode?: unknown;
   discoveryMode?: unknown;
   referenceDate?: string;
@@ -136,7 +142,7 @@ export const PREFERRED_ARTIST_CANDIDATE_LIMIT = FAVORITE_ARTIST_CANDIDATE_LIMIT;
  *
  * Therefore, candidate retrieval uses a conservative lower bound: 24 hours (1 calendar day)
  * prior to the reference instant. Downstream scoring strictly enforces venue-timezone-aware
- * eligibility via calculateTimingFactor().
+ * eligibility via checkEventEligibility().
  */
 export function calculateCandidateRetrievalLowerBound(
   referenceDate?: string,
@@ -182,7 +188,7 @@ export const MAX_CANDIDATE_SCAN_PAGES = 5;
  * Invariants:
  * 1. Begins query from `queryFromDate` (24h lookback to protect same-day shows in western timezones).
  * 2. Pushes `status: filters.status ?? 'scheduled'` into database queries to eliminate scan-limit false negatives.
- * 3. Only genuinely eligible scheduled events (`!timing.isPast && ev.status === 'scheduled'`) count
+ * 3. Only genuinely eligible scheduled events (`!eligibility.isPast && ev.status === 'scheduled'`) count
  *    toward the `targetEligibleLimit`. Cancelled, postponed, and past events do not prevent subsequent valid concerts.
  * 4. Ineligible, past, cancelled, and postponed events within the scan window are preserved in the returned
  *    candidate collection so that `totalCandidateCount`, `suppressed`, and `ineligibleCount` diagnostics
@@ -222,7 +228,7 @@ export async function retrieveCandidatesWithLookback(
       if (!candidateIds.has(ev.id)) {
         candidateIds.add(ev.id);
 
-        const timing = calculateTimingFactor({
+        const eligibility = checkEventEligibility({
           localStartDate: ev.localStartDate,
           startsAt: ev.startsAt,
           timezone: ev.timezone,
@@ -232,7 +238,7 @@ export async function retrieveCandidatesWithLookback(
         });
 
         const isTimingAndStatusEligible =
-          !timing.isPast && ev.status === 'scheduled';
+          !eligibility.isPast && ev.status === 'scheduled';
         const isModeEligible =
           !modeOptions?.mode ||
           modeOptions.mode === 'all' ||
@@ -399,6 +405,7 @@ export async function getPersonalizedDiscoverData(
     catalogRepo: injectedCatalogRepo,
     spotifyRepo: injectedSpotifyRepo,
     presetOverride,
+    locationOverride,
     mode,
     discoveryMode,
     referenceDate,
@@ -764,6 +771,7 @@ export async function getPersonalizedDiscoverData(
     referenceInstant,
     presetOverride: activePreset,
     weightsOverride: modeWeights,
+    locationOverride: locationOverride ?? undefined,
   };
 
   const rankResult: RecommendationResult = rankEvents(
@@ -884,7 +892,7 @@ export async function getPublicDiscoverData(
     if (ev.status !== 'scheduled') {
       return false;
     }
-    const timing = calculateTimingFactor({
+    const eligibility = checkEventEligibility({
       localStartDate: ev.localStartDate,
       startsAt: ev.startsAt,
       timezone: ev.timezone,
@@ -892,7 +900,7 @@ export async function getPublicDiscoverData(
       referenceDate,
       referenceInstant,
     });
-    return !timing.isPast;
+    return !eligibility.isPast;
   });
 
   if (activeMode !== 'all') {
@@ -945,7 +953,7 @@ export interface PersonalizedFeedOptions extends PersonalizedDiscoverOptions {
 
 /**
  * Produces a personalized, ranked feed of scored events suitable for the Index UI.
- * Integrates factor breakdowns (artist, distance, price, timing), user explanations,
+ * Integrates factor breakdowns (artist, distance, price), user explanations,
  * price/free filtering, and flexible sorting.
  */
 export async function getPersonalizedFeed(
@@ -1003,7 +1011,7 @@ export async function getPersonalizedFeed(
     });
   } else {
     // 'score_desc' (default)
-    feed.sort(compareScoredEvents);
+    feed.sort(compareFeedOrder);
   }
 
   // Paging

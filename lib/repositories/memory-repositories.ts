@@ -333,6 +333,7 @@ export class MemoryCatalogRepository implements ICatalogRepository {
       id: string;
       name: string;
       billingPosition: BillingPosition;
+      imageUrl?: string | null;
     }> = [];
     for (const ea of this.eventArtists.values()) {
       if (ea.eventId === id) {
@@ -341,6 +342,7 @@ export class MemoryCatalogRepository implements ICatalogRepository {
           id: ea.artistId,
           name: a?.name ?? 'Unknown Artist',
           billingPosition: ea.billingPosition,
+          imageUrl: a?.imageUrl ?? null,
         });
       }
     }
@@ -393,8 +395,10 @@ export class MemoryCatalogRepository implements ICatalogRepository {
         ? {
             id: venue.id,
             name: venue.name,
+            normalizedName: venue.normalizedName,
             city: venue.city,
             region: venue.region,
+            imageUrl: venue.imageUrl ?? null,
           }
         : null,
       ticketLinks,
@@ -639,6 +643,7 @@ export class MemoryCatalogRepository implements ICatalogRepository {
             name: a?.name ?? 'Unknown Artist',
             billingPosition: ea.billingPosition,
             spotifyArtistId,
+            imageUrl: a?.imageUrl ?? null,
           });
         }
       }
@@ -746,6 +751,7 @@ export class MemoryCatalogRepository implements ICatalogRepository {
         sources: eventSources,
         ticketLinks: eventTicketLinks,
         inventoryStatus: summaryInventoryStatus,
+        ...(event.imageUrl ? { imageUrl: event.imageUrl } : {}),
       });
     }
 
@@ -1352,6 +1358,8 @@ export class MemoryCatalogRepository implements ICatalogRepository {
                 payload.event.primary_ticket_url !== undefined
                   ? payload.event.primary_ticket_url
                   : existing.primaryTicketUrl,
+              // Fill-if-empty: never overwrite an existing image.
+              imageUrl: existing.imageUrl ?? payload.event.image_url ?? null,
               updatedAt: new Date().toISOString(),
             });
           }
@@ -1382,11 +1390,23 @@ export class MemoryCatalogRepository implements ICatalogRepository {
             isMultiDay: payload.event.is_multi_day ?? false,
             officialUrl: payload.event.official_url ?? null,
             primaryTicketUrl: payload.event.primary_ticket_url ?? null,
+            imageUrl: payload.event.image_url ?? null,
             announcedAt: null,
             createdAt: now,
             updatedAt: now,
           };
           this.events.set(eventId, created);
+        }
+
+        // Venue image (fill-if-empty), mirroring the SQL function
+        if (payload.event.venue_image_url && venueIdToUse) {
+          const v = this.venues.get(venueIdToUse);
+          if (v && !v.imageUrl) {
+            this.venues.set(venueIdToUse, {
+              ...v,
+              imageUrl: payload.event.venue_image_url,
+            });
+          }
         }
 
         // 2. Artists (link existing or create new inside the transaction)
@@ -1400,9 +1420,21 @@ export class MemoryCatalogRepository implements ICatalogRepository {
                 id: artistId,
                 name: a.name,
                 normalizedName: a.normalized_name ?? normalizeName(a.name),
+                imageUrl: a.image_url ?? null,
                 createdAt: artNow,
                 updatedAt: artNow,
               });
+            }
+
+            // Artist image (fill-if-empty) for matched artists, mirroring the SQL function
+            if (artistId && a.image_url) {
+              const existingArtist = this.artists.get(artistId);
+              if (existingArtist && !existingArtist.imageUrl) {
+                this.artists.set(artistId, {
+                  ...existingArtist,
+                  imageUrl: a.image_url,
+                });
+              }
             }
 
             // Enrich or attach external IDs if provided (for both new and matched artists)

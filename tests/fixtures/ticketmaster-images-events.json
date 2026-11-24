@@ -1,0 +1,179 @@
+{
+  "events": [
+    {
+      "id": "tm-img-001",
+      "name": "Image Test Headliner",
+      "url": "https://www.ticketmaster.com/image-test-headliner/event/AAA1",
+      "images": [
+        {
+          "ratio": "3_2",
+          "url": "https://s1.ticketm.net/dam/a/111/event_3_2_1024.jpg",
+          "width": 1024,
+          "height": 683,
+          "fallback": false
+        },
+        {
+          "ratio": "16_9",
+          "url": "https://s1.ticketm.net/dam/a/111/event_16_9_1024.jpg",
+          "width": 1024,
+          "height": 576,
+          "fallback": false
+        },
+        {
+          "ratio": "16_9",
+          "url": "https://s1.ticketm.net/dam/a/111/event_16_9_2048.jpg",
+          "width": 2048,
+          "height": 1152,
+          "fallback": false
+        },
+        {
+          "ratio": "16_9",
+          "url": "https://s1.ticketm.net/dam/c/placeholder_16_9_1024.jpg",
+          "width": 1024,
+          "height": 576,
+          "fallback": true
+        },
+        {
+          "ratio": "16_9",
+          "url": "http://insecure.ticketm.net/dam/a/111/event_16_9_640.jpg",
+          "width": 640,
+          "height": 360,
+          "fallback": false
+        }
+      ],
+      "dates": {
+        "start": {
+          "localDate": "2027-02-12",
+          "localTime": "20:00:00",
+          "dateTime": "2027-02-13T03:00:00Z"
+        },
+        "timezone": "America/Denver",
+        "status": { "code": "onsale" }
+      },
+      "_embedded": {
+        "venues": [
+          {
+            "id": "KovZ-IMG-V1",
+            "name": "Image Test Hall",
+            "timezone": "America/Denver",
+            "city": { "name": "Denver" },
+            "state": { "name": "Colorado", "stateCode": "CO" },
+            "country": {
+              "name": "United States Of America",
+              "countryCode": "US"
+            },
+            "images": [
+              {
+                "ratio": "16_9",
+                "url": "https://s1.ticketm.net/dam/v/222/venue_16_9_1024.jpg",
+                "width": 1024,
+                "height": 576,
+                "fallback": false
+              }
+            ]
+          }
+        ],
+        "attractions": [
+          {
+            "id": "K8vZ-IMG-A1",
+            "name": "Image Test Headliner",
+            "images": [
+              {
+                "ratio": "16_9",
+                "url": "https://s1.ticketm.net/dam/a/333/artist_16_9_1024.jpg",
+                "width": 1024,
+                "height": 576,
+                "fallback": false
+              }
+            ]
+          },
+          {
+            "id": "K8vZ-IMG-A2",
+            "name": "Image Test Opener"
+          }
+        ]
+      }
+    },
+    {
+      "id": "tm-img-002",
+      "name": "Placeholder Only Show",
+      "url": "https://www.ticketmaster.com/placeholder-only/event/BBB2",
+      "images": [
+        {
+          "ratio": "16_9",
+          "url": "https://s1.ticketm.net/dam/c/placeholder_16_9_1024.jpg",
+          "width": 1024,
+          "height": 576,
+          "fallback": true
+        },
+        {
+          "ratio": "3_2",
+          "url": "http://insecure.ticketm.net/dam/a/444/event_3_2_1024.jpg",
+          "width": 1024,
+          "height": 683,
+          "fallback": false
+        }
+      ],
+      "dates": {
+        "start": {
+          "localDate": "2027-02-13",
+          "localTime": "19:00:00",
+          "dateTime": "2027-02-14T02:00:00Z"
+        },
+        "timezone": "America/Denver"
+      },
+      "_embedded": {
+        "venues": [
+          {
+            "id": "KovZ-IMG-V2",
+            "name": "Placeholder Room",
+            "timezone": "America/Denver",
+            "city": { "name": "Boulder" },
+            "state": { "name": "Colorado", "stateCode": "CO" },
+            "country": {
+              "name": "United States Of America",
+              "countryCode": "US"
+            },
+            "images": [
+              {
+                "ratio": "16_9",
+                "url": "https://s1.ticketm.net/dam/c/placeholder_venue.jpg",
+                "fallback": true
+              }
+            ]
+          }
+        ],
+        "attractions": [{ "id": "K8vZ-IMG-A3", "name": "Placeholder Band" }]
+      }
+    },
+    {
+      "id": "tm-img-003",
+      "name": "No Images Show",
+      "url": "https://www.ticketmaster.com/no-images/event/CCC3",
+      "dates": {
+        "start": {
+          "localDate": "2027-02-14",
+          "localTime": "19:00:00",
+          "dateTime": "2027-02-15T02:00:00Z"
+        },
+        "timezone": "America/Denver"
+      },
+      "_embedded": {
+        "venues": [
+          {
+            "id": "KovZ-IMG-V3",
+            "name": "No Images Club",
+            "timezone": "America/Denver",
+            "city": { "name": "Denver" },
+            "state": { "name": "Colorado", "stateCode": "CO" },
+            "country": {
+              "name": "United States Of America",
+              "countryCode": "US"
+            }
+          }
+        ],
+        "attractions": [{ "id": "K8vZ-IMG-A4", "name": "No Images Band" }]
+      }
+    }
+  ]
+}

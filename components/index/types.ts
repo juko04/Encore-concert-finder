@@ -36,7 +36,6 @@ export interface IndexPersonalScore {
     artist?: IndexFactorDetail;
     distance?: IndexFactorDetail;
     price?: IndexFactorDetail;
-    timing?: IndexFactorDetail;
   };
 }
 
@@ -107,7 +106,6 @@ export interface IndexEventItem {
     artist: { score: number; weight?: number; explanation: string };
     distance: { score: number; weight?: number; explanation: string };
     price: { score: number; weight?: number; explanation: string };
-    timing: { score: number; weight?: number; explanation: string };
   };
 }
 
@@ -253,10 +251,6 @@ export function toIndexEventItem(
           score: input.factors.price.score,
           explanation: input.factors.price.explanation,
         },
-        timing: {
-          score: input.factors.timing.score,
-          explanation: input.factors.timing.explanation,
-        },
       },
     };
 
@@ -296,7 +290,7 @@ export function toIndexEventItem(
       subgenres: Array.isArray(canonicalAny.subgenres)
         ? (canonicalAny.subgenres as string[])
         : undefined,
-      ageRestriction: (canonicalAny.ageRestriction as string) || 'All Ages',
+      ageRestriction: (canonicalAny.ageRestriction as string) || undefined,
       imageUrl:
         (canonicalAny.imageUrl as string) ||
         (headliner as { imageUrl?: string | null })?.imageUrl ||
@@ -349,11 +343,6 @@ export function toIndexEventItem(
           score: input.factors.price.score,
           weight: input.factors.price.weight,
           explanation: input.factors.price.explanation,
-        },
-        timing: {
-          score: input.factors.timing.score,
-          weight: input.factors.timing.weight,
-          explanation: input.factors.timing.explanation,
         },
       },
     };
@@ -428,7 +417,7 @@ export function toIndexEventItem(
     subgenres: Array.isArray(canonicalAny.subgenres)
       ? (canonicalAny.subgenres as string[])
       : undefined,
-    ageRestriction: (canonicalAny.ageRestriction as string) || 'All Ages',
+    ageRestriction: (canonicalAny.ageRestriction as string) || undefined,
     imageUrl:
       (canonicalAny.imageUrl as string) ||
       (headliner as { imageUrl?: string | null })?.imageUrl ||

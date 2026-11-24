@@ -40,7 +40,7 @@ export function SpotifyConnectionCard({
   return (
     <div
       data-testid="spotify-connection-card"
-      className="overflow-hidden rounded-2xl border border-zinc-800 bg-gradient-to-b from-zinc-900/80 to-zinc-950 p-6 backdrop-blur"
+      className="overflow-hidden rounded-2xl border border-zinc-200 bg-gradient-to-b from-white to-zinc-50 p-6 backdrop-blur"
     >
       <div className="flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between">
         <div className="flex items-start gap-4">
@@ -58,48 +58,48 @@ export function SpotifyConnectionCard({
 
           <div>
             <div className="flex flex-wrap items-center gap-2">
-              <h2 className="text-base font-bold text-white">
+              <h2 className="text-base font-bold text-zinc-900">
                 Spotify Music Taste Explorer
               </h2>
               {connected ? (
                 <span
                   data-testid="spotify-connected-badge"
-                  className="rounded-full border border-emerald-800/40 bg-emerald-950/60 px-2.5 py-0.5 text-[11px] font-semibold text-emerald-400"
+                  className="rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-0.5 text-[11px] font-semibold text-emerald-700"
                 >
                   ● Connected
                 </span>
               ) : status === 'expired' ? (
                 <span
                   data-testid="spotify-expired-badge"
-                  className="rounded-full border border-amber-800/40 bg-amber-950/60 px-2.5 py-0.5 text-[11px] font-semibold text-amber-400"
+                  className="rounded-full border border-amber-200 bg-amber-50 px-2.5 py-0.5 text-[11px] font-semibold text-amber-700"
                 >
                   ⚠ Reauthorization Required
                 </span>
               ) : status === 'revoked' ? (
                 <span
                   data-testid="spotify-revoked-badge"
-                  className="rounded-full border border-red-800/40 bg-red-950/60 px-2.5 py-0.5 text-[11px] font-semibold text-red-400"
+                  className="rounded-full border border-red-200 bg-red-50 px-2.5 py-0.5 text-[11px] font-semibold text-red-600"
                 >
                   ⚠ Connection Revoked
                 </span>
               ) : isSyntheticDemo ? (
                 <span
                   data-testid="spotify-demo-badge"
-                  className="rounded-full border border-indigo-800/40 bg-indigo-950/60 px-2.5 py-0.5 text-[11px] font-semibold text-indigo-400"
+                  className="rounded-full border border-indigo-200 bg-indigo-50 px-2.5 py-0.5 text-[11px] font-semibold text-indigo-600"
                 >
                   ✦ Preview Mode
                 </span>
               ) : (
                 <span
                   data-testid="spotify-disconnected-badge"
-                  className="rounded-full border border-zinc-800 bg-zinc-900 px-2.5 py-0.5 text-[11px] font-medium text-zinc-400"
+                  className="rounded-full border border-zinc-200 bg-white px-2.5 py-0.5 text-[11px] font-medium text-zinc-500"
                 >
                   {isConfigured ? 'Optional Integration' : 'Preview / Demo'}
                 </span>
               )}
             </div>
 
-            <p className="mt-1 text-xs text-zinc-400">
+            <p className="mt-1 text-xs text-zinc-500">
               {connected
                 ? 'Your Spotify account is connected. Inspect your top listening history below and add artists to your live concert interests to guarantee priority while catalog matches are enriched.'
                 : status === 'expired'
@@ -131,7 +131,7 @@ export function SpotifyConnectionCard({
                 type="button"
                 onClick={() => setShowConfirmDisconnect(false)}
                 disabled={isDisconnecting}
-                className="rounded-lg border border-zinc-700 bg-transparent px-2.5 py-1.5 text-xs font-medium text-zinc-400 hover:text-zinc-200"
+                className="rounded-lg border border-zinc-200 bg-transparent px-2.5 py-1.5 text-xs font-medium text-zinc-500 hover:text-zinc-900"
               >
                 Cancel
               </button>
@@ -142,7 +142,7 @@ export function SpotifyConnectionCard({
                 <a
                   href="/api/integrations/spotify/connect"
                   data-testid="connect-spotify-btn"
-                  className="inline-flex items-center gap-1.5 rounded-lg bg-[#1DB954] px-3.5 py-2 text-xs font-bold text-black shadow-sm transition hover:bg-[#1ed760] focus:outline-none focus:ring-2 focus:ring-[#1DB954] focus:ring-offset-2 focus:ring-offset-zinc-950"
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-[#1DB954] px-3.5 py-2 text-xs font-bold text-black shadow-sm transition hover:bg-[#1ed760] focus:outline-none focus:ring-2 focus:ring-[#1DB954] focus:ring-offset-2 focus:ring-offset-white"
                 >
                   Reconnect Spotify
                 </a>
@@ -153,13 +153,13 @@ export function SpotifyConnectionCard({
                   data-testid="sync-spotify-btn"
                   onClick={onSync}
                   disabled={isSyncing || isDisconnecting}
-                  className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-1.5 text-xs font-medium text-zinc-300 transition-colors hover:border-zinc-500 hover:text-white disabled:opacity-50"
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-xs font-medium text-zinc-700 transition-colors hover:border-zinc-400 hover:text-zinc-900 disabled:opacity-50"
                 >
                   {isSyncing ? (
                     <>
                       <span
                         data-testid="sync-spinner"
-                        className="h-3 w-3 animate-spin rounded-full border border-zinc-500 border-t-zinc-200"
+                        className="h-3 w-3 animate-spin rounded-full border border-zinc-400 border-t-zinc-100"
                       />
                       Syncing…
                     </>
@@ -172,7 +172,7 @@ export function SpotifyConnectionCard({
                 type="button"
                 data-testid="disconnect-spotify-btn"
                 onClick={() => setShowConfirmDisconnect(true)}
-                className="rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-1.5 text-xs font-medium text-zinc-300 transition-colors hover:border-red-900/60 hover:bg-red-950/30 hover:text-red-300"
+                className="rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-xs font-medium text-zinc-700 transition-colors hover:border-red-300 hover:bg-red-50 hover:text-red-700"
               >
                 Disconnect
               </button>
@@ -183,8 +183,8 @@ export function SpotifyConnectionCard({
                   onClick={onToggleDemoMode}
                   className={`rounded-lg border px-3 py-2 text-xs font-semibold transition-colors ${
                     isSyntheticDemo
-                      ? 'border-indigo-600 bg-indigo-950/50 text-indigo-300'
-                      : 'border-zinc-800 bg-zinc-900 text-zinc-300 hover:border-zinc-700 hover:text-white'
+                      ? 'border-indigo-600 bg-indigo-50 text-indigo-700'
+                      : 'border-zinc-200 bg-white text-zinc-700 hover:border-zinc-300 hover:text-zinc-900'
                   }`}
                 >
                   {isSyntheticDemo ? 'Exit Preview' : 'Interactive Preview'}
@@ -196,7 +196,7 @@ export function SpotifyConnectionCard({
               <a
                 href="/api/integrations/spotify/connect"
                 data-testid="connect-spotify-btn"
-                className="inline-flex items-center gap-1.5 rounded-lg bg-[#1DB954] px-3.5 py-2 text-xs font-bold text-black shadow-sm transition hover:bg-[#1ed760] focus:outline-none focus:ring-2 focus:ring-[#1DB954] focus:ring-offset-2 focus:ring-offset-zinc-950"
+                className="inline-flex items-center gap-1.5 rounded-lg bg-[#1DB954] px-3.5 py-2 text-xs font-bold text-black shadow-sm transition hover:bg-[#1ed760] focus:outline-none focus:ring-2 focus:ring-[#1DB954] focus:ring-offset-2 focus:ring-offset-white"
               >
                 Connect Spotify
               </a>
@@ -206,8 +206,8 @@ export function SpotifyConnectionCard({
                 onClick={onToggleDemoMode}
                 className={`rounded-lg border px-3 py-2 text-xs font-semibold transition-colors ${
                   isSyntheticDemo
-                    ? 'border-indigo-600 bg-indigo-950/50 text-indigo-300'
-                    : 'border-zinc-800 bg-zinc-900 text-zinc-300 hover:border-zinc-700 hover:text-white'
+                    ? 'border-indigo-600 bg-indigo-50 text-indigo-700'
+                    : 'border-zinc-200 bg-white text-zinc-700 hover:border-zinc-300 hover:text-zinc-900'
                 }`}
               >
                 {isSyntheticDemo ? 'Exit Preview' : 'Interactive Preview'}
@@ -219,12 +219,12 @@ export function SpotifyConnectionCard({
 
       {/* Stored Account Details */}
       {hasStoredConnection && (
-        <div className="mt-4 flex flex-wrap items-center gap-4 rounded-xl border border-zinc-800/80 bg-zinc-950/50 px-4 py-3 text-xs text-zinc-400">
+        <div className="mt-4 flex flex-wrap items-center gap-4 rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-3 text-xs text-zinc-500">
           <div>
             <span className="text-zinc-500">Spotify Account: </span>
             <span
               data-testid="spotify-account-id-label"
-              className="font-mono font-medium text-zinc-200"
+              className="font-mono font-medium text-zinc-800"
             >
               {spotifyAccountId || 'Connected Account'}
             </span>
@@ -232,7 +232,7 @@ export function SpotifyConnectionCard({
           {lastSyncedAt && (
             <div>
               <span className="text-zinc-500">Last Synced: </span>
-              <span className="text-zinc-300">
+              <span className="text-zinc-700">
                 {new Date(lastSyncedAt).toLocaleDateString(undefined, {
                   month: 'short',
                   day: 'numeric',
@@ -243,7 +243,7 @@ export function SpotifyConnectionCard({
             </div>
           )}
           {status === 'expired' && (
-            <span className="text-[11px] font-medium text-amber-400">
+            <span className="text-[11px] font-medium text-amber-700">
               (Authorization expired — disconnect to remove stored credentials)
             </span>
           )}
@@ -252,7 +252,7 @@ export function SpotifyConnectionCard({
               type="button"
               data-testid="switch-to-preview-btn"
               onClick={onToggleDemoMode}
-              className="text-[11px] text-zinc-400 underline-offset-2 hover:text-indigo-400 hover:underline"
+              className="text-[11px] text-zinc-500 underline-offset-2 hover:text-indigo-700 hover:underline"
             >
               {isSyntheticDemo ? 'Show Live Taste' : 'View Synthetic Preview'}
             </button>
@@ -262,20 +262,20 @@ export function SpotifyConnectionCard({
 
       {/* Disconnected / Policy Disclosures */}
       {!connected && (
-        <div className="mt-4 grid grid-cols-1 gap-3 rounded-xl border border-zinc-800/60 bg-zinc-950/40 p-3.5 text-xs text-zinc-400 sm:grid-cols-2">
+        <div className="mt-4 grid grid-cols-1 gap-3 rounded-xl border border-zinc-200 bg-zinc-50 p-3.5 text-xs text-zinc-500 sm:grid-cols-2">
           <div className="flex items-start gap-2">
-            <span className="text-emerald-400">✓</span>
+            <span className="text-emerald-700">✓</span>
             <span>
-              <strong className="text-zinc-300">
+              <strong className="text-zinc-700">
                 Authoritative Manual Choice:
               </strong>{' '}
               Spotify data never overrides your manual concert preferences.
             </span>
           </div>
           <div className="flex items-start gap-2">
-            <span className="text-emerald-400">✓</span>
+            <span className="text-emerald-700">✓</span>
             <span>
-              <strong className="text-zinc-300">Minimal Permissions:</strong>{' '}
+              <strong className="text-zinc-700">Minimal Permissions:</strong>{' '}
               Requests only top-artist reading (`user-top-read`). Zero listening
               telemetry stored without your confirmation.
             </span>

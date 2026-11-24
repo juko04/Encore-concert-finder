@@ -27,6 +27,7 @@ interface UserArtistPreferenceRow {
     id: string;
     name: string;
     image_url: string | null;
+    genres?: string[] | null;
     artist_external_ids?: Array<{
       provider: string;
       external_id: string;
@@ -56,6 +57,11 @@ function mapRowToDomain(row: UserArtistPreferenceRow): UserArtistPreference {
           id: row.artists.id,
           name: row.artists.name,
           imageUrl: row.artists.image_url,
+          genres: Array.isArray(row.artists.genres)
+            ? row.artists.genres.filter(
+                (g): g is string => typeof g === 'string',
+              )
+            : [],
           spotifyArtistId: canonicalSpotifyExtId ?? effectiveSpotifyArtistId,
         }
       : null,
@@ -64,7 +70,7 @@ function mapRowToDomain(row: UserArtistPreferenceRow): UserArtistPreference {
 }
 
 const PREFERENCE_SELECT_QUERY =
-  '*, artists(id, name, image_url, artist_external_ids(provider, external_id))';
+  '*, artists(*, artist_external_ids(provider, external_id))';
 
 export class SupabaseUserPreferenceRepository implements IUserPreferenceRepository {
   private client: SupabaseClient;

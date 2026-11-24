@@ -181,7 +181,7 @@ describe('PostgreSQL Integration: John Summit Synthetic Fixture End-to-End Recom
     }
   });
 
-  it('Step 1: evaluates unmarked baseline concert fixture at Artist Score = 40, Composite = 45.0 in exploratory pool', async () => {
+  it('Step 1: evaluates unmarked baseline concert fixture at Artist Score = 40, Composite = 44.5 in exploratory pool', async () => {
     if (!adminClient) return;
 
     // Simulate baseline state where user has no active Spotify connection or signals
@@ -219,11 +219,10 @@ describe('PostgreSQL Integration: John Summit Synthetic Fixture End-to-End Recom
     expect(baselineEvent!.factors.artist.isAvailable).toBe(false);
     expect(baselineEvent!.factors.distance.score).toBe(50);
     expect(baselineEvent!.factors.price.score).toBe(50);
-    expect(baselineEvent!.factors.timing.score).toBe(50);
 
-    // Under balanced weights (50% artist, 20% dist, 20% price, 10% timing):
-    // 40 * 0.5 + 50 * 0.2 + 50 * 0.2 + 50 * 0.1 = 20 + 10 + 10 + 5 = 45.0
-    expect(baselineEvent!.score).toBe(45.0);
+    // Under balanced weights (55% artist, 25% dist, 20% price):
+    // 40 * 0.55 + 50 * 0.25 + 50 * 0.2 = 22 + 12.5 + 10 = 44.5
+    expect(baselineEvent!.score).toBe(44.5);
     expect(baselineEvent!.isExploratory).toBe(true);
     expect(baselineEvent!.isSuppressed).toBe(false);
 
@@ -278,8 +277,8 @@ describe('PostgreSQL Integration: John Summit Synthetic Fixture End-to-End Recom
     expect(boostedEvent!.factors.artist.score).toBe(70);
     expect(boostedEvent!.factors.artist.isAvailable).toBe(true);
 
-    // Under balanced weights: 70 * 0.5 + 50 * 0.2 + 50 * 0.2 + 50 * 0.1 = 35 + 10 + 10 + 5 = 60.0
-    expect(boostedEvent!.score).toBe(60.0);
+    // Under balanced weights: 70 * 0.55 + 50 * 0.25 + 50 * 0.2 = 38.5 + 12.5 + 10 = 61.0
+    expect(boostedEvent!.score).toBe(61.0);
     expect(boostedEvent!.isExploratory).toBe(false);
     expect(boostedEvent!.isSuppressed).toBe(false);
 
@@ -418,8 +417,8 @@ describe('PostgreSQL Integration: John Summit Synthetic Fixture End-to-End Recom
     // Manual favorite takes precedence: artist score = 100
     expect(favoriteEvent!.factors.artist.score).toBe(100);
 
-    // Under balanced weights: 100 * 0.5 + 50 * 0.2 + 50 * 0.2 + 50 * 0.1 = 50 + 10 + 10 + 5 = 75.0
-    expect(favoriteEvent!.score).toBe(75.0);
+    // Under balanced weights: 100 * 0.55 + 50 * 0.25 + 50 * 0.2 = 55 + 12.5 + 10 = 77.5
+    expect(favoriteEvent!.score).toBe(77.5);
     expect(favoriteEvent!.isSuppressed).toBe(false);
     expect(favoriteEvent!.isExploratory).toBe(false);
     expect(favoriteEvent!.matchedArtist?.isFavorite).toBe(true);

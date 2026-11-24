@@ -1,0 +1,708 @@
+{
+ "batch": 1,
+ "researchedOn": "2026-11-24",
+ "venues": [
+  {
+   "name": "Red Rocks Amphitheatre",
+   "aliases": [
+    "Red Rocks",
+    "Red Rocks Park and Amphitheatre"
+   ],
+   "city": "Morrison",
+   "region": "CO",
+   "capacity": {
+    "value": 9525,
+    "sourceUrls": [
+     "https://www.artsandvenuesdenver.com/news/detail/red-rocks-tops-year-end-charts-after-record-breaking-2023-attendance",
+     "https://www.axs.com/venues/101164"
+    ]
+   },
+   "seatingFormat": {
+    "value": "mixed",
+    "note": "Open-air bowl with numbered rows (accessible seating references rows 1 to 70). The official visitor page also warns GA ticket holders to arrive early, so some shows are general admission. Format varies by show.",
+    "sourceUrls": [
+     "https://www.redrocksonline.com/?p=7034",
+     "https://www.redrocksonline.com/?p=7074",
+     "https://www.axs.com/venues/101164"
+    ]
+   },
+   "agePolicy": {
+    "text": "No venue-wide age rule found on the official What to Expect page; it only says underage drinkers may be ejected. Age limits are set per show, so check the event listing.",
+    "sourceUrls": [
+     "https://www.redrocksonline.com/?p=7074"
+    ],
+    "evidence": "official"
+   },
+   "doors": {
+    "text": null,
+    "sourceUrls": []
+   },
+   "parking": {
+    "summary": "Event parking is on-site in several hillside lots. Official page says lots open 2 hours before doors, staff direct cars to a space, and some lots mean a hike. Cars left overnight (not moved by 10 a.m.) may be ticketed or towed. Several sources list admission and parking as free; AXS says lots are free and first-come. Community-reported: upper lots can fill an hour or more before showtime, and lower-lot walks of 15 to 30+ minutes uphill are possible. Rideshare drop-off is reported at the Trading Post or Lower South Lot (sources differ), pickup is at the Jurassic Lot near Entrance 2. Limited free post-show shuttles run to the Jurassic Lot, but the venue encourages walking downhill. Seasonal shuttles from Denver Union Station are mentioned by AXS.",
+    "difficulty": "hard",
+    "sourceUrls": [
+     "https://www.redrocksonline.com/plan-your-visit/getting-here/",
+     "https://www.axs.com/venues/101164",
+     "https://www.westword.com/music/red-rocks-parking-map-pricing-tips-and-more-20858777",
+     "https://solwd.net/red-rocks-pro-tips-when-to-go-where-to-park-and-how-to-leave-quickly/"
+    ],
+    "evidence": "official"
+   },
+   "transit": {
+    "summary": "No direct light-rail stop. AXS notes seasonal shuttles from Denver Union Station and select downtown points. The official Getting Here page lists no public transit routes and points to WayToGo carpool matching.",
+    "sourceUrls": [
+     "https://www.axs.com/venues/101164",
+     "https://www.redrocksonline.com/plan-your-visit/getting-here/"
+    ]
+   },
+   "policies": {
+    "bag": "Everything must fit under your seat (about 18 x 12 in). Single-pocket bags and clear bags up to 13 x 15 x 8 in are allowed; small purses and fanny packs up to 6 x 9 in; multi-pocket bags are not allowed. Bags are inspected at the gate.",
+    "reentry": null,
+    "other": "No glass, cans, alcohol, marijuana, umbrellas, strollers, laptops/tablets, or cameras with removable lenses. Empty reusable water bottles (32 oz or less) and small soft coolers are allowed. Paper signs up to 8.5 x 11 in are allowed. Management has final say.",
+    "sourceUrls": [
+     "https://www.redrocksonline.com/plan-your-visit/permitted-prohibited-items/",
+     "https://www.redrocksonline.com/?p=7074"
+    ]
+   },
+   "accessibility": {
+    "summary": "Rows 1 and 70 are wheelchair accessible and chosen at purchase; Row 1 is for guests who cannot climb even two stairs and needs AXS mobile tickets. A continuous accessible shuttle runs on ticketed event days from Upper South Lot to about 275 ft from Row 1. Accessible parking is at Top Circle and Upper South lots (placard required, registered holder in the vehicle). ASL and assistive listening require a request at least 7 days ahead. Service animals are allowed; emotional support animals are not.",
+    "sourceUrls": [
+     "https://www.redrocksonline.com/?p=7034"
+    ]
+   },
+   "area": {
+    "summary": "Mountain-park setting 6,450 ft above sea level, in the Denver foothills near Morrison. Weather can include strong sun, wind, rain or snow; layers and rain gear advised. Many stairs whichever entrance you use. Community-reported: roads are unlit and busy with walkers after shows, and a 2023 hailstorm injured people at one concert.",
+    "sourceUrls": [
+     "https://www.redrocksonline.com/?p=7074",
+     "https://solwd.net/red-rocks-pro-tips-when-to-go-where-to-park-and-how-to-leave-quickly/",
+     "https://www.westword.com/music/red-rocks-parking-map-pricing-tips-and-more-20858777"
+    ]
+   },
+   "sound": {
+    "summary": "AXS describes the venue as naturally acoustically excellent, but this is venue marketing. I did not find multiple independent sources on sound quality in this pass.",
+    "sourceUrls": [
+     "https://www.axs.com/venues/101164"
+    ],
+    "evidence": "official"
+   },
+   "whyPeopleLikeIt": [
+    {
+     "text": "Natural sandstone setting framed by monoliths; billed as a distinctive outdoor venue and a long-running historic site (dedicated 1941, National Historic Landmark).",
+     "sourceUrls": [
+      "https://www.axs.com/venues/101164",
+      "https://www.artsandvenuesdenver.com/news/detail/red-rocks-tops-year-end-charts-after-record-breaking-2023-attendance"
+     ],
+     "evidence": "official"
+    },
+    {
+     "text": "Consistently ranked among the most-attended outdoor venues; over 1.65 million tickets sold in the 2023 season.",
+     "sourceUrls": [
+      "https://www.artsandvenuesdenver.com/news/detail/red-rocks-tops-year-end-charts-after-record-breaking-2023-attendance"
+     ],
+     "evidence": "official"
+    },
+    {
+     "text": "Parking and park admission are free, with free in-park shuttles on arrival.",
+     "sourceUrls": [
+      "https://www.redrocksonline.com/plan-your-visit/getting-here/"
+     ],
+     "evidence": "official"
+    }
+   ],
+   "considerBeforeAttending": [
+    {
+     "text": "Lots fill early and may leave a long uphill walk; arrive well before doors and wear comfortable shoes.",
+     "sourceUrls": [
+      "https://www.westword.com/music/red-rocks-parking-map-pricing-tips-and-more-20858777",
+      "https://www.redrocksonline.com/?p=7074"
+     ],
+     "evidence": "community"
+    },
+    {
+     "text": "Weather can change fast, including hail; bring layers and rain gear, and expect altitude effects (6,450 ft).",
+     "sourceUrls": [
+      "https://www.redrocksonline.com/?p=7074",
+      "https://solwd.net/red-rocks-pro-tips-when-to-go-where-to-park-and-how-to-leave-quickly/"
+     ],
+     "evidence": "official"
+    },
+    {
+     "text": "Post-show exit is slow; carpool, schedule rideshare ahead (cell service can be spotty), or walk downhill to the pickup lot.",
+     "sourceUrls": [
+      "https://www.redrocksonline.com/plan-your-visit/getting-here/",
+      "https://solwd.net/red-rocks-pro-tips-when-to-go-where-to-park-and-how-to-leave-quickly/",
+      "https://www.westword.com/music/red-rocks-parking-map-pricing-tips-and-more-20858777"
+     ],
+     "evidence": "community"
+    },
+    {
+     "text": "Strict bag rules (no multi-pocket bags, umbrellas, strollers); bathroom lines at the bottom can run 20 to 25 minutes or more.",
+     "sourceUrls": [
+      "https://www.redrocksonline.com/plan-your-visit/permitted-prohibited-items/",
+      "https://solwd.net/red-rocks-pro-tips-when-to-go-where-to-park-and-how-to-leave-quickly/"
+     ],
+     "evidence": "official"
+    }
+   ],
+   "confidence": "high",
+   "notes": "Re-entry, doors time, and general age policy not stated on pages I opened. Rideshare drop-off location differs between sources (AXS says Lower South Lot; Westword says Trading Post; official page lists Top Circle Lot and Entrance 2 area). Westword and solwd.net articles are media/community-style practical guides; parking fees are listed as free by official and AXS pages, but check each show."
+  },
+  {
+   "name": "Fiddler's Green Amphitheatre",
+   "aliases": [
+    "Fiddler's Green",
+    "Fiddlers Green",
+    "Comfort Dental Amphitheatre (former name)"
+   ],
+   "city": "Greenwood Village",
+   "region": "CO",
+   "capacity": {
+    "value": 17000,
+    "sourceUrls": [
+     "https://fiddlersgreenamp.com/venue-info/"
+    ]
+   },
+   "seatingFormat": {
+    "value": "mixed",
+    "note": "Reserved sections nearer the stage plus a general admission lawn at the back; pit and premium box options also sold. Layout details come from a third-party seat-review site; the official pages I opened only link to premium and accessible seating.",
+    "sourceUrls": [
+     "https://rateyourseats.com/fiddlers-green-amphitheatre/seating/lawn-seats",
+     "https://fiddlersgreenamp.com/venue-info/"
+    ]
+   },
+   "agePolicy": {
+    "text": "Official policies page says shows are all-ages unless noted otherwise, with a ticket needed for guests aged 2 and up; alcohol requires proof of age 21+. Check each event listing.",
+    "sourceUrls": [
+     "https://fiddlersgreenamp.com/policies"
+    ],
+    "evidence": "official"
+   },
+   "doors": {
+    "text": null,
+    "sourceUrls": []
+   },
+   "parking": {
+    "summary": "Official page: prepaid parking can be bought on the event's AXS page (valid for any lot except one marked section of the map); day-of parking takes credit card only at lot entrances; accessible parking is on the north side of Fiddlers Green Circle. Prices are not listed officially. Community/third-party: lots open roughly 90 minutes before show, the I-25 Orchard Road exit is the main bottleneck, and post-show leaving by car can take 45 to 75 minutes; paid premium/gold lots reported around $30 to $50+.",
+    "difficulty": "hard",
+    "sourceUrls": [
+     "https://fiddlersgreenamp.com/directions",
+     "https://www.arenacapacity.com/fiddlers-green-amphitheatre-parking/",
+     "https://kingfm.com/opinion-top-5-reasons-why-fiddlers-green-amphitheater-is-a-horrible-concert-venue/"
+    ],
+    "evidence": "community"
+   },
+   "transit": {
+    "summary": "RTD light rail: Arapahoe at Village Center Station, about a 10-minute walk (exit west away from I-25). RTD bus routes 65, 66, 73, AT, ATX and T also serve the venue.",
+    "sourceUrls": [
+     "https://fiddlersgreenamp.com/directions"
+    ]
+   },
+   "policies": {
+    "bag": "Clear bag policy: one clear bag up to 12 x 6 x 12 in, or a one-gallon clear resealable bag; small clear fanny packs up to 13 x 6 x 3 in; clutches up to 4.5 x 6.5 in. Large backpacks, suitcases and equipment bags are prohibited. Lockers are sold for disallowed items.",
+    "reentry": null,
+    "other": "One factory-sealed water bottle (24 oz or less) per person allowed; no outside food/drink, metal bottles, selfie sticks, or large umbrellas. No tailgating in lots and no overnight parking. Prohibited items can vary by show. Alcohol requires 21+ with valid ID.",
+    "sourceUrls": [
+     "https://fiddlersgreenamp.com/policies"
+    ]
+   },
+   "accessibility": {
+    "summary": "Accessible seating is listed under the venue's Ticket Info pages; accessible parking is on the north side of Fiddlers Green Circle. Wheelchairs, walkers and canes for disabilities are allowed. The (888) 226-0076 number is for website accessibility problems only, not ticketing.",
+    "sourceUrls": [
+     "https://fiddlersgreenamp.com/policies",
+     "https://fiddlersgreenamp.com/directions",
+     "https://fiddlersgreenamp.com/venue-info/"
+    ]
+   },
+   "area": {
+    "summary": "Suburban Denver Tech Center area off I-25 in Greenwood Village. A 2015 opinion piece reports a congested area with limited nearby pre- or post-show food and drink options and a 10:30 p.m. curfew that has cut some sets short (dated; verify).",
+    "sourceUrls": [
+     "https://kingfm.com/opinion-top-5-reasons-why-fiddlers-green-amphitheater-is-a-horrible-concert-venue/"
+    ]
+   },
+   "sound": {
+    "summary": "Sources disagree. A seat-review site says sound is good from all areas, with some lawn views partly blocked by poles and lights behind the reserved sections; a 2015 opinion piece says sound is muffled, worst on the lawn.",
+    "sourceUrls": [
+     "https://rateyourseats.com/fiddlers-green-amphitheatre/seating/lawn-seats",
+     "https://kingfm.com/opinion-top-5-reasons-why-fiddlers-green-amphitheater-is-a-horrible-concert-venue/"
+    ],
+    "evidence": "community"
+   },
+   "whyPeopleLikeIt": [
+    {
+     "text": "Light rail is a short walk away, giving a way to avoid I-25 traffic.",
+     "sourceUrls": [
+      "https://fiddlersgreenamp.com/directions"
+     ],
+     "evidence": "official"
+    },
+    {
+     "text": "Affordable general admission lawn option with first-come choice of spots (lowest listed price $66 on one third-party page; varies).",
+     "sourceUrls": [
+      "https://rateyourseats.com/fiddlers-green-amphitheatre/seating/lawn-seats"
+     ],
+     "evidence": "community"
+    },
+    {
+     "text": "Large capacity venue (about 17,000) hosts major touring acts in an outdoor setting.",
+     "sourceUrls": [
+      "https://fiddlersgreenamp.com/venue-info/"
+     ],
+     "evidence": "official"
+    }
+   ],
+   "considerBeforeAttending": [
+    {
+     "text": "Post-show traffic at the I-25 Orchard exit is heavy; consider light rail or leaving early or late.",
+     "sourceUrls": [
+      "https://www.arenacapacity.com/fiddlers-green-amphitheatre-parking/",
+      "https://kingfm.com/opinion-top-5-reasons-why-fiddlers-green-amphitheater-is-a-horrible-concert-venue/"
+     ],
+     "evidence": "community"
+    },
+    {
+     "text": "Strict clear-bag rules; large backpacks are not allowed (lockers available).",
+     "sourceUrls": [
+      "https://fiddlersgreenamp.com/policies"
+     ],
+     "evidence": "official"
+    },
+    {
+     "text": "Day-of lot payment is credit card only; prepay via AXS where possible.",
+     "sourceUrls": [
+      "https://fiddlersgreenamp.com/directions"
+     ],
+     "evidence": "official"
+    },
+    {
+     "text": "Lawn seats are farthest from the stage and some spots are partly blocked by equipment; arrive early for better placement.",
+     "sourceUrls": [
+      "https://rateyourseats.com/fiddlers-green-amphitheatre/seating/lawn-seats"
+     ],
+     "evidence": "community"
+    }
+   ],
+   "confidence": "medium",
+   "notes": "Capacity conflict: the official venue-info page states 17,000 while a third-party parking guide says about 18,000; I used the official figure. Doors and re-entry were not found. Sound reports conflict, and the negative piece dates from 2015. Parking prices are third-party only."
+  },
+  {
+   "name": "Mission Ballroom",
+   "aliases": [
+    "The Mission Ballroom"
+   ],
+   "city": "Denver",
+   "region": "CO",
+   "capacity": {
+    "value": 3950,
+    "sourceUrls": [
+     "https://www.axs.com/venues/127278"
+    ]
+   },
+   "seatingFormat": {
+    "value": "mixed",
+    "note": "Flexible room: AXS describes movable platforms and bowl-shaped tiered seating, with capacity scaling from 2,200 to 3,950. Layout varies by show (GA floor plus tiers/balconies).",
+    "sourceUrls": [
+     "https://www.axs.com/venues/127278"
+    ]
+   },
+   "agePolicy": {
+    "text": "Varies by show: all-ages, 16+, 18+ or 21+. Under-11s need a parent or guardian for all-ages and 16+ shows and cannot attend 18+ or 21+ shows; ages 11 to 15 can attend all-ages shows alone and 16+ shows only with a ticketed adult.",
+    "sourceUrls": [
+     "https://missionballroom.com/faq"
+    ],
+    "evidence": "official"
+   },
+   "doors": {
+    "text": "No general doors time stated. The box office opens 1 hour before doors on show days.",
+    "sourceUrls": [
+     "https://missionballroom.com/faq"
+    ]
+   },
+   "parking": {
+    "summary": "Paid on-site lots on North Wynkoop, first-come and can be added to a ticket on AXS; unsold spots sold at the lot. AXS says attendants monitor the lot from 2 hours before doors until 1 hour after the show, with an adjacent overflow lot. Other nearby paid lots include North Wynkoop Parking (4120 Wynkoop St) and Modic Parking (4305 Brighton Blvd). No overnight parking. Community-reported: parking is difficult and nearby paid lots fill quickly. Venue recommends rideshare with a post-show pickup lot at 39th and Wynkoop.",
+    "difficulty": "moderate",
+    "sourceUrls": [
+     "https://missionballroom.com/faq",
+     "https://www.axs.com/venues/127278",
+     "https://encore-echos.squarespace.com/venue-guides/guide-to-mission-ballroom-in-denver-co"
+    ],
+    "evidence": "official"
+   },
+   "transit": {
+    "summary": "RTD A Line light rail at 38th and Blake is a few blocks away (AXS says about 15 minutes' walk). Bus route 48 stops at 43rd/Brighton; routes 7 and 12 also serve the area.",
+    "sourceUrls": [
+     "https://missionballroom.com/faq",
+     "https://www.axs.com/venues/127278"
+    ]
+   },
+   "policies": {
+    "bag": "Large backpacks, suitcases, beach bags and equipment bags are prohibited (page also cites a 14 x 14 in limit). Walk-through metal detectors at all events. Coat check ($3 per coat, $5 for extra items or bags) is just inside the entrance.",
+    "reentry": null,
+    "other": "Concessions are cashless; box office takes cash and card. Valid government photo ID required (alternatives listed on the FAQ). No outside food/drink, professional cameras, selfie sticks, glow sticks, blankets, or full face coverings. Stadium seats allowed only if soft-sided with no metal. Camera rules vary by show.",
+    "sourceUrls": [
+     "https://missionballroom.com/faq",
+     "https://missionballroom.com/policies"
+    ]
+   },
+   "accessibility": {
+    "summary": "Accessible seating is sold on axs.com and at the box office; tell security or event staff for seating help. Service animals are allowed (pets are not). (888) 226-0076 is for website accessibility issues, not ticketing.",
+    "sourceUrls": [
+     "https://missionballroom.com/faq"
+    ]
+   },
+   "area": {
+    "summary": "Located at 4242 Wynkoop St in the RiNo Arts District, a neighborhood with street art, breweries and restaurants. A 2019 review mentions an occasional smell from a nearby factory in the neighborhood.",
+    "sourceUrls": [
+     "https://www.axs.com/venues/127278",
+     "https://encore-echos.squarespace.com/venue-guides/guide-to-mission-ballroom-in-denver-co",
+     "https://www.westword.com/music/mission-ballroom-proved-its-greatness-at-grand-opening-lumineers-concert-11442045"
+    ]
+   },
+   "sound": {
+    "summary": "A launch-night Westword review found audio clear throughout the room, and plenty of space to move and re-position on the floor. A third-party guide also calls the system state of the art and says balconies give good views. AXS markets the room's sound as world-class.",
+    "sourceUrls": [
+     "https://www.westword.com/music/mission-ballroom-proved-its-greatness-at-grand-opening-lumineers-concert-11442045",
+     "https://encore-echos.squarespace.com/venue-guides/guide-to-mission-ballroom-in-denver-co"
+    ],
+    "evidence": "community"
+   },
+   "whyPeopleLikeIt": [
+    {
+     "text": "Purpose-built room (opened 2019) with flexible staging and tiered sightlines.",
+     "sourceUrls": [
+      "https://www.axs.com/venues/127278"
+     ],
+     "evidence": "official"
+    },
+    {
+     "text": "Reviewers praised clear sound and room to move, even at a sold-out show.",
+     "sourceUrls": [
+      "https://www.westword.com/music/mission-ballroom-proved-its-greatness-at-grand-opening-lumineers-concert-11442045"
+     ],
+     "evidence": "community"
+    },
+    {
+     "text": "Free earplugs and water refill stations reported at launch; RiNo restaurants and breweries nearby for pre-show.",
+     "sourceUrls": [
+      "https://www.westword.com/music/mission-ballroom-proved-its-greatness-at-grand-opening-lumineers-concert-11442045",
+      "https://encore-echos.squarespace.com/venue-guides/guide-to-mission-ballroom-in-denver-co"
+     ],
+     "evidence": "community"
+    }
+   ],
+   "considerBeforeAttending": [
+    {
+     "text": "Parking is limited and paid; prebuy via AXS or use rideshare/A Line.",
+     "sourceUrls": [
+      "https://missionballroom.com/faq",
+      "https://encore-echos.squarespace.com/venue-guides/guide-to-mission-ballroom-in-denver-co"
+     ],
+     "evidence": "official"
+    },
+    {
+     "text": "Cashless concessions and metal-detector entry; allow extra time and leave large bags at home.",
+     "sourceUrls": [
+      "https://missionballroom.com/faq",
+      "https://missionballroom.com/policies"
+     ],
+     "evidence": "official"
+    },
+    {
+     "text": "Age limits differ per show (all-ages to 21+); check before buying for minors.",
+     "sourceUrls": [
+      "https://missionballroom.com/faq"
+     ],
+     "evidence": "official"
+    },
+    {
+     "text": "Layout and capacity change per show, so check the seating chart for your event.",
+     "sourceUrls": [
+      "https://www.axs.com/venues/127278",
+      "https://encore-echos.squarespace.com/venue-guides/guide-to-mission-ballroom-in-denver-co"
+     ],
+     "evidence": "official"
+    }
+   ],
+   "confidence": "medium",
+   "notes": "Capacity: AXS gives flexible 2,200 to 3,950; a third-party guide says 3,950; I record the max. Re-entry not stated. The sound review is from the 2019 opening night. Reddit thread could not be read (content not retrievable). Bag size limit appears on the policies page (14 x 14 in); the FAQ mentions coat check for bags."
+  },
+  {
+   "name": "Fillmore Auditorium",
+   "aliases": [
+    "The Fillmore Denver",
+    "Fillmore Denver"
+   ],
+   "city": "Denver",
+   "region": "CO",
+   "capacity": {
+    "value": 3900,
+    "sourceUrls": [
+     "https://blog.ticketmaster.com/venue-faq-fillmore-auditorium-denver-co"
+    ]
+   },
+   "seatingFormat": {
+    "value": "mixed",
+    "note": "Mostly general admission standing on a large dance floor; some shows add box seats and VIP seating. An elevator serves upstairs VIP areas.",
+    "sourceUrls": [
+     "https://blog.ticketmaster.com/venue-faq-fillmore-auditorium-denver-co",
+     "https://www.fillmoredenver.com/visit"
+    ]
+   },
+   "agePolicy": {
+    "text": "Varies by show. At 16+ shows every guest must be at least 16 and show valid government ID, with no admission for younger guests even with an adult. All-ages shows need no ID but every guest needs a ticket.",
+    "sourceUrls": [
+     "https://www.fillmoredenver.com/visit",
+     "https://www.axs.com/venues/101490"
+    ],
+    "evidence": "official"
+   },
+   "doors": {
+    "text": "Doors generally open one hour before the show start time (the time on the ticket is the door time). The box office opens 3 hours before doors on show dates.",
+    "sourceUrls": [
+     "https://www.fillmoredenver.com/visit"
+    ]
+   },
+   "parking": {
+    "summary": "No large venue-owned garage. Fillmore lists a VIP lot across the street (about $40, gates typically around 4 p.m.), unaffiliated private lots on Colfax, N. Ogden and Corona streets, and street/metered parking (not guaranteed). A cheaper school-playground lot farther away starts around $22. Overnight parking is not allowed. One source recommends arriving at least 40 minutes before the show. Prices are from an older third-party page, so verify.",
+    "difficulty": "moderate",
+    "sourceUrls": [
+     "https://www.fillmoreauditorium.org/fillmore-auditorium-parking/",
+     "https://www.fillmoredenver.com/visit",
+     "https://blog.ticketmaster.com/venue-faq-fillmore-auditorium-denver-co"
+    ],
+    "evidence": "community"
+   },
+   "transit": {
+    "summary": "RTD bus routes 15 and 16 along East Colfax Avenue are close (the #15 stops across the street). A Colfax light-rail stop connects to the #15 line. Rideshare drop-off and pickup are at Colfax and Clarkson.",
+    "sourceUrls": [
+     "https://www.fillmoreauditorium.org/fillmore-auditorium-parking/",
+     "https://www.axs.com/venues/101490",
+     "https://www.fillmoredenver.com/visit"
+    ]
+   },
+   "policies": {
+    "bag": "Large bags and large backpacks are not allowed, nor are hydration bladders. Coat check is offered fall through spring ($5 per coat, $10 per bag, credit card only).",
+    "reentry": "Official page says re-entry is not permitted.",
+    "other": "No outside food or drink, including sealed water bottles. No camping or overnight parking. AXS also lists professional cameras, tablets/computers, selfie sticks, glow sticks and oversized signs as prohibited.",
+    "sourceUrls": [
+     "https://www.fillmoredenver.com/visit",
+     "https://www.axs.com/venues/101490"
+    ]
+   },
+   "accessibility": {
+    "summary": "Elevator to downstairs restrooms and upstairs VIP areas; stairs may limit access to areas not marked wheelchair accessible. Free sign-language interpreters with at least 2 weeks' notice. Contact the box office at 303.837.0360 (option 3).",
+    "sourceUrls": [
+     "https://www.fillmoredenver.com/visit"
+    ]
+   },
+   "area": {
+    "summary": "In Capitol Hill, at 1510 Clarkson St, just off East Colfax Avenue. Historic building opened in 1907 as a roller-skating rink. Late arrivals may be asked to wait in the lobby for certain shows (per a parking guide).",
+    "sourceUrls": [
+     "https://www.axs.com/venues/101490",
+     "https://www.fillmoreauditorium.org/fillmore-auditorium-parking/"
+    ]
+   },
+   "sound": {
+    "summary": null,
+    "sourceUrls": [],
+    "evidence": "community"
+   },
+   "whyPeopleLikeIt": [
+    {
+     "text": "Historic room with a big dance floor and chandeliers, hosting a wide range of genres.",
+     "sourceUrls": [
+      "https://www.axs.com/venues/101490"
+     ],
+     "evidence": "official"
+    },
+    {
+     "text": "Large GA floor in a roughly 3,900-capacity room, described as Colorado's biggest indoor GA venue.",
+     "sourceUrls": [
+      "https://blog.ticketmaster.com/venue-faq-fillmore-auditorium-denver-co"
+     ],
+     "evidence": "official"
+    },
+    {
+     "text": "Multiple bus routes and rideshare drop near the front gates.",
+     "sourceUrls": [
+      "https://www.fillmoredenver.com/visit",
+      "https://www.axs.com/venues/101490"
+     ],
+     "evidence": "official"
+    }
+   ],
+   "considerBeforeAttending": [
+    {
+     "text": "No re-entry: if you step out you cannot return.",
+     "sourceUrls": [
+      "https://www.fillmoredenver.com/visit"
+     ],
+     "evidence": "official"
+    },
+    {
+     "text": "Even sealed water bottles are banned; large bags are not allowed; coat check is card-only.",
+     "sourceUrls": [
+      "https://www.fillmoredenver.com/visit"
+     ],
+     "evidence": "official"
+    },
+    {
+     "text": "Parking is mostly private paid lots or street spots that aren't guaranteed; arrive early.",
+     "sourceUrls": [
+      "https://www.fillmoreauditorium.org/fillmore-auditorium-parking/"
+     ],
+     "evidence": "community"
+    },
+    {
+     "text": "Age rules vary by show; 16+ shows need ID.",
+     "sourceUrls": [
+      "https://www.fillmoredenver.com/visit",
+      "https://www.axs.com/venues/101490"
+     ],
+     "evidence": "official"
+    }
+   ],
+   "confidence": "medium",
+   "notes": "Capacity 3,900 comes from a Ticketmaster venue-FAQ blog (older page; includes dated 2020 COVID text). Sound/sightlines: no reliable source obtained, left null. fillmoreauditorium.org is a third-party parking/info site, not the operator, so its prices are community-level. The AXS page says 'some shows are 16+' while Live Nation page describes 16+ and all-ages; no conflict found."
+  },
+  {
+   "name": "Ogden Theatre",
+   "aliases": [
+    "The Ogden",
+    "Ogden Theater"
+   ],
+   "city": "Denver",
+   "region": "CO",
+   "capacity": {
+    "value": 1597,
+    "sourceUrls": [
+     "https://www.arenacapacity.com/ogden-theatre-bag-policy/"
+    ]
+   },
+   "seatingFormat": {
+    "value": "mixed",
+    "note": "General admission standing floor, with a very limited number of first-come balcony seats. The venue describes a multi-level layout.",
+    "sourceUrls": [
+     "https://ogdentheatre.com/faq-policies",
+     "https://www.axs.com/venues/101141"
+    ]
+   },
+   "agePolicy": {
+    "text": "Shows are 16+ unless noted otherwise. Ages 0 to 10 are allowed only at all-ages and 16+ shows with a parent or guardian; ages 11 to 15 may attend all-ages shows and 16+ shows with a ticketed adult; 18+ and 21+ shows are restricted accordingly.",
+    "sourceUrls": [
+     "https://ogdentheatre.com/faq-policies"
+    ],
+    "evidence": "official"
+   },
+   "doors": {
+    "text": "The official FAQ gives no doors time; the box office opens 1 hour before doors. A third-party guide says doors typically open 60 to 90 minutes before showtime.",
+    "sourceUrls": [
+     "https://ogdentheatre.com/faq-policies",
+     "https://www.arenacapacity.com/ogden-theatre-bag-policy/"
+    ]
+   },
+   "parking": {
+    "summary": "A Preferred Parking Lot behind the theatre is staffed from 1 hour before doors until 30 minutes after the show; first-come and can be added to a ticket online, with unsold spots sold on site. Street parking is available on Colfax and parallel streets; nearby pay lots are not affiliated with the Ogden. Third-party guide says rideshare drop-off is on East Colfax.",
+    "difficulty": "moderate",
+    "sourceUrls": [
+     "https://ogdentheatre.com/faq-policies",
+     "https://www.axs.com/venues/101141",
+     "https://www.arenacapacity.com/ogden-theatre-bag-policy/"
+    ],
+    "evidence": "official"
+   },
+   "transit": {
+    "summary": "AXS lists RTD bus routes 12, 15 and 15L with stops very close to the theatre.",
+    "sourceUrls": [
+     "https://www.axs.com/venues/101141"
+    ]
+   },
+   "policies": {
+    "bag": "Large backpacks, suitcases, beach bags and equipment bags are prohibited. A third-party guide reports no bag check is offered and clutches of about 4.5 x 6.5 in are safest.",
+    "reentry": null,
+    "other": "Walk-through metal detectors at all events. Concessions are cashless; box office takes cash and card. No outside food/drink or weapons. Valid government photo ID required (alternatives listed).",
+    "sourceUrls": [
+     "https://ogdentheatre.com/faq-policies",
+     "https://www.arenacapacity.com/ogden-theatre-bag-policy/"
+    ]
+   },
+   "accessibility": {
+    "summary": "No accessible-seating ticket needed: tell event security on arrival and they will bring a chair and escort you to the ADA section. Service animals allowed; pets are not. (888) 226-0076 is for website accessibility issues, not ticketing.",
+    "sourceUrls": [
+     "https://ogdentheatre.com/faq-policies"
+    ]
+   },
+   "area": {
+    "summary": "At 935 E. Colfax Ave in Capitol Hill. Historic theatre opened in 1918 as a vaudeville house, listed on the National Register of Historic Places.",
+    "sourceUrls": [
+     "https://www.axs.com/venues/101141"
+    ]
+   },
+   "sound": {
+    "summary": "A third-party guide calls the acoustics incredible, but I found no multiple consistent sources or technical detail. Westword mentions a wraparound balcony and a new sound system from a past upgrade.",
+    "sourceUrls": [
+     "https://www.arenacapacity.com/ogden-theatre-bag-policy/",
+     "https://www.westword.com/location/ogden-theatre-5162711/"
+    ],
+    "evidence": "community"
+   },
+   "whyPeopleLikeIt": [
+    {
+     "text": "Intimate, multi-level historic theatre with preserved character.",
+     "sourceUrls": [
+      "https://www.axs.com/venues/101141"
+     ],
+     "evidence": "official"
+    },
+    {
+     "text": "Smaller room (about 1,600) with a standing GA floor, so you can get close.",
+     "sourceUrls": [
+      "https://www.arenacapacity.com/ogden-theatre-bag-policy/",
+      "https://ogdentheatre.com/faq-policies"
+     ],
+     "evidence": "community"
+    },
+    {
+     "text": "On-site preferred lot behind the theatre and several nearby bus lines.",
+     "sourceUrls": [
+      "https://ogdentheatre.com/faq-policies",
+      "https://www.axs.com/venues/101141"
+     ],
+     "evidence": "official"
+    }
+   ],
+   "considerBeforeAttending": [
+    {
+     "text": "Balcony seats are very limited and first-come; most of the room is standing.",
+     "sourceUrls": [
+      "https://ogdentheatre.com/faq-policies"
+     ],
+     "evidence": "official"
+    },
+    {
+     "text": "No bag check reported and large bags are banned; travel light.",
+     "sourceUrls": [
+      "https://ogdentheatre.com/faq-policies",
+      "https://www.arenacapacity.com/ogden-theatre-bag-policy/"
+     ],
+     "evidence": "community"
+    },
+    {
+     "text": "Metal-detector screening and cashless concessions; plan extra time.",
+     "sourceUrls": [
+      "https://ogdentheatre.com/faq-policies"
+     ],
+     "evidence": "official"
+    },
+    {
+     "text": "Most shows are 16+, but ages vary by event.",
+     "sourceUrls": [
+      "https://ogdentheatre.com/faq-policies"
+     ],
+     "evidence": "official"
+    }
+   ],
+   "confidence": "medium",
+   "notes": "Capacity 1,597 is from a third-party site only (no official figure found); treat as approximate. Official pages did not state doors time or re-entry. Sound evidence is thin."
+  }
+ ]
+}

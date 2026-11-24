@@ -1,0 +1,372 @@
+import type { CanonicalEventSummary } from '@/lib/domain/catalog';
+import type { ICatalogRepository } from '@/lib/repositories/interfaces';
+import type { EventListFilters } from '@/lib/repositories/interfaces';
+import type { ScoredEvent } from '@/lib/recommendation/types';
+import { getPersonalizedDiscoverData } from '@/lib/recommendation/service';
+import {
+  getDiscoverDateWindows,
+  type DiscoverDateWindows,
+} from '@/lib/discover/dates';
+
+export interface DiscoverRow {
+  id: string;
+  title: string;
+  subtitle?: string;
+  events: Array<CanonicalEventSummary | ScoredEvent>;
+  /** Link to /search that reproduces the row's filter. */
+  seeAllHref: string;
+}
+
+export interface DiscoverChip {
+  label: string;
+  href: string;
+  count?: number;
+}
+
+export interface DiscoverHomeData {
+  totalUpcoming: number;
+  rows: DiscoverRow[];
+  venueChips: DiscoverChip[];
+  genreChips: DiscoverChip[];
+  windows: DiscoverDateWindows;
+}
+
+const ROW_LIMIT = 12;
+const POOL_LIMIT = 100;
+/** Minimum verified-price events before an "Under $30" row is shown. */
+const MIN_VERIFIED_PRICE_ROW = 4;
+const UNDER_PRICE = 30;
+
+type CatalogReader = Pick<ICatalogRepository, 'listEvents' | 'countEvents'> &
+  Partial<Pick<ICatalogRepository, 'getFacets'>>;
+
+async function safe<T>(label: string, fn: () => Promise<T>, fallback: T) {
+  try {
+    return await fn();
+  } catch (err) {
+    console.error(`[DiscoverHome] ${label} failed:`, err);
+    return fallback;
+  }
+}
+
+/** Cancelled shows never belong in discovery rows. */
+function isVisible(e: CanonicalEventSummary | ScoredEvent): boolean {
+  const summary = 'event' in e ? e.event : e;
+  return summary.status !== 'cancelled';
+}
+
+function search(params: Record<string, string | undefined>): string {
+  const qs = new URLSearchParams();
+  for (const [k, v] of Object.entries(params)) {
+    if (v) qs.set(k, v);
+  }
+  const s = qs.toString();
+  return s ? `/search?${s}` : '/search';
+}
+
+function topByCount(
+  values: Array<string | null | undefined>,
+  max: number,
+): Array<{ name: string; count: number }> {
+  const counts = new Map<string, number>();
+  for (const v of values) {
+    const name = v?.trim();
+    if (!name || name === 'Venue TBA') continue;
+    counts.set(name, (counts.get(name) ?? 0) + 1);
+  }
+  return Array.from(counts.entries())
+    .map(([name, count]) => ({ name, count }))
+    .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name))
+    .slice(0, max);
+}
+
+/**
+ * Builds the rows shown on the public Discover home from real catalog data.
+ * Every row is future-only and omitted when it has no events. Nothing here
+ * invents prices, availability, or recency: rows that need data the catalog
+ * summary does not carry (e.g. "just announced") are intentionally absent.
+ */
+export async function getDiscoverHomeData(options: {
+  catalogRepo: CatalogReader;
+  userId?: string | null;
+  now?: Date;
+  /** The visitor's chosen home city/coordinates (from the city picker). */
+  homeLocation?: {
+    city?: string;
+    state?: string;
+    lat: number;
+    lng: number;
+  } | null;
+}): Promise<DiscoverHomeData> {
+  const { catalogRepo, userId, homeLocation } = options;
+  const now = options.now ?? new Date();
+  const nowIso = now.toISOString();
+  const windows = getDiscoverDateWindows(now);
+
+  const base: EventListFilters = {
+    fromDate: windows.today,
+    excludePastShowtimes: true,
+    referenceNowIso: nowIso,
+    sortBy: 'date_asc',
+  };
+
+  const list = (extra: EventListFilters) =>
+    catalogRepo.listEvents({ ...base, limit: ROW_LIMIT, ...extra });
+
+  const nearPromise = homeLocation?.city
+    ? safe(
+        `near ${homeLocation.city}`,
+        () => list({ city: homeLocation.city, limit: ROW_LIMIT * 2 }),
+        [] as CanonicalEventSummary[],
+      )
+    : Promise.resolve([] as CanonicalEventSummary[]);
+
+  const [
+    picked,
+    pool,
+    weekend,
+    nextWeek,
+    free,
+    priced,
+    planAhead,
+    totalUpcoming,
+    facets,
+  ] = await Promise.all([
+    userId
+      ? safe(
+          'personalized',
+          async () => {
+            const data = await getPersonalizedDiscoverData({
+              userId,
+              locationOverride: homeLocation
+                ? { lat: homeLocation.lat, lng: homeLocation.lng }
+                : undefined,
+            });
+            return [...data.recommendations, ...data.exploratory].slice(
+              0,
+              ROW_LIMIT,
+            );
+          },
+          [] as ScoredEvent[],
+        )
+      : Promise.resolve([] as ScoredEvent[]),
+    safe(
+      'pool',
+      () => catalogRepo.listEvents({ ...base, limit: POOL_LIMIT }),
+      [] as CanonicalEventSummary[],
+    ),
+    safe(
+      'weekend',
+      () =>
+        list({
+          fromDate: windows.weekend.startDate,
+          toDate: windows.weekend.endDate,
+        }),
+      [] as CanonicalEventSummary[],
+    ),
+    safe(
+      'next 7 days',
+      () => list({ toDate: windows.nextWeekEnd }),
+      [] as CanonicalEventSummary[],
+    ),
+    safe('free', () => list({ freeOnly: true }), [] as CanonicalEventSummary[]),
+    safe(
+      'under price',
+      () =>
+        list({
+          maxPrice: UNDER_PRICE,
+          includeUnknownPrice: false,
+          sortBy: 'price_asc',
+          limit: 24,
+        }),
+      [] as CanonicalEventSummary[],
+    ),
+    safe(
+      'plan ahead',
+      () =>
+        list({ fromDate: windows.planAheadStart, toDate: windows.horizonEnd }),
+      [] as CanonicalEventSummary[],
+    ),
+    safe(
+      'count',
+      () =>
+        typeof catalogRepo.countEvents === 'function'
+          ? catalogRepo.countEvents({
+              fromDate: windows.today,
+              excludePastShowtimes: true,
+              referenceNowIso: nowIso,
+            })
+          : Promise.resolve(0),
+      0,
+    ),
+    safe(
+      'facets',
+      () =>
+        typeof catalogRepo.getFacets === 'function'
+          ? catalogRepo.getFacets()
+          : Promise.resolve(undefined),
+      undefined,
+    ),
+  ]);
+
+  const rows: DiscoverRow[] = [];
+  const seen = new Set<string>();
+  const idOf = (e: CanonicalEventSummary | ScoredEvent) =>
+    ('event' in e ? e.event : e).id;
+  const take = (
+    events: Array<CanonicalEventSummary | ScoredEvent>,
+    max = ROW_LIMIT,
+  ) => {
+    const out = events.filter(isVisible).slice(0, max);
+    out.forEach((e) => seen.add(idOf(e)));
+    return out;
+  };
+  /** Like take(), but skips shows already featured in an earlier row. */
+  const takeFresh = (events: Array<CanonicalEventSummary | ScoredEvent>) =>
+    take(events.filter((e) => !seen.has(idOf(e))));
+
+  const nearEvents = await nearPromise;
+  const nearRow = take(nearEvents);
+  if (homeLocation?.city && nearRow.length > 0) {
+    rows.push({
+      id: 'near-home',
+      title: `Near ${homeLocation.city}`,
+      subtitle: 'Shows in your city',
+      events: nearRow,
+      seeAllHref: search({ city: homeLocation.city }),
+    });
+  }
+
+  const pickedRow = take(picked);
+  if (pickedRow.length > 0) {
+    rows.push({
+      id: 'picked',
+      title: 'Picked for you',
+      subtitle: 'Based on your artists and preferences',
+      events: pickedRow,
+      seeAllHref: '/search',
+    });
+  }
+
+  const weekendRow = take(weekend);
+  if (weekendRow.length > 0) {
+    rows.push({
+      id: 'weekend',
+      title: 'This weekend',
+      events: weekendRow,
+      seeAllHref: search({
+        startDate: windows.weekend.startDate,
+        endDate: windows.weekend.endDate,
+      }),
+    });
+  }
+
+  const nextWeekRow = take(nextWeek);
+  if (nextWeekRow.length > 0) {
+    rows.push({
+      id: 'next-7-days',
+      title: 'Next 7 days',
+      events: nextWeekRow,
+      seeAllHref: search({
+        startDate: windows.today,
+        endDate: windows.nextWeekEnd,
+      }),
+    });
+  }
+
+  const freeRow = take(free);
+  if (freeRow.length > 0) {
+    rows.push({
+      id: 'free',
+      title: 'Free shows',
+      subtitle: 'Verified free admission',
+      events: freeRow,
+      seeAllHref: search({ freeOnly: 'true' }),
+    });
+  }
+
+  // Only verified, non-free prices count; unknown prices never qualify.
+  const verifiedUnder = priced
+    .filter(isVisible)
+    .filter(
+      (e) =>
+        typeof e.minPrice === 'number' &&
+        e.minPrice > 0 &&
+        e.minPrice <= UNDER_PRICE,
+    );
+  if (verifiedUnder.length >= MIN_VERIFIED_PRICE_ROW) {
+    rows.push({
+      id: 'under-30',
+      title: `Under $${UNDER_PRICE}`,
+      subtitle: 'Shows with a listed ticket price',
+      events: take(verifiedUnder),
+      seeAllHref: search({
+        maxPrice: String(UNDER_PRICE),
+        includeUnknownPrice: 'false',
+        sort: 'price_asc',
+      }),
+    });
+  }
+
+  // City rows are derived from where the catalog actually has shows, not from
+  // a hard-coded region.
+  const topCities = topByCount(
+    pool.map((e) => e.city),
+    2,
+  );
+  const cityRows = await Promise.all(
+    topCities.map(({ name }) =>
+      safe(
+        `city ${name}`,
+        () => list({ city: name, limit: ROW_LIMIT * 4 }),
+        [] as CanonicalEventSummary[],
+      ),
+    ),
+  );
+  topCities.forEach(({ name }, i) => {
+    const cityRow = takeFresh(cityRows[i]);
+    if (cityRow.length > 0) {
+      rows.push({
+        id: `city-${name.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`,
+        title: `In ${name}`,
+        events: cityRow,
+        seeAllHref: search({ city: name }),
+      });
+    }
+  });
+
+  const planAheadRow = takeFresh(planAhead);
+  if (planAheadRow.length > 0) {
+    rows.push({
+      id: 'plan-ahead',
+      title: 'Plan ahead',
+      subtitle: 'Shows more than a month out',
+      events: planAheadRow,
+      seeAllHref: search({
+        startDate: windows.planAheadStart,
+        endDate: windows.horizonEnd,
+      }),
+    });
+  }
+
+  const venueChips: DiscoverChip[] = topByCount(
+    pool.map((e) => e.venueName),
+    10,
+  ).map(({ name, count }) => ({
+    label: name,
+    count,
+    href: search({ venue: name }),
+  }));
+
+  const genreChips: DiscoverChip[] = (facets?.genres ?? [])
+    .slice(0, 8)
+    .map((g) => ({ label: g, href: search({ genre: g }) }));
+
+  return {
+    totalUpcoming,
+    rows,
+    venueChips,
+    genreChips,
+    windows,
+  };
+}

@@ -48,6 +48,21 @@ export function redactSensitiveString(
 }
 
 /**
+ * Ticketmaster Image Schema (Discovery API v2 `images` entries).
+ * `fallback: true` marks a generic Ticketmaster placeholder, not real artwork.
+ */
+export const TicketmasterImageSchema = z.object({
+  url: z.string(),
+  ratio: z.string().optional(),
+  width: z.number().optional(),
+  height: z.number().optional(),
+  fallback: z.boolean().optional(),
+  attribution: z.string().optional(),
+});
+
+export type TicketmasterImage = z.infer<typeof TicketmasterImageSchema>;
+
+/**
  * Ticketmaster Attraction (Artist/Performer) Schema
  */
 export const TicketmasterAttractionSchema = z.object({
@@ -55,6 +70,7 @@ export const TicketmasterAttractionSchema = z.object({
   name: z.string(),
   type: z.string().optional(),
   url: z.string().optional(),
+  images: z.array(TicketmasterImageSchema).optional(),
   externalLinks: z
     .record(
       z.array(
@@ -88,6 +104,7 @@ export const TicketmasterVenueSchema = z.object({
   id: z.string().optional(),
   name: z.string().optional(),
   url: z.string().optional(),
+  images: z.array(TicketmasterImageSchema).optional(),
   postalCode: z.string().optional(),
   timezone: z.string().optional(),
   city: z
@@ -221,6 +238,7 @@ export const TicketmasterEventSchema = z.object({
   locale: z.string().optional(),
   info: z.string().optional(),
   pleaseNote: z.string().optional(),
+  images: z.array(TicketmasterImageSchema).optional(),
   dates: TicketmasterEventDatesSchema,
   priceRanges: z.array(TicketmasterPriceRangeSchema).optional(),
   classifications: z.array(TicketmasterClassificationSchema).optional(),

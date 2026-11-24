@@ -11,6 +11,7 @@ import type {
   ISourceRepository,
 } from '@/lib/repositories/interfaces';
 import { TicketmasterDiscoveryAdapter } from './adapter';
+import { overlayTicketmasterImages } from './parser';
 import { ensureTicketmasterSource } from './source-registry';
 import {
   PipelineDatabaseError,
@@ -364,7 +365,11 @@ export async function runTicketmasterIngestion(
 
       if (existingCand) {
         candidatesReused++;
-        persistedCandidates.push(existingCand);
+        // Stored candidates are immutable: overlay current source images in memory
+        // so re-processing can backfill images onto already-ingested events.
+        persistedCandidates.push(
+          overlayTicketmasterImages(existingCand, candidate),
+        );
       } else {
         const savedCand = await options.candidateRepo.create(
           candidate as EventCandidate & {

@@ -39,6 +39,13 @@ export interface SearchClientProps {
   referenceDate?: string;
   title?: string;
   subtitle?: string;
+  /** Optional filter state hydrated from /search URL params (set by the page). */
+  initialVenue?: string;
+  initialCity?: string;
+  initialGenre?: string;
+  initialStartDate?: string;
+  initialEndDate?: string;
+  initialFreeOnly?: boolean;
   initialFacets?: {
     venues?: Array<{ id: string; name: string; city?: string }>;
     cities?: string[];
@@ -55,6 +62,12 @@ export function SearchClient({
   referenceDate,
   title = 'Discover Live Music',
   subtitle = 'Curated concerts, transparent pricing, and personalized music discovery.',
+  initialVenue,
+  initialCity,
+  initialGenre,
+  initialStartDate,
+  initialEndDate,
+  initialFreeOnly = false,
   initialFacets,
 }: SearchClientProps) {
   const baseRaw = rawInitialEvents ?? rawEvents ?? [];
@@ -131,15 +144,27 @@ export function SearchClient({
 
   // Search & Filter State
   const [query, setQuery] = useState(initialQuery);
-  const [dateFilter, setDateFilter] = useState<string>('all');
-  const [customStartDate, setCustomStartDate] = useState('');
-  const [customEndDate, setCustomEndDate] = useState('');
-  const [pricePreset, setPricePreset] = useState<string>('all');
+  const [dateFilter, setDateFilter] = useState<string>(
+    initialStartDate || initialEndDate ? 'custom' : 'all',
+  );
+  const [customStartDate, setCustomStartDate] = useState(
+    initialStartDate ?? '',
+  );
+  const [customEndDate, setCustomEndDate] = useState(initialEndDate ?? '');
+  const [pricePreset, setPricePreset] = useState<string>(
+    initialFreeOnly ? 'free' : 'all',
+  );
   const [maxPriceBudget, setMaxPriceBudget] = useState<number>(150);
   const [outsideBudgetAllowed, setOutsideBudgetAllowed] = useState(true);
-  const [selectedVenue, setSelectedVenue] = useState<string>('all');
-  const [selectedCity, setSelectedCity] = useState<string>('all');
-  const [selectedGenre, setSelectedGenre] = useState<string>('all');
+  const [selectedVenue, setSelectedVenue] = useState<string>(
+    initialVenue || 'all',
+  );
+  const [selectedCity, setSelectedCity] = useState<string>(
+    initialCity || 'all',
+  );
+  const [selectedGenre, setSelectedGenre] = useState<string>(
+    initialGenre || 'all',
+  );
   const [statusFilter, setStatusFilter] = useState<
     IndexInventoryStatus | 'all'
   >('all');
@@ -150,7 +175,20 @@ export function SearchClient({
   // Catalog-wide facet options with fallback to local events
   const uniqueVenues = useMemo(() => {
     if (catalogFacets.venues.length > 0) {
-      return catalogFacets.venues;
+      // Facets can contain several venue rows that share one display name
+      // (e.g. the same room ingested from two sources). Collapse them into a
+      // single option; when ids differ, drop the id so filtering is by name
+      // and still matches every row.
+      const byName = new Map<string, { id?: string; name: string }>();
+      for (const v of catalogFacets.venues) {
+        const existing = byName.get(v.name);
+        if (!existing) {
+          byName.set(v.name, { id: v.id, name: v.name });
+        } else if (existing.id !== v.id) {
+          existing.id = undefined;
+        }
+      }
+      return Array.from(byName.values());
     }
     const map = new Map<string, { id?: string; name: string }>();
     normalizedEvents.forEach((e) => {
@@ -843,7 +881,7 @@ export function SearchClient({
               >
                 <option value="all">All Venues</option>
                 {uniqueVenues.map((v) => (
-                  <option key={v.name} value={v.name}>
+                  <option key={v.id ?? v.name} value={v.name}>
                     {v.name}
                   </option>
                 ))}

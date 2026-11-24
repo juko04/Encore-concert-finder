@@ -103,7 +103,7 @@ export function ArtistSearchInput({
             if (trimmedQuery) setIsOpen(true);
           }}
           placeholder="Search catalog or type custom artist name..."
-          className="w-full rounded-xl border border-zinc-700 bg-zinc-950/80 px-4 py-3 pl-10 text-sm text-zinc-100 placeholder-zinc-500 shadow-inner backdrop-blur transition-all focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:opacity-50"
+          className="w-full rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-3 pl-10 text-sm text-zinc-900 placeholder-zinc-500 shadow-inner backdrop-blur transition-all focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:opacity-50"
         />
         <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3.5 text-zinc-500">
           <svg
@@ -130,7 +130,7 @@ export function ArtistSearchInput({
               setResults([]);
               setIsOpen(false);
             }}
-            className="absolute inset-y-0 right-0 flex items-center pr-3.5 text-xs text-zinc-400 hover:text-zinc-200"
+            className="absolute inset-y-0 right-0 flex items-center pr-3.5 text-xs text-zinc-500 hover:text-zinc-900"
           >
             Clear
           </button>
@@ -140,17 +140,17 @@ export function ArtistSearchInput({
       {isOpen && trimmedQuery && (
         <div
           data-testid="search-results-dropdown"
-          className="absolute z-50 mt-2 max-h-72 w-full overflow-y-auto rounded-xl border border-zinc-800 bg-zinc-900/95 p-1 shadow-2xl backdrop-blur"
+          className="absolute z-50 mt-2 max-h-72 w-full overflow-y-auto rounded-xl border border-zinc-200 bg-white p-1 shadow-2xl backdrop-blur"
         >
           {isLoading && (
-            <div className="px-4 py-2.5 text-xs text-zinc-400">
+            <div className="px-4 py-2.5 text-xs text-zinc-500">
               Searching catalog...
             </div>
           )}
 
           {results.length > 0 && (
             <div className="space-y-0.5">
-              <div className="px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-zinc-400">
+              <div className="px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
                 In Concert Catalog
               </div>
               {results.map((artist) => (
@@ -165,7 +165,7 @@ export function ArtistSearchInput({
                       imageUrl: artist.imageUrl,
                     })
                   }
-                  className="flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-sm text-zinc-200 transition-colors hover:bg-zinc-800 focus:bg-zinc-800 focus:outline-none"
+                  className="flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-sm text-zinc-800 transition-colors hover:bg-zinc-100 focus:bg-zinc-100 focus:outline-none"
                 >
                   <div className="flex items-center gap-3">
                     {artist.imageUrl ? (
@@ -175,15 +175,15 @@ export function ArtistSearchInput({
                         className="h-7 w-7 rounded-full object-cover"
                       />
                     ) : (
-                      <div className="flex h-7 w-7 items-center justify-center rounded-full bg-indigo-900/50 text-xs font-bold text-indigo-300">
+                      <div className="flex h-7 w-7 items-center justify-center rounded-full bg-indigo-100 text-xs font-bold text-indigo-700">
                         {artist.name.slice(0, 1).toUpperCase()}
                       </div>
                     )}
-                    <span className="font-medium text-white">
+                    <span className="font-medium text-zinc-900">
                       {artist.name}
                     </span>
                   </div>
-                  <span className="rounded border border-indigo-800/40 bg-indigo-950/70 px-1.5 py-0.5 text-[10px] font-semibold text-indigo-300">
+                  <span className="rounded border border-indigo-200 bg-indigo-50 px-1.5 py-0.5 text-[10px] font-semibold text-indigo-700">
                     In Catalog
                   </span>
                 </button>
@@ -192,7 +192,7 @@ export function ArtistSearchInput({
           )}
 
           {/* Option to add custom artist (uncataloged) */}
-          <div className="mt-1 border-t border-zinc-800/80 pt-1">
+          <div className="mt-1 border-t border-zinc-200 pt-1">
             <button
               type="button"
               data-testid="add-custom-artist-btn"
@@ -202,20 +202,20 @@ export function ArtistSearchInput({
                   name: trimmedQuery,
                 })
               }
-              className="flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-sm text-indigo-300 transition-colors hover:bg-indigo-950/40 focus:bg-indigo-950/40 focus:outline-none"
+              className="flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-sm text-indigo-700 transition-colors hover:bg-indigo-50 focus:bg-indigo-50 focus:outline-none"
             >
               <div className="flex items-center gap-2">
                 <span className="text-base leading-none">＋</span>
                 <span>
                   Add &ldquo;
-                  <span className="font-semibold text-white">
+                  <span className="font-semibold text-zinc-900">
                     {trimmedQuery}
                   </span>
                   &rdquo; as uncataloged artist
                 </span>
               </div>
               {!hasExactMatch && (
-                <span className="rounded bg-zinc-800 px-1.5 py-0.5 text-[10px] font-medium text-zinc-400">
+                <span className="rounded bg-zinc-100 px-1.5 py-0.5 text-[10px] font-medium text-zinc-500">
                   Custom
                 </span>
               )}

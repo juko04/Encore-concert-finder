@@ -8,7 +8,7 @@ import type {
 } from '@/lib/domain/event-candidate';
 import type { SourceProvenance } from '@/lib/domain/source';
 import { normalizeUrl } from '@/lib/domain/value-objects';
-import type { TicketmasterEvent } from './types';
+import type { TicketmasterEvent, TicketmasterImage } from './types';
 
 export interface TicketmasterParseContext {
   sourceId: string;
@@ -26,6 +26,66 @@ export interface TicketmasterParseContext {
 function extractSpotifyArtistId(url: string): string | null {
   const match = url.match(/artist\/([a-zA-Z0-9]+)/);
   return match ? match[1] : null;
+}
+
+const PREFERRED_IMAGE_WIDTH = 1024;
+const MIN_PREFERRED_IMAGE_WIDTH = 640;
+const MAX_PREFERRED_IMAGE_WIDTH = 1200;
+
+/**
+ * Picks one real, https image rendition from a Ticketmaster `images` array.
+ *
+ * - Ignores entries without a valid https URL.
+ * - Ignores `fallback: true` entries (generic placeholders, not real artwork);
+ *   when only fallbacks exist the result is null rather than a stand-in.
+ * - Prefers 16:9, then a width within 640-1200px, then the width closest to 1024px.
+ * - Deterministic: ties break on URL.
+ */
+export function selectTicketmasterImage(
+  images: TicketmasterImage[] | null | undefined,
+): string | null {
+  if (!Array.isArray(images)) return null;
+
+  const usable: Array<{ url: string; ratio?: string; width: number }> = [];
+  for (const image of images) {
+    if (!image || image.fallback === true || typeof image.url !== 'string') {
+      continue;
+    }
+    let parsed: URL;
+    try {
+      parsed = new URL(image.url.trim());
+    } catch {
+      continue;
+    }
+    if (parsed.protocol !== 'https:') continue;
+    usable.push({
+      url: parsed.toString(),
+      ratio: image.ratio,
+      width: typeof image.width === 'number' ? image.width : 0,
+    });
+  }
+
+  if (usable.length === 0) return null;
+
+  const rank = (img: { ratio?: string; width: number }): number[] => [
+    img.ratio === '16_9' ? 0 : 1,
+    img.width >= MIN_PREFERRED_IMAGE_WIDTH &&
+    img.width <= MAX_PREFERRED_IMAGE_WIDTH
+      ? 0
+      : 1,
+    Math.abs(img.width - PREFERRED_IMAGE_WIDTH),
+  ];
+
+  usable.sort((a, b) => {
+    const ra = rank(a);
+    const rb = rank(b);
+    for (let i = 0; i < ra.length; i++) {
+      if (ra[i] !== rb[i]) return ra[i] - rb[i];
+    }
+    return a.url.localeCompare(b.url);
+  });
+
+  return usable[0].url;
 }
 
 /**
@@ -80,11 +140,15 @@ export function parseTicketmasterEvent(
         }
       }
 
+      // Image belongs to this attraction only (never matched by name).
+      const artistImageUrl = selectTicketmasterImage(attr.images);
+
       artists.push({
         name: attr.name,
         billingPosition: 'unknown',
         sortOrder: index,
         externalIds,
+        ...(artistImageUrl ? { imageUrl: artistImageUrl } : {}),
       });
     });
   }
@@ -103,6 +167,10 @@ export function parseTicketmasterEvent(
     primaryVenue?.country?.countryCode?.trim() ||
     primaryVenue?.country?.name?.trim() ||
     undefined;
+
+  // 3b. Source-supplied images (null when Ticketmaster provides no real image)
+  const eventImageUrl = selectTicketmasterImage(event.images);
+  const venueImageUrl = selectTicketmasterImage(primaryVenue?.images);
 
   // 4. Temporal & Timezone Handling
   const localStartDate = event.dates.start.localDate;
@@ -309,6 +377,50 @@ export function parseTicketmasterEvent(
       ticketing: event.ticketing,
       priceRanges: event.priceRanges,
       feeStatus,
+      ...(eventImageUrl || venueImageUrl
+        ? {
+            images: {
+              source: 'ticketmaster',
+              eventImageUrl,
+              venueImageUrl,
+            },
+          }
+        : {}),
     },
+  };
+}
+
+/**
+ * Overlays freshly parsed source images onto a previously persisted (immutable)
+ * candidate, in memory only, so already-ingested events can be backfilled with
+ * images on re-processing. Nothing is written back to the stored candidate row.
+ * Artist images are matched only by Ticketmaster attraction id, never by name.
+ */
+export function overlayTicketmasterImages<T extends EventCandidate>(
+  existing: T,
+  parsed: EventCandidate,
+): T {
+  const parsedImages = parsed.rawPayload?.images;
+
+  const tmId = (a: CandidateArtist) =>
+    a.externalIds?.find((e) => e.provider === 'ticketmaster')?.externalId;
+  const imageByAttractionId = new Map<string, string>();
+  for (const a of parsed.artists ?? []) {
+    const id = tmId(a);
+    if (id && a.imageUrl) imageByAttractionId.set(id, a.imageUrl);
+  }
+
+  if (!parsedImages && imageByAttractionId.size === 0) return existing;
+
+  return {
+    ...existing,
+    rawPayload: parsedImages
+      ? { ...(existing.rawPayload ?? {}), images: parsedImages }
+      : existing.rawPayload,
+    artists: existing.artists?.map((a) => {
+      const id = tmId(a);
+      const imageUrl = id ? imageByAttractionId.get(id) : undefined;
+      return imageUrl ? { ...a, imageUrl } : a;
+    }),
   };
 }

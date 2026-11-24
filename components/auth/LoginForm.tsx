@@ -76,11 +76,11 @@ export function LoginForm({
   return (
     <div
       data-testid="login-container"
-      className="w-full max-w-md rounded-2xl border border-zinc-800/80 bg-zinc-900/60 p-8 shadow-2xl backdrop-blur"
+      className="w-full max-w-md rounded-2xl border border-zinc-200 bg-white p-8 shadow-sm"
     >
       {/* Invite-Only Beta Badge */}
       <div className="mb-4 flex items-center justify-between">
-        <span className="inline-flex items-center rounded-full border border-indigo-500/30 bg-indigo-500/10 px-2.5 py-0.5 text-[11px] font-semibold tracking-wide text-indigo-400">
+        <span className="inline-flex items-center rounded-full border border-indigo-200 bg-indigo-50 px-2.5 py-0.5 text-[11px] font-semibold tracking-wide text-indigo-600">
           Invite-Only Beta
         </span>
         {mode === 'forgot_password' && (
@@ -92,17 +92,17 @@ export function LoginForm({
               setError(null);
               setSuccessMessage(null);
             }}
-            className="inline-flex items-center gap-1 text-xs font-medium text-zinc-400 hover:text-zinc-200"
+            className="inline-flex items-center gap-1 text-xs font-medium text-zinc-500 hover:text-zinc-900"
           >
             ← Back to Sign In
           </button>
         )}
       </div>
 
-      <h2 className="text-xl font-bold tracking-tight text-white">
+      <h2 className="text-xl font-bold tracking-tight text-zinc-900">
         {mode === 'signin' ? 'Welcome Back' : 'Reset Your Password'}
       </h2>
-      <p className="mt-1 text-sm text-zinc-400">
+      <p className="mt-1 text-sm text-zinc-500">
         {mode === 'signin'
           ? authMethod === 'magic_link'
             ? 'Enter your invited email address to receive a secure, passwordless login link.'
@@ -112,7 +112,7 @@ export function LoginForm({
 
       {/* Sign-in Method Switcher (Magic Link vs Password) */}
       {mode === 'signin' && (
-        <div className="mt-4 flex items-center justify-between rounded-lg border border-zinc-800 bg-zinc-950 p-1 text-xs font-medium">
+        <div className="mt-4 flex items-center justify-between rounded-lg border border-zinc-200 bg-white p-1 text-xs font-medium">
           <button
             type="button"
             data-testid="method-magic-link"
@@ -123,8 +123,8 @@ export function LoginForm({
             }}
             className={`flex-1 rounded-md py-1.5 text-center transition-colors ${
               authMethod === 'magic_link'
-                ? 'shadow-xs bg-zinc-800 font-semibold text-white'
-                : 'text-zinc-400 hover:text-zinc-200'
+                ? 'shadow-xs bg-zinc-100 font-semibold text-zinc-900'
+                : 'text-zinc-500 hover:text-zinc-900'
             }`}
           >
             Passwordless Link
@@ -139,8 +139,8 @@ export function LoginForm({
             }}
             className={`flex-1 rounded-md py-1.5 text-center transition-colors ${
               authMethod === 'password'
-                ? 'shadow-xs bg-zinc-800 font-semibold text-white'
-                : 'text-zinc-400 hover:text-zinc-200'
+                ? 'shadow-xs bg-zinc-100 font-semibold text-zinc-900'
+                : 'text-zinc-500 hover:text-zinc-900'
             }`}
           >
             Password
@@ -152,7 +152,7 @@ export function LoginForm({
         <div
           data-testid="auth-error-alert"
           role="alert"
-          className="mt-4 rounded-lg border border-red-800/60 bg-red-950/40 p-3 text-sm text-red-200"
+          className="mt-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800"
         >
           {error}
         </div>
@@ -162,7 +162,7 @@ export function LoginForm({
         <div
           data-testid="auth-success-alert"
           role="status"
-          className="mt-4 rounded-lg border border-emerald-800/60 bg-emerald-950/40 p-3 text-sm text-emerald-200"
+          className="mt-4 rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800"
         >
           {successMessage}
         </div>
@@ -172,7 +172,7 @@ export function LoginForm({
         <div>
           <label
             htmlFor="email"
-            className="block text-xs font-medium uppercase tracking-wider text-zinc-400"
+            className="block text-xs font-medium uppercase tracking-wider text-zinc-500"
           >
             Email Address
           </label>
@@ -183,7 +183,7 @@ export function LoginForm({
             autoComplete="email"
             required
             data-testid="email-input"
-            className="mt-1 block w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 placeholder-zinc-500 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+            className="mt-1 block w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-900 placeholder-zinc-500 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
             placeholder="you@example.com"
           />
         </div>
@@ -193,7 +193,7 @@ export function LoginForm({
           <div>
             <label
               htmlFor="password"
-              className="block text-xs font-medium uppercase tracking-wider text-zinc-400"
+              className="block text-xs font-medium uppercase tracking-wider text-zinc-500"
             >
               Password
             </label>
@@ -204,7 +204,7 @@ export function LoginForm({
               autoComplete="current-password"
               required
               data-testid="password-input"
-              className="mt-1 block w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 placeholder-zinc-500 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+              className="mt-1 block w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-900 placeholder-zinc-500 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
               placeholder="••••••••"
             />
           </div>
@@ -220,7 +220,7 @@ export function LoginForm({
                 setError(null);
                 setSuccessMessage(null);
               }}
-              className="text-xs font-medium text-indigo-400 hover:text-indigo-300"
+              className="text-xs font-medium text-indigo-600 hover:text-indigo-800"
             >
               Forgot password?
             </button>
@@ -231,7 +231,7 @@ export function LoginForm({
           type="submit"
           disabled={isPending}
           data-testid="auth-submit-btn"
-          className="mt-6 flex w-full items-center justify-center rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white shadow-lg transition-colors hover:bg-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 focus:ring-offset-zinc-900 disabled:opacity-50"
+          className="mt-6 flex w-full items-center justify-center rounded-lg bg-zinc-900 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-zinc-800 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 focus:ring-offset-white disabled:opacity-50"
         >
           {isPending ? (
             <span className="flex items-center gap-2">

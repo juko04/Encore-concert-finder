@@ -2,7 +2,8 @@
  * Recommendation Scoring Presets & Fixed Priority Weights
  * Users choose one of four intuitive presets rather than configuring
  * raw numerical decimals directly.
- * Invariant: Weights for every preset must sum exactly to 100%.
+ * Invariant: Weights for every preset must sum exactly to 100% (artist + distance + price;
+ * timing was removed - only past-event eligibility remains).
  */
 
 import { VALID_RECOMMENDATION_PRESETS } from '@/lib/domain/profile';
@@ -10,28 +11,24 @@ import type { ScoringPreset, ScoringWeights } from './types';
 
 export const PRESET_WEIGHTS: Record<ScoringPreset, ScoringWeights> = {
   balanced: {
-    artist: 50,
-    distance: 20,
+    artist: 55,
+    distance: 25,
     price: 20,
-    timing: 10,
   },
   artist_first: {
-    artist: 65,
+    artist: 70,
     distance: 15,
-    price: 10,
-    timing: 10,
+    price: 15,
   },
   nearby: {
-    artist: 40,
-    distance: 35,
+    artist: 45,
+    distance: 40,
     price: 15,
-    timing: 10,
   },
   value: {
-    artist: 40,
+    artist: 45,
     distance: 15,
-    price: 35,
-    timing: 10,
+    price: 40,
   },
 } as const;
 
@@ -87,7 +84,6 @@ export function getPresetWeights(preset?: unknown): ScoringWeights {
  * Validates that weights sum to exactly 100%.
  */
 export function validateWeightsSum(weights: ScoringWeights): boolean {
-  const sum =
-    weights.artist + weights.distance + weights.price + weights.timing;
+  const sum = weights.artist + weights.distance + weights.price;
   return Math.abs(sum - 100) < 0.001;
 }

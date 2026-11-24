@@ -266,22 +266,6 @@ export function PersonalizedEventCard({
                 {factors.price.weight}%)
               </span>
             </div>
-
-            {/* Timing Factor */}
-            <div className="flex items-start justify-between gap-2 text-zinc-300">
-              <div>
-                <span className="font-medium text-zinc-200">
-                  📅 Timing Suitability:
-                </span>{' '}
-                <span className="text-zinc-400">
-                  {factors.timing.explanation}
-                </span>
-              </div>
-              <span className="shrink-0 font-mono text-zinc-400">
-                +{Math.round(factors.timing.weightedContribution)} pts (wt{' '}
-                {factors.timing.weight}%)
-              </span>
-            </div>
           </div>
         )}
 

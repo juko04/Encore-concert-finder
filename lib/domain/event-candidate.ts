@@ -14,6 +14,8 @@ export interface CandidateArtist {
   billingPosition?: BillingPosition;
   sortOrder?: number;
   externalIds?: CandidateArtistExternalId[];
+  /** Verified https image supplied by the source for this specific artist. */
+  imageUrl?: string | null;
 }
 
 export interface CandidatePrice {
@@ -65,4 +67,38 @@ export interface EventCandidate {
   resolutionConfidence?: number;
   resolutionProvenance?: Record<string, unknown>;
   rawPayload?: Record<string, unknown>;
+}
+
+/**
+ * Source-supplied images carried on `rawPayload.images` (persisted as JSON on the
+ * candidate, so it survives candidate storage and replay). Absent means unknown.
+ */
+export interface CandidateImages {
+  source: string;
+  eventImageUrl?: string | null;
+  venueImageUrl?: string | null;
+}
+
+export function asHttpsImageUrl(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  try {
+    const url = new URL(trimmed);
+    return url.protocol === 'https:' ? url.toString() : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Reads and re-validates (https only) the event/venue images on a candidate. */
+export function getCandidateImages(
+  candidate: Pick<EventCandidate, 'rawPayload'>,
+): { eventImageUrl: string | null; venueImageUrl: string | null } {
+  const images = candidate.rawPayload?.images as
+    Partial<CandidateImages> | undefined;
+  return {
+    eventImageUrl: asHttpsImageUrl(images?.eventImageUrl),
+    venueImageUrl: asHttpsImageUrl(images?.venueImageUrl),
+  };
 }

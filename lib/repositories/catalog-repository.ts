@@ -31,6 +31,8 @@ interface ArtistRow {
   name: string;
   normalized_name: string;
   image_url: string | null;
+  /** Optional: column added by migration 20261124010000; tolerate absence. */
+  genres?: string[] | null;
   created_at: string;
   updated_at: string;
 }
@@ -47,6 +49,8 @@ interface VenueRow {
   timezone: string | null;
   website: string | null;
   capacity: number | null;
+  /** Added by migration 20261124000000; undefined until that migration is applied. */
+  image_url?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -89,6 +93,8 @@ interface EventRow {
   announced_at: string | null;
   genre?: string | null;
   genres?: string[] | null;
+  /** Added by migration 20261124000000; undefined until that migration is applied. */
+  image_url?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -171,12 +177,20 @@ interface CandidateResolutionRow {
   created_at: string;
 }
 
+function normalizeGenreList(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter(
+    (g): g is string => typeof g === 'string' && g.trim() !== '',
+  );
+}
+
 function mapArtistRow(row: ArtistRow): Artist {
   return {
     id: row.id,
     name: row.name,
     normalizedName: row.normalized_name,
     imageUrl: row.image_url,
+    genres: normalizeGenreList(row.genres),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -195,6 +209,7 @@ function mapVenueRow(row: VenueRow): Venue {
     timezone: row.timezone,
     website: row.website,
     capacity: row.capacity,
+    imageUrl: row.image_url ?? null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -251,6 +266,7 @@ function mapEventRow(row: EventRow): Event {
     announcedAt: row.announced_at,
     genre: row.genre ?? null,
     genres: Array.isArray(row.genres) ? row.genres : [],
+    imageUrl: row.image_url ?? null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -369,6 +385,7 @@ export class SupabaseCatalogRepository implements ICatalogRepository {
         id: row.artist_id,
         name: row.artists?.name ?? 'Unknown Artist',
         billingPosition: row.billing_position,
+        imageUrl: row.artists?.image_url ?? null,
       }),
     );
 
@@ -425,8 +442,10 @@ export class SupabaseCatalogRepository implements ICatalogRepository {
         ? {
             id: venue.id,
             name: venue.name,
+            normalizedName: venue.normalizedName,
             city: venue.city,
             region: venue.region,
+            imageUrl: venue.imageUrl ?? null,
           }
         : null,
       ticketLinks,
@@ -834,6 +853,7 @@ export class SupabaseCatalogRepository implements ICatalogRepository {
         billingPosition: BillingPosition;
         spotifyArtistId?: string | null;
         imageUrl?: string | null;
+        genres?: string[];
       }>
     >();
     for (const aRow of (allArtistLinks as unknown as EventArtistWithExtIds[]) ||
@@ -850,6 +870,7 @@ export class SupabaseCatalogRepository implements ICatalogRepository {
         billingPosition: aRow.billing_position as BillingPosition,
         spotifyArtistId,
         imageUrl: aRow.artists?.image_url ?? null,
+        genres: normalizeGenreList(aRow.artists?.genres),
       });
       artistsByEventId.set(aRow.event_id, list);
     }
@@ -957,6 +978,7 @@ export class SupabaseCatalogRepository implements ICatalogRepository {
             ? 'Festival'
             : null),
         genres: event.genres ?? [],
+        imageUrl: event.imageUrl ?? null,
       });
     }
 

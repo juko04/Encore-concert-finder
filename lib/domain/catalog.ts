@@ -32,6 +32,8 @@ export interface Artist {
   name: string;
   normalizedName: string;
   imageUrl?: string | null;
+  /** Spotify artist-object genres (provenance: genres_source); empty/undefined when unknown. */
+  genres?: string[];
   createdAt?: string;
   updatedAt?: string;
 }
@@ -65,6 +67,7 @@ export interface Venue {
   timezone?: string | null;
   website?: string | null;
   capacity?: number | null;
+  imageUrl?: string | null;
   createdAt?: string;
   updatedAt?: string;
 }
@@ -115,6 +118,7 @@ export interface Event {
   announcedAt?: string | null;
   genre?: string | null;
   genres?: string[];
+  imageUrl?: string | null;
   createdAt?: string;
   updatedAt?: string;
 }
@@ -228,6 +232,7 @@ export interface CanonicalEventSummary {
     billingPosition: BillingPosition;
     spotifyArtistId?: string | null;
     imageUrl?: string | null;
+    genres?: string[];
   }>;
   imageUrl?: string | null;
   ticketUrl?: string | null;
@@ -247,12 +252,15 @@ export interface CanonicalEventDetail extends Event {
     id: string;
     name: string;
     billingPosition: BillingPosition;
+    imageUrl?: string | null;
   }>;
   venue: {
     id: string;
     name: string;
+    normalizedName?: string;
     city: string;
     region?: string | null;
+    imageUrl?: string | null;
   } | null;
   ticketLinks: EventTicketLink[];
   promoters: Array<{
@@ -278,6 +286,7 @@ export interface CanonicalizationPayload {
     country_code?: string | null;
     timezone?: string | null;
     website?: string | null;
+    image_url?: string | null;
   } | null;
   event?: {
     id?: string;
@@ -299,11 +308,17 @@ export interface CanonicalizationPayload {
     is_multi_day?: boolean;
     official_url?: string | null;
     primary_ticket_url?: string | null;
+    /** Fill-if-empty: never overwrites an existing non-null events.image_url. */
+    image_url?: string | null;
+    /** Fill-if-empty image for the event's venue (venues.image_url). */
+    venue_image_url?: string | null;
   } | null;
   artists?: Array<{
     artist_id?: string;
     name?: string;
     normalized_name?: string;
+    /** Fill-if-empty: never overwrites an existing non-null artists.image_url. */
+    image_url?: string | null;
     billing_position?: BillingPosition;
     sort_order?: number;
     external_ids?: Array<{

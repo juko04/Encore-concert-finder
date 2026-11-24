@@ -472,17 +472,16 @@ export async function runSpotifyRecommendationsVerification(
     sArt: number,
     sDist: number,
     sPrice: number,
-    sTime: number,
     sComp: number,
     pool: string,
   ) =>
-    `| ${state.padEnd(20)} | ${artist.padEnd(12)} | ${String(sArt).padStart(6)} | ${String(sDist).padStart(6)} | ${String(sPrice).padStart(6)} | ${String(sTime).padStart(6)} | ${String(sComp).padStart(6)} | ${pool.padEnd(15)} |`;
+    `| ${state.padEnd(20)} | ${artist.padEnd(12)} | ${String(sArt).padStart(6)} | ${String(sDist).padStart(6)} | ${String(sPrice).padStart(6)} | ${String(sComp).padStart(6)} | ${pool.padEnd(15)} |`;
 
   console.log(
-    '| State                | Headliner    | S_art  | S_dist | S_pric | S_time | S_comp | Pool            |',
+    '| State                | Headliner    | S_art  | S_dist | S_pric | S_comp | Pool            |',
   );
   console.log(
-    '|----------------------|--------------|--------|--------|--------|--------|--------|-----------------|',
+    '|----------------------|--------------|--------|--------|--------|--------|-----------------|',
   );
   console.log(
     formatRow(
@@ -491,7 +490,6 @@ export async function runSpotifyRecommendationsVerification(
       baselineConcert.factors.artist.score,
       baselineConcert.factors.distance.score,
       baselineConcert.factors.price.score,
-      baselineConcert.factors.timing.score,
       baselineConcert.score,
       baselinePool,
     ),
@@ -503,7 +501,6 @@ export async function runSpotifyRecommendationsVerification(
       boostedConcert.factors.artist.score,
       boostedConcert.factors.distance.score,
       boostedConcert.factors.price.score,
-      boostedConcert.factors.timing.score,
       boostedConcert.score,
       boostedPool,
     ),
@@ -515,7 +512,6 @@ export async function runSpotifyRecommendationsVerification(
       dislikedConcert?.factors.artist.score ?? 0,
       dislikedConcert?.factors.distance.score ?? 0,
       dislikedConcert?.factors.price.score ?? 0,
-      dislikedConcert?.factors.timing.score ?? 0,
       dislikedConcert?.score ?? 0,
       dislikedPool,
     ),
@@ -527,7 +523,6 @@ export async function runSpotifyRecommendationsVerification(
       favoritedConcert?.factors.artist.score ?? 100,
       favoritedConcert?.factors.distance.score ?? 0,
       favoritedConcert?.factors.price.score ?? 0,
-      favoritedConcert?.factors.timing.score ?? 0,
       favoritedConcert?.score ?? 0,
       favoritedPool,
     ),
@@ -587,8 +582,6 @@ export async function runSpotifyRecommendationsVerification(
           distanceContribution:
             baselineConcert.factors.distance.weightedContribution,
           priceContribution: baselineConcert.factors.price.weightedContribution,
-          timingContribution:
-            baselineConcert.factors.timing.weightedContribution,
         },
       },
       spotifyBoosted: {
@@ -604,8 +597,6 @@ export async function runSpotifyRecommendationsVerification(
           distanceContribution:
             boostedConcert.factors.distance.weightedContribution,
           priceContribution: boostedConcert.factors.price.weightedContribution,
-          timingContribution:
-            boostedConcert.factors.timing.weightedContribution,
         },
         boostDelta,
         explanation: boostedConcert.explanation,

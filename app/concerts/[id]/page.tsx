@@ -80,7 +80,19 @@ export default async function ConcertDetailPage({
       id: a.id,
       name: a.name,
       billingPosition: a.billingPosition,
+      imageUrl: a.imageUrl ?? null,
     })),
+    imageUrl: eventDetail.imageUrl ?? null,
+    venue: eventDetail.venue
+      ? {
+          id: eventDetail.venue.id,
+          name: eventDetail.venue.name,
+          normalizedName: eventDetail.venue.normalizedName ?? '',
+          city: eventDetail.venue.city,
+          region: eventDetail.venue.region ?? null,
+          imageUrl: eventDetail.venue.imageUrl ?? null,
+        }
+      : null,
     ticketUrl:
       eventDetail.primaryTicketUrl ||
       eventDetail.ticketLinks[0]?.url ||
@@ -134,6 +146,8 @@ export default async function ConcertDetailPage({
       const venueEvents = await catalogRepo.listEvents({
         venueId: eventDetail.venueId,
         limit: 5,
+        excludePastShowtimes: true,
+        sortBy: 'date_asc',
       });
       relatedEvents = venueEvents
         .filter((e) => e.id !== eventDetail.id)

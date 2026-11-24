@@ -10,6 +10,7 @@ import type {
   EventSortOption,
 } from '@/lib/repositories/interfaces';
 import type { IndexSortBy } from '@/components/index/types';
+import { getDiscoverDateWindows } from '@/lib/discover/dates';
 
 export const dynamic = 'force-dynamic';
 
@@ -18,6 +19,7 @@ interface SearchPageProps {
     q?: string;
     venue?: string;
     city?: string;
+    genre?: string;
     startDate?: string;
     endDate?: string;
     sort?: string;
@@ -68,14 +70,20 @@ export default async function SearchPage({ searchParams }: SearchPageProps) {
     ? UUID_PATTERN.test(resolvedParams.venue)
     : false;
 
+  // Future-only by default: without an explicit startDate, hide past shows.
+  const today = getDiscoverDateWindows().today;
+  const hasExplicitStart = Boolean(resolvedParams.startDate);
+
   const filters: EventListFilters = {
     searchQuery: resolvedParams.q || undefined,
     venueId: isVenueUuid ? resolvedParams.venue : undefined,
     venueName:
       !isVenueUuid && resolvedParams.venue ? resolvedParams.venue : undefined,
     city: resolvedParams.city || undefined,
-    fromDate: resolvedParams.startDate || undefined,
+    genre: resolvedParams.genre || undefined,
+    fromDate: resolvedParams.startDate || today,
     toDate: resolvedParams.endDate || undefined,
+    excludePastShowtimes: !hasExplicitStart,
     minPrice:
       minPrice !== undefined && !Number.isNaN(minPrice) ? minPrice : undefined,
     maxPrice:
@@ -114,6 +122,18 @@ export default async function SearchPage({ searchParams }: SearchPageProps) {
           totalCount={totalCount}
           initialQuery={resolvedParams.q || ''}
           initialSortBy={(resolvedParams.sort as IndexSortBy) || 'date_asc'}
+          title="Search concerts"
+          subtitle="Search every upcoming show by artist, opener, venue, or city, then filter by date and price."
+          initialVenue={
+            !isVenueUuid && resolvedParams.venue
+              ? resolvedParams.venue
+              : undefined
+          }
+          initialCity={resolvedParams.city || undefined}
+          initialGenre={resolvedParams.genre || undefined}
+          initialStartDate={resolvedParams.startDate || undefined}
+          initialEndDate={resolvedParams.endDate || undefined}
+          initialFreeOnly={freeOnly}
         />
       </main>
     </div>

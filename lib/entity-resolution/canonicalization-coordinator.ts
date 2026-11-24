@@ -4,9 +4,11 @@ import type {
   Event,
   EventStatus,
 } from '@/lib/domain/catalog';
-import type {
-  CandidateArtist,
-  EventCandidate,
+import {
+  asHttpsImageUrl,
+  getCandidateImages,
+  type CandidateArtist,
+  type EventCandidate,
 } from '@/lib/domain/event-candidate';
 import {
   deriveLocalDateFromInstant,
@@ -494,6 +496,7 @@ export class CanonicalizationCoordinator {
         resolvedArtistIds.push(resolved.artistId!);
         artistPayloads.push({
           artist_id: resolved.artistId!,
+          image_url: asHttpsImageUrl(candidateArtist.imageUrl),
           billing_position: billingPos,
           sort_order: sortOrd,
           external_ids: resolved.externalIdsToEnrich?.map((e) => ({
@@ -509,6 +512,7 @@ export class CanonicalizationCoordinator {
           artist_id: toCreate.id,
           name: toCreate.name,
           normalized_name: toCreate.normalizedName,
+          image_url: asHttpsImageUrl(candidateArtist.imageUrl),
           external_ids: toCreate.externalIds?.map((e) => ({
             provider: e.provider,
             external_id: e.externalId,
@@ -568,6 +572,8 @@ export class CanonicalizationCoordinator {
     // 7. Assemble Atomic Transaction Payload (zero upfront writes)
     let payload: CanonicalizationPayload;
 
+    const { eventImageUrl, venueImageUrl } = getCandidateImages(candidate);
+
     if (matchResult.decision === 'create') {
       const isMultiDay = Boolean(
         candidate.localEndDate && candidate.localEndDate !== localStartDate,
@@ -606,6 +612,8 @@ export class CanonicalizationCoordinator {
         min_price: candidate.price?.min ?? null,
         max_price: candidate.price?.max ?? null,
         currency: candidate.price?.currency ?? null,
+        image_url: eventImageUrl,
+        venue_image_url: venueImageUrl,
       };
 
       const creationEvidences: NonNullable<
@@ -659,6 +667,7 @@ export class CanonicalizationCoordinator {
       addFieldEvidence('start_time_precision', eventData.start_time_precision);
       addFieldEvidence('doors_at', eventData.doors_at);
       addFieldEvidence('primary_ticket_url', eventData.primary_ticket_url);
+      addFieldEvidence('image_url', eventData.image_url);
 
       payload = {
         venueToCreate:
@@ -716,11 +725,17 @@ export class CanonicalizationCoordinator {
         preparedCandidate.provenance?.parserVersion,
       );
 
+      const matchedEventPayload = mapEventUpdatesToCanonicalizationPayload({
+        id: existingEvent.id,
+        ...mergeOutcome.updates,
+      });
+      // Images are fill-if-empty: never replace an image the event already has.
+      const fillsEventImage = Boolean(eventImageUrl && !existingEvent.imageUrl);
+      if (fillsEventImage) matchedEventPayload.image_url = eventImageUrl;
+      if (venueImageUrl) matchedEventPayload.venue_image_url = venueImageUrl;
+
       payload = {
-        event: mapEventUpdatesToCanonicalizationPayload({
-          id: existingEvent.id,
-          ...mergeOutcome.updates,
-        }),
+        event: matchedEventPayload,
         artists: artistPayloads,
         ticketLinks: candidate.ticketUrl
           ? [
@@ -744,18 +759,39 @@ export class CanonicalizationCoordinator {
           source_url: candidate.provenance?.sourceUrl ?? '',
           confidence: candidate.confidence,
         },
-        evidence: mergeOutcome.evidences.map((ev: FieldMergeEvidence) => ({
-          field_name: ev.fieldName,
-          source_id: candidate.sourceId,
-          raw_ingest_id: candidate.rawIngestId,
-          candidate_id: candidateId,
-          observed_value: ev.observedValue,
-          value_hash: ev.valueHash,
-          confidence: ev.confidence,
-          observed_at:
-            candidate.provenance?.fetchedAt ?? new Date().toISOString(),
-          parser_version: ev.parserVersion,
-        })),
+        evidence: mergeOutcome.evidences
+          .map((ev: FieldMergeEvidence) => ({
+            field_name: ev.fieldName,
+            source_id: candidate.sourceId,
+            raw_ingest_id: candidate.rawIngestId,
+            candidate_id: candidateId,
+            observed_value: ev.observedValue,
+            value_hash: ev.valueHash,
+            confidence: ev.confidence,
+            observed_at:
+              candidate.provenance?.fetchedAt ?? new Date().toISOString(),
+            parser_version: ev.parserVersion,
+          }))
+          .concat(
+            fillsEventImage && eventImageUrl
+              ? [
+                  {
+                    field_name: 'image_url',
+                    source_id: candidate.sourceId,
+                    raw_ingest_id: candidate.rawIngestId,
+                    candidate_id: candidateId,
+                    observed_value: eventImageUrl as unknown,
+                    value_hash: `image_url_${eventImageUrl}`,
+                    confidence: candidate.confidence,
+                    observed_at:
+                      candidate.provenance?.fetchedAt ??
+                      new Date().toISOString(),
+                    parser_version:
+                      candidate.provenance?.parserVersion ?? '1.0.0',
+                  },
+                ]
+              : [],
+          ),
         resolution: {
           event_candidate_id: candidateId,
           status: 'matched',

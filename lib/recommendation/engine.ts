@@ -3,11 +3,12 @@
  * Pure, deterministic, multi-factor ranking coordinator for canonical events.
  *
  * Scoring Formula:
- *   Composite Score = (S_artist * W_artist + S_dist * W_dist + S_price * W_price + S_time * W_time) / 100
+ *   Composite Score = (S_artist * W_artist + S_dist * W_dist + S_price * W_price) / 100
  *
  * Invariants:
  * 1. Zero ML black-box scoring; 100% deterministic and unit-testable.
- * 2. Unmarked artists are partitioned into a separate exploratory section.
+ * 2. Relevance gate: events with no artist-fit signal (no preference, Spotify or genre match)
+ *    are partitioned into a separate exploratory section regardless of price/distance.
  * 3. Not-interested artists or cancelled events are suppressed.
  * 4. Deduplication: Duplicate canonical event IDs are rejected / deduplicated.
  * 5. Stable tie-breaking: score desc -> artistScore desc -> localStartDate asc -> id asc.
@@ -15,9 +16,11 @@
 
 import type { CanonicalEventSummary } from '@/lib/domain/catalog';
 import { calculateArtistInterestFactor } from './factors/artist-interest';
-import { calculateDistanceFactor } from './factors/distance';
+import { calculateDistanceFactor, isValidCoordinate } from './factors/distance';
+import { findCityByName } from '@/lib/location/cities';
 import { calculatePriceFactor } from './factors/price';
-import { calculateTimingFactor } from './factors/timing';
+import { checkEventEligibility } from './factors/eligibility';
+import { buildGenreTasteProfile } from './genre';
 import { buildRecommendationExplanation } from './explainer';
 import {
   DEFAULT_PRESET,
@@ -68,17 +71,40 @@ export function scoreEvent(
     event.artists,
     context.artistPreferences,
     context.spotifyTopArtists,
+    context.genreTasteProfile ??
+      buildGenreTasteProfile({
+        artistPreferences: context.artistPreferences,
+        spotifyTopArtists: context.spotifyTopArtists,
+      }),
   );
 
   const isFavorite = artistResult.matchedArtist?.isFavorite ?? false;
 
   // 2. Distance Factor
+  // Many events lack venue coordinates. Fall back to the city centroid so a
+  // chosen home city still produces a distance signal; flagged as approximate.
+  let eventLat = event.lat;
+  let eventLng = event.lng;
+  let cityLevelApprox = false;
+  if (!isValidCoordinate(eventLat, eventLng)) {
+    const city = findCityByName(event.city, event.region);
+    if (city) {
+      eventLat = city.lat;
+      eventLng = city.lng;
+      cityLevelApprox = true;
+    }
+  }
+
   const distanceResult = calculateDistanceFactor({
-    userLat: context.userProfile?.homeLatApprox,
-    userLng: context.userProfile?.homeLngApprox,
-    venueLat: event.lat,
-    venueLng: event.lng,
-    preferredRadiusMiles: context.userProfile?.defaultRadiusMiles,
+    userLat:
+      context.locationOverride?.lat ?? context.userProfile?.homeLatApprox,
+    userLng:
+      context.locationOverride?.lng ?? context.userProfile?.homeLngApprox,
+    venueLat: eventLat,
+    venueLng: eventLng,
+    preferredRadiusMiles:
+      context.locationOverride?.radiusMiles ??
+      context.userProfile?.defaultRadiusMiles,
     isFavoriteArtist: isFavorite,
   });
 
@@ -88,21 +114,26 @@ export function scoreEvent(
     maxPrice: event.maxPrice,
     currency: event.currency,
     eventKind: event.eventKind,
-    maxNormalTicketPrice: context.userProfile?.maxNormalTicketPrice,
-    maxFavoriteArtistPrice: context.userProfile?.maxFavoriteArtistPrice,
-    maxSpontaneousPrice: context.userProfile?.maxSpontaneousPrice,
+    maxNormalTicketPrice:
+      context.budgetOverride?.maxNormalTicketPrice ??
+      context.userProfile?.maxNormalTicketPrice,
+    maxFavoriteArtistPrice:
+      context.budgetOverride?.maxFavoriteArtistPrice ??
+      context.userProfile?.maxFavoriteArtistPrice,
+    maxSpontaneousPrice:
+      context.budgetOverride?.maxSpontaneousPrice ??
+      context.userProfile?.maxSpontaneousPrice,
     artistPreferenceLevel: artistResult.matchedArtist?.preferenceLevel,
   });
 
-  // 4. Timing Suitability Factor
-  const timingResult = calculateTimingFactor({
+  // 4. Eligibility (past events are excluded; this is not a scored factor)
+  const eligibility = checkEventEligibility({
     localStartDate: event.localStartDate,
     startsAt: event.startsAt,
     timezone: event.timezone,
     startTimePrecision: event.startTimePrecision,
     referenceDate: context.referenceDate,
     referenceInstant: context.referenceInstant,
-    preferredDays: context.timingPreferences?.preferredDays,
   });
 
   // Assemble full factor scores with guaranteed finite weights and contributions
@@ -120,6 +151,12 @@ export function scoreEvent(
   const distanceScore = clampScore(distanceResult.factorScore.score, 50);
   const distanceFactor: FactorScore = {
     ...distanceResult.factorScore,
+    diagnostics: cityLevelApprox
+      ? {
+          ...(distanceResult.factorScore.diagnostics ?? {}),
+          locationPrecision: 'city_level_approximation',
+        }
+      : distanceResult.factorScore.diagnostics,
     score: distanceScore,
     weight: weights.distance,
     weightedContribution: computeWeightedContribution(
@@ -139,17 +176,6 @@ export function scoreEvent(
     ),
   };
 
-  const timingScore = clampScore(timingResult.factorScore.score, 50);
-  const timingFactor: FactorScore = {
-    ...timingResult.factorScore,
-    score: timingScore,
-    weight: weights.timing,
-    weightedContribution: computeWeightedContribution(
-      timingScore,
-      weights.timing,
-    ),
-  };
-
   // Check event status suppression
   let isSuppressed = artistResult.isSuppressed;
   let suppressionReason = artistResult.suppressionReason;
@@ -163,8 +189,7 @@ export function scoreEvent(
   const rawComposite =
     artistFactor.weightedContribution +
     distanceFactor.weightedContribution +
-    priceFactor.weightedContribution +
-    timingFactor.weightedContribution;
+    priceFactor.weightedContribution;
 
   const score = isSuppressed ? 0 : clampScore(rawComposite, 50);
 
@@ -172,7 +197,7 @@ export function scoreEvent(
     artistFactor,
     distanceFactor,
     priceFactor,
-    timingFactor,
+    genreMatch: artistResult.genreMatch,
     matchedArtist: artistResult.matchedArtist,
     isSuppressed,
     suppressionReason,
@@ -187,7 +212,6 @@ export function scoreEvent(
       artist: artistFactor,
       distance: distanceFactor,
       price: priceFactor,
-      timing: timingFactor,
     },
     presetUsed: preset,
     weights,
@@ -196,12 +220,13 @@ export function scoreEvent(
     isSuppressed,
     suppressionReason,
     isExploratory: artistResult.isExploratory,
+    genreMatch: artistResult.genreMatch,
     diagnostics: {
       dataAvailability: {
         hasArtistMatch: artistFactor.isAvailable,
         hasPriceData: priceFactor.isAvailable,
         hasCoordinates: distanceFactor.isAvailable,
-        hasTimingPreferences: timingFactor.isAvailable,
+        hasGenreSignal: artistResult.genreMatch !== undefined,
       },
       rawMetrics: {
         distanceMiles: distanceResult.distanceMiles,
@@ -211,7 +236,7 @@ export function scoreEvent(
     },
   };
 
-  return { scoredEvent, isPast: timingResult.isPast };
+  return { scoredEvent, isPast: eligibility.isPast };
 }
 
 /**
@@ -221,6 +246,12 @@ export function scoreEvent(
  * 3. Local start date ascending (sooner shows first)
  * 4. Event ID ascending (lexicographical)
  */
+export function compareFeedOrder(a: ScoredEvent, b: ScoredEvent): number {
+  // Relevance tier first: events with an artist-fit signal always precede exploratory ones
+  if (a.isExploratory !== b.isExploratory) return a.isExploratory ? 1 : -1;
+  return compareScoredEvents(a, b);
+}
+
 export function compareScoredEvents(a: ScoredEvent, b: ScoredEvent): number {
   const scoreA = Number.isFinite(a.score) ? a.score : 0;
   const scoreB = Number.isFinite(b.score) ? b.score : 0;

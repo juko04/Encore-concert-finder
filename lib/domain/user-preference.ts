@@ -18,6 +18,8 @@ export interface CanonicalArtistSummary {
   name: string;
   imageUrl?: string | null;
   spotifyArtistId?: string | null;
+  /** Stored Spotify genres of the canonical artist (empty/undefined when unknown). */
+  genres?: string[];
 }
 
 export interface UserArtistPreference {
