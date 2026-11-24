@@ -23,6 +23,7 @@ import {
 import {
   DEFAULT_PRESET,
   getPresetWeights,
+  applyArtistWeight,
   isValidScoringPreset,
   normalizeScoringPreset,
 } from '@/lib/recommendation/presets';
@@ -48,6 +49,11 @@ import { SupabaseSpotifyConnectionRepository } from '@/lib/repositories/spotify-
 import { SupabaseUserPreferenceRepository } from '@/lib/repositories/user-preference-repository';
 import type { SpotifyTopArtist } from '@/lib/domain/spotify';
 import { getActiveSpotifyTopArtistsForUser } from '@/lib/sources/spotify/affinity-service';
+import {
+  buildGenreTasteProfile,
+  summarizeGenreTaste,
+  type GenreTasteSummaryItem,
+} from '@/lib/recommendation/genre';
 
 export interface PersonalizedDiscoverOptions {
   userId: string;
@@ -87,6 +93,8 @@ export interface PersonalizedDiscoverResult {
   hasSpotifyAffinities?: boolean;
   isLocationConfigured: boolean;
   isEmptyCatalog: boolean;
+  /** Genres the user is assumed to like, derived from their artists/Spotify (empty when unknown). */
+  genreTaste?: GenreTasteSummaryItem[];
 }
 
 export interface PublicDiscoverOptions {
@@ -126,6 +134,8 @@ export interface PublicDiscoverResult {
  */
 export const FAVORITE_ARTIST_CANDIDATE_LIMIT = 100;
 export const LIKE_ARTIST_CANDIDATE_LIMIT = 75;
+/** Per-genre cap for taste-driven candidate retrieval. */
+export const GENRE_CANDIDATE_LIMIT = 60;
 export const INTERESTED_ARTIST_CANDIDATE_LIMIT = 50;
 export const GENERAL_CATALOG_CANDIDATE_LIMIT = 150;
 
@@ -428,6 +438,98 @@ export function applyLocationOverride(
 }
 
 /**
+ * Scores ONE event for a signed-in user with exactly the same inputs the Discover/home ranking
+ * uses: saved profile (radius, budgets, preset, artist weight), explicit artist preferences,
+ * Spotify listening (including genre taste) and the chosen home location. Used by the concert
+ * detail page so its "why this fits" breakdown never disagrees with the rest of the site.
+ * Returns null when scoring is not possible; callers fall back to the unscored event.
+ */
+export async function scoreEventForUser(options: {
+  userId: string;
+  event: CanonicalEventSummary;
+  locationOverride?: PersonalizedDiscoverOptions['locationOverride'];
+  client?: SupabaseClient;
+  profileRepo?: IProfileRepository;
+  prefRepo?: IUserPreferenceRepository;
+  catalogRepo?: ICatalogRepository;
+  spotifyRepo?: ISpotifyConnectionRepository;
+  spotifyTopArtists?: SpotifyTopArtist[];
+}): Promise<ScoredEvent | null> {
+  const { userId, event, locationOverride } = options;
+  if (!userId) return null;
+
+  const needsClient =
+    !options.profileRepo || !options.prefRepo || !options.catalogRepo;
+  const client =
+    options.client ?? (needsClient ? await createClient() : undefined);
+  const profileRepo =
+    options.profileRepo ?? new SupabaseProfileRepository(client);
+  const prefRepo =
+    options.prefRepo ?? new SupabaseUserPreferenceRepository(client!);
+  const catalogRepo =
+    options.catalogRepo ?? new SupabaseCatalogRepository(client);
+
+  let spotifyRepo = options.spotifyRepo;
+  if (!spotifyRepo) {
+    try {
+      spotifyRepo = new SupabaseSpotifyConnectionRepository(
+        createAdminClient(),
+      );
+    } catch {
+      if (client) spotifyRepo = new SupabaseSpotifyConnectionRepository(client);
+    }
+  }
+
+  const [storedProfile, preferences, connection] = await Promise.all([
+    profileRepo.getProfile(userId),
+    prefRepo.getPreferences(userId),
+    spotifyRepo ? spotifyRepo.getConnection(userId).catch(() => null) : null,
+  ]);
+
+  const userProfile = applyLocationOverride(
+    storedProfile,
+    locationOverride,
+    userId,
+  );
+
+  let spotifyTopArtists = options.spotifyTopArtists ?? [];
+  if (spotifyTopArtists.length === 0 && connection?.status === 'connected') {
+    try {
+      spotifyTopArtists = await getActiveSpotifyTopArtistsForUser(
+        userId,
+        'short_term',
+        { catalogRepo },
+      );
+    } catch {
+      spotifyTopArtists = [];
+    }
+  }
+
+  const preset: ScoringPreset =
+    userProfile?.recommendationPreset ?? DEFAULT_PRESET;
+  const weights = applyArtistWeight(
+    getPresetWeights(preset),
+    userProfile?.artistWeight,
+  );
+
+  const result = rankEvents([event], {
+    userProfile,
+    artistPreferences: preferences,
+    spotifyTopArtists,
+    presetOverride: preset,
+    weightsOverride: weights,
+    locationOverride: locationOverride ?? undefined,
+  });
+  return (
+    [
+      ...result.recommendations,
+      ...result.exploratory,
+      ...result.suppressed,
+    ][0] ?? null
+  );
+}
+
+/**
  * Retrieves personalized Discover recommendations for an authenticated user.
  * Invariants:
  * 1. Scoped strictly to the verified authenticated user ID (never trusts unverified client input).
@@ -540,7 +642,15 @@ export async function getPersonalizedDiscoverData(
   const activeMode: DiscoveryMode = normalizeDiscoveryMode(
     mode ?? discoveryMode,
   );
-  const activeWeights = getPresetWeights(activePreset);
+  // The user's artist-importance slider only applies when the preset comes from their profile;
+  // an explicit presetOverride (previews, tests) keeps the pure preset weights.
+  const activeWeights =
+    presetOverride !== undefined && presetOverride !== null
+      ? getPresetWeights(activePreset)
+      : applyArtistWeight(
+          getPresetWeights(activePreset),
+          userProfile?.artistWeight,
+        );
   const modeWeights = getModeScoringWeights(activeMode, activeWeights);
 
   const hasPreferences = userPreferences.length > 0;
@@ -728,6 +838,30 @@ export async function getPersonalizedDiscoverData(
     }
   }
 
+  // Tier 1E: genre-taste retrieval. The user's inferred genres (from their artists/Spotify) pull in
+  // shows by artists they have never heard of, so "you like electronic" actually surfaces more
+  // electronic shows instead of only the ones that happen to sit in the first general pool.
+  const genreTasteProfile = buildGenreTasteProfile({
+    artistPreferences: userPreferences,
+    spotifyTopArtists,
+  });
+  const genreTaste = summarizeGenreTaste(genreTasteProfile, 3);
+  const genreQueryTerms = Array.from(
+    new Set(genreTaste.flatMap((g) => g.rawGenres)),
+  ).slice(0, 4);
+  for (const rawGenre of genreQueryTerms) {
+    candidateQueries.push(
+      retrieveCandidatesWithLookback(
+        catalogRepo,
+        { ...commonFilters, genre: rawGenre },
+        GENRE_CANDIDATE_LIMIT,
+        referenceDate,
+        referenceInstant,
+        modeOptions,
+      ).catch(() => [] as CanonicalEventSummary[]),
+    );
+  }
+
   // Tier 2: General upcoming catalog candidates (discovery pool)
   candidateQueries.push(
     retrieveCandidatesWithLookback(
@@ -820,6 +954,7 @@ export async function getPersonalizedDiscoverData(
     },
     artistPreferences: userPreferences,
     spotifyTopArtists,
+    genreTasteProfile,
     referenceDate,
     referenceInstant,
     presetOverride: activePreset,
@@ -847,6 +982,7 @@ export async function getPersonalizedDiscoverData(
     hasSpotifyAffinities,
     isLocationConfigured,
     isEmptyCatalog: false,
+    genreTaste,
   };
 }
 

@@ -1,5 +1,9 @@
 import type { Event, EventStatus } from '@/lib/domain/catalog';
-import type { EventCandidate } from '@/lib/domain/event-candidate';
+import { normalizeName } from '@/lib/domain/value-objects';
+import {
+  getCandidateGenres,
+  type EventCandidate,
+} from '@/lib/domain/event-candidate';
 
 export interface FieldMergeEvidence {
   fieldName: string;
@@ -14,6 +18,32 @@ export interface FieldMergeOutcome {
   evidences: FieldMergeEvidence[];
 }
 
+function normalizeTitle(value: string): string {
+  return value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+}
+
+/**
+ * True when `candidateTitle` is the current name followed by a tour/show name after a colon or
+ * dash ("Nickelback" -> "Nickelback: Everything Under The Sun Tour"). Used to upgrade a bare or
+ * derived title to the tour name; never shortens, and never treats "w/ opener" or "feat." suffixes
+ * as a more specific title.
+ */
+export function isMoreSpecificTitle(
+  currentName: string,
+  candidateTitle: string,
+): boolean {
+  const cur = currentName.trim();
+  const cand = candidateTitle.trim();
+  if (!cur || cand.length <= cur.length) return false;
+  const escaped = cur.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`^${escaped}\\s*[:\\-–—]\\s+\\S`, 'i').test(cand);
+}
+
 export function evaluateFieldMerge(
   current: Event,
   candidate: EventCandidate,
@@ -21,6 +51,41 @@ export function evaluateFieldMerge(
 ): FieldMergeOutcome {
   const updates: Partial<Omit<Event, 'id' | 'createdAt' | 'updatedAt'>> = {};
   const evidences: FieldMergeOutcome['evidences'] = [];
+
+  // 0. Title: upgrade a bare/derived title to the more specific show or tour name, but never
+  // let a ticket-package listing ("Club Level Seating: X") override the real show title.
+  if (
+    candidate.title &&
+    candidate.rawPayload?.isTicketPackage !== true &&
+    isMoreSpecificTitle(current.name, candidate.title)
+  ) {
+    updates.name = candidate.title.trim();
+    updates.normalizedName = normalizeName(candidate.title);
+    evidences.push({
+      fieldName: 'name',
+      observedValue: candidate.title.trim(),
+      valueHash: `name_${normalizeTitle(candidate.title)}`,
+      confidence: candidate.confidence,
+      parserVersion,
+    });
+  }
+
+  // 0b. Genres are fill-if-empty (never overwrite genres we already hold).
+  const candidateGenres = getCandidateGenres(candidate);
+  if (
+    candidateGenres.length > 0 &&
+    (!Array.isArray(current.genres) || current.genres.length === 0)
+  ) {
+    updates.genre = current.genre ?? candidateGenres[0];
+    updates.genres = candidateGenres;
+    evidences.push({
+      fieldName: 'genres',
+      observedValue: candidateGenres,
+      valueHash: `genres_${candidateGenres.join('|').toLowerCase()}`,
+      confidence: candidate.confidence,
+      parserVersion,
+    });
+  }
 
   // 1. Reschedule or start time update (instant or date change)
   if (candidate.startsAt && candidate.startsAt !== current.startsAt) {
@@ -60,10 +125,12 @@ export function evaluateFieldMerge(
     });
   }
 
-  // 3. Local end date update
+  // 3. Local end date update (never accept an end date before the effective start date)
+  const effectiveStartDate = updates.localStartDate ?? current.localStartDate;
   if (
     candidate.localEndDate &&
-    candidate.localEndDate !== current.localEndDate
+    candidate.localEndDate !== current.localEndDate &&
+    candidate.localEndDate >= effectiveStartDate
   ) {
     updates.localEndDate = candidate.localEndDate;
     evidences.push({
@@ -73,6 +140,24 @@ export function evaluateFieldMerge(
       confidence: candidate.confidence,
       parserVersion,
     });
+  }
+
+  // 3b. Keep is_multi_day consistent with the merged date range
+  // (mirrors the events.check_events_multi_day_consistency constraint).
+  if (
+    updates.localStartDate !== undefined ||
+    updates.localEndDate !== undefined
+  ) {
+    const mergedEndDate =
+      updates.localEndDate !== undefined
+        ? updates.localEndDate
+        : current.localEndDate;
+    const mergedIsMultiDay = Boolean(
+      mergedEndDate && mergedEndDate > effectiveStartDate,
+    );
+    if (mergedIsMultiDay !== current.isMultiDay) {
+      updates.isMultiDay = mergedIsMultiDay;
+    }
   }
 
   // 4. Ends at update
@@ -87,11 +172,21 @@ export function evaluateFieldMerge(
     });
   }
 
-  // 5. Start time precision update (when precision changed without starts_at)
+  // 5. Start time precision update (when precision changed without starts_at).
+  // Only accept a precision consistent with the merged starts_at (mirrors the
+  // check_events_date_only_no_starts_at / check_events_instant_starts_at constraints):
+  // a less precise "date_only" observation never downgrades an event that already
+  // has a known start instant.
+  const mergedStartsAt = updates.startsAt ?? current.startsAt ?? null;
+  const precisionConsistent =
+    candidate.startTimePrecision === 'date_only'
+      ? mergedStartsAt === null
+      : mergedStartsAt !== null;
   if (
     candidate.startTimePrecision &&
     candidate.startTimePrecision !== current.startTimePrecision &&
-    !updates.startTimePrecision
+    !updates.startTimePrecision &&
+    precisionConsistent
   ) {
     updates.startTimePrecision = candidate.startTimePrecision;
     evidences.push({

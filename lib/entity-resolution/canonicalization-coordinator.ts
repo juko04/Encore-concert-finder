@@ -6,6 +6,7 @@ import type {
 } from '@/lib/domain/catalog';
 import {
   asHttpsImageUrl,
+  getCandidateGenres,
   getCandidateImages,
   type CandidateArtist,
   type EventCandidate,
@@ -94,6 +95,12 @@ export function mapEventUpdatesToCanonicalizationPayload(
   }
   if ('primaryTicketUrl' in updates && updates.primaryTicketUrl !== undefined) {
     result.primary_ticket_url = updates.primaryTicketUrl;
+  }
+  if ('genre' in updates && updates.genre !== undefined) {
+    result.genre = updates.genre;
+  }
+  if ('genres' in updates && updates.genres !== undefined) {
+    result.genres = updates.genres;
   }
 
   return result;
@@ -573,6 +580,7 @@ export class CanonicalizationCoordinator {
     let payload: CanonicalizationPayload;
 
     const { eventImageUrl, venueImageUrl } = getCandidateImages(candidate);
+    const candidateGenres = getCandidateGenres(candidate);
 
     if (matchResult.decision === 'create') {
       const isMultiDay = Boolean(
@@ -614,6 +622,10 @@ export class CanonicalizationCoordinator {
         currency: candidate.price?.currency ?? null,
         image_url: eventImageUrl,
         venue_image_url: venueImageUrl,
+        // Source-assigned genres (e.g. Ticketmaster classification); omitted when unknown.
+        ...(candidateGenres.length > 0
+          ? { genre: candidateGenres[0], genres: candidateGenres }
+          : {}),
       };
 
       const creationEvidences: NonNullable<

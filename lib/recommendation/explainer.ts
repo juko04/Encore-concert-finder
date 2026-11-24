@@ -6,6 +6,7 @@
  * Invariant: Never claims uncalibrated probability or statistical certainty.
  */
 
+import { describeGenreMatch } from './genre';
 import type { FactorScore, GenreMatchInfo, MatchedArtistInfo } from './types';
 
 export interface ExplainerInput {
@@ -46,9 +47,7 @@ export function buildRecommendationExplanation(input: ExplainerInput): string {
       parts.push(`Interested (${input.matchedArtist.name})`);
     }
   } else if (input.genreMatch) {
-    parts.push(
-      `Similar to ${input.genreMatch.similarTo} (${input.genreMatch.eventGenre})`,
-    );
+    parts.push(describeGenreMatch(input.genreMatch));
   } else if (input.isExploratory) {
     parts.push('Unfamiliar artist (exploratory)');
   }

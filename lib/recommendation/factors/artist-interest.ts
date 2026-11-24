@@ -32,7 +32,11 @@ import {
   computeSpotifyAffinity,
   spotifyAffinityToArtistScore,
 } from '../spotify-affinity';
-import { calculateGenreFit, type GenreTasteProfile } from '../genre';
+import {
+  calculateGenreFit,
+  describeGenreMatch,
+  type GenreTasteProfile,
+} from '../genre';
 
 declare module '@/lib/domain/spotify' {
   interface SpotifyTopArtist {
@@ -498,6 +502,7 @@ export function calculateArtistInterestFactor(
         eventGenre: best.fit.matchedGenre,
         tasteGenre: best.fit.tasteGenre,
         similarTo: best.fit.similarTo,
+        similarArtists: best.fit.similarArtists,
         similarity: best.fit.similarity,
       };
       return {
@@ -506,7 +511,7 @@ export function calculateArtistInterestFactor(
           score,
           isAvailable: true,
           fieldStatus: 'verified',
-          explanation: `Similar to ${genreMatch.similarTo} (${genreMatch.eventGenre})`,
+          explanation: describeGenreMatch(genreMatch, best.artist.name),
           diagnostics: {
             genreMatch,
             genreArtist: best.artist.name,

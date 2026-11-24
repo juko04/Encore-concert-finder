@@ -303,6 +303,8 @@ export class MemoryEventCandidateRepository implements IEventCandidateRepository
 }
 
 export class MemoryCatalogRepository implements ICatalogRepository {
+  /** Provenance of genres written via fillArtistGenres (test visibility). */
+  readonly artistGenreSources = new Map<string, string>();
   public artists: Map<string, Artist> = new Map();
   public artistExternalIds: Map<string, ArtistExternalId> = new Map();
   public venues: Map<string, Venue> = new Map();
@@ -855,6 +857,31 @@ export class MemoryCatalogRepository implements ICatalogRepository {
       }
     }
     return null;
+  }
+
+  async getArtistsByIds(ids: string[]): Promise<Artist[]> {
+    const out: Artist[] = [];
+    for (const id of new Set(ids)) {
+      const a = this.artists.get(id);
+      if (a) out.push(a);
+    }
+    return out;
+  }
+
+  async fillArtistGenres(
+    artistId: string,
+    genres: string[],
+    source: string,
+  ): Promise<boolean> {
+    const clean = Array.from(
+      new Set(genres.map((g) => g?.trim()).filter((g): g is string => !!g)),
+    );
+    const artist = this.artists.get(artistId);
+    if (!artist || clean.length === 0) return false;
+    if (Array.isArray(artist.genres) && artist.genres.length > 0) return false;
+    this.artists.set(artistId, { ...artist, genres: clean });
+    this.artistGenreSources.set(artistId, source);
+    return true;
   }
 
   async findArtistIdsByExternalIds(
@@ -2184,6 +2211,10 @@ export class MemoryProfileRepository implements IProfileRepository {
         input.recommendationPreset !== undefined
           ? input.recommendationPreset
           : (existing?.recommendationPreset ?? 'balanced'),
+      artistWeight:
+        input.artistWeight !== undefined
+          ? input.artistWeight
+          : (existing?.artistWeight ?? null),
       createdAt: existing?.createdAt ?? now,
       updatedAt: now,
     };

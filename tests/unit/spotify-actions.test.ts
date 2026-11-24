@@ -358,8 +358,90 @@ describe('Spotify Server Actions', () => {
 
       const result = await getSpotifyTopArtistsAction('short_term', false);
       expect(result.isSyntheticPreview).toBe(false);
-      expect(result.artists).toEqual(liveArtists);
+      expect(result.artists).toHaveLength(1);
+      expect(result.artists[0]).toMatchObject(liveArtists[0]);
+      // Other-window lookups returned nothing: the rank we do know is still reported.
+      expect(result.artists[0].ranksByRange).toEqual({ short_term: 1 });
+      expect(typeof result.artists[0].affinity).toBe('number');
       expect(mockRecordSync).toHaveBeenCalledWith('test-user-id');
+    });
+
+    it('attaches the artist rank from all three listening windows and an affinity score', async () => {
+      mockGetConnectionTokens.mockResolvedValueOnce({
+        accessToken: 'valid-access-token',
+        refreshToken: 'valid-refresh-token',
+        tokenExpiresAt: new Date(Date.now() + 3600 * 1000),
+        reauthorizationDeadline: new Date(Date.now() + 180 * 86400 * 1000),
+        scopes: ['user-top-read'],
+      });
+
+      const make = (id: string, name: string, rank: number, range: string) => ({
+        id,
+        name,
+        rank,
+        imageUrl: null,
+        spotifyUrl: `https://open.spotify.com/artist/${id}`,
+        genres: [],
+        popularity: 70,
+        timeRange: range,
+      });
+      // Requested window first (short_term), then medium_term, then long_term.
+      mockGetTopArtists
+        .mockResolvedValueOnce([
+          make('john-summit', 'John Summit', 1, 'short_term'),
+          make('other', 'Other', 2, 'short_term'),
+        ])
+        .mockResolvedValueOnce([
+          make('other', 'Other', 1, 'medium_term'),
+          make('john-summit', 'John Summit', 4, 'medium_term'),
+        ])
+        .mockResolvedValueOnce([
+          make('john-summit', 'John Summit', 9, 'long_term'),
+        ]);
+
+      const result = await getSpotifyTopArtistsAction('short_term', false);
+      const summit = result.artists.find((a) => a.id === 'john-summit');
+      const other = result.artists.find((a) => a.id === 'other');
+      expect(summit?.rank).toBe(1);
+      expect(summit?.ranksByRange).toEqual({
+        short_term: 1,
+        medium_term: 4,
+        long_term: 9,
+      });
+      expect(other?.ranksByRange).toEqual({ short_term: 2, medium_term: 1 });
+      expect(summit?.affinity as number).toBeGreaterThan(
+        other?.affinity as number,
+      );
+    });
+
+    it('still returns the requested window when another window fails to load', async () => {
+      mockGetConnectionTokens.mockResolvedValueOnce({
+        accessToken: 'valid-access-token',
+        refreshToken: 'valid-refresh-token',
+        tokenExpiresAt: new Date(Date.now() + 3600 * 1000),
+        reauthorizationDeadline: new Date(Date.now() + 180 * 86400 * 1000),
+        scopes: ['user-top-read'],
+      });
+      mockGetTopArtists
+        .mockResolvedValueOnce([
+          {
+            id: 'a',
+            name: 'A',
+            rank: 3,
+            imageUrl: null,
+            spotifyUrl: 'https://open.spotify.com/artist/a',
+            genres: [],
+            popularity: 50,
+            timeRange: 'short_term',
+          },
+        ])
+        .mockRejectedValueOnce(new Error('spotify 500'))
+        .mockResolvedValueOnce([]);
+
+      const result = await getSpotifyTopArtistsAction('short_term', false);
+      expect(result.error).toBeUndefined();
+      expect(result.artists).toHaveLength(1);
+      expect(result.artists[0].ranksByRange).toEqual({ short_term: 3 });
     });
 
     it('marks connection expired when token refresh fails with permanent SpotifyAuthenticationError', async () => {

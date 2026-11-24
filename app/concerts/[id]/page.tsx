@@ -3,9 +3,8 @@ import { notFound } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';
 import { getAuthenticatedUser } from '@/lib/auth/session';
 import { SupabaseCatalogRepository } from '@/lib/repositories/catalog-repository';
-import { SupabaseUserPreferenceRepository } from '@/lib/repositories/user-preference-repository';
-import { SupabaseProfileRepository } from '@/lib/repositories/profile-repository';
-import { rankEvents } from '@/lib/recommendation/engine';
+import { scoreEventForUser } from '@/lib/recommendation/service';
+import { getHomeLocation } from '@/lib/location/server';
 import { ConcertDetailClient } from '@/components/index/ConcertDetailClient';
 import { Header } from '@/components/index/Header';
 import type {
@@ -111,26 +110,17 @@ export default async function ConcertDetailPage({
 
   if (user) {
     try {
-      const prefRepo = new SupabaseUserPreferenceRepository(supabase);
-      const profileRepo = new SupabaseProfileRepository(supabase);
-      const [preferences, profile] = await Promise.all([
-        prefRepo.getPreferences(user.id),
-        profileRepo.getProfile(user.id),
-      ]);
-
-      const rankResult = rankEvents([summary], {
-        userProfile: profile,
-        artistPreferences: preferences,
+      // Same scoring inputs as the home page / Discover: saved preferences, Spotify listening
+      // (artists + genre taste), saved weights and the chosen home city.
+      const home = await getHomeLocation(user.id);
+      const scored = await scoreEventForUser({
+        userId: user.id,
+        event: summary,
+        client: supabase,
+        locationOverride: home ? { lat: home.lat, lng: home.lng } : undefined,
       });
-
-      const allRanked = [
-        ...rankResult.recommendations,
-        ...rankResult.exploratory,
-        ...rankResult.suppressed,
-      ];
-
-      if (allRanked.length > 0) {
-        displayEvent = allRanked[0];
+      if (scored) {
+        displayEvent = scored;
       }
     } catch (err) {
       console.error(

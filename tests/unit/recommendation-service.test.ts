@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import {
   getPersonalizedDiscoverData,
   getPublicDiscoverData,
+  scoreEventForUser,
   retrieveCandidatesWithLookback,
 } from '@/lib/recommendation/service';
 import {
@@ -133,6 +134,156 @@ describe('Production Recommendation Service (getPersonalizedDiscoverData)', () =
 
   const referenceDate = '2026-10-25';
   const referenceInstant = '2026-10-25T12:00:00Z';
+
+  describe('scoreEventForUser (concert detail page scoring)', () => {
+    const elyEvent = {
+      id: 'event-ely',
+      title: 'Ely Oaks',
+      venueName: 'The Church Nightclub',
+      city: 'Denver',
+      region: 'CO',
+      localStartDate: '2026-11-28',
+      startsAt: '2026-11-29T05:00:00Z',
+      timezone: 'America/Denver',
+      startTimePrecision: 'instant',
+      status: 'scheduled',
+      artists: [
+        { id: 'canon-ely', name: 'Ely Oaks', billingPosition: 'unknown' },
+      ],
+      minPrice: 29.95,
+      currency: 'USD',
+    } as unknown as import('@/lib/domain/catalog').CanonicalEventSummary;
+
+    const spotifyTop = [
+      {
+        id: 'sp-ely',
+        name: 'Ely Oaks',
+        rank: 9,
+        imageUrl: null,
+        spotifyUrl: 'https://open.spotify.com/artist/sp-ely',
+        genres: [],
+        popularity: 0,
+        timeRange: 'short_term',
+        canonicalArtistId: 'canon-ely',
+      },
+    ] as unknown as import('@/lib/domain/spotify').SpotifyTopArtist[];
+
+    it('recognises a Spotify top-10 artist instead of calling them unfamiliar', async () => {
+      const scored = await scoreEventForUser({
+        userId: 'detail-user',
+        event: elyEvent,
+        profileRepo,
+        prefRepo,
+        catalogRepo,
+        spotifyTopArtists: spotifyTop,
+      });
+      expect(scored).not.toBeNull();
+      expect(scored?.factors.artist.explanation).not.toMatch(/unfamiliar/i);
+      expect(scored?.factors.artist.score).toBeGreaterThan(40);
+      expect(scored?.matchedArtist?.isSpotifyAffinity).toBe(true);
+    });
+
+    it('without Spotify data the same show is an exploratory discovery', async () => {
+      const scored = await scoreEventForUser({
+        userId: 'detail-user',
+        event: elyEvent,
+        profileRepo,
+        prefRepo,
+        catalogRepo,
+        spotifyTopArtists: [],
+      });
+      expect(scored?.factors.artist.explanation).toMatch(/unfamiliar/i);
+    });
+
+    it("uses the user's saved weights, radius and budget", async () => {
+      await profileRepo.upsertProfile('detail-user', {
+        recommendationPreset: 'balanced',
+        artistWeight: 70,
+        maxNormalTicketPrice: 25,
+        defaultRadiusMiles: 50,
+        homeLatApprox: 40.015,
+        homeLngApprox: -105.2705,
+      });
+      const scored = await scoreEventForUser({
+        userId: 'detail-user',
+        event: elyEvent,
+        profileRepo,
+        prefRepo,
+        catalogRepo,
+        spotifyTopArtists: spotifyTop,
+      });
+      expect(scored?.weights.artist).toBe(70);
+      expect(scored?.factors.distance.explanation).toMatch(/50 mi radius/);
+    });
+  });
+
+  describe('saved artist-importance weight', () => {
+    const run = (presetOverride?: string) =>
+      getPersonalizedDiscoverData({
+        userId: 'weight-user',
+        profileRepo,
+        prefRepo,
+        catalogRepo,
+        referenceDate,
+        referenceInstant,
+        presetOverride,
+      });
+
+    it('uses the preset weights when no custom weight is saved', async () => {
+      await profileRepo.upsertProfile('weight-user', {
+        recommendationPreset: 'balanced',
+      });
+      const result = await run();
+      expect(result.activeWeights).toEqual({
+        artist: 55,
+        distance: 25,
+        price: 20,
+      });
+    });
+
+    it('applies the saved artist weight and keeps the preset distance:price ratio', async () => {
+      await profileRepo.upsertProfile('weight-user', {
+        recommendationPreset: 'balanced',
+        artistWeight: 70,
+      });
+      const result = await run();
+      expect(result.activeWeights.artist).toBe(70);
+      expect(
+        result.activeWeights.artist +
+          result.activeWeights.distance +
+          result.activeWeights.price,
+      ).toBe(100);
+      // balanced is 25:20 distance:price
+      expect(result.activeWeights.distance).toBeGreaterThan(
+        result.activeWeights.price,
+      );
+    });
+
+    it('lowering the saved weight shifts emphasis toward distance and price', async () => {
+      await profileRepo.upsertProfile('weight-user', {
+        recommendationPreset: 'balanced',
+        artistWeight: 30,
+      });
+      const result = await run();
+      expect(result.activeWeights.artist).toBe(30);
+      expect(result.activeWeights.distance + result.activeWeights.price).toBe(
+        70,
+      );
+    });
+
+    it('ignores the saved weight when a preset is explicitly overridden', async () => {
+      await profileRepo.upsertProfile('weight-user', {
+        recommendationPreset: 'balanced',
+        artistWeight: 70,
+      });
+      const result = await run('value');
+      expect(result.activeWeights).toEqual({
+        artist: 45,
+        distance: 15,
+        price: 40,
+      });
+    });
+  });
 
   it('retrieves preferred-artist events even when outside the general first-page limit (>150 earlier events)', async () => {
     const userA = 'user-a-uuid';

@@ -195,7 +195,7 @@ export function buildDecisionGuide(
 
   const personalBullets: GuideBullet[] = [];
   if (isPersonalized && !isDisliked) {
-    const artist = usableFactor(personal?.factors?.artist, 70);
+    const artist = usableFactor(personal?.factors?.artist, 60);
     if (artist) {
       personalBullets.push({
         text: artist,

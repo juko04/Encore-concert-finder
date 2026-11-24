@@ -23,6 +23,8 @@ import {
 } from '@/lib/domain/spotify';
 import type { ICatalogRepository } from '@/lib/repositories/interfaces';
 import { computeSpotifyAffinity } from '@/lib/recommendation/spotify-affinity';
+import { enrichSpotifyArtistGenres } from './genre-enrichment';
+import { createTicketmasterGenreLookup } from '@/lib/sources/ticketmaster/attraction-genres';
 import {
   SpotifyArtistMatcher,
   type SpotifyArtistCandidate,
@@ -354,6 +356,10 @@ export async function syncSpotifyTopArtistsAcrossTimeRanges(
       );
     }
 
+    // Spotify no longer returns artist genres: fill them from the catalog / Ticketmaster so the
+    // per-user genre taste (e.g. "mostly electronic") can be inferred. Best-effort, time-boxed.
+    await enrichGenresSafely(consolidatedArtists, options?.catalogRepo);
+
     // Cache consolidated top artists
     affinityCache.set(`${userId}:consolidated`, {
       timestamp: Date.now(),
@@ -412,6 +418,29 @@ async function resolveAndEnrichSpotifyArtists(
       '[SpotifyAffinityService] SpotifyArtistMatcher resolution encountered error:',
       err,
     );
+  }
+}
+
+const GENRE_ENRICHMENT_TIMEOUT_MS = 12_000;
+
+async function enrichGenresSafely(
+  artists: SpotifyTopArtist[],
+  catalogRepo?: ICatalogRepository,
+): Promise<void> {
+  try {
+    const apiKey = process.env.TICKETMASTER_API_KEY?.trim();
+    const work = enrichSpotifyArtistGenres(artists, {
+      catalogRepo,
+      lookup: apiKey ? createTicketmasterGenreLookup({ apiKey }) : undefined,
+    });
+    await Promise.race([
+      work,
+      new Promise((resolve) =>
+        setTimeout(resolve, GENRE_ENRICHMENT_TIMEOUT_MS),
+      ),
+    ]);
+  } catch {
+    // Genres stay unknown; scoring falls back to artist-level matching.
   }
 }
 

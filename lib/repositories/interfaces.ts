@@ -92,6 +92,17 @@ export interface ICatalogRepository {
     provider: string,
     externalId: string,
   ): Promise<Artist | null>;
+  /** Batch lookup of canonical artists (missing ids are simply absent from the result). */
+  getArtistsByIds(ids: string[]): Promise<Artist[]>;
+  /**
+   * Fill-if-empty genre write with provenance. Never overwrites genres already held and never
+   * writes an empty list. Returns true when a write happened.
+   */
+  fillArtistGenres(
+    artistId: string,
+    genres: string[],
+    source: string,
+  ): Promise<boolean>;
   findArtistIdsByExternalIds(
     provider: string,
     externalIds: string[],

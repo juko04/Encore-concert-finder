@@ -2,11 +2,13 @@ import type { CanonicalEventSummary } from '@/lib/domain/catalog';
 import type { ICatalogRepository } from '@/lib/repositories/interfaces';
 import type { EventListFilters } from '@/lib/repositories/interfaces';
 import type { ScoredEvent } from '@/lib/recommendation/types';
+import type { GenreTasteSummaryItem } from '@/lib/recommendation/genre';
 import { getPersonalizedDiscoverData } from '@/lib/recommendation/service';
 import {
   getDiscoverDateWindows,
   type DiscoverDateWindows,
 } from '@/lib/discover/dates';
+import { filterEventsWithinRadius } from '@/lib/location/radius';
 
 export interface DiscoverRow {
   id: string;
@@ -33,9 +35,22 @@ export interface DiscoverHomeData {
 
 const ROW_LIMIT = 12;
 const POOL_LIMIT = 100;
+/** Upcoming shows scanned when filtering the "Near" row by travel radius. */
+const NEAR_RADIUS_FETCH_LIMIT = 300;
 /** Minimum verified-price events before an "Under $30" row is shown. */
 const MIN_VERIFIED_PRICE_ROW = 4;
 const UNDER_PRICE = 30;
+
+interface PersonalizedPick {
+  picked: ScoredEvent[];
+  genreEvents: ScoredEvent[];
+  genreTaste: GenreTasteSummaryItem[];
+}
+const EMPTY_PERSONALIZED: PersonalizedPick = {
+  picked: [],
+  genreEvents: [],
+  genreTaste: [],
+};
 
 type CatalogReader = Pick<ICatalogRepository, 'listEvents' | 'countEvents'> &
   Partial<Pick<ICatalogRepository, 'getFacets'>>;
@@ -62,6 +77,12 @@ function search(params: Record<string, string | undefined>): string {
   }
   const s = qs.toString();
   return s ? `/search?${s}` : '/search';
+}
+
+function joinNames(names: string[]): string {
+  if (names.length <= 1) return names[0] ?? '';
+  if (names.length === 2) return `${names[0]} and ${names[1]}`;
+  return `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
 }
 
 function topByCount(
@@ -97,8 +118,18 @@ export async function getDiscoverHomeData(options: {
     lat: number;
     lng: number;
   } | null;
+  /**
+   * The signed-in user's saved travel radius. When set together with a home location, the
+   * "Near" row shows everything within that many miles instead of only the home city's shows.
+   */
+  homeRadiusMiles?: number | null;
 }): Promise<DiscoverHomeData> {
-  const { catalogRepo, userId, homeLocation } = options;
+  const { catalogRepo, userId, homeLocation, homeRadiusMiles } = options;
+  const useRadius =
+    typeof homeRadiusMiles === 'number' &&
+    Number.isFinite(homeRadiusMiles) &&
+    homeRadiusMiles > 0 &&
+    Boolean(homeLocation);
   const now = options.now ?? new Date();
   const nowIso = now.toISOString();
   const windows = getDiscoverDateWindows(now);
@@ -113,16 +144,28 @@ export async function getDiscoverHomeData(options: {
   const list = (extra: EventListFilters) =>
     catalogRepo.listEvents({ ...base, limit: ROW_LIMIT, ...extra });
 
-  const nearPromise = homeLocation?.city
-    ? safe(
-        `near ${homeLocation.city}`,
-        () => list({ city: homeLocation.city, limit: ROW_LIMIT * 2 }),
-        [] as CanonicalEventSummary[],
-      )
-    : Promise.resolve([] as CanonicalEventSummary[]);
+  const nearPromise =
+    useRadius && homeLocation
+      ? safe(
+          `within ${homeRadiusMiles} mi`,
+          async () =>
+            filterEventsWithinRadius(
+              await list({ limit: NEAR_RADIUS_FETCH_LIMIT }),
+              homeLocation,
+              homeRadiusMiles as number,
+            ),
+          [] as CanonicalEventSummary[],
+        )
+      : homeLocation?.city
+        ? safe(
+            `near ${homeLocation.city}`,
+            () => list({ city: homeLocation.city, limit: ROW_LIMIT * 2 }),
+            [] as CanonicalEventSummary[],
+          )
+        : Promise.resolve([] as CanonicalEventSummary[]);
 
   const [
-    picked,
+    personalized,
     pool,
     weekend,
     nextWeek,
@@ -142,14 +185,19 @@ export async function getDiscoverHomeData(options: {
                 ? { lat: homeLocation.lat, lng: homeLocation.lng }
                 : undefined,
             });
-            return [...data.recommendations, ...data.exploratory].slice(
-              0,
-              ROW_LIMIT,
-            );
+            const ranked = [...data.recommendations, ...data.exploratory];
+            return {
+              picked: ranked.slice(0, ROW_LIMIT),
+              // Shows that fit the user's inferred genre taste (not a direct artist match).
+              genreEvents: ranked
+                .filter((e) => e.genreMatch && !e.matchedArtist)
+                .slice(0, ROW_LIMIT),
+              genreTaste: data.genreTaste ?? [],
+            } as PersonalizedPick;
           },
-          [] as ScoredEvent[],
+          EMPTY_PERSONALIZED,
         )
-      : Promise.resolve([] as ScoredEvent[]),
+      : Promise.resolve(EMPTY_PERSONALIZED),
     safe(
       'pool',
       () => catalogRepo.listEvents({ ...base, limit: POOL_LIMIT }),
@@ -250,7 +298,16 @@ export async function getDiscoverHomeData(options: {
   const nearEvents = await nearPromise;
   const nearRow = takeShared(nearEvents);
   nearRow.forEach((e) => nearIds.add(idOf(e)));
-  if (homeLocation?.city && nearRow.length > 0) {
+  if (useRadius && homeLocation && nearRow.length > 0) {
+    rows.push({
+      id: 'near-home',
+      title: `Near ${homeLocation.city ?? 'you'}`,
+      subtitle: `Within ${homeRadiusMiles} miles (approximate)`,
+      events: nearRow,
+      // /search reads the saved radius itself; near=1 turns the filter on.
+      seeAllHref: search({ near: '1' }),
+    });
+  } else if (homeLocation?.city && nearRow.length > 0) {
     rows.push({
       id: 'near-home',
       title: `Near ${homeLocation.city}`,
@@ -260,6 +317,7 @@ export async function getDiscoverHomeData(options: {
     });
   }
 
+  const picked = personalized.picked;
   const pickedRow = takeShared(picked);
   if (pickedRow.length > 0) {
     rows.push({
@@ -268,6 +326,20 @@ export async function getDiscoverHomeData(options: {
       subtitle: 'Based on your artists and preferences',
       events: pickedRow,
       seeAllHref: '/search',
+    });
+  }
+
+  // Genre taste row: dynamic per user. Only appears when the user's own listening implies a
+  // genre and we hold shows that fit it; the subtitle states the assumption and its basis.
+  const topTaste = personalized.genreTaste[0];
+  const genreRowEvents = takeShared(personalized.genreEvents);
+  if (topTaste && genreRowEvents.length >= 3) {
+    rows.push({
+      id: 'genre-taste',
+      title: `More ${topTaste.label}`,
+      subtitle: `We assume you like ${topTaste.label}, based on your listening to ${joinNames(topTaste.artists.slice(0, 3))}`,
+      events: genreRowEvents,
+      seeAllHref: search({ genre: topTaste.rawGenres[0] }),
     });
   }
 

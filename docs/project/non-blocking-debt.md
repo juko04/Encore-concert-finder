@@ -61,3 +61,19 @@ The following items were explicitly reviewed during Phase 1 and deferred:
 - **Status:** Deferred to Phase 3 / production scaling.
 - **Context:** Multi-field catalog search in `SupabaseCatalogRepository.searchEvents` constructs PostgREST disjunction clauses (`.or(...)`) across event titles (`name.ilike."%...%"`), matching venue IDs (`venue_id.in.(...)`), and artist-matched event IDs (`id.in.(...)`). Disjunctions are sliced into 200-item chunks with double-quote escaping to avoid single-clause parser overflow.
 - **Accepted Tradeoff:** `catalog-repository.ts` chunks disjunction IDs by 200 without enforcing an artificial global aggregate URL cap. At the expected Colorado launch scale (~100–300 total active events across the state), broad search queries produce filter strings of ~1.5–3.5 KB, which operate reliably and comfortably within standard 8 KB HTTP reverse proxy (Kong/Nginx) request buffers. For future national scale with thousands of concurrent event matches per query, search will migrate to a dedicated PostgreSQL full-text search index (`tsvector` / GIN index) or RPC search function.
+
+---
+
+## 4. Backlog Captured 2026-11-24 (Genres, Search, Calendar, Event Kinds)
+
+Not started. Requested by the product owner; do these as a dedicated branch.
+
+1. **Genres unknown next to most artists.** Genre badges are empty for most artists because genres only fill from Ticketmaster classifications on sync. Backfill more broadly, then show the source.
+2. **Calendar default month.** `/calendar` must open on the current month.
+3. **Genre-aware search.** Searching "hip hop" must match hip-hop genres (close/similar terms work, e.g. "hiphop", "rap"). Use the existing taxonomy in `lib/recommendation/genre.ts`.
+4. **Match score on every show.** Show a small 0–100 rating on every show card, under the "Check ticket prices" text.
+5. **Genre list cleanup.** "Live Music" is not a genre (every show is live). Children's music, French music, world music, and rodeo are not genres either. Map or drop these in one place so badges, filters and search agree.
+6. **Genres selectable in Search** (filter control).
+7. **Mixed genre label.** Multi-genre shows (festivals) display "Mixed".
+8. **Genre colors.** Each genre gets its own badge color.
+9. **Festival/event-kind classification is wrong.** Examples: "House Party" tagged religious; "Classic Albums Live" is a single night (Van Halen), not a festival; "Pink Floyd Laser Spectacular" is a light show. Review the festival detection in `lib/sources/ticketmaster/parser.ts` (name contains "festival", multi-day, genre) and add rules/tests for tribute, laser/light shows and single-night "live" album shows.

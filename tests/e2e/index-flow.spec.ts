@@ -94,16 +94,26 @@ test.describe('Encore V2 Index E2E Flow', () => {
     });
   });
 
-  test('Index Preferences: navigates to /preferences, verifies taste and Spotify card', async ({
+  test('Index Preferences: /preferences is the settings page, separate from the taste profile', async ({
     page,
   }) => {
     const response = await page.goto('/preferences');
     expect(response?.status()).toBe(200);
 
     await expect(
+      page.getByRole('heading', { name: 'Preferences', exact: true }),
+    ).toBeVisible();
+    // The removed "Engineering Invariant 11" explainer must not come back.
+    await expect(page.getByText(/Engineering Invariant/i)).toHaveCount(0);
+    // Taste (artists + Spotify) lives on its own page.
+    await expect(page.getByTestId('preferences-taste-link')).toBeVisible();
+    await expect(page.getByText('Connect Spotify')).toHaveCount(0);
+
+    const taste = await page.goto('/profile/taste');
+    expect(taste?.status()).toBe(200);
+    await expect(
       page.getByRole('heading', { name: /Music Taste Profile/i }),
     ).toBeVisible();
-    await expect(page.getByText('Connect Spotify')).toBeVisible();
 
     // Capture screenshot
     await page.screenshot({

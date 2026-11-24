@@ -260,7 +260,7 @@ export function Header({
                     className="flex items-center gap-2 px-3 py-2 text-zinc-700 hover:bg-zinc-50 hover:text-zinc-900"
                   >
                     <SlidersIcon className="h-3.5 w-3.5 text-zinc-500" />
-                    <span>Scoring Preferences</span>
+                    <span>Preferences</span>
                   </Link>
 
                   <Link

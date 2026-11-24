@@ -266,6 +266,97 @@ export function genreSimilarity(a: string, b: string): number {
   return 0;
 }
 
+/** Display labels (never used for matching). Falls back to the family, then the raw genre. */
+const CLUSTER_LABELS: Record<string, string> = {
+  edm: 'electronic / EDM',
+  house: 'house',
+  techno: 'techno',
+  trance: 'trance',
+  dnb: 'drum & bass',
+  bass: 'bass music',
+  electronica: 'electronica',
+  hip_hop: 'hip-hop',
+  trap: 'trap',
+  latin_urban: 'latin urban',
+  latin: 'latin',
+  dance_pop: 'dance pop',
+  indie_pop: 'indie pop',
+  k_pop: 'K-pop',
+  pop: 'pop',
+  rock: 'rock',
+  indie_rock: 'indie / alternative rock',
+  psychedelic: 'psychedelic rock',
+  jam: 'jam band',
+  metal: 'metal',
+  punk: 'punk',
+  emo: 'emo / pop-punk',
+  ska: 'ska',
+  country: 'country',
+  bluegrass: 'bluegrass',
+  folk: 'folk / americana',
+  jazz: 'jazz',
+  blues: 'blues',
+  funk: 'funk',
+  soul_rnb: 'R&B / soul',
+  reggae: 'reggae',
+  classical: 'classical',
+  world: 'world music',
+};
+
+const FAMILY_LABELS: Record<GenreFamily, string> = {
+  electronic: 'electronic / EDM',
+  hip_hop: 'hip-hop',
+  pop: 'pop',
+  rock: 'rock',
+  metal: 'metal',
+  punk: 'punk',
+  country_folk: 'country / folk',
+  jazz_blues: 'jazz / blues',
+  soul_rnb: 'R&B / soul',
+  reggae: 'reggae',
+  latin: 'latin',
+  classical: 'classical',
+  world: 'world music',
+};
+
+/** Human-readable name for a genre string, for explanations ("electronic / EDM"). */
+export function describeGenre(raw: string): string {
+  const { family, cluster } = classifyGenre(raw);
+  if (cluster && CLUSTER_LABELS[cluster]) return CLUSTER_LABELS[cluster];
+  if (family) return FAMILY_LABELS[family];
+  return normalizeGenre(raw);
+}
+
+function joinNames(names: string[]): string {
+  if (names.length <= 1) return names[0] ?? '';
+  if (names.length === 2) return `${names[0]} and ${names[1]}`;
+  return `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
+}
+
+/**
+ * Explanation for a genre-driven artist fit. States the inference plainly: the user is ASSUMED to
+ * like this genre because of artists they listen to (it is not a claim they chose it).
+ */
+export function describeGenreMatch(
+  match: {
+    eventGenre: string;
+    tasteGenre: string;
+    similarTo: string;
+    similarArtists?: string[];
+  },
+  eventArtistName?: string,
+): string {
+  const basis = (
+    match.similarArtists && match.similarArtists.length > 0
+      ? match.similarArtists
+      : [match.similarTo]
+  ).filter(Boolean);
+  const taste = describeGenre(match.tasteGenre);
+  const eventLabel = describeGenre(match.eventGenre);
+  const who = eventArtistName ? `${eventArtistName} is ` : 'This is ';
+  return `Assumed taste for ${taste}, based on your listening to ${joinNames(basis)}. ${who}${eventLabel}`;
+}
+
 // ---------------------------------------------------------------------------
 // Taste profile
 // ---------------------------------------------------------------------------
@@ -276,6 +367,10 @@ export interface GenreTasteEntry {
   weight: number;
   /** The user artist that contributed most to this genre (for explanations). */
   sourceArtist: string;
+  /** Up to 3 user artists that contributed most, strongest first (the basis of this taste). */
+  sourceArtists: string[];
+  /** Source spelling of the genre (not normalized), for catalog lookups. */
+  rawGenre?: string;
 }
 
 export interface GenreTasteProfile {
@@ -309,6 +404,10 @@ interface Accumulator {
   total: number;
   bestContribution: number;
   sourceArtist: string;
+  /** Contribution per user artist, to report the strongest few as the basis of this taste. */
+  byArtist: Map<string, number>;
+  /** First source spelling of this genre (e.g. "Dance/Electronic"), for catalog lookups. */
+  rawGenre: string;
 }
 
 function addContribution(
@@ -329,9 +428,15 @@ function addContribution(
         total: weight,
         bestContribution: weight,
         sourceArtist: artistName,
+        byArtist: new Map([[artistName, weight]]),
+        rawGenre: raw.trim(),
       });
     } else {
       acc.total += weight;
+      acc.byArtist.set(
+        artistName,
+        Math.max(acc.byArtist.get(artistName) ?? 0, weight),
+      );
       if (weight > acc.bestContribution) {
         acc.bestContribution = weight;
         acc.sourceArtist = artistName;
@@ -352,6 +457,11 @@ function toEntries(
       genre,
       weight: Math.min(1, acc.total / max),
       sourceArtist: acc.sourceArtist,
+      sourceArtists: Array.from(acc.byArtist.entries())
+        .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+        .slice(0, 3)
+        .map(([name]) => name),
+      rawGenre: acc.rawGenre,
     }))
     .sort((a, b) => b.weight - a.weight || a.genre.localeCompare(b.genre));
 }
@@ -465,6 +575,8 @@ export interface GenreFitResult {
   tasteGenre?: string;
   /** The user's own artist that this taste genre came from. */
   similarTo?: string;
+  /** The user's strongest few artists behind that taste genre. */
+  similarArtists?: string[];
   /** 0..1 strongest similarity to a genre the user explicitly dislikes. */
   dislikedGenreSimilarity: number;
   hasKnownGenres: boolean;
@@ -492,6 +604,7 @@ export function calculateGenreFit(
         result.matchedGenre = g;
         result.tasteGenre = entry.genre;
         result.similarTo = entry.sourceArtist;
+        result.similarArtists = entry.sourceArtists;
       }
     }
     for (const entry of profile.negative) {
@@ -503,4 +616,51 @@ export function calculateGenreFit(
   }
   result.similarity = Math.round(result.similarity * 1000) / 1000;
   return result;
+}
+
+export interface GenreTasteSummaryItem {
+  /** Friendly label, e.g. "electronic / EDM". */
+  label: string;
+  /** 0..1 relative strength. */
+  weight: number;
+  /** The user's strongest artists behind this taste. */
+  artists: string[];
+  /** Source spellings of the underlying genres (for catalog queries). */
+  rawGenres: string[];
+}
+
+/**
+ * Collapses a user's positive genre taste into a few friendly groups (by display label), so the
+ * UI can say "you seem to like electronic / EDM, based on John Summit, Cloonee and FISHER".
+ * Entirely derived from the user's own data; nothing is hard-coded per genre.
+ */
+export function summarizeGenreTaste(
+  profile: GenreTasteProfile,
+  maxItems = 3,
+): GenreTasteSummaryItem[] {
+  const groups = new Map<string, GenreTasteSummaryItem>();
+  for (const entry of profile.positive) {
+    const label = describeGenre(entry.genre);
+    if (!label) continue;
+    const g = groups.get(label);
+    const artists = entry.sourceArtists ?? [entry.sourceArtist];
+    if (!g) {
+      groups.set(label, {
+        label,
+        weight: entry.weight,
+        artists: [...artists],
+        rawGenres: entry.rawGenre ? [entry.rawGenre] : [],
+      });
+    } else {
+      g.weight = Math.max(g.weight, entry.weight);
+      for (const a of artists) if (!g.artists.includes(a)) g.artists.push(a);
+      if (entry.rawGenre && !g.rawGenres.includes(entry.rawGenre)) {
+        g.rawGenres.push(entry.rawGenre);
+      }
+    }
+  }
+  return Array.from(groups.values())
+    .sort((a, b) => b.weight - a.weight || a.label.localeCompare(b.label))
+    .slice(0, maxItems)
+    .map((g) => ({ ...g, artists: g.artists.slice(0, 4) }));
 }

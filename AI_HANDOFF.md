@@ -20,6 +20,21 @@ Durable architecture records belong in [`docs/architecture/`](docs/architecture/
   - `npx playwright test`: **PASS** (**17/17 browser tests passed / 1 skipped for Spotify creds**)
 - **Next Immediate Action:** Proceed to improving actual ticket price coverage and ingesting more concerts. Zero speculative fixes.
 
+### Latest (2026-11-24, branch `fix/ui-discover-auth-v2`, uncommitted)
+
+- **Live Ticketmaster ingestion unblocked.** Prior local DB held only TM fixture rows. Fixed `lib/entity-resolution/field-merge.ts` so merges keep `is_multi_day` consistent with merged dates, reject end dates before start, and never downgrade an event with a known `starts_at` to `date_only` (these violated `check_events_multi_day_consistency` / `check_events_date_only_no_starts_at` and aborted whole sync jobs). Fixed `lib/sources/ticketmaster/adapter.ts` dropping `countryCode` (nationwide "US" festival query was returning worldwide events). Tests added; `typecheck`, `lint`, `format:check`, `npm test` (1207/1207) pass. Integration/e2e/build not re-run.
+- Local DB now has 758 TM events (651 with images). Live sync of all three horizons persisted locally.
+- **Open issue:** one TM listing whose two attractions share a Spotify ID ("Day Out With Thomas") trips the external-ID guard in `apply_canonicalization`, and the pipeline aborts the entire batch (long-term nationwide festivals not persisted). Needs a per-candidate `needs_review` route instead of a batch abort — identity-resolution change, needs review.
+- Fixture-run sync checkpoints marked CO as fresh; use `--force` after fixture persists.
+
+#### Preferences page, Spotify ranks, prices (2026-11-24, same branch, uncommitted)
+
+- **`/preferences` is now a settings page** (radius, three ticket-price ceilings, ranking preset, optional artist-importance slider 20–80). The artist/Spotify manager stays at `/profile/taste`; the "Engineering Invariant 11" box was removed. New: migration `20261124020000_add_artist_weight_to_profiles.sql` (applied locally only), `lib/preferences/validate.ts`, `app/preferences/actions.ts`, `components/preferences/PreferencesForm.tsx`, `applyArtistWeight` in `lib/recommendation/presets.ts` (used by the service only when the preset comes from the profile; explicit `presetOverride` and non-`all` discovery modes keep pure weights).
+- **Where preferences take effect:** "Picked for you" scoring (radius, three budgets, preset, artist weight); Search chips "Within N mi of <home>" (`?near=1`, city-centroid distances, unknown locations excluded) and "Listed price up to $X" (strict; unpriced shows excluded); home "Near <city>" row is radius-based for signed-in users. Search radius filter scans at most 500 shows (no geo query in the catalog).
+- **Spotify history** now shows rank "#N of 50" plus 4 wk / 6 mo / 1 yr ranks and the Encore affinity (0–100) per artist (`getSpotifyTopArtistsAction` fetches all three windows; the other two are best-effort).
+- **Price coverage finding (not fixed):** only ~75 of ~1,040 upcoming shows have a price. Ticketmaster Discovery returns `priceRanges` for ~12% of Colorado events (mostly non-Ticketmaster-ticketed listings); big Ticketmaster-ticketed shows have none. Of the ~98 priced Colorado listings, ~68 are club-night/promoter listings with no artist attached, which entity resolution routes to `needs_review: missing_artist_identity`, so they never appear. Also: `needs_review` resolutions are not being persisted (`candidate_resolutions` has only created/matched rows), so these are silently re-evaluated each sync. Both need an identity-policy decision.
+- Verified in browser on local DB (saved radius 50, $40/$120/$25, artist weight 70; Search 1,042 → 385 within 50 mi → 69 listed ≤ $40 → 60 both). Integration, e2e and `npm run build` not re-run.
+
 ---
 
 ## Resolved Issue Register (Findings & Hardening)
@@ -93,3 +108,11 @@ Durable architecture records belong in [`docs/architecture/`](docs/architecture/
 ## Next Immediate Action
 
 Submit final verification report and evidence manifest for user signoff. Do NOT autonomously merge into `main`.
+
+#### Package listings, Spotify matching, genre taste (2026-11-24, same branch, uncommitted)
+
+- **Ticket-package listings:** Ticketmaster "Club Level Seating: X" events/attractions are no longer artists or show titles (`lib/sources/ticketmaster/listing-filters.ts`; parser strips them; `overlayTicketmasterImages` drops stale ones on replay). Field merge upgrades a bare title to "Artist: Tour Name" (colon/dash only, never "w/ opener") and fills genres if empty. Migration `20261124030000_cleanup_ticket_package_listings.sql` cleans existing rows (applied locally only).
+- **Ely Oaks "unfamiliar" root cause:** the concert detail page scored events without Spotify data. It now uses `scoreEventForUser` (`lib/recommendation/service.ts`), the same inputs as Discover/home (saved weights, Spotify, home city). The decision-guide artist reason threshold dropped 70 to 60 so Spotify top-10 artists are mentioned.
+- **Genres:** Spotify no longer returns artist genres to this app (confirmed: top-artist objects have no `genres`/`popularity`), so the existing genre taste system was empty. Genres now come from Ticketmaster classifications (events + attractions, stored fill-if-empty with provenance `ticketmaster`) and, for Spotify top artists, from the catalog or an exact-name Ticketmaster attractions lookup (`lib/sources/spotify/genre-enrichment.ts`, `lib/sources/ticketmaster/attraction-genres.ts`; bounded, cached, time-boxed). Taste is derived per user in `buildGenreTasteProfile`/`summarizeGenreTaste`; nothing is hard-coded per genre.
+- **Surfacing:** genre-driven fits explain the assumption ("Assumed taste for electronic / EDM, based on your listening to ..."); candidate retrieval has a genre-taste tier; home page shows "More <genre>" row only when the user's own data implies it.
+- **Open:** 5 stray non-US events from the pre-fix worldwide festival run remain in the local DB (delete was not permitted in this session). Genres for events/artists only fill on sync; a prod sync is needed. Spotify artist matching to catalog still depends on verified ids (artists without a Spotify id in the catalog are matched by the Spotify matcher during sync, not by name alone).

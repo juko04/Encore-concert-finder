@@ -26,6 +26,7 @@ interface ProfileRow {
   max_favorite_artist_price: number | string | null;
   travel_willingness: string | null;
   recommendation_preset?: string | null;
+  artist_weight?: number | null;
 }
 
 function mapProfileRow(row: ProfileRow): UserProfile {
@@ -62,6 +63,10 @@ function mapProfileRow(row: ProfileRow): UserProfile {
     travelWillingness: row.travel_willingness ?? null,
     recommendationPreset:
       (row.recommendation_preset as RecommendationPreset) || 'balanced',
+    artistWeight:
+      row.artist_weight !== null && row.artist_weight !== undefined
+        ? Number(row.artist_weight)
+        : null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -140,6 +145,9 @@ export class SupabaseProfileRepository implements IProfileRepository {
     }
     if (input.recommendationPreset !== undefined) {
       rowPayload.recommendation_preset = input.recommendationPreset;
+    }
+    if (input.artistWeight !== undefined) {
+      rowPayload.artist_weight = input.artistWeight;
     }
 
     const { data, error } = await client

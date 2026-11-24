@@ -9,6 +9,7 @@ import {
 } from '@/lib/discover/home-data';
 import { getDiscoverDateWindows } from '@/lib/discover/dates';
 import { getHomeLocation } from '@/lib/location/server';
+import { SupabaseProfileRepository } from '@/lib/repositories/profile-repository';
 import { Header } from '@/components/index/Header';
 import { DiscoverHero, EventRow, VenueChips } from '@/components/discover-home';
 
@@ -22,10 +23,21 @@ export default async function HomePage() {
     const supabase = await createClient();
     const catalogRepo = new SupabaseCatalogRepository(supabase);
     const homeLocation = await getHomeLocation();
+    let homeRadiusMiles: number | null = null;
+    if (user && homeLocation) {
+      try {
+        homeRadiusMiles =
+          (await new SupabaseProfileRepository().getProfile(user.id))
+            ?.defaultRadiusMiles ?? null;
+      } catch (err) {
+        console.error('[HomePage] profile radius load failed:', err);
+      }
+    }
     data = await getDiscoverHomeData({
       catalogRepo,
       userId: user?.id,
       homeLocation,
+      homeRadiusMiles,
     });
   } catch (err) {
     console.error('[HomePage] Error loading discover data:', err);

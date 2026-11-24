@@ -69,6 +69,52 @@ export interface TicketmasterIngestionResult {
 }
 
 /**
+ * Persists the genres Ticketmaster assigned to each performer onto the canonical artist
+ * (fill-if-empty, provenance "ticketmaster"). Matching is by Ticketmaster attraction id only
+ * (never by name). Best-effort: a genre write failure never fails event ingestion.
+ */
+export async function storeTicketmasterArtistGenres(
+  catalogRepo: Pick<
+    ICatalogRepository,
+    'findArtistByExternalId' | 'fillArtistGenres'
+  >,
+  candidate: Pick<EventCandidate, 'artists'>,
+): Promise<number> {
+  let written = 0;
+  for (const artist of candidate.artists ?? []) {
+    const genres = artist.genres;
+    if (!Array.isArray(genres) || genres.length === 0) continue;
+    const tmId = artist.externalIds?.find(
+      (e) => e.provider === 'ticketmaster',
+    )?.externalId;
+    if (!tmId) continue;
+    try {
+      const canonical = await catalogRepo.findArtistByExternalId(
+        'ticketmaster',
+        tmId,
+      );
+      if (
+        canonical &&
+        (!canonical.genres || canonical.genres.length === 0) &&
+        (await catalogRepo.fillArtistGenres(
+          canonical.id,
+          genres,
+          'ticketmaster',
+        ))
+      ) {
+        written++;
+      }
+    } catch (err) {
+      console.warn(
+        `[TicketmasterPipeline] Could not store genres for ${artist.name}:`,
+        err instanceof Error ? err.message : err,
+      );
+    }
+  }
+  return written;
+}
+
+/**
  * Runs controlled Ticketmaster ingestion and canonicalization pipeline.
  * Supports both safe dry-run in-memory preview and atomic database persistence.
  */
@@ -420,6 +466,10 @@ export async function runTicketmasterIngestion(
       }
 
       const outcome = await coordinator.canonicalize(cand);
+
+      if (outcome.status === 'created' || outcome.status === 'matched') {
+        await storeTicketmasterArtistGenres(options.catalogRepo, cand);
+      }
 
       if (outcome.status === 'created') {
         canonicalEventsCreated++;

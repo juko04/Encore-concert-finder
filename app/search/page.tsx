@@ -1,5 +1,10 @@
 import React from 'react';
+import Link from 'next/link';
 import { createClient } from '@/lib/supabase/server';
+import { getHomeLocation } from '@/lib/location/server';
+import { filterEventsWithinRadius } from '@/lib/location/radius';
+import { SupabaseProfileRepository } from '@/lib/repositories/profile-repository';
+import type { UserProfile } from '@/lib/domain/profile';
 import { getAuthenticatedUser } from '@/lib/auth/session';
 import { SupabaseCatalogRepository } from '@/lib/repositories/catalog-repository';
 import { Header } from '@/components/index/Header';
@@ -32,7 +37,28 @@ interface SearchPageProps {
     maxPrice?: string;
     freeOnly?: string;
     includeUnknownPrice?: string;
+    near?: string;
   }>;
+}
+
+/** Cap for radius post-filtering (most-upcoming shows first, in the requested sort order). */
+const RADIUS_FETCH_LIMIT = 500;
+const PAGE_SIZE = 50;
+
+function shortcutHref(
+  params: Record<string, string | undefined>,
+  changes: Record<string, string | null>,
+): string {
+  const next: Record<string, string> = {};
+  for (const [k, v] of Object.entries(params)) {
+    if (typeof v === 'string' && v !== '') next[k] = v;
+  }
+  for (const [k, v] of Object.entries(changes)) {
+    if (v === null) delete next[k];
+    else next[k] = v;
+  }
+  const qs = new URLSearchParams(next).toString();
+  return qs ? `/search?${qs}` : '/search';
 }
 
 export default async function SearchPage({ searchParams }: SearchPageProps) {
@@ -111,17 +137,48 @@ export default async function SearchPage({ searchParams }: SearchPageProps) {
     offset: 0,
   };
 
+  // Saved preferences power two shortcut chips (signed-in users only).
+  let profile: UserProfile | null = null;
+  let home: Awaited<ReturnType<typeof getHomeLocation>> = null;
+  if (user) {
+    try {
+      profile = await new SupabaseProfileRepository().getProfile(user.id);
+    } catch (err) {
+      console.error('[SearchPage] profile load failed:', err);
+    }
+    home = await getHomeLocation(user.id);
+  }
+  const radiusMiles = profile?.defaultRadiusMiles ?? 25;
+  const budget = profile?.maxNormalTicketPrice ?? null;
+  const nearActive = resolvedParams.near === '1' && Boolean(home);
+  const budgetActive =
+    budget !== null && maxPrice === budget && !includeUnknownPrice;
+
   let events: CanonicalEventSummary[] = [];
   let totalCount = 0;
   try {
-    const [fetchedEvents, count] = await Promise.all([
-      catalogRepo.listEvents(filters),
-      typeof catalogRepo.countEvents === 'function'
-        ? catalogRepo.countEvents(filters)
-        : Promise.resolve(0),
-    ]);
-    events = fetchedEvents;
-    totalCount = Math.max(count, events.length);
+    if (nearActive && home) {
+      // Radius is measured from the home city's coordinate to the venue (or city centroid).
+      // The catalog has no geo query, so fetch a bounded page and filter here; shows whose
+      // location is unknown are excluded rather than guessed.
+      const candidates = await catalogRepo.listEvents({
+        ...filters,
+        limit: RADIUS_FETCH_LIMIT,
+        offset: 0,
+      });
+      const within = filterEventsWithinRadius(candidates, home, radiusMiles);
+      events = within.slice(0, PAGE_SIZE);
+      totalCount = within.length;
+    } else {
+      const [fetchedEvents, count] = await Promise.all([
+        catalogRepo.listEvents(filters),
+        typeof catalogRepo.countEvents === 'function'
+          ? catalogRepo.countEvents(filters)
+          : Promise.resolve(0),
+      ]);
+      events = fetchedEvents;
+      totalCount = Math.max(count, events.length);
+    }
   } catch (err) {
     console.error('[SearchPage] Error querying catalog events:', err);
     events = [];
@@ -132,6 +189,76 @@ export default async function SearchPage({ searchParams }: SearchPageProps) {
     <div className="min-h-screen bg-[#fafaf9] text-zinc-900">
       <Header isAuthenticated={Boolean(user)} userEmail={user?.email} />
       <main className="mx-auto w-full max-w-7xl px-4 py-6 sm:px-6 sm:py-8 lg:px-8">
+        {user && (
+          <div
+            data-testid="preference-shortcuts"
+            className="mb-4 flex flex-wrap items-center gap-2 text-xs"
+          >
+            <span className="font-semibold text-zinc-500">My preferences:</span>
+            {home ? (
+              <Link
+                href={shortcutHref(resolvedParams, {
+                  near: nearActive ? null : '1',
+                })}
+                data-testid="shortcut-near"
+                aria-pressed={nearActive}
+                className={`rounded-full border px-3 py-1 font-semibold transition ${
+                  nearActive
+                    ? 'border-zinc-900 bg-zinc-900 text-white'
+                    : 'border-zinc-200 bg-white text-zinc-700 hover:border-zinc-300'
+                }`}
+              >
+                Within {radiusMiles} mi of {home.label}
+              </Link>
+            ) : (
+              <Link
+                href="/preferences"
+                data-testid="shortcut-set-home"
+                className="rounded-full border border-dashed border-zinc-300 px-3 py-1 font-semibold text-zinc-600 hover:border-zinc-400"
+              >
+                Set a home city to filter by distance
+              </Link>
+            )}
+            {budget !== null ? (
+              <Link
+                href={shortcutHref(
+                  resolvedParams,
+                  budgetActive
+                    ? { maxPrice: null, includeUnknownPrice: null }
+                    : {
+                        maxPrice: String(budget),
+                        // Strict: only shows with a listed price within budget. Shows with no
+                        // listed price are not claimed to be affordable.
+                        includeUnknownPrice: 'false',
+                      },
+                )}
+                data-testid="shortcut-budget"
+                aria-pressed={budgetActive}
+                title="Only shows with a listed starting price at or under your typical budget"
+                className={`rounded-full border px-3 py-1 font-semibold transition ${
+                  budgetActive
+                    ? 'border-zinc-900 bg-zinc-900 text-white'
+                    : 'border-zinc-200 bg-white text-zinc-700 hover:border-zinc-300'
+                }`}
+              >
+                Listed price up to ${budget}
+              </Link>
+            ) : (
+              <Link
+                href="/preferences"
+                data-testid="shortcut-set-budget"
+                className="rounded-full border border-dashed border-zinc-300 px-3 py-1 font-semibold text-zinc-600 hover:border-zinc-400"
+              >
+                Set a ticket budget
+              </Link>
+            )}
+            {nearActive && (
+              <span className="text-zinc-400">
+                Distances are approximate (city to city).
+              </span>
+            )}
+          </div>
+        )}
         {/* Remount when the URL filters change so client-side navigation
             (header links, "See all", back/forward) re-hydrates every control. */}
         <SearchClient

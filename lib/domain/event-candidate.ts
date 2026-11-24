@@ -16,6 +16,8 @@ export interface CandidateArtist {
   externalIds?: CandidateArtistExternalId[];
   /** Verified https image supplied by the source for this specific artist. */
   imageUrl?: string | null;
+  /** Genres the source assigns to this performer (e.g. Ticketmaster classification). */
+  genres?: string[];
 }
 
 export interface CandidatePrice {
@@ -101,4 +103,25 @@ export function getCandidateImages(
     eventImageUrl: asHttpsImageUrl(images?.eventImageUrl),
     venueImageUrl: asHttpsImageUrl(images?.venueImageUrl),
   };
+}
+
+/**
+ * Event-level genres the source assigned (carried on `rawPayload.genres`, so they survive
+ * candidate storage and replay). Empty when unknown: genres are never guessed.
+ */
+export function getCandidateGenres(
+  candidate: Pick<EventCandidate, 'rawPayload'>,
+): string[] {
+  const raw = candidate.rawPayload?.genres;
+  if (!Array.isArray(raw)) return [];
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const g of raw) {
+    if (typeof g !== 'string') continue;
+    const v = g.trim();
+    if (!v || seen.has(v.toLowerCase())) continue;
+    seen.add(v.toLowerCase());
+    out.push(v);
+  }
+  return out;
 }

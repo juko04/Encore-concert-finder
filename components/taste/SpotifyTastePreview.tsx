@@ -7,6 +7,14 @@ import type {
   UserArtistPreference,
 } from '@/lib/domain/user-preference';
 
+/** Spotify returns at most 50 artists per listening window. */
+const MAX_RANK = 50;
+const RANK_WINDOWS: Array<{ key: SpotifyTimeRange; label: string }> = [
+  { key: 'short_term', label: '4 wk' },
+  { key: 'medium_term', label: '6 mo' },
+  { key: 'long_term', label: '1 yr' },
+];
+
 interface SpotifyTastePreviewProps {
   artists: SpotifyTopArtist[];
   timeRange: SpotifyTimeRange;
@@ -203,8 +211,15 @@ export function SpotifyTastePreview({
                 className="flex flex-col gap-3 p-4 transition-colors hover:bg-zinc-50 sm:flex-row sm:items-center sm:justify-between"
               >
                 <div className="flex items-center gap-3.5">
-                  <span className="w-5 text-right font-mono text-xs font-bold text-zinc-500">
+                  <span
+                    data-testid={`spotify-rank-${artist.id}`}
+                    title={`Spotify ranks this as your #${artist.rank} most-listened artist in the selected window (out of ${MAX_RANK})`}
+                    className="w-14 shrink-0 text-right font-mono text-xs font-bold leading-tight text-zinc-700"
+                  >
                     #{artist.rank}
+                    <span className="block text-[10px] font-medium text-zinc-400">
+                      of {MAX_RANK}
+                    </span>
                   </span>
 
                   {artist.imageUrl ? (
@@ -272,6 +287,43 @@ export function SpotifyTastePreview({
                     {artist.genres.length > 0 && (
                       <p className="mt-0.5 text-[11px] text-zinc-500">
                         {artist.genres.slice(0, 3).join(' · ')}
+                      </p>
+                    )}
+
+                    {/* Rank in every Spotify window + the Encore affinity derived from them,
+                        so the listening data can be checked against Spotify directly. */}
+                    {artist.ranksByRange && (
+                      <p
+                        data-testid={`spotify-window-ranks-${artist.id}`}
+                        className="mt-1 font-mono text-[10px] text-zinc-500"
+                      >
+                        {RANK_WINDOWS.map(({ key, label }) => {
+                          const r = artist.ranksByRange?.[key];
+                          return (
+                            <span key={key} className="mr-2.5 inline-block">
+                              {label}{' '}
+                              <strong
+                                className={
+                                  r ? 'text-zinc-800' : 'text-zinc-400'
+                                }
+                              >
+                                {r ? `#${r}` : '—'}
+                              </strong>
+                              <span className="text-zinc-400">/{MAX_RANK}</span>
+                            </span>
+                          );
+                        })}
+                        {typeof artist.affinity === 'number' && (
+                          <span
+                            data-testid={`spotify-affinity-${artist.id}`}
+                            title={artist.affinityReason}
+                            className="inline-block text-indigo-700"
+                          >
+                            Encore affinity{' '}
+                            <strong>{Math.round(artist.affinity * 100)}</strong>
+                            /100
+                          </span>
+                        )}
                       </p>
                     )}
                   </div>

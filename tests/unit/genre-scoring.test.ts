@@ -179,8 +179,10 @@ describe('genre-based artist fit', () => {
     expect(res.factorScore.score).toBeLessThan(70); // direct Spotify top-5 match
     expect(res.isExploratory).toBe(false);
     expect(res.genreMatch?.similarTo).toBe('John Summit');
-    expect(res.factorScore.explanation).toBe(
-      'Similar to John Summit (tech house)',
+    // States the inference: an ASSUMED taste, based on the user's own listening.
+    expect(res.factorScore.explanation).toContain('Assumed taste for house');
+    expect(res.factorScore.explanation).toContain(
+      'based on your listening to John Summit',
     );
   });
 
@@ -263,7 +265,8 @@ describe('genre-based artist fit', () => {
       isSuppressed: false,
       isExploratory: false,
     });
-    expect(text).toContain('Similar to John Summit (tech house)');
+    expect(text).toContain('Assumed taste for house');
+    expect(text).toContain('based on your listening to John Summit');
   });
 });
 

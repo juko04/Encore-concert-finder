@@ -9,6 +9,11 @@ import type {
 import type { SourceProvenance } from '@/lib/domain/source';
 import { normalizeUrl } from '@/lib/domain/value-objects';
 import type { TicketmasterEvent, TicketmasterImage } from './types';
+import {
+  extractTicketmasterGenres,
+  isNonArtistAttraction,
+  splitTicketPackageTitle,
+} from './listing-filters';
 
 export interface TicketmasterParseContext {
   sourceId: string;
@@ -109,8 +114,16 @@ export function parseTicketmasterEvent(
     confidence: 0.95,
   };
 
+  const ticketPackage = splitTicketPackageTitle(event.name);
+  const eventGenres = extractTicketmasterGenres(event.classifications);
+
   // 2. Artists & Billing
-  const rawAttractions = event._embedded?.attractions || [];
+  // Seat/VIP/parking products and the venue itself are listed as "attractions" but are not
+  // performers: never turn them into artists ("Club Level Seating: Ball Arena").
+  const listedVenueName = event._embedded?.venues?.[0]?.name?.trim() || '';
+  const rawAttractions = (event._embedded?.attractions || []).filter(
+    (attr) => !isNonArtistAttraction(attr.name, listedVenueName),
+  );
   const artists: CandidateArtist[] = [];
   const artistNames: string[] = [];
 
@@ -143,12 +156,16 @@ export function parseTicketmasterEvent(
       // Image belongs to this attraction only (never matched by name).
       const artistImageUrl = selectTicketmasterImage(attr.images);
 
+      // Genres Ticketmaster assigns to this performer (never guessed when absent).
+      const artistGenres = extractTicketmasterGenres(attr.classifications);
+
       artists.push({
         name: attr.name,
         billingPosition: 'unknown',
         sortOrder: index,
         externalIds,
         ...(artistImageUrl ? { imageUrl: artistImageUrl } : {}),
+        ...(artistGenres.length > 0 ? { genres: artistGenres } : {}),
       });
     });
   }
@@ -341,7 +358,9 @@ export function parseTicketmasterEvent(
     sourceEventId: event.id,
     sourceType: 'ticketing',
     provenance,
-    title: event.name,
+    // "Club Level Seating: Nickelback" is a seat package for the show "Nickelback": the package
+    // prefix is never part of the show title (rawPayload.name keeps the original).
+    title: ticketPackage.baseTitle || event.name,
     artistNames,
     artists,
     venueName,
@@ -367,6 +386,8 @@ export function parseTicketmasterEvent(
     rawPayload: {
       id: event.id,
       name: event.name,
+      ...(ticketPackage.isPackage ? { isTicketPackage: true } : {}),
+      ...(eventGenres.length > 0 ? { genres: eventGenres } : {}),
       url: event.url,
       dates: event.dates,
       status,
@@ -401,26 +422,64 @@ export function overlayTicketmasterImages<T extends EventCandidate>(
   parsed: EventCandidate,
 ): T {
   const parsedImages = parsed.rawPayload?.images;
+  const parsedGenres = parsed.rawPayload?.genres;
+  const parsedIsPackage = parsed.rawPayload?.isTicketPackage === true;
 
   const tmId = (a: CandidateArtist) =>
     a.externalIds?.find((e) => e.provider === 'ticketmaster')?.externalId;
   const imageByAttractionId = new Map<string, string>();
+  const genresByAttractionId = new Map<string, string[]>();
+  const parsedAttractionIds = new Set<string>();
   for (const a of parsed.artists ?? []) {
     const id = tmId(a);
-    if (id && a.imageUrl) imageByAttractionId.set(id, a.imageUrl);
+    if (!id) continue;
+    parsedAttractionIds.add(id);
+    if (a.imageUrl) imageByAttractionId.set(id, a.imageUrl);
+    if (a.genres && a.genres.length > 0) genresByAttractionId.set(id, a.genres);
   }
 
-  if (!parsedImages && imageByAttractionId.size === 0) return existing;
+  // Stored candidates may pre-date listing hygiene: performers that are really seat packages or
+  // the venue itself are dropped from the in-memory view (same rule the parser applies).
+  const isStale = (a: CandidateArtist) =>
+    isNonArtistAttraction(a.name, existing.venueName);
+  const hasStaleAttractions = (existing.artists ?? []).some(isStale);
+
+  if (
+    !parsedImages &&
+    !parsedGenres &&
+    !parsedIsPackage &&
+    imageByAttractionId.size === 0 &&
+    genresByAttractionId.size === 0 &&
+    !hasStaleAttractions
+  ) {
+    return existing;
+  }
+
+  const keptArtists = (existing.artists ?? []).filter((a) => !isStale(a));
+  const keptNames = new Set(keptArtists.map((a) => a.name));
 
   return {
     ...existing,
-    rawPayload: parsedImages
-      ? { ...(existing.rawPayload ?? {}), images: parsedImages }
-      : existing.rawPayload,
-    artists: existing.artists?.map((a) => {
+    title: parsedIsPackage ? parsed.title : existing.title,
+    artistNames: hasStaleAttractions
+      ? existing.artistNames.filter((n) => keptNames.has(n))
+      : existing.artistNames,
+    rawPayload: {
+      ...(existing.rawPayload ?? {}),
+      ...(parsedImages ? { images: parsedImages } : {}),
+      ...(parsedGenres ? { genres: parsedGenres } : {}),
+      ...(parsedIsPackage ? { isTicketPackage: true } : {}),
+    },
+    artists: keptArtists.map((a) => {
       const id = tmId(a);
       const imageUrl = id ? imageByAttractionId.get(id) : undefined;
-      return imageUrl ? { ...a, imageUrl } : a;
+      const genres = id ? genresByAttractionId.get(id) : undefined;
+      if (!imageUrl && !genres) return a;
+      return {
+        ...a,
+        ...(imageUrl ? { imageUrl } : {}),
+        ...(genres ? { genres } : {}),
+      };
     }),
   };
 }

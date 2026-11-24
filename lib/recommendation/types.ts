@@ -56,6 +56,8 @@ export interface GenreMatchInfo {
   tasteGenre: string;
   /** The user's own artist that taste genre came from. */
   similarTo: string;
+  /** The user's strongest few artists behind that taste (for "because you listen to ..."). */
+  similarArtists?: string[];
   /** 0..1 weighted similarity. */
   similarity: number;
 }

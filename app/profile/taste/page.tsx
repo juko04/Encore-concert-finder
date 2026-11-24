@@ -123,7 +123,14 @@ export default async function TasteProfilePage({
             </h1>
             <p className="mt-1 text-sm text-zinc-500">
               Your live music preferences teach Encore how to rank and score
-              upcoming concerts.
+              upcoming concerts.{' '}
+              <Link
+                href="/preferences"
+                data-testid="taste-preferences-link"
+                className="font-semibold text-indigo-600 hover:text-indigo-500"
+              >
+                Set your radius, budget and ranking style →
+              </Link>
             </p>
           </div>
 

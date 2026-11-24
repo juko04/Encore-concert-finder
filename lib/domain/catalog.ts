@@ -312,6 +312,9 @@ export interface CanonicalizationPayload {
     image_url?: string | null;
     /** Fill-if-empty image for the event's venue (venues.image_url). */
     venue_image_url?: string | null;
+    /** Source-assigned primary genre / genre list (e.g. Ticketmaster classification). */
+    genre?: string | null;
+    genres?: string[];
   } | null;
   artists?: Array<{
     artist_id?: string;

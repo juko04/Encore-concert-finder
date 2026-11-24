@@ -1466,6 +1466,45 @@ export class SupabaseCatalogRepository implements ICatalogRepository {
     return mapArtistRow(data.artists as unknown as ArtistRow);
   }
 
+  async getArtistsByIds(ids: string[]): Promise<Artist[]> {
+    const unique = Array.from(new Set(ids.filter(Boolean)));
+    if (unique.length === 0) return [];
+    const { data, error } = await this.client
+      .from('artists')
+      .select('*')
+      .in('id', unique);
+    if (error) {
+      throw new Error(`Failed to load artists by id: ${error.message}`);
+    }
+    return (data ?? []).map((row) => mapArtistRow(row as ArtistRow));
+  }
+
+  async fillArtistGenres(
+    artistId: string,
+    genres: string[],
+    source: string,
+  ): Promise<boolean> {
+    const clean = Array.from(
+      new Set(genres.map((g) => g?.trim()).filter((g): g is string => !!g)),
+    );
+    if (clean.length === 0) return false;
+    // Only rows with no genres yet are written (fill-if-empty); provenance is recorded.
+    const { data, error } = await this.client
+      .from('artists')
+      .update({
+        genres: clean,
+        genres_source: source,
+        genres_updated_at: new Date().toISOString(),
+      })
+      .eq('id', artistId)
+      .filter('genres', 'eq', '{}')
+      .select('id');
+    if (error) {
+      throw new Error(`Failed to store artist genres: ${error.message}`);
+    }
+    return (data ?? []).length > 0;
+  }
+
   async findArtistIdsByExternalIds(
     provider: string,
     externalIds: string[],

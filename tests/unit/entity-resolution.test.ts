@@ -604,5 +604,84 @@ describe('Entity Resolution Pipeline', () => {
       expect(fieldNames).toContain('status');
       expect(outcome.evidences.length).toBe(3);
     });
+
+    describe('multi-day consistency (check_events_multi_day_consistency)', () => {
+      const baseEvent: Event = {
+        id: '10000000-0000-0000-0000-000000000010',
+        name: 'Flow Fest',
+        normalizedName: 'flow fest',
+        eventKind: 'festival',
+        status: 'scheduled',
+        venueId: '20000000-0000-0000-0000-000000000001',
+        timezone: 'America/Mexico_City',
+        localStartDate: '2026-11-28',
+        startTimePrecision: 'date_only',
+        isMultiDay: false,
+      };
+      const baseCandidate: EventCandidate = {
+        title: 'Flow Fest',
+        artistNames: [],
+        venueName: 'Autódromo',
+        timezone: 'America/Mexico_City',
+        localStartDate: '2026-11-28',
+        startTimePrecision: 'date_only',
+        confidence: 0.9,
+        provenance: {
+          sourceId: 'src_tm',
+          sourceType: 'ticketing',
+          acquisitionMethod: 'api',
+          sourceUrl: 'https://app.ticketmaster.com/discovery/v2/events.json',
+          contentHash: 'hash_flow_fest',
+          fetchedAt: '2026-11-24T12:00:00Z',
+          confidence: 0.9,
+          parserVersion: '1.0.0',
+        },
+      };
+
+      it('sets isMultiDay=true when a merged end date extends a single-day event', () => {
+        const outcome = evaluateFieldMerge(baseEvent, {
+          ...baseCandidate,
+          localEndDate: '2026-11-29',
+        });
+        expect(outcome.updates.localEndDate).toBe('2026-11-29');
+        expect(outcome.updates.isMultiDay).toBe(true);
+      });
+
+      it('sets isMultiDay=false when a merged end date collapses a multi-day event to one day', () => {
+        const outcome = evaluateFieldMerge(
+          { ...baseEvent, localEndDate: '2026-11-29', isMultiDay: true },
+          { ...baseCandidate, localEndDate: '2026-11-28' },
+        );
+        expect(outcome.updates.localEndDate).toBe('2026-11-28');
+        expect(outcome.updates.isMultiDay).toBe(false);
+      });
+
+      it('does not downgrade an event with a known start instant to date_only', () => {
+        const outcome = evaluateFieldMerge(
+          {
+            ...baseEvent,
+            startsAt: '2026-11-29T02:00:00Z',
+            startTimePrecision: 'instant',
+          },
+          { ...baseCandidate, startTimePrecision: 'date_only' },
+        );
+        expect(outcome.updates.startTimePrecision).toBeUndefined();
+        expect(
+          outcome.evidences.some((e) => e.fieldName === 'start_time_precision'),
+        ).toBe(false);
+      });
+
+      it('rejects an observed end date that precedes the effective start date', () => {
+        const outcome = evaluateFieldMerge(baseEvent, {
+          ...baseCandidate,
+          localEndDate: '2026-11-27',
+        });
+        expect(outcome.updates.localEndDate).toBeUndefined();
+        expect(outcome.updates.isMultiDay).toBeUndefined();
+        expect(
+          outcome.evidences.some((e) => e.fieldName === 'local_end_date'),
+        ).toBe(false);
+      });
+    });
   });
 });

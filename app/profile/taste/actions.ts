@@ -34,6 +34,7 @@ import {
 } from '@/lib/sources/spotify/affinity-service';
 import { SupabaseCatalogRepository } from '@/lib/repositories/catalog-repository';
 import type { ICatalogRepository } from '@/lib/repositories/interfaces';
+import { computeSpotifyAffinity } from '@/lib/recommendation/spotify-affinity';
 
 export interface PreferenceActionResult {
   success?: boolean;
@@ -467,14 +468,52 @@ export async function getSpotifyTopArtistsAction(
       }
     }
 
-    const artists = await spotifyClient.getTopArtists(
-      currentAccessToken,
-      timeRange,
+    // Fetch all three listening windows so each row can show the artist's rank in every window
+    // (out of Spotify's top 50) next to the Encore affinity score derived from those ranks.
+    // The requested window must succeed; the other two are best-effort enrichment.
+    const otherRanges = VALID_SPOTIFY_TIME_RANGES.filter(
+      (r) => r !== timeRange,
     );
+    const [artists, ...otherResults] = await Promise.all([
+      spotifyClient.getTopArtists(currentAccessToken, timeRange),
+      ...otherRanges.map(async (r): Promise<SpotifyTopArtist[] | null> => {
+        try {
+          return (
+            (await spotifyClient.getTopArtists(currentAccessToken, r)) ?? null
+          );
+        } catch {
+          return null;
+        }
+      }),
+    ]);
     await repo.recordSync(user.id);
 
+    const ranksById = new Map<
+      string,
+      Partial<Record<SpotifyTimeRange, number>>
+    >();
+    for (const a of artists) {
+      ranksById.set(a.id, { [timeRange]: a.rank });
+    }
+    otherRanges.forEach((range, i) => {
+      for (const a of otherResults[i] ?? []) {
+        const ranks = ranksById.get(a.id);
+        if (ranks) ranks[range] = a.rank;
+      }
+    });
+
     return {
-      artists,
+      artists: artists.map((a) => {
+        const ranks = ranksById.get(a.id) ?? { [timeRange]: a.rank };
+        const result = computeSpotifyAffinity(ranks);
+        return {
+          ...a,
+          ranksByRange: ranks,
+          affinity: result.affinity,
+          affinityReason: result.reason,
+          trend: a.trend ?? result.trend,
+        };
+      }),
       isSyntheticPreview: false,
     };
   } catch (err) {

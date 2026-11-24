@@ -25,6 +25,11 @@ export interface UserProfile {
   maxFavoriteArtistPrice: number | null;
   travelWillingness: string | null;
   recommendationPreset: RecommendationPreset;
+  /**
+   * Optional artist-importance weight (20-80 percent). Null = use the preset's own artist weight.
+   * See applyArtistWeight in lib/recommendation/presets.ts.
+   */
+  artistWeight?: number | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -38,4 +43,5 @@ export interface UserProfileUpdateInput {
   maxFavoriteArtistPrice?: number | null;
   travelWillingness?: string | null;
   recommendationPreset?: RecommendationPreset;
+  artistWeight?: number | null;
 }
