@@ -25,6 +25,18 @@
   remove fragments and `utm_*`/`gclid`/`fbclid`, and preserve unknown query
   parameters.
 
+- Artist identity (owner decision, 2026-11-25): external ids and canonical ids always take
+  precedence over names. A name-only match is accepted when exactly ONE existing artist has that
+  normalized name and no incoming external id conflicts with that artist's ids (this lets venue
+  calendars, which publish no ids, attach to artists known from another source). Several
+  same-name artists, or a conflicting id, remain ambiguous / distinct. Every accepted name-only
+  match is recorded as `event_field_evidence` (`artist_matched_by_unique_name`). An artist may
+  hold several external ids per provider; attractions of one listing that share an id collapse
+  into one artist (`shared_external_id_in_candidate_collapsed`).
+- Shows with no artist are created when the source supplies at least one genre; genres that are
+  not source-supplied are inferred only from explicit title words or an exact-name Ticketmaster
+  lookup and are marked in `events.genres_source`.
+
 ### Technology
 - Real web app, not single static HTML file.
 - Next.js + TypeScript.

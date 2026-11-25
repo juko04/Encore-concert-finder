@@ -1,7 +1,10 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import type { Event } from '@/lib/domain/catalog';
 import type { EventCandidate } from '@/lib/domain/event-candidate';
-import { ArtistResolver } from '@/lib/entity-resolution/artist-resolver';
+import {
+  ArtistResolver,
+  UNIQUE_NAME_MATCH_REASON,
+} from '@/lib/entity-resolution/artist-resolver';
 import { EventMatcher } from '@/lib/entity-resolution/event-matcher';
 import { evaluateFieldMerge } from '@/lib/entity-resolution/field-merge';
 import { VenueResolver } from '@/lib/entity-resolution/venue-resolver';
@@ -40,8 +43,8 @@ describe('Entity Resolution Pipeline', () => {
       expect(result.matchMethod).toBe('external_id');
     });
 
-    it('disallows name-only matching against existing artist without external ID (routes to ambiguous)', async () => {
-      await catalogRepo.createArtist({
+    it('accepts a name-only match when exactly ONE existing artist has that name and no id conflicts (owner decision)', async () => {
+      const existing = await catalogRepo.createArtist({
         name: 'Khruangbin',
         normalizedName: 'khruangbin',
       });
@@ -50,9 +53,69 @@ describe('Entity Resolution Pipeline', () => {
         name: '  Khruangbin  ',
       });
 
+      expect(outcome.status).toBe('matched');
+      expect(outcome.artistId).toBe(existing.id);
+      expect(outcome.reasons).toContain(UNIQUE_NAME_MATCH_REASON);
+    });
+
+    it('a unique name match also enriches non-conflicting external ids onto the existing artist', async () => {
+      const existing = await catalogRepo.createArtist({
+        name: 'Khruangbin',
+        normalizedName: 'khruangbin',
+      });
+
+      const outcome = await resolver.resolveOrPrepare(catalogRepo, {
+        name: 'Khruangbin',
+        externalIds: [{ provider: 'spotify', externalId: 'sp_khruangbin' }],
+      });
+
+      expect(outcome.status).toBe('matched');
+      expect(outcome.artistId).toBe(existing.id);
+      expect(outcome.externalIdsToEnrich?.map((e) => e.externalId)).toContain(
+        'sp_khruangbin',
+      );
+    });
+
+    it('stays ambiguous when several existing artists share the name', async () => {
+      await catalogRepo.createArtist({
+        name: 'Phoenix',
+        normalizedName: 'phoenix',
+      });
+      await catalogRepo.createArtist({
+        name: 'Phoenix',
+        normalizedName: 'phoenix',
+      });
+
+      const outcome = await resolver.resolveOrPrepare(catalogRepo, {
+        name: 'Phoenix',
+      });
+
       expect(outcome.status).toBe('ambiguous');
       expect(outcome.reasons).toContain(
-        'name_only_match_against_existing_artist_requires_external_id_disambiguation',
+        'multiple_artists_with_same_name_requires_external_id',
+      );
+    });
+
+    it('creates a DISTINCT artist when the unique same-name artist has a conflicting id', async () => {
+      const existing = await catalogRepo.createArtist({
+        name: 'Phoenix',
+        normalizedName: 'phoenix',
+      });
+      await catalogRepo.addArtistExternalId({
+        artistId: existing.id,
+        provider: 'spotify',
+        externalId: 'sp_phoenix_france',
+      });
+
+      const outcome = await resolver.resolveOrPrepare(catalogRepo, {
+        name: 'Phoenix',
+        externalIds: [{ provider: 'spotify', externalId: 'sp_phoenix_local' }],
+      });
+
+      expect(outcome.status).toBe('to_create');
+      expect(outcome.artistId).not.toBe(existing.id);
+      expect(outcome.reasons).toContain(
+        'conflicting_external_id_distinct_artist',
       );
     });
 

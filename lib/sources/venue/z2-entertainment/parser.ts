@@ -76,6 +76,13 @@ export function resolveZ2Venue(
     return Z2_KNOWN_VENUES['chautauqua auditorium'];
   }
 
+  if (
+    cleaned.includes('10 mile music hall') ||
+    cleaned.includes('ten mile music hall')
+  ) {
+    return Z2_KNOWN_VENUES['10 mile music hall'];
+  }
+
   return { venueName: rawVenueText.trim() };
 }
 

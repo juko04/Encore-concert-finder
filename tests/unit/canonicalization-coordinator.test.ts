@@ -411,14 +411,14 @@ describe('CanonicalizationCoordinator Unit Tests', () => {
     ).rejects.toThrow(/duplicate key value violates unique constraint/);
   });
 
-  it('routes to needs_review when candidate artist matches existing artist by name alone without external IDs (Invariant 7)', async () => {
-    // Pre-seed an existing artist named "Ghost"
-    await catalogRepo.createArtist({
+  it('attaches to the ONE existing artist with that name when the candidate has no external ids (owner decision 2026-11-25), auditable as evidence', async () => {
+    // Pre-seed exactly one existing artist named "Ghost"
+    const existing = await catalogRepo.createArtist({
       name: 'Ghost',
       normalizedName: 'ghost',
     });
 
-    // Incoming candidate has artist "Ghost" but NO external ID disambiguation
+    // Incoming candidate (e.g. from a venue calendar) has artist "Ghost" and NO external ids
     const candidate = {
       ...fixtures.single_show,
       title: 'Ghost Live',
@@ -427,8 +427,35 @@ describe('CanonicalizationCoordinator Unit Tests', () => {
     };
 
     const res = await coordinator.canonicalize(candidate);
+    expect(res.status).toBe('created');
+    expect(res.eventId).not.toBeNull();
+
+    // No second "Ghost" artist was created: the event links to the existing one.
+    const ghosts = await catalogRepo.findArtistsByName('ghost');
+    expect(ghosts.map((a) => a.id)).toEqual([existing.id]);
+    const detail = await catalogRepo.getEventById(res.eventId as string);
+    expect(detail?.artists.map((a) => a.id)).toEqual([existing.id]);
+
+    // The decision is recorded as field evidence.
+    const evidence = (await catalogRepo.getEventById(res.eventId as string))
+      ?.fieldEvidence;
+    expect(
+      (evidence ?? []).some(
+        (e) => e.fieldName === 'artist_matched_by_unique_name',
+      ),
+    ).toBe(true);
+  });
+
+  it('still routes to needs_review when SEVERAL existing artists share the name (no unique match)', async () => {
+    await catalogRepo.createArtist({ name: 'Ghost', normalizedName: 'ghost' });
+    await catalogRepo.createArtist({ name: 'Ghost', normalizedName: 'ghost' });
+    const res = await coordinator.canonicalize({
+      ...fixtures.single_show,
+      title: 'Ghost Live',
+      artistNames: ['Ghost'],
+      artists: [{ name: 'Ghost' }],
+    });
     expect(res.status).toBe('needs_review');
-    expect(res.eventId).toBeNull();
     expect(res.reasons).toContain('ambiguous_artist_identity');
   });
 

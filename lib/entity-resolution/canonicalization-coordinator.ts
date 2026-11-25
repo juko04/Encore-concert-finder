@@ -22,7 +22,7 @@ import {
   NON_EVENT_REASON,
   isNonPublicEventTitle,
 } from '@/lib/sources/non-events';
-import { ArtistResolver } from './artist-resolver';
+import { ArtistResolver, UNIQUE_NAME_MATCH_REASON } from './artist-resolver';
 import { EventMatcher } from './event-matcher';
 import { evaluateFieldMerge, type FieldMergeEvidence } from './field-merge';
 import { VenueResolver } from './venue-resolver';
@@ -417,6 +417,7 @@ export class CanonicalizationCoordinator {
     }
 
     // 4. Resolve Artists (Finding 5: In-memory prep with ambiguity detection)
+    const uniqueNameMatches: Array<{ name: string; artist_id: string }> = [];
     const rawArtistPayloads: NonNullable<CanonicalizationPayload['artists']> =
       [];
 
@@ -638,6 +639,16 @@ export class CanonicalizationCoordinator {
       const billingPos = candidateArtist.billingPosition ?? 'unknown';
       const sortOrd = candidateArtist.sortOrder ?? index;
 
+      if (
+        resolved.status === 'matched' &&
+        resolved.reasons.includes(UNIQUE_NAME_MATCH_REASON)
+      ) {
+        uniqueNameMatches.push({
+          name: candidateArtist.name,
+          artist_id: resolved.artistId!,
+        });
+      }
+
       if (resolved.status === 'matched') {
         rawArtistPayloads.push({
           artist_id: resolved.artistId!,
@@ -680,6 +691,17 @@ export class CanonicalizationCoordinator {
       observed_value: c,
       value_hash: `shared_external_id_collapsed_${c.provider}_${c.external_id}_${c.collapsed_names.join('|')}`,
       confidence: candidate.confidence,
+      observed_at: candidate.provenance?.fetchedAt ?? new Date().toISOString(),
+      parser_version: candidate.provenance?.parserVersion ?? '1.0.0',
+    }));
+    const uniqueNameEvidences = uniqueNameMatches.map((m) => ({
+      field_name: 'artist_matched_by_unique_name',
+      source_id: candidate.sourceId,
+      raw_ingest_id: candidate.rawIngestId,
+      candidate_id: candidateId,
+      observed_value: m,
+      value_hash: `artist_unique_name_${m.artist_id}_${normalizeName(m.name)}`,
+      confidence: 0.6,
       observed_at: candidate.provenance?.fetchedAt ?? new Date().toISOString(),
       parser_version: candidate.provenance?.parserVersion ?? '1.0.0',
     }));
@@ -897,7 +919,11 @@ export class CanonicalizationCoordinator {
           source_url: candidate.provenance?.sourceUrl ?? '',
           confidence: candidate.confidence,
         },
-        evidence: [...creationEvidences, ...collapseEvidences],
+        evidence: [
+          ...creationEvidences,
+          ...collapseEvidences,
+          ...uniqueNameEvidences,
+        ],
         resolution: {
           event_candidate_id: candidateId,
           status: 'created',
@@ -982,7 +1008,7 @@ export class CanonicalizationCoordinator {
                 ]
               : [],
           )
-          .concat(collapseEvidences),
+          .concat(collapseEvidences, uniqueNameEvidences),
         resolution: {
           event_candidate_id: candidateId,
           status: 'matched',

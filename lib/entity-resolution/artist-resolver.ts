@@ -46,6 +46,10 @@ export interface ResolvedArtistResult {
   matchMethod: 'external_id' | 'normalized_name' | 'created';
 }
 
+/** Reason set when an artist was matched by a unique normalized name (no external id evidence). */
+export const UNIQUE_NAME_MATCH_REASON =
+  'unique_name_match_no_conflicting_external_id';
+
 export class ArtistResolver {
   /**
    * Resolves an artist or prepares an atomic creation specification without writing to the database.
@@ -202,12 +206,26 @@ export class ArtistResolver {
         }
       }
 
-      // Disallow name-only matching against existing artist without external ID or disambiguation signal
+      // Owner decision (2026-11-25): a name-only match IS accepted when exactly ONE existing artist
+      // carries this normalized name and no incoming external id conflicts with that artist's
+      // ids (conflicts and several same-name artists were handled above and stay ambiguous /
+      // distinct). This lets venue calendars, which publish no ids, attach to the artist we
+      // already know from another source. The decision is recorded as field evidence by the
+      // coordinator (artist_matched_by_unique_name) so it is auditable.
+      const enrichment = await this.evaluateExternalIdEnrichment(
+        catalogRepo,
+        candidateArtist.id,
+        options.externalIds,
+      );
+      if (enrichment.conflictReason) {
+        return { status: 'ambiguous', reasons: [enrichment.conflictReason] };
+      }
       return {
-        status: 'ambiguous',
-        reasons: [
-          'name_only_match_against_existing_artist_requires_external_id_disambiguation',
-        ],
+        status: 'matched',
+        artistId: candidateArtist.id,
+        artist: candidateArtist,
+        externalIdsToEnrich: enrichment.externalIdsToEnrich,
+        reasons: [UNIQUE_NAME_MATCH_REASON],
       };
     }
 

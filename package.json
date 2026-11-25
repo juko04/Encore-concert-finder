@@ -25,7 +25,8 @@
     "cleanup:synthetic": "vite-node --config vitest.config.ts scripts/cleanup-synthetic-data.ts",
     "audit:synthetic": "vite-node --config vitest.config.ts scripts/cleanup-synthetic-data.ts",
     "enrich:venue-images": "vite-node --config vitest.config.ts scripts/enrich-venue-images.ts",
-    "backfill:genres": "vite-node --config vitest.config.ts scripts/backfill-event-genres.ts"
+    "backfill:genres": "vite-node --config vitest.config.ts scripts/backfill-event-genres.ts",
+    "reprocess:name-only": "vite-node --config vitest.config.ts scripts/reprocess-name-only-reviews.ts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.5.2",
