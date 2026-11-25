@@ -151,4 +151,21 @@ describe('Calendar and Planning Features (Agent 5 & QA)', () => {
       ).toBeInTheDocument();
     });
   });
+
+  describe('CalendarClient default month', () => {
+    it('opens on the current month, not the first event month', () => {
+      vi.useFakeTimers({ toFake: ['Date'] });
+      vi.setSystemTime(new Date(2026, 10, 25, 12, 0, 0));
+      try {
+        render(
+          <CalendarClient
+            initialEvents={[{ ...sampleEvent, localStartDate: '2027-02-14' }]}
+          />,
+        );
+        expect(screen.getByText('November 2026')).toBeInTheDocument();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+  });
 });
