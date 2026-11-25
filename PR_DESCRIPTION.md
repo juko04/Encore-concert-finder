@@ -1,6 +1,6 @@
 ## What changed
 
-Branch `fix/ui-discover-auth-v2` (15 commits vs `origin/main` plus uncommitted final-session work):
+Branch `fix/ui-discover-auth-v2` (15 commits vs `origin/main`, head 2dc3ae0):
 
 - Discover home, calendar (opens on current month, `?month=YYYY-MM`), preferences page, Spotify ranks and trend-aware affinity, genre taste inference, Ticketmaster listing/image/genre fixes.
 - Search: `near=1` radius filter scans the whole catalog with exact counts; Load More keeps `near=1` and exact price limits (`lib/location/near-search.ts`, `near-context.ts`, `catalog-search.ts`, `SearchClient`, `/api/catalog/search`). Shared genre module, genre-aware search, "Mixed" label, badge colors, match score on cards.
