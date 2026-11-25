@@ -1,4 +1,4 @@
-import { beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { execSync } from 'child_process';
 import { assertSafeDatabaseTarget } from '@/lib/supabase/destination-guard';
@@ -52,12 +52,246 @@ function resolveSupabaseCredentials(): LocalCredentials | null {
   };
 }
 
+// ---------------------------------------------------------------------------
+// Isolated synthetic catalog (AGENTS.md invariants 8 and 12)
+//
+// This suite used to assume a pre-ingested live catalog. It now seeds its own
+// clearly labeled synthetic rows in beforeAll and removes exactly those rows in
+// afterAll. Every row uses a deterministic UUID in the reserved
+// 5e5e0000-0000-4000-8000-* range and a "(Synthetic Test)" name suffix, so a
+// crashed earlier run can be cleaned up and real rows are never touched.
+// All dates are computed relative to "now" so the catalog never goes stale.
+// ---------------------------------------------------------------------------
+const SYNTH_LABEL = '(Synthetic Test)';
+const SYNTH_TICKET_HOST = 'https://synthetic.test.invalid/red-rocks-live';
+const RED_ROCKS_EVENT_COUNT = 60; // > 50 so page 2 of the search route is non-empty
+const FILLER_EVENT_COUNT = 60; // pushes the catalog comfortably past 100 upcoming events
+
+function synthId(kind: 'v' | 'a' | 'e', n: number): string {
+  const prefix = { v: '1', a: '2', e: '3' }[kind];
+  return `5e5e0000-0000-4000-8000-${prefix}${String(n).padStart(11, '0')}`;
+}
+
+function futureDate(daysAhead: number): string {
+  // Start a few days out so day-boundary/timezone effects never make a seeded
+  // event "past" or leave it outside the upcoming window.
+  const d = new Date();
+  d.setUTCDate(d.getUTCDate() + 3 + daysAhead);
+  return d.toISOString().split('T')[0];
+}
+
+interface SyntheticCatalog {
+  venueIds: string[];
+  artistIds: string[];
+  eventIds: string[];
+  redRocksVenueId: string;
+  rows: {
+    venues: Record<string, unknown>[];
+    artists: Record<string, unknown>[];
+    events: Record<string, unknown>[];
+    eventArtists: Record<string, unknown>[];
+    ticketLinks: Record<string, unknown>[];
+  };
+}
+
+function buildSyntheticCatalog(): SyntheticCatalog {
+  const venue = (n: number, name: string, city: string) => ({
+    id: synthId('v', n),
+    name: `${name} ${SYNTH_LABEL}`,
+    normalized_name: `${name.toLowerCase()} synthetic test`,
+    city,
+    region: 'CO',
+    country_code: 'US',
+    timezone: 'America/Denver',
+  });
+  const artist = (n: number, name: string) => ({
+    id: synthId('a', n),
+    name: `${name} ${SYNTH_LABEL}`,
+    normalized_name: `${name.toLowerCase()} synthetic test`,
+  });
+
+  const venues = [
+    venue(1, 'Red Rocks Amphitheatre', 'Morrison'),
+    venue(2, 'Globe Hall', 'Denver'),
+    venue(3, 'Synthetic Catalog Hall', 'Denver'),
+  ];
+  const artists = [
+    artist(1, 'Red Rocks Headliner'), // a1
+    artist(2, 'Jonah Kagen'), // a2
+    artist(3, 'Sublime'), // a3
+    artist(4, 'Abbie Gamboa'), // a4
+    artist(5, 'Chelsea Plank'), // a5
+    artist(6, 'Filler Headliner'), // a6
+  ];
+
+  const events: Record<string, unknown>[] = [];
+  const eventArtists: Record<string, unknown>[] = [];
+  const ticketLinks: Record<string, unknown>[] = [];
+  let eventSeq = 0;
+
+  const addEvent = (opts: {
+    name: string;
+    venueN: number;
+    city: string;
+    dayOffset: number;
+    artistLinks: Array<{ artistN: number; billing: string }>;
+    kind?: string;
+    link?: {
+      min: number;
+      max: number;
+      status: string;
+      verified?: boolean;
+    };
+  }) => {
+    eventSeq += 1;
+    const id = synthId('e', eventSeq);
+    const date = futureDate(opts.dayOffset);
+    events.push({
+      id,
+      name: `${opts.name} ${SYNTH_LABEL}`,
+      normalized_name: `${opts.name.toLowerCase()} synthetic test`,
+      event_kind: opts.kind ?? 'concert',
+      status: 'scheduled',
+      venue_id: synthId('v', opts.venueN),
+      city: opts.city,
+      region: 'CO',
+      country_code: 'US',
+      timezone: 'America/Denver',
+      local_start_date: date,
+      // 19:00Z is 12:00/13:00 in America/Denver: same calendar date as local_start_date.
+      starts_at: `${date}T19:00:00Z`,
+      start_time_precision: 'instant',
+    });
+    opts.artistLinks.forEach((al, idx) => {
+      eventArtists.push({
+        event_id: id,
+        artist_id: synthId('a', al.artistN),
+        billing_position: al.billing,
+        sort_order: idx,
+      });
+    });
+    if (opts.link) {
+      ticketLinks.push({
+        event_id: id,
+        url: `${SYNTH_TICKET_HOST}/${id}`,
+        normalized_url: `${SYNTH_TICKET_HOST}/${id}`,
+        min_price: opts.link.min,
+        max_price: opts.link.max,
+        currency: 'USD',
+        inventory_status: opts.link.status,
+        verified_at: opts.link.verified ? new Date().toISOString() : null,
+      });
+    }
+  };
+
+  for (let i = 0; i < RED_ROCKS_EVENT_COUNT; i++) {
+    addEvent({
+      name: `Red Rocks Night ${String(i + 1).padStart(2, '0')}`,
+      venueN: 1,
+      city: 'Morrison',
+      dayOffset: i,
+      artistLinks: [{ artistN: 1, billing: 'headliner' }],
+      link: { min: 40 + i, max: 90 + i, status: 'available' },
+    });
+  }
+
+  // Source-verified sold-out concert at Globe Hall.
+  addEvent({
+    name: 'Jonah Kagen',
+    venueN: 2,
+    city: 'Denver',
+    dayOffset: 7,
+    artistLinks: [{ artistN: 2, billing: 'headliner' }],
+    link: { min: 30, max: 30, status: 'sold_out', verified: true },
+  });
+  // Events with no ticket links: inventory must default to 'unknown'.
+  for (let i = 0; i < 2; i++) {
+    addEvent({
+      name: `Sublime Tribute Night ${i + 1}`,
+      venueN: 3,
+      city: 'Denver',
+      dayOffset: 10 + i,
+      artistLinks: [{ artistN: 3, billing: 'headliner' }],
+    });
+  }
+  // Headliner with a searchable opener.
+  addEvent({
+    name: 'Abbie Gamboa',
+    venueN: 3,
+    city: 'Denver',
+    dayOffset: 12,
+    artistLinks: [
+      { artistN: 4, billing: 'headliner' },
+      { artistN: 5, billing: 'support' },
+    ],
+    link: { min: 25, max: 45, status: 'available' },
+  });
+  // Free events so price_asc sorts a verified $0 event first.
+  for (let i = 0; i < 3; i++) {
+    addEvent({
+      name: `Free Community Show ${i + 1}`,
+      venueN: 3,
+      city: 'Denver',
+      dayOffset: 14 + i,
+      kind: 'free_event',
+      artistLinks: [{ artistN: 6, billing: 'headliner' }],
+    });
+  }
+  for (let i = 0; i < FILLER_EVENT_COUNT; i++) {
+    addEvent({
+      name: `Catalog Filler Show ${String(i + 1).padStart(2, '0')}`,
+      venueN: 3,
+      city: 'Denver',
+      dayOffset: 20 + i,
+      artistLinks: [{ artistN: 6, billing: 'headliner' }],
+      link: { min: 15 + i, max: 60 + i, status: 'available' },
+    });
+  }
+
+  return {
+    venueIds: venues.map((v) => v.id),
+    artistIds: artists.map((a) => a.id),
+    eventIds: events.map((e) => e.id as string),
+    redRocksVenueId: synthId('v', 1),
+    rows: { venues, artists, events, eventArtists, ticketLinks },
+  };
+}
+
+async function chunkedInsert(
+  client: SupabaseClient,
+  table: string,
+  rows: Record<string, unknown>[],
+): Promise<void> {
+  for (let i = 0; i < rows.length; i += 100) {
+    const { error } = await client.from(table).insert(rows.slice(i, i + 100));
+    if (error) {
+      throw new Error(`Failed to seed synthetic ${table}: ${error.message}`);
+    }
+  }
+}
+
+/** Deletes only rows with this suite's reserved synthetic ids (cascades to links). */
+async function deleteSyntheticCatalog(
+  client: SupabaseClient,
+  catalog: SyntheticCatalog,
+): Promise<void> {
+  for (let i = 0; i < catalog.eventIds.length; i += 100) {
+    await client
+      .from('events')
+      .delete()
+      .in('id', catalog.eventIds.slice(i, i + 100));
+  }
+  await client.from('artists').delete().in('id', catalog.artistIds);
+  await client.from('venues').delete().in('id', catalog.venueIds);
+}
+
 describe('PostgreSQL Live Integration: Red Rocks Search, Deep Pagination, Timezone & Availability', () => {
   const credentials = resolveSupabaseCredentials();
   let adminClient: SupabaseClient;
   let catalogRepo: SupabaseCatalogRepository;
+  const syntheticCatalog = buildSyntheticCatalog();
 
-  beforeAll(() => {
+  beforeAll(async () => {
     if (!credentials) {
       throw new Error(
         'Supabase integration credentials could not be resolved.',
@@ -79,23 +313,47 @@ describe('PostgreSQL Live Integration: Red Rocks Search, Deep Pagination, Timezo
       auth: { autoRefreshToken: false, persistSession: false },
     });
     catalogRepo = new SupabaseCatalogRepository(adminClient);
-  });
+
+    // Idempotent: clear leftovers from a crashed earlier run (reserved ids only),
+    // then seed the isolated synthetic catalog. Existing real rows are untouched.
+    await deleteSyntheticCatalog(adminClient, syntheticCatalog);
+    await chunkedInsert(adminClient, 'venues', syntheticCatalog.rows.venues);
+    await chunkedInsert(adminClient, 'artists', syntheticCatalog.rows.artists);
+    await chunkedInsert(adminClient, 'events', syntheticCatalog.rows.events);
+    await chunkedInsert(
+      adminClient,
+      'event_artists',
+      syntheticCatalog.rows.eventArtists,
+    );
+    await chunkedInsert(
+      adminClient,
+      'event_ticket_links',
+      syntheticCatalog.rows.ticketLinks,
+    );
+  }, 60000);
+
+  afterAll(async () => {
+    if (adminClient) {
+      await deleteSyntheticCatalog(adminClient, syntheticCatalog);
+    }
+  }, 60000);
 
   describe('1. Red Rocks HTTP 500 Reproduction & Deep Pagination', () => {
     let redRocksUpcomingCount: number;
 
     // Determine actual count from database before running assertions
     it('resolves Red Rocks upcoming event count from database', async () => {
+      // Resolve the venue set exactly as the search route does (name match), so
+      // the expected count stays correct if other Red Rocks venues also exist.
       const { data: venues } = await adminClient
         .from('venues')
         .select('id')
-        .ilike('name', '%Red Rocks%');
+        .ilike('name', '%Red Rocks Amphitheatre%');
       expect(venues && venues.length > 0).toBe(true);
-      const redRocksId = venues![0].id;
 
       // Count upcoming events at Red Rocks
       const events = await catalogRepo.listEvents({
-        venueId: redRocksId,
+        venueId: 'Red Rocks Amphitheatre',
         excludePastShowtimes: true,
         fromDate: new Date().toISOString().split('T')[0],
         limit: 200,
@@ -148,13 +406,21 @@ describe('PostgreSQL Live Integration: Red Rocks Search, Deep Pagination, Timezo
     });
 
     it('also accepts valid venue UUID seamlessly in API and repository', async () => {
-      // Find Red Rocks UUID
+      // Find the seeded Red Rocks venue UUID
       const { data: venues } = await adminClient
         .from('venues')
         .select('id, name')
-        .ilike('name', '%Red Rocks%');
+        .eq('id', syntheticCatalog.redRocksVenueId);
       expect(venues && venues.length > 0).toBe(true);
       const redRocks = venues![0];
+      const redRocksVenueCount = (
+        await catalogRepo.listEvents({
+          venueId: redRocks.id,
+          excludePastShowtimes: true,
+          fromDate: new Date().toISOString().split('T')[0],
+          limit: 200,
+        })
+      ).length;
 
       const req = new NextRequest(
         `http://localhost:3000/api/catalog/search?venueId=${redRocks.id}&sort=date_asc&limit=10&page=1`,
@@ -166,8 +432,8 @@ describe('PostgreSQL Live Integration: Red Rocks Search, Deep Pagination, Timezo
       }
 
       expect(res.status).toBe(200);
-      expect(data.events.length).toBe(Math.min(redRocksUpcomingCount, 10));
-      expect(data.pagination.totalCount).toBe(redRocksUpcomingCount);
+      expect(data.events.length).toBe(Math.min(redRocksVenueCount, 10));
+      expect(data.pagination.totalCount).toBe(redRocksVenueCount);
     });
   });
 

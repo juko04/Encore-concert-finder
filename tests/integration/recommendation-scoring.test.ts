@@ -6,6 +6,7 @@ import { SupabaseProfileRepository } from '@/lib/repositories/profile-repository
 import { SupabaseUserPreferenceRepository } from '@/lib/repositories/user-preference-repository';
 import { SupabaseCatalogRepository } from '@/lib/repositories/catalog-repository';
 import { rankEvents } from '@/lib/recommendation/engine';
+import { PRESET_WEIGHTS } from '@/lib/recommendation/presets';
 
 interface LocalCredentials {
   url: string;
@@ -356,7 +357,9 @@ describe('PostgreSQL Integration: Recommendation Scoring & Profile RLS', () => {
       (r) => r.eventId === testEventId,
     );
     expect(matchedRecArtistFirst).toBeDefined();
-    expect(matchedRecArtistFirst!.weights.artist).toBe(PRESET_WEIGHTS.artist_first.artist);
+    expect(matchedRecArtistFirst!.weights.artist).toBe(
+      PRESET_WEIGHTS.artist_first.artist,
+    );
   });
 
   it('resolves explicit Spotify provider identity through artist_external_ids, disambiguates same-name artists, and isolates preferences across database reload', async () => {
