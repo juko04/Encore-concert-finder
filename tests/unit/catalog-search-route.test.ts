@@ -103,6 +103,7 @@ describe('GET /api/catalog/search (Server-side Pagination & Filter Route)', () =
       totalCount: 542,
       totalPages: 11,
       hasMore: true,
+      nearApplied: false,
     });
 
     // Verify pagination headers
@@ -129,6 +130,7 @@ describe('GET /api/catalog/search (Server-side Pagination & Filter Route)', () =
       totalCount: 101,
       totalPages: 3,
       hasMore: false,
+      nearApplied: false,
     });
     expect(res.headers.get('X-Has-More')).toBe('false');
   });
@@ -220,6 +222,7 @@ describe('GET /api/catalog/search (Server-side Pagination & Filter Route)', () =
       totalCount: 3,
       totalPages: 1,
       hasMore: false,
+      nearApplied: false,
     });
   });
 });

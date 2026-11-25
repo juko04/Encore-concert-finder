@@ -444,3 +444,20 @@ export function formatMatchScoreLabel(score: number): string {
   const clamped = Math.max(0, Math.min(100, Math.round(score)));
   return `Match ${clamped}`;
 }
+
+/**
+ * Label for a card's match score, or null when there is nothing genuine to show: guests,
+ * unscored rows, suppressed (disliked) shows. Shared by the Search and Discover cards so both
+ * surfaces agree.
+ */
+export function getCardMatchScoreLabel(
+  p?: {
+    isPersonalized?: boolean;
+    score?: number | null;
+    isDisliked?: boolean;
+  } | null,
+): string | null {
+  if (p?.isDisliked) return null;
+  if (!hasRealMatchScore(p)) return null;
+  return formatMatchScoreLabel(p.score);
+}

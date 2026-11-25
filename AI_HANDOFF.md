@@ -8,26 +8,17 @@ Durable architecture records belong in [`docs/architecture/`](docs/architecture/
 ## Current Status & Location
 
 - **Current Milestone:** **Encore V2 UI Migration & Production Foundation (Homepage Discovery, Calendar View, Opener Search, Card Hardening)**.
-- **Active Branch:** `main`
-- **Current Status:** **COMMITTED & VERIFIED ON MAIN**. Encore now opens directly to the live concert discovery homepage at `/`. Features integrated calendar month view with `.ics` and Google Calendar exports (`/calendar`), dynamic compact header (`Discover`, `Calendar`, `Saved`, and accessible `Account` menu), opener and support act search across the full catalog, accessible cards with fallback image hierarchy, honest availability percentage badges, and upcoming saved show ticker.
-- **Verification Suite Results (All Passed):**
-  - `npm run format:check`: **PASS** (100% Prettier compliant)
-  - `npm run lint`: **PASS** (0 ESLint errors, 0 warnings)
-  - `npm run typecheck`: **PASS** (Strict TypeScript `tsc --noEmit`, 0 errors)
-  - `npm test`: **PASS** (**72/72 test files, 979/979 unit tests passed**)
-  - `npm run test:integration`: **PASS** (**15/15 test files, 125/125 database integration tests passed against live local Supabase PostgreSQL**)
-  - `npm run build`: **PASS** (Next.js 15.5.27 production build clean, 22/22 routes compiled including `/` and `/calendar`)
-  - `npx playwright test`: **PASS** (**17/17 browser tests passed / 1 skipped for Spotify creds**)
-- **Next Immediate Action:** Proceed to improving actual ticket price coverage and ingesting more concerts. Zero speculative fixes.
+- **Active Branch:** `fix/ui-discover-auth-v2` (PR #21 against `main`). Coordinator commits; nothing merged.
+- **Current Status:** Final verification run 2026-11-25 on the integrated working tree (uncommitted at time of run). See below; PR text in `PR_DESCRIPTION.md`.
 
 ### Latest (2026-11-25, branch `fix/ui-discover-auth-v2`, PR #21)
 
-- **CI fix:** `supabase/config.toml` `[auth.email] enable_signup=false` disabled the whole email provider (422 `email_provider_disabled`) in the current Supabase CLI, breaking password-login e2e. Now `true`; public signup still blocked by `[auth] enable_signup=false` (verified: signup returns `signup_disabled`). Spotify e2e tab assertion updated to the new active class. Integration: scoring tests aligned with new preset weights (balanced 55, artist_first 70); Red Rocks suite now seeds its own labeled synthetic catalog (it previously needed a live-ingested DB, failing on any clean DB).
-- **Search:** `near=1` filter now scans the whole catalog (`lib/location/near-search.ts`), exact counts. **OPEN: Load More after `near=1` still returns unfiltered rows** (needs `SearchClient.tsx` + `app/api/catalog/search/route.ts`; edit was blocked by a permission check and not worked around).
-- **Spotify persistence:** new `user_spotify_artist_affinities` table (migration 20261125010000, RLS, cascades on account deletion). Disconnect/expiry/403 deletes tokens only; stored rankings still feed scoring and the Taste UI. Spotify has no revoke endpoint, so "revoke" = local token deletion. Needs an entry in `docs/architecture/data-model.md` (not yet written).
-- **Ticketmaster/DB:** shared provider external IDs (e.g. 'Day Out With Thomas') now route to persisted `needs_review` (`duplicate_external_id_conflict`) instead of aborting the batch (migration 20261125020000, coordinator + memory repo). **NOT RUN:** real Ticketmaster ingestion (no API key in this environment); only a Ticketmaster-shaped fixture through the real pipeline against local Postgres.
-- **Backlog done:** calendar current month, shared genre module/search/Mixed/colors, match score on cards, event-kind rules (see `docs/project/non-blocking-debt.md` section 4). Not done: backlog 1 (broader genre backfill needs a prod sync), 10 (Spotify embed), 'House Party' religious tag.
-- **Verified locally on the final tree (Docker + local Supabase started in cloud env, db reset first):** `format:check` PASS, `lint` PASS, `typecheck` PASS, `npm test` 105 files / 1314 tests PASS, `test:integration` 17 files / 133 tests PASS, `build` PASS, Playwright 16 passed / 1 skipped (needs a connected Spotify test user). Not run: manual browser QA of Spotify reconnect/disconnect with a real Spotify account, ticket images, invited-user magic-link. Earlier lint/format discrepancies between this file and QA docs were stale uncommitted-state results; all now pass.
+- **Verified on the final tree (local Supabase with the real dev DB, no reset):** `format:check` PASS, `lint` PASS (0 warnings), `typecheck` PASS, `npm test` 110 files / 1344 tests PASS, `build` PASS, `test:integration` 19 files / 146 tests: 144 pass, 2 FAIL (`personalized-discover` Scenario B and `catalog-search-red-rocks-live` totalCount; both assume a small catalog and fail only against the 1,133-event dev DB: default limit 50 / sample cap 300; they passed on a freshly reset DB), Playwright 16 pass / 1 skipped (Spotify test user needed). First e2e run had 2 timeouts from a hung browser session; those two files passed 5/5 on rerun. Earlier lint/format discrepancies in QA docs were stale; current result is clean.
+- **Added this session:** near=1 Load More fix + shared near-search (`lib/location/near-search.ts`, `near-context.ts`, `catalog-search.ts`), `user_spotify_artist_affinities` (20261125010000), needs_review conflict persistence (20261125020000), conflict idempotency tests, `scripts/bench-near-search.ts`.
+- **Local stack caveat:** the running GoTrue container predates the `config.toml` change (`GOTRUE_DISABLE_SIGNUP=false`), so public signup and OTP auto-create currently succeed locally. Restart the stack (`supabase stop && supabase start`, data kept) and re-check `signup_disabled` before relying on invite-only locally.
+- **Not run / limitations:** real Spotify OAuth connect/disconnect (needs interactive consent); no fresh-DB migration replay locally (CI does it); Ticketmaster dry-run only (not persisted). Cold first `near=1` request at 20k+ events takes ~4-26s (needs lightweight scan/RPC; no cap added). `/search` page 1 and Load More share a default 12-month end date. `DISCOVER_TIMEZONE='America/Denver'` (`lib/discover/dates.ts`) still violates the no-hardcoded-geography invariant. `resolveNearContext` has no dedicated test. Two Ticketmaster attractions resolving to one existing artist still abort a batch (`uq_artist_provider`).
+- **Backlog:** see `docs/project/non-blocking-debt.md` section 4 (not done: 1 genre backfill, 10 Spotify embed, 'House Party' tag).
+- **Next action:** independent review of PR #21; do NOT merge autonomously.
 
 ### Earlier (2026-11-24, branch `fix/ui-discover-auth-v2`)
 

@@ -77,6 +77,9 @@ export function TasteProfileManager({
   const [spotifyArtists, setSpotifyArtists] = useState<SpotifyTopArtist[]>([]);
   const [isStoredSnapshot, setIsStoredSnapshot] = useState<boolean>(false);
   const [storedSyncedAt, setStoredSyncedAt] = useState<string | null>(null);
+  const [storedEmptyMessage, setStoredEmptyMessage] = useState<string | null>(
+    null,
+  );
   const [isLoadingSpotify, setIsLoadingSpotify] = useState<boolean>(false);
   const [isDisconnecting, setIsDisconnecting] = useState<boolean>(false);
   const [spotifyPreviewError, setSpotifyPreviewError] = useState<string | null>(
@@ -143,13 +146,17 @@ export function TasteProfileManager({
         .then((res) => {
           if (!isSubscribed) return;
           setSpotifyArtists(res.artists);
-          setIsStoredSnapshot(res.artists.length > 0);
+          // Keep the preview (and its window tabs) mounted when stored data exists but the
+          // selected window has none, so the user can switch windows.
+          setIsStoredSnapshot(res.artists.length > 0 || Boolean(res.message));
+          setStoredEmptyMessage(res.message ?? null);
           setStoredSyncedAt(res.syncedAt);
         })
         .catch(() => {
           if (!isSubscribed) return;
           setSpotifyArtists([]);
           setIsStoredSnapshot(false);
+          setStoredEmptyMessage(null);
         });
       return () => {
         isSubscribed = false;
@@ -157,6 +164,7 @@ export function TasteProfileManager({
     }
 
     setIsStoredSnapshot(false);
+    setStoredEmptyMessage(null);
     let isSubscribed = true;
     setIsLoadingSpotify(true);
 
@@ -469,12 +477,11 @@ export function TasteProfileManager({
           isSyncing={isSyncing}
         />
 
-        {(spotifyStatus.connected ||
-          isSyntheticDemo ||
-          (isStoredSnapshot && spotifyArtists.length > 0)) && (
+        {(spotifyStatus.connected || isSyntheticDemo || isStoredSnapshot) && (
           <SpotifyTastePreview
             isStoredSnapshot={isStoredSnapshot}
             storedSyncedAt={storedSyncedAt}
+            emptyMessage={storedEmptyMessage}
             artists={spotifyArtists}
             timeRange={spotifyTimeRange}
             onChangeTimeRange={setSpotifyTimeRange}

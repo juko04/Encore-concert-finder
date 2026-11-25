@@ -57,6 +57,8 @@ export interface SearchClientProps {
   initialStartDate?: string;
   initialEndDate?: string;
   initialFreeOnly?: boolean;
+  /** ?near=1 was honoured server-side; Load More / refetches must ask for the same radius (the server re-derives home + radius from the session, never from the client). */
+  initialNear?: boolean;
   /** Hydrated from ?maxPrice= so "Under $30" links keep their price cap. */
   initialMaxPrice?: number;
   /** Hydrated from ?includeUnknownPrice=false (verified prices only). */
@@ -115,6 +117,7 @@ export function SearchClient({
   initialStartDate,
   initialEndDate,
   initialFreeOnly = false,
+  initialNear = false,
   initialMaxPrice,
   initialIncludeUnknownPrice = true,
   initialFacets,
@@ -230,7 +233,8 @@ export function SearchClient({
   );
   const [maxPriceBudget, setMaxPriceBudget] = useState<number>(
     capUsesBudget
-      ? Math.min(Math.max(Math.round(initialMaxPrice! / 5) * 5, 10), 250)
+      ? // Exact URL value (e.g. 40, 42.5); never rounded or clamped to the slider's range.
+        initialMaxPrice!
       : 150,
   );
   const [outsideBudgetAllowed, setOutsideBudgetAllowed] =
@@ -417,14 +421,20 @@ export function SearchClient({
     setCurrentPage(1);
   };
 
+  // Primitive (not the uniqueVenues array) so a Load More that merely appends events does not
+  // change buildSearchParams' identity and re-trigger a page-1 refetch that wipes the extra pages.
+  const selectedVenueId = useMemo(
+    () => uniqueVenues.find((v) => v.id === selectedVenue)?.id,
+    [uniqueVenues, selectedVenue],
+  );
+
   const buildSearchParams = useCallback(
     (pageNumber: number) => {
       const params = new URLSearchParams();
       if (query.trim()) params.set('q', query.trim());
       if (selectedVenue !== 'all') {
-        const found = uniqueVenues.find((v) => v.id === selectedVenue);
-        if (found?.id) {
-          params.set('venueId', found.id);
+        if (selectedVenueId) {
+          params.set('venueId', selectedVenueId);
         } else {
           params.set('venue', selectedVenue);
         }
@@ -462,6 +472,7 @@ export function SearchClient({
       if (sortBy) {
         params.set('sort', sortBy);
       }
+      if (initialNear) params.set('near', '1');
 
       params.set('limit', '50');
       params.set('page', String(pageNumber));
@@ -473,7 +484,7 @@ export function SearchClient({
       selectedVenue,
       selectedCity,
       selectedGenre,
-      uniqueVenues,
+      selectedVenueId,
       dateFilter,
       customStartDate,
       customEndDate,
@@ -482,6 +493,7 @@ export function SearchClient({
       maxPriceBudget,
       includeUnknownPrice,
       sortBy,
+      initialNear,
       referenceDate,
     ],
   );
@@ -967,7 +979,9 @@ export function SearchClient({
                 min="10"
                 max="250"
                 step="5"
-                value={maxPriceBudget}
+                // The slider only displays a clamped position; the exact value (state) is
+                // never rewritten unless the user moves the control.
+                value={Math.min(Math.max(maxPriceBudget, 10), 250)}
                 onChange={(e) => setMaxPriceBudget(Number(e.target.value))}
                 className="w-full accent-zinc-900"
               />

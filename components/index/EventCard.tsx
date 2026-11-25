@@ -13,6 +13,7 @@ import {
 } from './formatters';
 import { EventImage } from './EventImage';
 import { GenreBadge } from './GenreBadge';
+import { eventGenreList } from '@/lib/genres/catalog-genres';
 import {
   HeartIcon,
   BellIcon,
@@ -145,7 +146,7 @@ export function EventCard({
               )
             ) : null}
 
-            <GenreBadge genre={event.genre} />
+            <GenreBadge genre={eventGenreList(event)} />
           </div>
 
           {/* Quick Action Controls (Save, Alert, Calendar Export) */}

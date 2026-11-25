@@ -8,6 +8,7 @@ import {
   formatIndexPrice,
   getArtistAccent,
   getVerifiedAvailabilityBadge,
+  getCardMatchScoreLabel,
 } from '@/components/index/formatters';
 import { EventImage } from '@/components/index/EventImage';
 
@@ -47,6 +48,7 @@ export function DiscoverEventCard({ event }: DiscoverEventCardProps) {
     event.inventoryStatus,
     event.ticketRemainingPercent,
   );
+  const matchLabel = getCardMatchScoreLabel(event.personalScore);
   const place = [event.venueName, event.city].filter(Boolean).join(' · ');
 
   return (
@@ -94,9 +96,17 @@ export function DiscoverEventCard({ event }: DiscoverEventCardProps) {
           {timePart ? `${timePart} · ` : ''}
           {place}
         </p>
-        <p className="mt-auto pt-2 text-xs font-semibold text-zinc-800">
-          {price}
-        </p>
+        <div className="mt-auto flex items-center justify-between gap-2 pt-2">
+          <p className="text-xs font-semibold text-zinc-800">{price}</p>
+          {matchLabel && (
+            <span
+              data-testid="card-match-score"
+              className="font-mono text-[11px] tabular-nums text-zinc-600"
+            >
+              {matchLabel}
+            </span>
+          )}
+        </div>
       </div>
     </Link>
   );

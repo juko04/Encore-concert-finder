@@ -11,6 +11,7 @@ import {
 } from './formatters';
 import { EventImage } from './EventImage';
 import { GenreBadge } from './GenreBadge';
+import { eventGenreList } from '@/lib/genres/catalog-genres';
 import {
   HeartIcon,
   BellIcon,
@@ -127,7 +128,7 @@ export function EventListItem({
               {event.venueName || 'Venue TBA'}
               {event.city ? ` (${event.city})` : ''}
             </span>
-            <GenreBadge genre={event.genre} />
+            <GenreBadge genre={eventGenreList(event)} />
           </div>
         </div>
       </div>

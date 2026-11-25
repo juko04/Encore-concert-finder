@@ -2,6 +2,8 @@ import { describe, it, expect } from 'vitest';
 import {
   canonicalGenreLabel,
   displayGenreLabel,
+  eventDisplayGenreLabel,
+  eventGenreList,
   eventMatchesGenre,
   genreBadgeClasses,
   genreDbTerms,
@@ -99,5 +101,65 @@ describe('shared catalog genres', () => {
     expect(eventMatchesGenre('all', 'Rock')).toBe(true);
     expect(eventMatchesGenre('zorb', 'Zorblax')).toBe(true);
     expect(eventMatchesGenre('zorb', null)).toBe(false);
+  });
+});
+
+describe('event genre badge uses all genre metadata', () => {
+  it('shows a single genre repeated in different spellings as that genre, not Mixed', () => {
+    expect(
+      eventDisplayGenreLabel({
+        genre: 'Hip-Hop/Rap',
+        genres: ['Hip Hop', 'rap'],
+        artists: [{ genres: ['hip hop'] }, { genres: ['Rap'] }],
+      }),
+    ).toBe('Hip-Hop');
+  });
+
+  it('is Mixed for a festival with several genres across its fields', () => {
+    expect(
+      eventDisplayGenreLabel({
+        genre: 'Festival',
+        genres: ['Rock', 'Electronic'],
+        artists: [{ genres: ['jazz'] }],
+      }),
+    ).toBe(MIXED_GENRE_LABEL);
+  });
+
+  it('is Mixed when the artists on the bill disagree even if event.genre is a single genre', () => {
+    expect(
+      eventDisplayGenreLabel({
+        genre: 'Rock',
+        artists: [{ genres: ['hip hop'] }, { genres: ['country'] }],
+      }),
+    ).toBe(MIXED_GENRE_LABEL);
+  });
+
+  it('falls back to artist genres when the event has none', () => {
+    expect(
+      eventDisplayGenreLabel({ genre: null, artists: [{ genres: ['jazz'] }] }),
+    ).toBe('Jazz');
+  });
+
+  it('ignores non-genres for Mixed', () => {
+    expect(
+      eventDisplayGenreLabel({
+        genre: 'Rock',
+        genres: ['Live Music', "Children's Music", 'French Music', 'Rodeo'],
+        artists: [{ genres: ['world music'] }],
+      }),
+    ).toBe('Rock');
+    expect(
+      eventDisplayGenreLabel({ genre: 'Live Music', genres: ['Rodeo'] }),
+    ).toBeNull();
+  });
+
+  it('collects all raw strings from the event and every artist', () => {
+    expect(
+      eventGenreList({
+        genre: 'Rock',
+        genres: ['Pop'],
+        artists: [{ genres: ['jazz'] }, { genres: undefined }],
+      }),
+    ).toEqual(['Rock', 'Pop', 'jazz']);
   });
 });

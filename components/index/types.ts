@@ -45,6 +45,8 @@ export interface IndexArtistItem {
   billingPosition: BillingPosition | 'headliner' | 'support' | string;
   spotifyArtistId?: string | null;
   imageUrl?: string | null;
+  /** Genres of this artist (e.g. from Ticketmaster); used so multi-genre bills show "Mixed". */
+  genres?: string[];
 }
 
 export interface IndexTrackPreview {
@@ -78,6 +80,8 @@ export interface IndexEventItem {
   ticketUrl?: string | null;
   presaleDate?: string | null;
   genre?: string | null;
+  /** All event-level genres (primary first). */
+  genres?: string[];
   subgenres?: string[];
   ageRestriction?: string | null;
   imageUrl?: string | null;
@@ -264,6 +268,7 @@ export function toIndexEventItem(
         billingPosition: a.billingPosition,
         spotifyArtistId: a.spotifyArtistId,
         imageUrl: (a as { imageUrl?: string | null }).imageUrl ?? null,
+        genres: (a as { genres?: string[] }).genres ?? [],
       })),
       venueName: canonical.venueName,
       venueId: canonical.venueId,
@@ -285,6 +290,9 @@ export function toIndexEventItem(
       ticketUrl: canonical.ticketUrl,
       presaleDate: (canonicalAny.presaleDate as string) || null,
       genre: (canonicalAny.genre as string) || null,
+      genres: Array.isArray(canonicalAny.genres)
+        ? (canonicalAny.genres as string[])
+        : [],
       subgenres: Array.isArray(canonicalAny.subgenres)
         ? (canonicalAny.subgenres as string[])
         : undefined,
@@ -389,6 +397,7 @@ export function toIndexEventItem(
       billingPosition: a.billingPosition,
       spotifyArtistId: a.spotifyArtistId,
       imageUrl: (a as { imageUrl?: string | null }).imageUrl ?? null,
+      genres: (a as { genres?: string[] }).genres ?? [],
     })),
     venueName: canonical.venueName,
     venueId: canonical.venueId,
@@ -410,6 +419,9 @@ export function toIndexEventItem(
     ticketUrl: canonical.ticketUrl,
     presaleDate: (canonicalAny.presaleDate as string) || null,
     genre: (canonicalAny.genre as string) || null,
+    genres: Array.isArray(canonicalAny.genres)
+      ? (canonicalAny.genres as string[])
+      : [],
     subgenres: Array.isArray(canonicalAny.subgenres)
       ? (canonicalAny.subgenres as string[])
       : undefined,

@@ -164,6 +164,38 @@ export function displayGenreLabel(
   return labels[0];
 }
 
+export interface EventGenreSource {
+  genre?: string | null;
+  genres?: readonly string[] | null;
+  /** Artists on the bill; any that carry a `genres` list contribute to the badge. */
+  artists?: ReadonlyArray<object> | null;
+}
+
+/**
+ * Every raw genre string an event carries, for the badge: its own `genre` and `genres` plus
+ * the `genres` of every artist on the bill. Subgenres are deliberately excluded (they refine a
+ * genre and would create a false "Mixed"). The badge resolves these through the shared
+ * normalizer, so one genre in several spellings stays a single label.
+ */
+export function eventGenreList(event: EventGenreSource): string[] {
+  const out: string[] = [];
+  const push = (v: unknown) => {
+    if (typeof v === 'string' && v.trim()) out.push(v);
+  };
+  push(event.genre);
+  for (const g of event.genres ?? []) push(g);
+  for (const a of event.artists ?? []) {
+    const g = (a as { genres?: unknown } | null)?.genres;
+    if (Array.isArray(g)) for (const x of g) push(x);
+  }
+  return out;
+}
+
+/** Badge label for an event using all of its genre metadata. */
+export function eventDisplayGenreLabel(event: EventGenreSource): string | null {
+  return displayGenreLabel(eventGenreList(event));
+}
+
 /** Deduplicated, sorted filter options from raw facet strings (non-genres dropped). */
 export function normalizeGenreFacets(
   rawGenres: readonly unknown[] | null | undefined,

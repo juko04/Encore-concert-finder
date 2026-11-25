@@ -29,6 +29,8 @@ interface SpotifyTastePreviewProps {
   /** True when showing the durable saved snapshot (Spotify disconnected/expired). */
   isStoredSnapshot?: boolean;
   storedSyncedAt?: string | null;
+  /** Shown instead of the generic empty text (e.g. stored data has no rank for this window). */
+  emptyMessage?: string | null;
   error?: string | null;
 }
 
@@ -56,6 +58,7 @@ export function SpotifyTastePreview({
   isSyntheticPreview = false,
   isStoredSnapshot = false,
   storedSyncedAt = null,
+  emptyMessage = null,
   error = null,
 }: SpotifyTastePreviewProps) {
   const [addingArtistId, setAddingArtistId] = useState<string | null>(null);
@@ -199,7 +202,7 @@ export function SpotifyTastePreview({
           data-testid="spotify-taste-empty"
           className="rounded-xl border border-dashed border-zinc-200 p-8 text-center text-xs text-zinc-500"
         >
-          No top artists returned for this time window.
+          {emptyMessage ?? 'No top artists returned for this time window.'}
         </div>
       ) : (
         <div className="divide-y divide-zinc-200 rounded-xl border border-zinc-200 bg-zinc-50">

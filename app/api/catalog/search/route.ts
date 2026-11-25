@@ -9,6 +9,11 @@ import {
   isValidTimeZone,
   resolveCatalogFromDate,
 } from '@/lib/discover/dates';
+import { resolveNearContext } from '@/lib/location/near-context';
+import {
+  defaultSearchEndDate,
+  searchCatalogPage,
+} from '@/lib/location/catalog-search';
 import type {
   EventListFilters,
   EventSortOption,
@@ -43,11 +48,7 @@ export async function GET(request: Request) {
     const now = new Date();
     const nowIso = now.toISOString();
     const todayLocalDate = deriveLocalDateFromInstant(nowIso, timezone);
-    const twelveMonthsFuture = new Date(now.getTime() + 365 * 86400000);
-    const twelveMonthsLocalDate = deriveLocalDateFromInstant(
-      twelveMonthsFuture.toISOString(),
-      timezone,
-    );
+    const twelveMonthsLocalDate = defaultSearchEndDate(timezone, now);
 
     const startDateParam = searchParams.get('startDate')?.trim();
     const endDateParam = searchParams.get('endDate')?.trim();
@@ -167,16 +168,19 @@ export async function GET(request: Request) {
       referenceNowIso: nowIso,
     };
 
-    const [events, countResult] = await Promise.all([
-      catalogRepo.listEvents(filters),
-      typeof catalogRepo.countEvents === 'function'
-        ? catalogRepo.countEvents(filters)
-        : Promise.resolve(0),
-    ]);
+    // Radius: derived on the server from the session user's profile / home-location cookie,
+    // exactly like /search. Client-supplied coordinates or radius are never read. Guests and
+    // users without a home location get the ordinary (unfiltered) result, nearApplied=false.
+    const nearRequested = searchParams.get('near') === '1';
+    const nearCtx = nearRequested ? await resolveNearContext() : null;
 
-    const totalCount = countResult;
+    const result = await searchCatalogPage(
+      catalogRepo,
+      filters,
+      nearCtx?.scope ?? null,
+    );
+    const { events, totalCount, hasMore, nearApplied } = result;
     const totalPages = Math.ceil(totalCount / limit) || 1;
-    const hasMore = offset + events.length < totalCount;
     const currentPage = Math.floor(offset / limit) + 1;
 
     const pagination = {
@@ -185,6 +189,7 @@ export async function GET(request: Request) {
       totalCount,
       totalPages,
       hasMore,
+      nearApplied,
     };
 
     const headers = {
@@ -193,6 +198,7 @@ export async function GET(request: Request) {
       'X-Limit': String(limit),
       'X-Total-Pages': String(totalPages),
       'X-Has-More': String(hasMore),
+      'X-Near-Applied': String(nearApplied),
     };
 
     if (searchParams.get('format') === 'array') {

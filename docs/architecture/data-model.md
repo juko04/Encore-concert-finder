@@ -381,3 +381,62 @@ observed_at
 ```
 
 This allows future debugging of conflicting dates/prices/venues.
+
+## Implemented additions (V2 branch, verified against local `\d` output)
+
+### user_spotify_artist_affinities (private, migration 20261125010000)
+
+Purpose: persist the user's imported Spotify top-artist rankings so recommendations and
+the Taste UI keep working after Spotify is disconnected, expires, or returns 403.
+Disconnect/expiry deletes **tokens only** (`user_spotify_connections`); this table is kept.
+Spotify has no revoke endpoint, so "revoke" means local token deletion.
+
+```text
+id uuid pk default gen_random_uuid()
+user_id uuid not null -> auth.users(id) ON DELETE CASCADE
+spotify_artist_id text not null (non-empty check)
+artist_name text not null (non-empty check)
+canonical_artist_id uuid null -> artists(id) ON DELETE SET NULL
+rank int not null (>= 1)
+ranks_by_range jsonb not null default '{}'   -- 4 wk / 6 mo / 1 yr ranks
+affinity numeric null (0..1), affinity_reason text, trend text (rising|consistent|fading)
+popularity int not null default 0, genres text[] not null default '{}'
+image_url, spotify_url text
+source text not null default 'spotify' (check = 'spotify')
+synced_at, created_at, updated_at timestamptz not null default now()
+unique (user_id, spotify_artist_id); indexes on (user_id, rank), canonical_artist_id
+```
+
+RLS is enabled with only two policies: SELECT and DELETE where `auth.uid() = user_id`.
+There are no INSERT/UPDATE policies; writes happen server-side with the service role.
+Account deletion removes every row (verified with a throwaway auth user: profile,
+preference, connection and affinity rows all gone after the admin-API delete).
+
+### candidate_resolutions: needs_review conflicts (migration 20261125020000)
+
+`apply_canonicalization` now persists a `needs_review` row (event_id null) with reasons
+`['duplicate_external_id_conflict', <detail>]` when a candidate carries a provider
+external id that two artists in the same payload claim
+(`external_id_shared_by_multiple_artists_in_candidate`) or that is already owned by a
+different artist (`external_id_owned_by_different_artist`). No venue/event/artist/link/
+evidence rows are written for that candidate, existing artists are never merged or
+reassigned, and the rest of the batch continues. Payloads that carry only a `resolution`
+(needs_review/rejected without an event) are now persisted too. Without a `resolution`
+in the payload the original unique-violation exception is preserved. The RPC itself is
+not deduplicating: callers (pipeline/repository) skip already-persisted resolutions.
+Known gap: two different Ticketmaster attractions that both resolve to one existing
+artist (so one artist would get two ticketmaster ids) still hit `uq_artist_provider`
+and abort the batch; not addressed.
+
+### Genre, image and weight columns
+
+| Column | Type | Notes |
+|---|---|---|
+| `artists.genres` | `text[]` default `{}` | Fill-if-empty |
+| `artists.genres_source` | `text` | Provenance (e.g. `ticketmaster`) |
+| `artists.genres_updated_at` | `timestamptz` | |
+| `events.genre` | `text` | Primary genre |
+| `events.genres` | `text[]` default `{}` | Normalized via `lib/genres/catalog-genres.ts` |
+| `events.image_url` | `text` | Fill-if-empty, never overwritten |
+| `venues.image_url` | `text` | Fill-if-empty |
+| `profiles.artist_weight` | `smallint` null | Check: null or 20..80; user "artist importance" |

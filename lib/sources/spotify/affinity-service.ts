@@ -215,6 +215,30 @@ export async function getStoredSpotifyAffinities(
   }
 }
 
+/**
+ * Restrict consolidated artists to those with a stored rank in the selected listening window,
+ * ordered by that window's rank, with `rank`/`timeRange` set to that window's values.
+ * Never falls back to artists from other windows: no rank in the window means not shown.
+ * With no window given, the consolidated list is returned unchanged.
+ */
+export function selectArtistsForWindow(
+  artists: SpotifyTopArtist[],
+  timeRange?: SpotifyTimeRange,
+): SpotifyTopArtist[] {
+  if (!timeRange) return artists;
+  return artists
+    .filter((a) => {
+      const r = a.ranksByRange?.[timeRange];
+      return typeof r === 'number' && Number.isFinite(r) && r >= 1;
+    })
+    .map((a) => ({
+      ...a,
+      rank: a.ranksByRange?.[timeRange] as number,
+      timeRange,
+    }))
+    .sort((a, b) => a.rank - b.rank);
+}
+
 async function lastKnownOrStored(userId: string): Promise<SpotifyTopArtist[]> {
   const cached = lastKnownGoodCache.get(userId);
   if (cached && cached.length > 0) return cached;

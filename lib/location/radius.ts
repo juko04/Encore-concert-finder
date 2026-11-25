@@ -34,6 +34,23 @@ function isCoordinate(lat: unknown, lng: unknown): lat is number {
   );
 }
 
+// findCityByName normalises every city name per call; a full-catalog scan calls it per event, so
+// memoise by (city, region). The city table is static, so the cache never goes stale.
+const CITY_LOOKUP_CACHE = new Map<string, ReturnType<typeof findCityByName>>();
+const CITY_LOOKUP_CACHE_MAX = 5000;
+
+function lookupCity(city?: string | null, region?: string | null) {
+  if (!city) return null;
+  const key = `${city}\u0000${region ?? ''}`;
+  const hit = CITY_LOOKUP_CACHE.get(key);
+  if (hit !== undefined) return hit;
+  const found = findCityByName(city, region);
+  if (CITY_LOOKUP_CACHE.size >= CITY_LOOKUP_CACHE_MAX)
+    CITY_LOOKUP_CACHE.clear();
+  CITY_LOOKUP_CACHE.set(key, found);
+  return found;
+}
+
 /** Miles from home to the event (venue coordinate, else city centroid), or null when unknown. */
 export function eventDistanceMiles(
   event: LocatableEvent,
@@ -42,7 +59,7 @@ export function eventDistanceMiles(
   let lat = event.lat;
   let lng = event.lng;
   if (!isCoordinate(lat, lng)) {
-    const city = findCityByName(event.city, event.region);
+    const city = lookupCity(event.city, event.region);
     if (!city) return null;
     lat = city.lat;
     lng = city.lng;

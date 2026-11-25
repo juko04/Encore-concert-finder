@@ -1,6 +1,7 @@
 'use client';
 
 import { GenreBadge } from './GenreBadge';
+import { eventGenreList } from '@/lib/genres/catalog-genres';
 import React, { useState, useMemo } from 'react';
 import Link from 'next/link';
 import type { IndexEventItem } from './types';
@@ -158,7 +159,7 @@ export function ConcertDetailClient({
                 </span>
               )}
 
-              <GenreBadge genre={event.genre} />
+              <GenreBadge genre={eventGenreList(event)} />
 
               {isPersonalized ? (
                 isDisliked ? (

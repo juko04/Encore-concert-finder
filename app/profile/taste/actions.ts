@@ -31,6 +31,7 @@ import {
 import {
   clearSpotifyAffinityCache,
   getStoredSpotifyAffinities,
+  selectArtistsForWindow,
   syncSpotifyTopArtistsAcrossTimeRanges,
 } from '@/lib/sources/spotify/affinity-service';
 import { SupabaseCatalogRepository } from '@/lib/repositories/catalog-repository';
@@ -295,17 +296,10 @@ export async function syncSpotifyArtistsAction(
     ).length;
     const syncedAt = new Date().toISOString();
 
-    const returnedArtists =
-      timeRange && timeRange !== 'short_term'
-        ? artists.filter(
-            (a) =>
-              a.timeRange === timeRange ||
-              (a.ranksByRange && a.ranksByRange[timeRange] !== undefined),
-          )
-        : artists;
+    const returnedArtists = selectArtistsForWindow(artists, timeRange);
 
     return {
-      artists: returnedArtists.length > 0 ? returnedArtists : artists,
+      artists: returnedArtists,
       syncedAt,
       matchedCount,
       totalCount: artists.length,
@@ -325,8 +319,13 @@ export interface StoredSpotifyArtistsResult {
   artists: SpotifyTopArtist[];
   /** ISO timestamp of the most recent stored sync (null when nothing is stored). */
   syncedAt: string | null;
+  /** Set when data is stored but none of it has a rank in the selected window. */
+  message?: string;
   error?: string;
 }
+
+const STORED_WINDOW_EMPTY_MESSAGE =
+  'No stored listening data for this period. Reconnect Spotify and sync to import it.';
 
 /**
  * Returns the durable, previously imported Spotify rankings/affinities. Works after disconnect,
@@ -341,23 +340,19 @@ export async function getStoredSpotifyArtistsAction(
   }
   try {
     const stored = await getStoredSpotifyAffinities(user.id);
-    const artists =
-      timeRange && stored.some((a) => a.ranksByRange?.[timeRange] !== undefined)
-        ? stored
-            .filter((a) => a.ranksByRange?.[timeRange] !== undefined)
-            .sort(
-              (a, b) =>
-                (a.ranksByRange?.[timeRange] ?? 0) -
-                (b.ranksByRange?.[timeRange] ?? 0),
-            )
-        : stored;
+    // Only artists with a stored rank in the selected window; never another window's data.
+    const artists = selectArtistsForWindow(stored, timeRange);
+    const message =
+      timeRange && stored.length > 0 && artists.length === 0
+        ? STORED_WINDOW_EMPTY_MESSAGE
+        : undefined;
     const syncedAt =
       stored
         .map((a) => a.syncedAt)
         .filter((v): v is string => Boolean(v))
         .sort()
         .at(-1) ?? null;
-    return { artists, syncedAt };
+    return message ? { artists, syncedAt, message } : { artists, syncedAt };
   } catch {
     return {
       artists: [],
