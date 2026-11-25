@@ -461,3 +461,53 @@ export function getCardMatchScoreLabel(
   if (!hasRealMatchScore(p)) return null;
   return formatMatchScoreLabel(p.score);
 }
+
+const MONTHS = [
+  'Jan',
+  'Feb',
+  'Mar',
+  'Apr',
+  'May',
+  'Jun',
+  'Jul',
+  'Aug',
+  'Sep',
+  'Oct',
+  'Nov',
+  'Dec',
+];
+
+/** "Apr 1–4" / "Apr 30 – May 2" for a multi-day festival run; falls back to the start date. */
+export function formatFestivalRange(start: string, end: string): string {
+  const [sy, sm, sd] = start.split('T')[0].split('-').map(Number);
+  const [ey, em, ed] = end.split('T')[0].split('-').map(Number);
+  if (!sy || !sm || !sd || !ey || !em || !ed || end <= start) {
+    return formatIndexDate(start);
+  }
+  const yearSuffix = sy !== ey ? `, ${sy}` : '';
+  if (sy === ey && sm === em) {
+    return `${MONTHS[sm - 1]} ${sd}–${ed}`;
+  }
+  return `${MONTHS[sm - 1]} ${sd}${yearSuffix} – ${MONTHS[em - 1]} ${ed}`;
+}
+
+/** Card date label: the festival run for a collapsed festival, else the usual date · time. */
+export function formatIndexEventDate(event: {
+  localStartDate: string;
+  festivalGroupEndDate?: string | null;
+  doorTime?: string | null;
+  startsAt?: string | null;
+  timezone?: string;
+}): string {
+  if (event.festivalGroupEndDate) {
+    return formatFestivalRange(
+      event.localStartDate,
+      event.festivalGroupEndDate,
+    );
+  }
+  return formatIndexDate(
+    event.localStartDate,
+    event.doorTime || event.startsAt,
+    event.timezone,
+  );
+}

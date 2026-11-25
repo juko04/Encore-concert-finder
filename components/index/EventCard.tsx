@@ -1,10 +1,11 @@
 'use client';
 
+import { SupportActsLine } from '@/components/index/SupportActsLine';
 import React, { useState, useRef, useEffect } from 'react';
 import Link from 'next/link';
 import type { IndexEventItem } from './types';
 import {
-  formatIndexDate,
+  formatIndexEventDate,
   formatIndexPrice,
   getVerifiedAvailabilityBadge,
   hasRealMatchScore,
@@ -257,11 +258,10 @@ export function EventCard({
             </h3>
           </Link>
 
-          {supportActs.length > 0 && (
-            <p className="mt-0.5 line-clamp-1 text-xs text-zinc-500">
-              with {supportActs.map((a) => a.name).join(', ')}
-            </p>
-          )}
+          <SupportActsLine
+            acts={supportActs}
+            className="mt-0.5 line-clamp-1 text-xs text-zinc-500"
+          />
 
           {event.title && event.title !== headlinerName && (
             <p className="mt-1 line-clamp-1 text-xs italic text-zinc-400">
@@ -275,11 +275,7 @@ export function EventCard({
           <div className="flex items-center gap-2">
             <CalendarIcon className="h-3.5 w-3.5 shrink-0 text-zinc-400" />
             <span className="font-medium text-zinc-800">
-              {formatIndexDate(
-                event.localStartDate,
-                event.doorTime || event.startsAt,
-                event.timezone,
-              )}
+              {formatIndexEventDate(event)}
             </span>
           </div>
 

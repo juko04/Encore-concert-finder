@@ -1,3 +1,6 @@
+import { getAuthenticatedUser } from '@/lib/auth/session';
+import { loadArtistAffinityResolver } from '@/lib/recommendation/artist-affinity-server';
+import { annotateEventsWithArtistAffinity } from '@/lib/recommendation/artist-affinity';
 import { NextResponse } from 'next/server';
 import { createServerClient } from '@supabase/ssr';
 import { createClient } from '@/lib/supabase/server';
@@ -173,6 +176,7 @@ export async function GET(request: Request) {
       offset,
       excludePastShowtimes,
       referenceNowIso: nowIso,
+      collapseFestivalDays: true,
     };
 
     const result = await searchCatalogPage(
@@ -180,7 +184,13 @@ export async function GET(request: Request) {
       filters,
       nearCtx?.scope ?? null,
     );
-    const { events, totalCount, hasMore, nearApplied } = result;
+    const { totalCount, hasMore, nearApplied } = result;
+    // Liked-artist markers for Load More pages, derived server-side from the session user.
+    const user = await getAuthenticatedUser().catch(() => null);
+    const events = annotateEventsWithArtistAffinity(
+      result.events,
+      await loadArtistAffinityResolver(user?.id, supabase, catalogRepo),
+    );
     const totalPages = Math.ceil(totalCount / limit) || 1;
     const currentPage = Math.floor(offset / limit) + 1;
 

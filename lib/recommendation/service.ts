@@ -735,6 +735,7 @@ export async function getPersonalizedDiscoverData(
     region: region || undefined,
     status: 'scheduled',
     searchQuery: searchQuery?.trim() || undefined,
+    collapseFestivalDays: true,
   };
 
   const modeOptions = {
@@ -1083,6 +1084,7 @@ export async function getPublicDiscoverData(
       region: region || undefined,
       status: 'scheduled',
       searchQuery: searchQuery?.trim() || undefined,
+      collapseFestivalDays: true,
     },
     limit * 2, // scan enough to satisfy mode eligibility filtering
     referenceDate,

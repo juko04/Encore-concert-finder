@@ -1,5 +1,6 @@
 'use client';
 
+import { SupportActsLine } from '@/components/index/SupportActsLine';
 import { GenreBadge } from './GenreBadge';
 import { eventGenreList } from '@/lib/genres/catalog-genres';
 import React, { useState, useMemo } from 'react';
@@ -9,12 +10,13 @@ import { toIndexEventItem } from './types';
 import type { CanonicalEventSummary } from '@/lib/domain/catalog';
 import type { ScoredEvent } from '@/lib/recommendation/types';
 import {
-  formatIndexDate,
+  formatIndexEventDate,
+  formatFestivalRange,
   formatIndexPrice,
   getVerifiedAvailabilityBadge,
   hasRealMatchScore,
-  calculateDistanceMiles,
 } from './formatters';
+import { eventDistanceDetails } from '@/lib/location/radius';
 import { AudioPreviewPlayer } from './AudioPreviewPlayer';
 import { SpotifyArtistEmbed } from './SpotifyArtistEmbed';
 import { EventCard } from './EventCard';
@@ -40,6 +42,10 @@ import {
 export interface ConcertDetailClientProps {
   event: CanonicalEventSummary | ScoredEvent | IndexEventItem;
   relatedEvents?: Array<CanonicalEventSummary | ScoredEvent | IndexEventItem>;
+  /** Every day of this event's multi-day festival (empty when it is a single show). */
+  festivalDays?: Array<{ id: string; name: string; localStartDate: string }>;
+  /** Viewer's home coordinates (when configured); omit distance when null. */
+  homeLocation?: { lat: number; lng: number } | null;
   initialPreferences?: Array<{
     artistId: string;
     level: 'favorite' | 'like' | 'ignore';
@@ -56,6 +62,8 @@ export interface ConcertDetailClientProps {
 export function ConcertDetailClient({
   event: rawEvent,
   relatedEvents: rawRelated = [],
+  festivalDays = [],
+  homeLocation = null,
   initialPreferences = [],
   onSetPreference,
   onBack,
@@ -90,7 +98,22 @@ export function ConcertDetailClient({
     (a) => a.name !== headlinerName && a.billingPosition !== 'headliner',
   );
 
-  const distanceMiles = calculateDistanceMiles(event.lat, event.lng);
+  const distanceDetails = homeLocation
+    ? eventDistanceDetails(
+        {
+          lat: event.lat,
+          lng: event.lng,
+          city: event.city,
+          region: event.region,
+        },
+        homeLocation,
+      )
+    : null;
+  const distanceMiles =
+    distanceDetails != null
+      ? Math.round(distanceDetails.distanceMiles * 10) / 10
+      : null;
+  const isApproxDistance = distanceDetails?.precision === 'city_centroid';
 
   const handlePreferenceChange = (
     artistId: string,
@@ -190,11 +213,10 @@ export function ConcertDetailClient({
                 {headlinerName}
               </h1>
 
-              {supportActs.length > 0 && (
-                <p className="mt-1 text-base font-medium text-zinc-600">
-                  with {supportActs.map((a) => a.name).join(', ')}
-                </p>
-              )}
+              <SupportActsLine
+                acts={supportActs}
+                className="mt-1 text-base font-medium text-zinc-600"
+              />
 
               {event.title && event.title !== headlinerName && (
                 <p className="mt-1 text-sm italic text-zinc-500">
@@ -209,11 +231,7 @@ export function ConcertDetailClient({
                 <CalendarIcon className="h-4 w-4 shrink-0 text-zinc-400" />
                 <div>
                   <div className="text-sm font-semibold text-zinc-900">
-                    {formatIndexDate(
-                      event.localStartDate,
-                      event.doorTime || event.startsAt,
-                      event.timezone,
-                    )}
+                    {formatIndexEventDate(event)}
                   </div>
                   {event.timezone && (
                     <div className="font-mono text-[11px] text-zinc-400">
@@ -232,7 +250,8 @@ export function ConcertDetailClient({
                   <div className="text-[11px] text-zinc-400">
                     {event.city ? `${event.city}` : ''}
                     {event.region ? `, ${event.region}` : ''}
-                    {distanceMiles !== null && ` (${distanceMiles} mi)`}
+                    {distanceMiles !== null &&
+                      ` (${isApproxDistance ? 'approx. ' : ''}${distanceMiles} mi)`}
                   </div>
                 </div>
               </div>
@@ -401,6 +420,55 @@ export function ConcertDetailClient({
         {/* Left 2 Columns: Decision Guide & Lineup */}
         <div className="space-y-6 lg:col-span-2">
           <DecisionGuide event={event} />
+
+          {festivalDays.length > 1 && (
+            <div
+              data-testid="festival-days"
+              className="shadow-xs space-y-3 rounded-3xl border border-zinc-200/90 bg-white p-6"
+            >
+              <h2 className="text-base font-bold text-zinc-900">
+                Festival days
+              </h2>
+              <ul className="flex flex-wrap gap-2">
+                {(() => {
+                  const dateCounts = new Map<string, number>();
+                  for (const d of festivalDays) {
+                    dateCounts.set(
+                      d.localStartDate,
+                      (dateCounts.get(d.localStartDate) ?? 0) + 1,
+                    );
+                  }
+                  const seenByDate = new Map<string, number>();
+                  return festivalDays.map((d) => {
+                    const label = formatFestivalRange(
+                      d.localStartDate,
+                      d.localStartDate,
+                    );
+                    const hasDuplicateDate =
+                      (dateCounts.get(d.localStartDate) ?? 0) > 1;
+                    const idx = (seenByDate.get(d.localStartDate) ?? 0) + 1;
+                    seenByDate.set(d.localStartDate, idx);
+                    return (
+                      <li key={d.id}>
+                        <Link
+                          href={`/concerts/${d.id}`}
+                          aria-current={d.id === event.id ? 'page' : undefined}
+                          title={d.name}
+                          className={`inline-flex rounded-full border px-3 py-1 text-xs font-semibold transition ${
+                            d.id === event.id
+                              ? 'border-zinc-900 bg-zinc-900 text-white'
+                              : 'border-zinc-200 bg-white text-zinc-700 hover:border-zinc-300'
+                          }`}
+                        >
+                          {hasDuplicateDate ? `${label} (${idx})` : label}
+                        </Link>
+                      </li>
+                    );
+                  });
+                })()}
+              </ul>
+            </div>
+          )}
 
           {/* Lineup & Billing Details with Preference Modifiers */}
           <div className="shadow-xs space-y-4 rounded-3xl border border-zinc-200/90 bg-white p-6">

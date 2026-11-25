@@ -1,6 +1,11 @@
 import React from 'react';
 import { notFound } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';
+import { loadArtistAffinityResolver } from '@/lib/recommendation/artist-affinity-server';
+import {
+  annotateEventWithArtistAffinity,
+  annotateEventsWithArtistAffinity,
+} from '@/lib/recommendation/artist-affinity';
 import { getAuthenticatedUser } from '@/lib/auth/session';
 import { SupabaseCatalogRepository } from '@/lib/repositories/catalog-repository';
 import { scoreEventForUser } from '@/lib/recommendation/service';
@@ -88,11 +93,23 @@ export default async function ConcertDetailPage({
     title: eventDetail.name,
     venueName: eventDetail.venue?.name || 'Venue TBA',
     venueId: eventDetail.venueId,
-    city: eventDetail.city || eventDetail.venue?.city || undefined,
-    region: eventDetail.region || eventDetail.venue?.region || undefined,
-    lat: eventDetail.lat ? Number(eventDetail.lat) : null,
-    lng: eventDetail.lng ? Number(eventDetail.lng) : null,
+    city: eventDetail.venue?.city || eventDetail.city || undefined,
+    region: eventDetail.venue?.region || eventDetail.region || undefined,
+    // Venue coordinates first (same resolution as the list cards), then the event row.
+    lat:
+      eventDetail.venue?.lat != null
+        ? eventDetail.venue.lat
+        : eventDetail.lat != null
+          ? Number(eventDetail.lat)
+          : null,
+    lng:
+      eventDetail.venue?.lng != null
+        ? eventDetail.venue.lng
+        : eventDetail.lng != null
+          ? Number(eventDetail.lng)
+          : null,
     localStartDate: eventDetail.localStartDate,
+    festivalGroupEndDate: eventDetail.festivalGroupEndDate ?? null,
     startsAt: eventDetail.startsAt,
     timezone: eventDetail.timezone,
     startTimePrecision: eventDetail.startTimePrecision,
@@ -104,9 +121,10 @@ export default async function ConcertDetailPage({
       billingPosition: a.billingPosition,
       imageUrl: a.imageUrl ?? null,
       spotifyArtistId:
-        headlinerArtist && a.id === headlinerArtist.id
+        a.spotifyArtistId ??
+        (headlinerArtist && a.id === headlinerArtist.id
           ? headlinerSpotifyId
-          : null,
+          : null),
     })),
     imageUrl: eventDetail.imageUrl ?? null,
     venue: eventDetail.venue
@@ -117,6 +135,8 @@ export default async function ConcertDetailPage({
           city: eventDetail.venue.city,
           region: eventDetail.venue.region ?? null,
           imageUrl: eventDetail.venue.imageUrl ?? null,
+          lat: eventDetail.venue.lat ?? null,
+          lng: eventDetail.venue.lng ?? null,
         }
       : null,
     ticketUrl:
@@ -133,13 +153,16 @@ export default async function ConcertDetailPage({
   };
 
   const user = await getAuthenticatedUser();
+  const home = await getHomeLocation(user?.id).catch(() => null);
   let displayEvent: CanonicalEventSummary | ScoredEvent = summary;
+  let affinityResolver: Awaited<
+    ReturnType<typeof loadArtistAffinityResolver>
+  > | null = null;
 
   if (user) {
     try {
       // Same scoring inputs as the home page / Discover: saved preferences, Spotify listening
       // (artists + genre taste), saved weights and the chosen home city.
-      const home = await getHomeLocation(user.id);
       const scored = await scoreEventForUser({
         userId: user.id,
         event: summary,
@@ -149,12 +172,32 @@ export default async function ConcertDetailPage({
       if (scored) {
         displayEvent = scored;
       }
+      affinityResolver = await loadArtistAffinityResolver(
+        user.id,
+        supabase,
+        catalogRepo,
+      );
+      displayEvent = annotateEventWithArtistAffinity(
+        displayEvent,
+        affinityResolver,
+      );
     } catch (err) {
       console.error(
         '[ConcertDetailPage] Failed to score event against user profile:',
         err,
       );
     }
+  }
+
+  let festivalDays: Array<{
+    id: string;
+    name: string;
+    localStartDate: string;
+  }> = [];
+  try {
+    festivalDays = await catalogRepo.listFestivalDays(eventDetail.id);
+  } catch {
+    festivalDays = [];
   }
 
   let relatedEvents: CanonicalEventSummary[] = [];
@@ -169,6 +212,12 @@ export default async function ConcertDetailPage({
       relatedEvents = venueEvents
         .filter((e) => e.id !== eventDetail.id)
         .slice(0, 3);
+      if (affinityResolver) {
+        relatedEvents = annotateEventsWithArtistAffinity(
+          relatedEvents,
+          affinityResolver,
+        );
+      }
     } catch {
       // Ignore related events fetch errors
     }
@@ -181,6 +230,8 @@ export default async function ConcertDetailPage({
         <ConcertDetailClient
           event={displayEvent}
           relatedEvents={relatedEvents}
+          festivalDays={festivalDays}
+          homeLocation={home ? { lat: home.lat, lng: home.lng } : null}
         />
       </main>
     </div>

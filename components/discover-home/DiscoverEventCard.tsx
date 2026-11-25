@@ -4,12 +4,13 @@ import React from 'react';
 import Link from 'next/link';
 import type { IndexEventItem } from '@/components/index/types';
 import {
-  formatIndexDate,
+  formatIndexEventDate,
   formatIndexPrice,
   getArtistAccent,
   getVerifiedAvailabilityBadge,
   getCardMatchScoreLabel,
 } from '@/components/index/formatters';
+import { SupportActsLine } from '@/components/index/SupportActsLine';
 import { EventImage } from '@/components/index/EventImage';
 
 export interface DiscoverEventCardProps {
@@ -25,17 +26,11 @@ export interface DiscoverEventCardProps {
 export function DiscoverEventCard({ event }: DiscoverEventCardProps) {
   const headlinerName = event.headlinerName || event.title;
   const accent = getArtistAccent(headlinerName);
-  const supportActs = (event.artists || [])
-    .filter(
-      (a) => a.name !== headlinerName && a.billingPosition !== 'headliner',
-    )
-    .map((a) => a.name);
-
-  const dateLabel = formatIndexDate(
-    event.localStartDate,
-    event.startsAt,
-    event.timezone,
+  const supportActs = (event.artists || []).filter(
+    (a) => a.name !== headlinerName && a.billingPosition !== 'headliner',
   );
+
+  const dateLabel = formatIndexEventDate(event);
   const [dayPart, timePart] = dateLabel.split(' · ');
   const price = formatIndexPrice(
     event.minPrice,
@@ -87,11 +82,10 @@ export function DiscoverEventCard({ event }: DiscoverEventCardProps) {
         <h3 className="line-clamp-2 text-sm font-bold leading-snug tracking-tight text-zinc-900">
           {headlinerName}
         </h3>
-        {supportActs.length > 0 && (
-          <p className="line-clamp-1 text-xs text-zinc-500">
-            with {supportActs.join(', ')}
-          </p>
-        )}
+        <SupportActsLine
+          acts={supportActs}
+          className="line-clamp-1 text-xs text-zinc-500"
+        />
         <p className="line-clamp-1 text-xs text-zinc-500">
           {timePart ? `${timePart} · ` : ''}
           {place}

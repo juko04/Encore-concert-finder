@@ -1225,6 +1225,21 @@ export async function runMultiSourceSync(
     }
   }
 
+  // Festival days are ingested one row per day; regroup so each festival run is one card.
+  if (options.persist && !options.rawIngestRepo) {
+    try {
+      const grouped = await catalogRepo.refreshFestivalGroups();
+      console.log(
+        `[Sync] Festival day groups refreshed (${grouped} events grouped).`,
+      );
+    } catch (err) {
+      console.warn(
+        '[Sync] Could not refresh festival groups:',
+        err instanceof Error ? err.message : err,
+      );
+    }
+  }
+
   const totalTimeMs = Date.now() - startTime;
   const hasFailed = reports.some((r) => r.status === 'failed');
   const hasPartial = reports.some(

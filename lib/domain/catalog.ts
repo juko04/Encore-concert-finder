@@ -3,6 +3,8 @@
  * Canonical entities, value objects, relationships, DTOs, and transaction payload definitions.
  */
 
+import type { ArtistAffinity } from '@/lib/recommendation/artist-affinity';
+
 export type EventKind =
   | 'concert'
   | 'club_show'
@@ -120,6 +122,8 @@ export interface Event {
   genres?: string[];
   /** null/undefined = from the ingested source; 'inferred_title' etc. = derived (see lib/genres). */
   genresSource?: string | null;
+  /** Last day of the festival run when this event is the first day of a multi-day group. */
+  festivalGroupEndDate?: string | null;
   imageUrl?: string | null;
   createdAt?: string;
   updatedAt?: string;
@@ -235,6 +239,8 @@ export interface CanonicalEventSummary {
     spotifyArtistId?: string | null;
     imageUrl?: string | null;
     genres?: string[];
+    /** Present only for a signed-in user who likes this artist (see lib/recommendation/artist-affinity). */
+    affinity?: ArtistAffinity;
   }>;
   imageUrl?: string | null;
   ticketUrl?: string | null;
@@ -248,6 +254,8 @@ export interface CanonicalEventSummary {
   genre?: string | null;
   genres?: string[];
   genresSource?: string | null;
+  /** Set on the first day of a collapsed multi-day festival: the run's last local date. */
+  festivalGroupEndDate?: string | null;
 }
 
 export interface CanonicalEventDetail extends Event {
@@ -255,6 +263,7 @@ export interface CanonicalEventDetail extends Event {
     id: string;
     name: string;
     billingPosition: BillingPosition;
+    spotifyArtistId?: string | null;
     imageUrl?: string | null;
   }>;
   venue: {
@@ -264,6 +273,8 @@ export interface CanonicalEventDetail extends Event {
     city: string;
     region?: string | null;
     imageUrl?: string | null;
+    lat?: number | null;
+    lng?: number | null;
   } | null;
   ticketLinks: EventTicketLink[];
   promoters: Array<{

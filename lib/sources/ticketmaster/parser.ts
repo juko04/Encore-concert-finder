@@ -9,6 +9,7 @@ import type {
 import type { SourceProvenance } from '@/lib/domain/source';
 import { normalizeUrl } from '@/lib/domain/value-objects';
 import type { TicketmasterEvent, TicketmasterImage } from './types';
+import { parseVenueCoordinates } from './venue-location';
 import {
   extractTicketmasterGenres,
   isNonArtistAttraction,
@@ -157,6 +158,9 @@ export function parseTicketmasterEvent(
   };
 
   const ticketPackage = splitTicketPackageTitle(event.name);
+  const venueCoordinates = parseVenueCoordinates(
+    event._embedded?.venues?.[0]?.location,
+  );
   const eventGenres = extractTicketmasterGenres(event.classifications);
 
   // 2. Artists & Billing
@@ -432,6 +436,14 @@ export function parseTicketmasterEvent(
       name: event.name,
       ...(ticketPackage.isPackage ? { isTicketPackage: true } : {}),
       ...(eventGenres.length > 0 ? { genres: eventGenres } : {}),
+      ...(venueCoordinates
+        ? {
+            venueLocation: {
+              lat: venueCoordinates.lat,
+              lng: venueCoordinates.lng,
+            },
+          }
+        : {}),
       url: event.url,
       dates: event.dates,
       status,
@@ -468,6 +480,7 @@ export function overlayTicketmasterImages<T extends EventCandidate>(
   const parsedImages = parsed.rawPayload?.images;
   const parsedGenres = parsed.rawPayload?.genres;
   const parsedIsPackage = parsed.rawPayload?.isTicketPackage === true;
+  const parsedVenueLocation = parsed.rawPayload?.venueLocation;
 
   const tmId = (a: CandidateArtist) =>
     a.externalIds?.find((e) => e.provider === 'ticketmaster')?.externalId;
@@ -491,6 +504,7 @@ export function overlayTicketmasterImages<T extends EventCandidate>(
   if (
     !parsedImages &&
     !parsedGenres &&
+    !parsedVenueLocation &&
     !parsedIsPackage &&
     imageByAttractionId.size === 0 &&
     genresByAttractionId.size === 0 &&
@@ -512,6 +526,7 @@ export function overlayTicketmasterImages<T extends EventCandidate>(
       ...(existing.rawPayload ?? {}),
       ...(parsedImages ? { images: parsedImages } : {}),
       ...(parsedGenres ? { genres: parsedGenres } : {}),
+      ...(parsedVenueLocation ? { venueLocation: parsedVenueLocation } : {}),
       ...(parsedIsPackage ? { isTicketPackage: true } : {}),
     },
     artists: keptArtists.map((a) => {

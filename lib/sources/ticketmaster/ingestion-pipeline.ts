@@ -11,6 +11,8 @@ import type {
   ISourceRepository,
 } from '@/lib/repositories/interfaces';
 import { fillInferredEventGenres } from '@/lib/genres/enrich-event-genres';
+import { isPlausibleCoordinate } from '@/lib/location/radius';
+import { getCandidateVenueCoordinates } from './venue-location';
 import { TicketmasterDiscoveryAdapter } from './adapter';
 import { overlayTicketmasterImages } from './parser';
 import { ensureTicketmasterSource } from './source-registry';
@@ -113,6 +115,41 @@ export async function storeTicketmasterArtistGenres(
     }
   }
   return written;
+}
+
+/** Best-effort, never throws: stores the candidate's venue coordinates on the event's venue. */
+export async function fillVenueCoordinates(
+  repo: Pick<ICatalogRepository, 'fillVenueCoordinatesForEvent'>,
+  eventId: string | null | undefined,
+  candidate: Pick<EventCandidate, 'rawPayload'> &
+    Partial<Pick<EventCandidate, 'city' | 'state'>>,
+): Promise<boolean> {
+  if (!eventId) return false;
+  const coords = getCandidateVenueCoordinates(candidate);
+  if (!coords) return false;
+  // Source data errors (e.g. a dropped minus sign) must not relocate a venue across the map.
+  if (
+    !isPlausibleCoordinate(
+      coords.lat,
+      coords.lng,
+      candidate.city,
+      candidate.state,
+    )
+  )
+    return false;
+  try {
+    return await repo.fillVenueCoordinatesForEvent(
+      eventId,
+      coords.lat,
+      coords.lng,
+    );
+  } catch (err) {
+    console.warn(
+      '[TicketmasterPipeline] Could not store venue coordinates:',
+      err instanceof Error ? err.message : err,
+    );
+    return false;
+  }
 }
 
 /**
@@ -476,6 +513,8 @@ export async function runTicketmasterIngestion(
           outcome.eventId,
           cand,
         );
+        // Ticketmaster supplies venue coordinates; store them fill-if-empty (never overwrite).
+        await fillVenueCoordinates(options.catalogRepo, outcome.eventId, cand);
       }
 
       if (outcome.status === 'created') {

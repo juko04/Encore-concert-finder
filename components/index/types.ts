@@ -6,6 +6,7 @@ import type {
   StartTimePrecision,
 } from '@/lib/domain/catalog';
 import type { ScoredEvent } from '@/lib/recommendation/types';
+import type { ArtistAffinity } from '@/lib/recommendation/artist-affinity';
 
 export type IndexInventoryStatus =
   'available' | 'low_inventory' | 'sold_out' | 'cancelled' | 'unknown';
@@ -47,6 +48,8 @@ export interface IndexArtistItem {
   imageUrl?: string | null;
   /** Genres of this artist (e.g. from Ticketmaster); used so multi-genre bills show "Mixed". */
   genres?: string[];
+  /** Set when the signed-in user likes this artist; drives the liked marker and ordering. */
+  affinity?: ArtistAffinity;
 }
 
 export interface IndexTrackPreview {
@@ -67,6 +70,8 @@ export interface IndexEventItem {
   lat?: number | null;
   lng?: number | null;
   localStartDate: string; // YYYY-MM-DD
+  /** Last day of a collapsed multi-day festival (this card is its first day). */
+  festivalGroupEndDate?: string | null;
   startsAt?: string | null;
   doorTime?: string | null;
   timezone?: string;
@@ -271,6 +276,7 @@ export function toIndexEventItem(
         spotifyArtistId: a.spotifyArtistId,
         imageUrl: (a as { imageUrl?: string | null }).imageUrl ?? null,
         genres: (a as { genres?: string[] }).genres ?? [],
+        affinity: (a as { affinity?: ArtistAffinity }).affinity,
       })),
       venueName: canonical.venueName,
       venueId: canonical.venueId,
@@ -279,6 +285,7 @@ export function toIndexEventItem(
       lat: canonical.lat,
       lng: canonical.lng,
       localStartDate: canonical.localStartDate,
+      festivalGroupEndDate: canonical.festivalGroupEndDate ?? null,
       startsAt: canonical.startsAt,
       doorTime: (canonicalAny.doorTime as string) || null,
       timezone: canonical.timezone,
@@ -401,6 +408,7 @@ export function toIndexEventItem(
       spotifyArtistId: a.spotifyArtistId,
       imageUrl: (a as { imageUrl?: string | null }).imageUrl ?? null,
       genres: (a as { genres?: string[] }).genres ?? [],
+      affinity: (a as { affinity?: ArtistAffinity }).affinity,
     })),
     venueName: canonical.venueName,
     venueId: canonical.venueId,
@@ -409,6 +417,7 @@ export function toIndexEventItem(
     lat: canonical.lat,
     lng: canonical.lng,
     localStartDate: canonical.localStartDate,
+    festivalGroupEndDate: canonical.festivalGroupEndDate ?? null,
     startsAt: canonical.startsAt,
     doorTime: (canonicalAny.doorTime as string) || null,
     timezone: canonical.timezone,

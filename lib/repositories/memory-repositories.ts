@@ -2,6 +2,7 @@
  * In-memory repository implementations for unit testing and offline development.
  */
 
+import { groupFestivalDays } from '@/lib/events/festival-groups';
 import {
   eventMatchesGenre,
   genreMatchesQuery,
@@ -440,6 +441,11 @@ export class MemoryCatalogRepository implements ICatalogRepository {
   private getFilteredEvents(filters?: EventListFilters): Event[] {
     let result = Array.from(this.events.values());
 
+    if (filters?.collapseFestivalDays) {
+      const hidden = this.hiddenFestivalDayIds;
+      result = result.filter((e) => !hidden.has(e.id));
+    }
+
     if (filters?.excludePastShowtimes && filters?.fromDate) {
       const today = filters.fromDate;
       const nowIso = filters.referenceNowIso || new Date().toISOString();
@@ -763,6 +769,7 @@ export class MemoryCatalogRepository implements ICatalogRepository {
         sources: eventSources,
         ticketLinks: eventTicketLinks,
         inventoryStatus: summaryInventoryStatus,
+        festivalGroupEndDate: event.festivalGroupEndDate ?? null,
         ...(event.imageUrl ? { imageUrl: event.imageUrl } : {}),
       });
     }
@@ -877,6 +884,47 @@ export class MemoryCatalogRepository implements ICatalogRepository {
       if (a) out.push(a);
     }
     return out;
+  }
+
+  /** Event ids hidden by collapseFestivalDays (computed by refreshFestivalGroups). */
+  private hiddenFestivalDayIds = new Set<string>();
+
+  async listFestivalDays(eventId: string) {
+    const group = groupFestivalDays(Array.from(this.events.values())).find(
+      (g) => g.members.some((m) => m.id === eventId),
+    );
+    return (group?.members ?? []).map((m) => ({
+      id: m.id,
+      name: m.name,
+      localStartDate: m.localStartDate,
+    }));
+  }
+
+  async refreshFestivalGroups(): Promise<number> {
+    this.hiddenFestivalDayIds = new Set();
+    const groups = groupFestivalDays(Array.from(this.events.values()));
+    let grouped = 0;
+    for (const g of groups) {
+      grouped += g.members.length;
+      for (const e of g.members) {
+        if (e.id !== g.primary.id) this.hiddenFestivalDayIds.add(e.id);
+        e.festivalGroupEndDate = e.id === g.primary.id ? g.endDate : null;
+      }
+    }
+    return grouped;
+  }
+
+  async fillVenueCoordinatesForEvent(
+    eventId: string,
+    lat: number,
+    lng: number,
+  ): Promise<boolean> {
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return false;
+    const ev = this.events.get(eventId);
+    const venue = ev?.venueId ? this.venues.get(ev.venueId) : undefined;
+    if (!venue || (venue.lat != null && venue.lng != null)) return false;
+    this.venues.set(venue.id, { ...venue, lat, lng });
+    return true;
   }
 
   async fillEventGenres(

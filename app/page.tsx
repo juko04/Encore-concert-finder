@@ -7,6 +7,7 @@ import {
   getDiscoverHomeData,
   type DiscoverHomeData,
 } from '@/lib/discover/home-data';
+import { loadArtistAffinityResolver } from '@/lib/recommendation/artist-affinity-server';
 import { getDiscoverDateWindows } from '@/lib/discover/dates';
 import { getHomeLocation, getViewerTimeZone } from '@/lib/location/server';
 import { SupabaseProfileRepository } from '@/lib/repositories/profile-repository';
@@ -42,6 +43,11 @@ export default async function HomePage() {
       homeLocation,
       homeRadiusMiles,
       timeZone,
+      artistAffinity: await loadArtistAffinityResolver(
+        user?.id,
+        supabase,
+        catalogRepo,
+      ),
     });
   } catch (err) {
     console.error('[HomePage] Error loading discover data:', err);

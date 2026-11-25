@@ -500,6 +500,60 @@ describe('Index Components Unit Tests', () => {
       expect(screen.getByText('Price Fit')).toBeInTheDocument();
       expect(screen.getByText('90/100')).toBeInTheDocument();
     });
+
+    it('uses homeLocation (with city centroid fallback) instead of hardcoded Denver and disambiguates duplicate festival dates', () => {
+      const boulderNoCoords = {
+        ...MOCK_INDEX_ITEMS[0],
+        city: 'Boulder',
+        region: 'CO',
+        lat: null,
+        lng: null,
+      };
+      const { rerender } = render(
+        <ConcertDetailClient
+          event={boulderNoCoords}
+          homeLocation={null}
+          festivalDays={[
+            {
+              id: 'd1',
+              name: 'Epic Fest - Day 1',
+              localStartDate: '2027-04-01',
+            },
+            {
+              id: 'd2',
+              name: 'Epic Fest - Day 1 VIP',
+              localStartDate: '2027-04-01',
+            },
+          ]}
+        />,
+      );
+      expect(screen.queryByText(/mi\)/)).not.toBeInTheDocument();
+      expect(screen.getByText(/\(1\)/)).toBeInTheDocument();
+      expect(screen.getByText(/\(2\)/)).toBeInTheDocument();
+
+      rerender(
+        <ConcertDetailClient
+          event={boulderNoCoords}
+          homeLocation={{ lat: 39.7392, lng: -104.9903 }}
+        />,
+      );
+      expect(screen.getByText(/approx\./)).toBeInTheDocument();
+
+      rerender(
+        <ConcertDetailClient
+          event={{
+            ...MOCK_INDEX_ITEMS[0],
+            city: 'San Diego',
+            region: 'CA',
+            lat: 32.723757,
+            lng: -117.22761,
+          }}
+          homeLocation={{ lat: 32.7157, lng: -117.1611 }}
+        />,
+      );
+      expect(screen.queryByText(/approx\./)).not.toBeInTheDocument();
+      expect(screen.getByText(/mi\)/)).toBeInTheDocument();
+    });
   });
 
   describe('SearchClient Component', () => {

@@ -6,6 +6,8 @@ import { searchCatalogPage } from '@/lib/location/catalog-search';
 import { getViewerTimeZone } from '@/lib/location/server';
 import { getAuthenticatedUser } from '@/lib/auth/session';
 import { SupabaseCatalogRepository } from '@/lib/repositories/catalog-repository';
+import { loadArtistAffinityResolver } from '@/lib/recommendation/artist-affinity-server';
+import { annotateEventsWithArtistAffinity } from '@/lib/recommendation/artist-affinity';
 import { Header } from '@/components/index/Header';
 import { SearchClient } from '@/components/index/SearchClient';
 import type { CanonicalEventSummary } from '@/lib/domain/catalog';
@@ -127,6 +129,7 @@ export default async function SearchPage({ searchParams }: SearchPageProps) {
     // page 1, Load More and counts agree).
     toDate: urlEndDate,
     excludePastShowtimes,
+    collapseFestivalDays: true,
     minPrice:
       minPrice !== undefined && !Number.isNaN(minPrice) ? minPrice : undefined,
     maxPrice:
@@ -158,7 +161,12 @@ export default async function SearchPage({ searchParams }: SearchPageProps) {
       filters,
       nearActive ? nearCtx.scope : null,
     );
-    events = result.events;
+    const affinity = await loadArtistAffinityResolver(
+      user?.id,
+      supabase,
+      catalogRepo,
+    );
+    events = annotateEventsWithArtistAffinity(result.events, affinity);
     totalCount = result.totalCount;
   } catch (err) {
     console.error('[SearchPage] Error querying catalog events:', err);

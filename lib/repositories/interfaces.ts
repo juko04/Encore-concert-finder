@@ -71,12 +71,23 @@ export interface EventListFilters {
   offset?: number;
   excludePastShowtimes?: boolean;
   referenceNowIso?: string;
+  /**
+   * Show a multi-day festival as ONE card (its first day). Off for the calendar, detail pages and
+   * anything that must see every day.
+   */
+  collapseFestivalDays?: boolean;
 }
 
 /**
  * The minimum an event needs for the radius test, as returned by the light scan. Same
  * city/region/lat/lng resolution as a CanonicalEventSummary (venue first, then the event row).
  */
+export interface FestivalDay {
+  id: string;
+  name: string;
+  localStartDate: string;
+}
+
 export interface EventLocationRow {
   id: string;
   city: string | null;
@@ -130,6 +141,21 @@ export interface ICatalogRepository {
     eventId: string,
     genres: string[],
     source: string,
+  ): Promise<boolean>;
+  /**
+   * Fill-if-empty coordinates for the VENUE of an event (venues.lat/lng). Never overwrites
+   * coordinates already stored. Returns true when a write happened.
+   */
+  /** Every day of the multi-day festival this event belongs to (empty when it is not grouped). */
+  listFestivalDays(eventId: string): Promise<FestivalDay[]>;
+
+  /** Recomputes festival day groups after ingestion (presentation columns only). */
+  refreshFestivalGroups(): Promise<number>;
+
+  fillVenueCoordinatesForEvent(
+    eventId: string,
+    lat: number,
+    lng: number,
   ): Promise<boolean>;
   findArtistIdsByExternalIds(
     provider: string,

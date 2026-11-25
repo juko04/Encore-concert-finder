@@ -73,8 +73,10 @@ interface Seed {
 }
 
 // venues: 0 Denver, 1 Boulder, 2 Fort Collins (out), 3 Seattle (out), 4 a city absent from the city table + no coords,
-// 5 "Nowhereville" with a venue coordinate in Denver (in), 6 city "Denver" but a venue
-// coordinate in Seattle (venue coordinate wins -> out).
+// 5 "Nowhereville" with a venue coordinate in Denver (in), 6 an unknown city with a venue
+// coordinate in Seattle (venue coordinate wins -> out). A venue coordinate that contradicts a KNOWN
+// city (e.g. city Denver, coordinate in Seattle) is treated as a source error and the city wins;
+// that rule is unit-tested in venue-coordinates / radius tests.
 const VENUES = [
   { city: 'Denver', region: 'CO', lat: null, lng: null },
   { city: 'Boulder', region: 'CO', lat: null, lng: null },
@@ -82,7 +84,7 @@ const VENUES = [
   { city: 'Seattle', region: 'WA', lat: null, lng: null },
   { city: 'Atlantis', region: 'ZZ', lat: null, lng: null },
   { city: 'Nowhereville', region: 'ZZ', lat: 39.74, lng: -104.99 },
-  { city: 'Denver', region: 'CO', lat: 47.6062, lng: -122.3321 },
+  { city: 'Elsewhere', region: 'ZZ', lat: 47.6062, lng: -122.3321 },
 ];
 const COUNTS = [60, 60, 40, 20, 20, 12, 10]; // in range: 60 + 60 + 12 = 132 (3 pages of 50)
 const IN_RANGE = new Set([0, 1, 5]);

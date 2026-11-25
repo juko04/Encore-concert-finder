@@ -27,6 +27,7 @@ import type {
   EventListFilters,
   EventLocationRow,
   EventSortOption,
+  FestivalDay,
   ICatalogRepository,
 } from './interfaces';
 import {
@@ -125,6 +126,10 @@ interface EventRow {
   genres?: string[] | null;
   /** Added by migration 20261126050000; undefined until applied. */
   genres_source?: string | null;
+  /** Added by migration 20261126070000; undefined until applied. */
+  festival_group_primary?: boolean | null;
+  festival_group_size?: number | null;
+  festival_group_end_date?: string | null;
   /** Added by migration 20261124000000; undefined until that migration is applied. */
   image_url?: string | null;
   created_at: string;
@@ -299,6 +304,10 @@ function mapEventRow(row: EventRow): Event {
     genre: row.genre ?? null,
     genres: Array.isArray(row.genres) ? row.genres : [],
     genresSource: row.genres_source ?? null,
+    festivalGroupEndDate:
+      row.festival_group_primary !== false && (row.festival_group_size ?? 1) > 1
+        ? (row.festival_group_end_date ?? null)
+        : null,
     imageUrl: row.image_url ?? null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -527,18 +536,33 @@ export class SupabaseCatalogRepository implements ICatalogRepository {
     // Fetch artists
     const { data: artistLinks } = await this.client
       .from('event_artists')
-      .select('*, artists(*)')
+      .select('*, artists(*, artist_external_ids(provider, external_id))')
       .eq('event_id', id)
       .order('sort_order', { ascending: true });
 
-    const artists = ((artistLinks as unknown as EventArtistRow[]) || []).map(
-      (row) => ({
-        id: row.artist_id,
-        name: row.artists?.name ?? 'Unknown Artist',
-        billingPosition: row.billing_position,
-        imageUrl: row.artists?.image_url ?? null,
-      }),
-    );
+    interface EventArtistDetailRow extends EventArtistRow {
+      artists?:
+        | (ArtistRow & {
+            artist_external_ids?: Array<{
+              provider: string;
+              external_id: string;
+            }> | null;
+          })
+        | null;
+    }
+
+    const artists = (
+      (artistLinks as unknown as EventArtistDetailRow[]) || []
+    ).map((row) => ({
+      id: row.artist_id,
+      name: row.artists?.name ?? 'Unknown Artist',
+      billingPosition: row.billing_position,
+      spotifyArtistId:
+        row.artists?.artist_external_ids?.find(
+          (ext) => ext.provider === 'spotify',
+        )?.external_id ?? null,
+      imageUrl: row.artists?.image_url ?? null,
+    }));
 
     // Fetch ticket links
     const { data: ticketLinksData } = await this.client
@@ -597,6 +621,8 @@ export class SupabaseCatalogRepository implements ICatalogRepository {
             city: venue.city,
             region: venue.region,
             imageUrl: venue.imageUrl ?? null,
+            lat: venue.lat ?? null,
+            lng: venue.lng ?? null,
           }
         : null,
       ticketLinks,
@@ -742,6 +768,11 @@ export class SupabaseCatalogRepository implements ICatalogRepository {
     // resolveSearchGroups); each query only ever carries one bounded group.
     if (opts?.searchOr) {
       query = query.or(opts.searchOr);
+    }
+
+    if (filters?.collapseFestivalDays) {
+      // One card per multi-day festival: hide every day but the group's first.
+      query = query.eq('festival_group_primary', true);
     }
 
     if (filters?.excludePastShowtimes && filters?.fromDate) {
@@ -1083,6 +1114,7 @@ export class SupabaseCatalogRepository implements ICatalogRepository {
             : null),
         genres: event.genres ?? [],
         genresSource: event.genresSource ?? null,
+        festivalGroupEndDate: event.festivalGroupEndDate ?? null,
         imageUrl: event.imageUrl ?? null,
       });
     }
@@ -1459,6 +1491,11 @@ export class SupabaseCatalogRepository implements ICatalogRepository {
       query = query.or(opts.searchOr);
     }
 
+    if (filters?.collapseFestivalDays) {
+      // One card per multi-day festival: hide every day but the group's first.
+      query = query.eq('festival_group_primary', true);
+    }
+
     if (filters?.excludePastShowtimes && filters?.fromDate) {
       const today = filters.fromDate;
       const nowIso = filters.referenceNowIso || new Date().toISOString();
@@ -1735,6 +1772,86 @@ export class SupabaseCatalogRepository implements ICatalogRepository {
       throw new Error(`Failed to load artists by id: ${error.message}`);
     }
     return (data ?? []).map((row) => mapArtistRow(row as ArtistRow));
+  }
+
+  async listFestivalDays(eventId: string): Promise<FestivalDay[]> {
+    const { data: self, error: selfErr } = await this.client
+      .from('events')
+      .select('festival_group_id')
+      .eq('id', eventId)
+      .maybeSingle();
+    if (selfErr) {
+      throw new Error(`Failed to load festival group: ${selfErr.message}`);
+    }
+    const groupId = (self as { festival_group_id?: string | null } | null)
+      ?.festival_group_id;
+    if (!groupId) return [];
+    const { data, error } = await this.client
+      .from('events')
+      .select('id, name, local_start_date')
+      .eq('festival_group_id', groupId)
+      .order('local_start_date', { ascending: true })
+      .order('id', { ascending: true });
+    if (error) {
+      throw new Error(`Failed to list festival days: ${error.message}`);
+    }
+    return (
+      (data ?? []) as Array<{
+        id: string;
+        name: string;
+        local_start_date: string;
+      }>
+    ).map((r) => ({
+      id: r.id,
+      name: r.name,
+      localStartDate: r.local_start_date,
+    }));
+  }
+
+  /** Recomputes festival day groups (presentation only); returns the number of grouped events. */
+  async refreshFestivalGroups(): Promise<number> {
+    const { data, error } = await this.client.rpc('refresh_festival_groups');
+    if (error) {
+      throw new Error(`Failed to refresh festival groups: ${error.message}`);
+    }
+    return typeof data === 'number' ? data : 0;
+  }
+
+  async fillVenueCoordinatesForEvent(
+    eventId: string,
+    lat: number,
+    lng: number,
+  ): Promise<boolean> {
+    if (
+      !Number.isFinite(lat) ||
+      !Number.isFinite(lng) ||
+      Math.abs(lat) > 90 ||
+      Math.abs(lng) > 180
+    ) {
+      return false;
+    }
+    const { data: ev, error: evErr } = await this.client
+      .from('events')
+      .select('venue_id')
+      .eq('id', eventId)
+      .maybeSingle();
+    if (evErr) {
+      throw new Error(`Failed to load event venue: ${evErr.message}`);
+    }
+    const venueId = (ev as { venue_id?: string | null } | null)?.venue_id;
+    if (!venueId) return false;
+    // Fill-if-empty: venues that already have coordinates are never changed.
+    const { data, error } = await this.client
+      .from('venues')
+      .update({ lat, lng, updated_at: new Date().toISOString() })
+      .eq('id', venueId)
+      .is('lat', null)
+      .is('lng', null)
+      .select('id');
+    if (error) {
+      throw new Error(`Failed to store venue coordinates: ${error.message}`);
+    }
+    return (data ?? []).length > 0;
   }
 
   async fillEventGenres(

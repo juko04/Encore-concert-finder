@@ -16,8 +16,8 @@
 
 import type { CanonicalEventSummary } from '@/lib/domain/catalog';
 import { calculateArtistInterestFactor } from './factors/artist-interest';
-import { calculateDistanceFactor, isValidCoordinate } from './factors/distance';
-import { findCityByName } from '@/lib/location/cities';
+import { calculateDistanceFactor } from './factors/distance';
+import { resolveEventCoordinates } from '@/lib/location/radius';
 import { calculatePriceFactor } from './factors/price';
 import { checkEventEligibility } from './factors/eligibility';
 import { buildGenreTasteProfile } from './genre';
@@ -81,19 +81,12 @@ export function scoreEvent(
   const isFavorite = artistResult.matchedArtist?.isFavorite ?? false;
 
   // 2. Distance Factor
-  // Many events lack venue coordinates. Fall back to the city centroid so a
-  // chosen home city still produces a distance signal; flagged as approximate.
-  let eventLat = event.lat;
-  let eventLng = event.lng;
-  let cityLevelApprox = false;
-  if (!isValidCoordinate(eventLat, eventLng)) {
-    const city = findCityByName(event.city, event.region);
-    if (city) {
-      eventLat = city.lat;
-      eventLng = city.lng;
-      cityLevelApprox = true;
-    }
-  }
+  // Prefer plausible venue coordinates; fall back to the city centroid so a
+  // chosen home city still produces a distance signal without trusting corrupt source coords.
+  const resolvedCoords = resolveEventCoordinates(event);
+  const eventLat = resolvedCoords?.lat ?? null;
+  const eventLng = resolvedCoords?.lng ?? null;
+  const cityLevelApprox = resolvedCoords?.precision === 'city_centroid';
 
   const distanceResult = calculateDistanceFactor({
     userLat:

@@ -1,10 +1,11 @@
 'use client';
 
+import { SupportActsLine } from '@/components/index/SupportActsLine';
 import React from 'react';
 import Link from 'next/link';
 import type { IndexEventItem } from './types';
 import {
-  formatIndexDate,
+  formatIndexEventDate,
   formatIndexPrice,
   getVerifiedAvailabilityBadge,
   hasRealMatchScore,
@@ -109,19 +110,14 @@ export function EventListItem({
               ))}
           </div>
 
-          {supportActs.length > 0 && (
-            <p className="line-clamp-1 text-[11px] text-zinc-500">
-              with {supportActs.map((a) => a.name).join(', ')}
-            </p>
-          )}
+          <SupportActsLine
+            acts={supportActs}
+            className="line-clamp-1 text-[11px] text-zinc-500"
+          />
 
           <div className="mt-0.5 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-xs text-zinc-500">
             <span className="font-medium text-zinc-700">
-              {formatIndexDate(
-                event.localStartDate,
-                event.doorTime || event.startsAt,
-                event.timezone,
-              )}
+              {formatIndexEventDate(event)}
             </span>
             <span>·</span>
             <span className="truncate">

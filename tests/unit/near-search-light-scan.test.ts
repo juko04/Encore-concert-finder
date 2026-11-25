@@ -145,7 +145,7 @@ describe('near search light scan (listEventLocations + getEventsByIds)', () => {
       { id: 'a', city: 'Denver', region: 'CO', lat: null, lng: null },
       { id: 'a', city: 'Denver', region: 'CO', lat: null, lng: null }, // duplicate
       { id: 'b', city: 'Atlantis', region: 'ZZ', lat: null, lng: null }, // unknown
-      { id: 'c', city: 'Denver', region: 'CO', lat: 47.6, lng: -122.3 }, // coord wins: out
+      { id: 'c', city: 'Nowhere', region: 'ZZ', lat: 47.6, lng: -122.3 }, // coord wins: out
       { id: 'd', city: 'Nowhere', region: 'ZZ', lat: 39.74, lng: -104.99 }, // coord: in
     ];
     const repo: NearListRepository = {

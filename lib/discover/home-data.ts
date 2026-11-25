@@ -8,6 +8,10 @@ import {
   getDiscoverDateWindows,
   type DiscoverDateWindows,
 } from '@/lib/discover/dates';
+import {
+  annotateEventsWithArtistAffinity,
+  type ArtistAffinityResolver,
+} from '@/lib/recommendation/artist-affinity';
 import { listAllEventsWithinRadius } from '@/lib/location/near-search';
 
 export interface DiscoverRow {
@@ -123,6 +127,8 @@ export async function getDiscoverHomeData(options: {
    * "Near" row shows everything within that many miles instead of only the home city's shows.
    */
   homeRadiusMiles?: number | null;
+  /** Marks artists the signed-in user likes on every row's lineup (see artist-affinity). */
+  artistAffinity?: ArtistAffinityResolver;
   /** Viewer IANA timezone for "today" / weekend windows (cookie -> home city -> UTC). */
   timeZone?: string;
 }): Promise<DiscoverHomeData> {
@@ -141,6 +147,8 @@ export async function getDiscoverHomeData(options: {
     excludePastShowtimes: true,
     referenceNowIso: nowIso,
     sortBy: 'date_asc',
+    // A multi-day festival is one card, not one per day.
+    collapseFestivalDays: true,
   };
 
   const list = (extra: EventListFilters) =>
@@ -254,6 +262,7 @@ export async function getDiscoverHomeData(options: {
               fromDate: windows.today,
               excludePastShowtimes: true,
               referenceNowIso: nowIso,
+              collapseFestivalDays: true,
             })
           : Promise.resolve(0),
       0,
@@ -462,6 +471,13 @@ export async function getDiscoverHomeData(options: {
   const genreChips: DiscoverChip[] = (facets?.genres ?? [])
     .slice(0, 8)
     .map((g) => ({ label: g, href: search({ genre: g }) }));
+
+  const affinity = options.artistAffinity;
+  if (affinity) {
+    for (const row of rows) {
+      row.events = annotateEventsWithArtistAffinity(row.events, affinity);
+    }
+  }
 
   return {
     totalUpcoming,
