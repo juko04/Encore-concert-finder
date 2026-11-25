@@ -2,6 +2,12 @@
  * In-memory repository implementations for unit testing and offline development.
  */
 
+import {
+  eventMatchesGenre,
+  genreMatchesQuery,
+  normalizeGenreFacets,
+  resolveGenreQuery,
+} from '@/lib/genres/catalog-genres';
 import type {
   Artist,
   ArtistExternalId,
@@ -476,7 +482,8 @@ export class MemoryCatalogRepository implements ICatalogRepository {
       result = result.filter(
         (e) =>
           e.eventKind?.toLowerCase().includes(g) ||
-          e.name.toLowerCase().includes(g),
+          e.name.toLowerCase().includes(g) ||
+          eventMatchesGenre(filters.genre, e.genre, e.genres),
       );
     }
     if (filters?.city) {
@@ -499,6 +506,9 @@ export class MemoryCatalogRepository implements ICatalogRepository {
       if (q) {
         result = result.filter((e) => {
           if (e.name.toLowerCase().includes(q)) return true;
+          if (resolveGenreQuery(q) && genreMatchesQuery(q, e.genre, e.genres)) {
+            return true;
+          }
           const venue = e.venueId ? this.venues.get(e.venueId) : null;
           if (venue?.name.toLowerCase().includes(q)) return true;
           for (const ea of this.eventArtists.values()) {
@@ -803,10 +813,11 @@ export class MemoryCatalogRepository implements ICatalogRepository {
     for (const e of this.events.values()) {
       if (e.genre) genreSet.add(e.genre);
     }
+    const genres = normalizeGenreFacets(Array.from(genreSet));
     return {
       venues: venues.sort((a, b) => a.name.localeCompare(b.name)),
       cities: cities.sort((a, b) => a.localeCompare(b)),
-      genres: Array.from(genreSet).sort((a, b) => a.localeCompare(b)),
+      genres,
     };
   }
 

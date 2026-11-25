@@ -438,3 +438,9 @@ export function hasRealMatchScore(
     Number.isFinite(p.score),
   );
 }
+
+/** Compact card label for a real 0-100 match score, e.g. "Match 72". */
+export function formatMatchScoreLabel(score: number): string {
+  const clamped = Math.max(0, Math.min(100, Math.round(score)));
+  return `Match ${clamped}`;
+}

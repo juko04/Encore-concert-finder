@@ -10,6 +10,7 @@ import {
   hasRealMatchScore,
 } from './formatters';
 import { EventImage } from './EventImage';
+import { GenreBadge } from './GenreBadge';
 import {
   HeartIcon,
   BellIcon,
@@ -126,14 +127,7 @@ export function EventListItem({
               {event.venueName || 'Venue TBA'}
               {event.city ? ` (${event.city})` : ''}
             </span>
-            {event.genre && (
-              <>
-                <span>·</span>
-                <span className="font-mono text-[11px] text-zinc-500">
-                  {event.genre.split('/')[0].trim()}
-                </span>
-              </>
-            )}
+            <GenreBadge genre={event.genre} />
           </div>
         </div>
       </div>

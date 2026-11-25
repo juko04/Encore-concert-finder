@@ -1,5 +1,11 @@
 'use client';
 
+import {
+  canonicalGenreLabel,
+  eventMatchesGenre,
+  genreMatchesQuery,
+  normalizeGenreFacets,
+} from '@/lib/genres/catalog-genres';
 import React, {
   useState,
   useMemo,
@@ -237,7 +243,8 @@ export function SearchClient({
     initialCity || 'all',
   );
   const [selectedGenre, setSelectedGenre] = useState<string>(
-    initialGenre || 'all',
+    (initialGenre && (canonicalGenreLabel(initialGenre) ?? initialGenre)) ||
+      'all',
   );
   const [statusFilter, setStatusFilter] = useState<
     IndexInventoryStatus | 'all'
@@ -363,17 +370,11 @@ export function SearchClient({
   }, [catalogFacets.cities, normalizedEvents]);
 
   const uniqueGenres = useMemo(() => {
+    // Shared vocabulary: non-genres dropped, raw strings collapsed to canonical labels.
     if (catalogFacets.genres.length > 0) {
-      return catalogFacets.genres;
+      return normalizeGenreFacets(catalogFacets.genres);
     }
-    const set = new Set<string>();
-    normalizedEvents.forEach((e) => {
-      if (e.genre) {
-        const primary = e.genre.split('/')[0].trim();
-        if (primary) set.add(primary);
-      }
-    });
-    return Array.from(set).sort();
+    return normalizeGenreFacets(normalizedEvents.map((e) => e.genre));
   }, [catalogFacets.genres, normalizedEvents]);
 
   // Active filter count
@@ -644,7 +645,7 @@ export function SearchClient({
         );
         const venueMatch = event.venueName?.toLowerCase().includes(q);
         const cityMatch = event.city?.toLowerCase().includes(q);
-        const genreMatch = event.genre?.toLowerCase().includes(q);
+        const genreMatch = genreMatchesQuery(q, event.genre, event.subgenres);
         const vibeMatch = event.vibeTags?.some((v) =>
           v.toLowerCase().includes(q),
         );
@@ -720,15 +721,7 @@ export function SearchClient({
 
       // 6. Genre Filter (checks event genre metadata and subgenres)
       if (selectedGenre !== 'all') {
-        const matchesPrimary =
-          event.genre &&
-          event.genre.toLowerCase().includes(selectedGenre.toLowerCase());
-        const matchesSub =
-          event.subgenres &&
-          event.subgenres.some((s) =>
-            s.toLowerCase().includes(selectedGenre.toLowerCase()),
-          );
-        if (!matchesPrimary && !matchesSub) {
+        if (!eventMatchesGenre(selectedGenre, event.genre, event.subgenres)) {
           return false;
         }
       }
@@ -1049,7 +1042,11 @@ export function SearchClient({
                 className="focus:outline-hidden w-full rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-xs text-zinc-800 focus:border-zinc-900"
               >
                 <option value="all">All Genres</option>
-                {uniqueGenres.map((g) => (
+                {(selectedGenre !== 'all' &&
+                !uniqueGenres.includes(selectedGenre)
+                  ? [selectedGenre, ...uniqueGenres]
+                  : uniqueGenres
+                ).map((g) => (
                   <option key={g} value={g}>
                     {g}
                   </option>

@@ -8,9 +8,11 @@ import {
   formatIndexPrice,
   getVerifiedAvailabilityBadge,
   hasRealMatchScore,
+  formatMatchScoreLabel,
   getArtistAccent,
 } from './formatters';
 import { EventImage } from './EventImage';
+import { GenreBadge } from './GenreBadge';
 import {
   HeartIcon,
   BellIcon,
@@ -141,11 +143,9 @@ export function EventCard({
                   <span>{score}% match</span>
                 </span>
               )
-            ) : event.genre ? (
-              <span className="inline-flex items-center rounded-md border border-zinc-200 bg-zinc-50 px-2 py-0.5 font-mono text-[11px] text-zinc-500">
-                {event.genre.split('/')[0].trim()}
-              </span>
             ) : null}
+
+            <GenreBadge genre={event.genre} />
           </div>
 
           {/* Quick Action Controls (Save, Alert, Calendar Export) */}
@@ -314,6 +314,16 @@ export function EventCard({
                 </span>
               )}
           </div>
+
+          {/* Real 0-100 match score only (never fabricated for guests or suppressed shows) */}
+          {isPersonalized && !isDisliked && (
+            <div
+              data-testid="card-match-score"
+              className="font-mono text-[11px] tabular-nums text-zinc-600"
+            >
+              {formatMatchScoreLabel(score)}
+            </div>
+          )}
         </div>
 
         {/* Match Reason or Pitch */}

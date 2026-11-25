@@ -1,5 +1,6 @@
 'use client';
 
+import { GenreBadge } from './GenreBadge';
 import React, { useState, useMemo } from 'react';
 import Link from 'next/link';
 import type { IndexEventItem } from './types';
@@ -157,11 +158,7 @@ export function ConcertDetailClient({
                 </span>
               )}
 
-              {event.genre && (
-                <span className="rounded-md border border-zinc-200 bg-zinc-50 px-2.5 py-0.5 font-mono text-xs text-zinc-600">
-                  {event.genre}
-                </span>
-              )}
+              <GenreBadge genre={event.genre} />
 
               {isPersonalized ? (
                 isDisliked ? (

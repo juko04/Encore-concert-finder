@@ -24,6 +24,31 @@ import type {
 import { escapeLikePattern, normalizeUrl } from '@/lib/domain/value-objects';
 import { createAdminClient } from '@/lib/supabase/admin';
 import type { EventListFilters, ICatalogRepository } from './interfaces';
+import {
+  canonicalGenreLabel,
+  genreDbTerms,
+  normalizeGenreFacets,
+  resolveGenreQuery,
+} from '@/lib/genres/catalog-genres';
+
+/**
+ * PostgREST `or=` clause for the genre filter. Canonical labels expand to every stored spelling
+ * (Hip-Hop -> "hip-hop", "hip hop", "rap", ...); other strings keep the previous substring match.
+ */
+function buildGenreFilterClause(rawGenre: string): string {
+  const trimmed = rawGenre.trim();
+  const label = canonicalGenreLabel(trimmed);
+  const terms = label ? genreDbTerms(label) : [];
+  const needles = terms.length > 0 ? terms : [trimmed];
+  const parts: string[] = [];
+  for (const needle of needles) {
+    const e = escapeLikePattern(needle).replace(/"/g, '""');
+    parts.push(`genre.ilike."%${e}%"`);
+  }
+  const arr = trimmed.toLowerCase().replace(/"/g, '');
+  parts.push(`genres.cs.{"${arr}"}`);
+  return parts.join(',');
+}
 
 // Database row interfaces
 interface ArtistRow {
@@ -699,8 +724,7 @@ export class SupabaseCatalogRepository implements ICatalogRepository {
           'event_kind.eq.festival,event_kind.eq.multi_day_festival,genre.ilike.festival,genres.cs.{festival}',
         );
       } else {
-        const escapedG = escapeLikePattern(filters.genre.trim());
-        query = query.or(`genre.ilike."%${escapedG}%",genres.cs.{"${g}"}`);
+        query = query.or(buildGenreFilterClause(filters.genre));
       }
     }
 
@@ -1001,7 +1025,15 @@ export class SupabaseCatalogRepository implements ICatalogRepository {
   private async resolveSearchGroups(searchQuery: string): Promise<string[]> {
     const escaped = escapeLikePattern(searchQuery.trim());
     const quotedEscaped = escaped.replace(/"/g, '""');
-    const nameClause = `name.ilike."%${quotedEscaped}%"`;
+    // Genre-aware search: "hip hop", "hiphop", "rap" etc. also match events by genre column.
+    const genreLabel = resolveGenreQuery(searchQuery);
+    const genreTerms = genreDbTerms(genreLabel).map((t) => {
+      const e = escapeLikePattern(t).replace(/"/g, '""');
+      return `genre.ilike."%${e}%"`;
+    });
+    const nameClause = [`name.ilike."%${quotedEscaped}%"`, ...genreTerms].join(
+      ',',
+    );
 
     const pageAll = async (table: 'venues' | 'artists'): Promise<string[]> => {
       const ids: string[] = [];
@@ -1258,8 +1290,7 @@ export class SupabaseCatalogRepository implements ICatalogRepository {
           'event_kind.eq.festival,event_kind.eq.multi_day_festival,genre.ilike.festival,genres.cs.{festival}',
         );
       } else {
-        const escapedG = escapeLikePattern(filters.genre.trim());
-        query = query.or(`genre.ilike."%${escapedG}%",genres.cs.{"${g}"}`);
+        query = query.or(buildGenreFilterClause(filters.genre));
       }
     }
 
@@ -1365,20 +1396,18 @@ export class SupabaseCatalogRepository implements ICatalogRepository {
       city: v.city ?? undefined,
     }));
 
-    const genreSet = new Set<string>();
-
-    if (genresRes.data) {
-      for (const row of genresRes.data as Array<{ genre?: string | null }>) {
-        if (row.genre && row.genre.trim().length > 0) {
-          genreSet.add(row.genre.trim());
-        }
-      }
-    }
+    // One shared vocabulary: non-genres ("Live Music", rodeo, ...) are dropped, raw source strings
+    // collapse to canonical labels so filters, badges and search agree.
+    const genres = normalizeGenreFacets(
+      ((genresRes.data ?? []) as Array<{ genre?: string | null }>).map(
+        (row) => row.genre,
+      ),
+    );
 
     return {
       venues,
       cities: citiesList.sort((a, b) => a.localeCompare(b)),
-      genres: Array.from(genreSet).sort((a, b) => a.localeCompare(b)),
+      genres,
     };
   }
 
