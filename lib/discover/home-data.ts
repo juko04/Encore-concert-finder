@@ -8,7 +8,7 @@ import {
   getDiscoverDateWindows,
   type DiscoverDateWindows,
 } from '@/lib/discover/dates';
-import { filterEventsWithinRadius } from '@/lib/location/radius';
+import { listAllEventsWithinRadius } from '@/lib/location/near-search';
 
 export interface DiscoverRow {
   id: string;
@@ -35,8 +35,8 @@ export interface DiscoverHomeData {
 
 const ROW_LIMIT = 12;
 const POOL_LIMIT = 100;
-/** Upcoming shows scanned when filtering the "Near" row by travel radius. */
-const NEAR_RADIUS_FETCH_LIMIT = 300;
+/** Matches kept for the "Near" row; the catalog is scanned until this many are found. */
+const NEAR_RADIUS_MATCH_LIMIT = POOL_LIMIT;
 /** Minimum verified-price events before an "Under $30" row is shown. */
 const MIN_VERIFIED_PRICE_ROW = 4;
 const UNDER_PRICE = 30;
@@ -149,10 +149,13 @@ export async function getDiscoverHomeData(options: {
       ? safe(
           `within ${homeRadiusMiles} mi`,
           async () =>
-            filterEventsWithinRadius(
-              await list({ limit: NEAR_RADIUS_FETCH_LIMIT }),
+            listAllEventsWithinRadius(
+              { listEvents: (f) => catalogRepo.listEvents(f) },
+              base,
               homeLocation,
               homeRadiusMiles as number,
+              undefined,
+              NEAR_RADIUS_MATCH_LIMIT,
             ),
           [] as CanonicalEventSummary[],
         )

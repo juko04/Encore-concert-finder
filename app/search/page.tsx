@@ -2,7 +2,7 @@ import React from 'react';
 import Link from 'next/link';
 import { createClient } from '@/lib/supabase/server';
 import { getHomeLocation } from '@/lib/location/server';
-import { filterEventsWithinRadius } from '@/lib/location/radius';
+import { listEventsNearHome } from '@/lib/location/near-search';
 import { SupabaseProfileRepository } from '@/lib/repositories/profile-repository';
 import type { UserProfile } from '@/lib/domain/profile';
 import { getAuthenticatedUser } from '@/lib/auth/session';
@@ -41,8 +41,6 @@ interface SearchPageProps {
   }>;
 }
 
-/** Cap for radius post-filtering (most-upcoming shows first, in the requested sort order). */
-const RADIUS_FETCH_LIMIT = 500;
 const PAGE_SIZE = 50;
 
 function shortcutHref(
@@ -133,7 +131,7 @@ export default async function SearchPage({ searchParams }: SearchPageProps) {
     freeOnly: freeOnly || undefined,
     includeUnknownPrice,
     sortBy: repoSortBy,
-    limit: 50,
+    limit: PAGE_SIZE,
     offset: 0,
   };
 
@@ -159,16 +157,17 @@ export default async function SearchPage({ searchParams }: SearchPageProps) {
   try {
     if (nearActive && home) {
       // Radius is measured from the home city's coordinate to the venue (or city centroid).
-      // The catalog has no geo query, so fetch a bounded page and filter here; shows whose
-      // location is unknown are excluded rather than guessed.
-      const candidates = await catalogRepo.listEvents({
-        ...filters,
-        limit: RADIUS_FETCH_LIMIT,
-        offset: 0,
-      });
-      const within = filterEventsWithinRadius(candidates, home, radiusMiles);
-      events = within.slice(0, PAGE_SIZE);
-      totalCount = within.length;
+      // The catalog has no geo query, so the whole catalog is walked server-side in batches
+      // (no first-N cap); shows whose location is unknown are excluded rather than guessed.
+      const near = await listEventsNearHome(
+        catalogRepo,
+        filters,
+        home,
+        radiusMiles,
+        { limit: PAGE_SIZE, offset: 0 },
+      );
+      events = near.events;
+      totalCount = near.totalCount;
     } else {
       const [fetchedEvents, count] = await Promise.all([
         catalogRepo.listEvents(filters),
