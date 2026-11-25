@@ -18,6 +18,7 @@ import {
   deletePreferenceAction,
   disconnectSpotifyAction,
   getSpotifyTopArtistsAction,
+  getStoredSpotifyArtistsAction,
   savePreferenceAction,
   syncSpotifyArtistsAction,
   updatePreferenceLevelAction,
@@ -74,6 +75,8 @@ export function TasteProfileManager({
   const [spotifyTimeRange, setSpotifyTimeRange] =
     useState<SpotifyTimeRange>('short_term');
   const [spotifyArtists, setSpotifyArtists] = useState<SpotifyTopArtist[]>([]);
+  const [isStoredSnapshot, setIsStoredSnapshot] = useState<boolean>(false);
+  const [storedSyncedAt, setStoredSyncedAt] = useState<string | null>(null);
   const [isLoadingSpotify, setIsLoadingSpotify] = useState<boolean>(false);
   const [isDisconnecting, setIsDisconnecting] = useState<boolean>(false);
   const [spotifyPreviewError, setSpotifyPreviewError] = useState<string | null>(
@@ -132,12 +135,28 @@ export function TasteProfileManager({
   useEffect(() => {
     const shouldFetch = spotifyStatus.connected || isSyntheticDemo;
     if (!shouldFetch) {
-      setSpotifyArtists([]);
+      // Disconnected / expired: show the durable saved snapshot (never calls Spotify).
+      let isSubscribed = true;
       setIsSyntheticResult(false);
       setSpotifyPreviewError(null);
-      return;
+      getStoredSpotifyArtistsAction(spotifyTimeRange)
+        .then((res) => {
+          if (!isSubscribed) return;
+          setSpotifyArtists(res.artists);
+          setIsStoredSnapshot(res.artists.length > 0);
+          setStoredSyncedAt(res.syncedAt);
+        })
+        .catch(() => {
+          if (!isSubscribed) return;
+          setSpotifyArtists([]);
+          setIsStoredSnapshot(false);
+        });
+      return () => {
+        isSubscribed = false;
+      };
     }
 
+    setIsStoredSnapshot(false);
     let isSubscribed = true;
     setIsLoadingSpotify(true);
 
@@ -398,7 +417,7 @@ export function TasteProfileManager({
           lastSyncedAt: null,
           isConfigured: spotifyStatus.isConfigured,
         });
-        setSpotifyArtists([]);
+        // Saved Spotify rankings/preferences are kept; the effect above reloads the stored snapshot.
         setIsSyntheticDemo(false);
         setSimulatedDemoPreferences([]);
       } else if (result.error) {
@@ -450,8 +469,12 @@ export function TasteProfileManager({
           isSyncing={isSyncing}
         />
 
-        {(spotifyStatus.connected || isSyntheticDemo) && (
+        {(spotifyStatus.connected ||
+          isSyntheticDemo ||
+          (isStoredSnapshot && spotifyArtists.length > 0)) && (
           <SpotifyTastePreview
+            isStoredSnapshot={isStoredSnapshot}
+            storedSyncedAt={storedSyncedAt}
             artists={spotifyArtists}
             timeRange={spotifyTimeRange}
             onChangeTimeRange={setSpotifyTimeRange}

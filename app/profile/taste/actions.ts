@@ -30,6 +30,7 @@ import {
 } from '@/lib/sources/spotify/synthetic-preview';
 import {
   clearSpotifyAffinityCache,
+  getStoredSpotifyAffinities,
   syncSpotifyTopArtistsAcrossTimeRanges,
 } from '@/lib/sources/spotify/affinity-service';
 import { SupabaseCatalogRepository } from '@/lib/repositories/catalog-repository';
@@ -316,6 +317,52 @@ export async function syncSpotifyArtistsAction(
       artists: [],
       isSyntheticPreview: false,
       error: 'Failed to sync Spotify listening history. Please try again.',
+    };
+  }
+}
+
+export interface StoredSpotifyArtistsResult {
+  artists: SpotifyTopArtist[];
+  /** ISO timestamp of the most recent stored sync (null when nothing is stored). */
+  syncedAt: string | null;
+  error?: string;
+}
+
+/**
+ * Returns the durable, previously imported Spotify rankings/affinities. Works after disconnect,
+ * token expiry/revocation, or developer-allowlist removal because it never calls Spotify.
+ */
+export async function getStoredSpotifyArtistsAction(
+  timeRange?: SpotifyTimeRange,
+): Promise<StoredSpotifyArtistsResult> {
+  const user = await getAuthenticatedUser();
+  if (!user) {
+    return { artists: [], syncedAt: null, error: 'Unauthorized' };
+  }
+  try {
+    const stored = await getStoredSpotifyAffinities(user.id);
+    const artists =
+      timeRange && stored.some((a) => a.ranksByRange?.[timeRange] !== undefined)
+        ? stored
+            .filter((a) => a.ranksByRange?.[timeRange] !== undefined)
+            .sort(
+              (a, b) =>
+                (a.ranksByRange?.[timeRange] ?? 0) -
+                (b.ranksByRange?.[timeRange] ?? 0),
+            )
+        : stored;
+    const syncedAt =
+      stored
+        .map((a) => a.syncedAt)
+        .filter((v): v is string => Boolean(v))
+        .sort()
+        .at(-1) ?? null;
+    return { artists, syncedAt };
+  } catch {
+    return {
+      artists: [],
+      syncedAt: null,
+      error: 'Failed to load stored Spotify artists.',
     };
   }
 }

@@ -5,7 +5,8 @@
  * across short-term, medium-term, and long-term listening windows.
  *
  * Invariants:
- * 1. Read-only listening signals: never mutates user_artist_preferences.
+ * 1. Read-only listening signals: never mutates user_artist_preferences. Synced affinities are
+ *    persisted to user_spotify_artist_affinities and remain after disconnect/expiry/403.
  * 2. Fail-closed: network, auth, or token failures gracefully return last-known-good
  *    or [] without crashing Discover or recommendation scoring.
  * 3. Short TTL in-memory caching: prevents repeated external API calls per user session.
@@ -15,6 +16,10 @@
 import { getServerEnv } from '@/lib/env/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { SupabaseSpotifyConnectionRepository } from '@/lib/repositories/spotify-connection-repository';
+import {
+  SupabaseSpotifyAffinityRepository,
+  type ISpotifyAffinityRepository,
+} from '@/lib/repositories/spotify-affinity-repository';
 import { SpotifyApiClient } from './client';
 import type { SpotifyTimeRange, SpotifyTopArtist } from '@/lib/domain/spotify';
 import {
@@ -167,6 +172,55 @@ export function calculateUnifiedAffinityScore(ranks: {
   return sScore * 0.6 + mScore * 0.3 + lScore * 0.1;
 }
 
+function getAffinityRepo(): SupabaseSpotifyAffinityRepository | null {
+  try {
+    return new SupabaseSpotifyAffinityRepository(createAdminClient());
+  } catch {
+    return null;
+  }
+}
+
+async function persistAffinities(
+  userId: string,
+  artists: SpotifyTopArtist[],
+  syncedAt: string,
+): Promise<void> {
+  const repo = getAffinityRepo();
+  if (!repo) return;
+  try {
+    await repo.replaceAffinities(userId, artists, new Date(syncedAt));
+  } catch (err) {
+    console.warn(
+      `[SpotifyAffinityService] Failed to persist affinities for user ${userId}:`,
+      err,
+    );
+  }
+}
+
+/**
+ * Reads the durable Spotify affinity snapshot for a user. Works with no Spotify connection,
+ * expired/revoked tokens, or an allowlist-removed app. Fail-closed: returns [] on error.
+ */
+export async function getStoredSpotifyAffinities(
+  userId: string,
+  repo?: ISpotifyAffinityRepository,
+): Promise<SpotifyTopArtist[]> {
+  if (!userId || typeof userId !== 'string') return [];
+  const effective = repo ?? getAffinityRepo();
+  if (!effective) return [];
+  try {
+    return await effective.getAffinities(userId);
+  } catch {
+    return [];
+  }
+}
+
+async function lastKnownOrStored(userId: string): Promise<SpotifyTopArtist[]> {
+  const cached = lastKnownGoodCache.get(userId);
+  if (cached && cached.length > 0) return cached;
+  return getStoredSpotifyAffinities(userId);
+}
+
 export interface SyncSpotifyOptions {
   catalogRepo?: ICatalogRepository;
   allowEnrichment?: boolean;
@@ -191,7 +245,7 @@ export async function syncSpotifyTopArtistsAcrossTimeRanges(
   try {
     serverEnv = getServerEnv();
   } catch {
-    return lastKnownGoodCache.get(userId) ?? [];
+    return await lastKnownOrStored(userId);
   }
 
   if (
@@ -202,7 +256,7 @@ export async function syncSpotifyTopArtistsAcrossTimeRanges(
     !serverEnv.SPOTIFY_REDIRECT_URI ||
     !serverEnv.SPOTIFY_TOKEN_ENCRYPTION_KEY
   ) {
-    return lastKnownGoodCache.get(userId) ?? [];
+    return await lastKnownOrStored(userId);
   }
 
   try {
@@ -214,12 +268,12 @@ export async function syncSpotifyTopArtistsAcrossTimeRanges(
 
     const tokens = await repo.getConnectionTokens(userId);
     if (!tokens) {
-      return lastKnownGoodCache.get(userId) ?? [];
+      return await lastKnownOrStored(userId);
     }
 
     if (tokens.reauthorizationDeadline.getTime() <= Date.now()) {
       await repo.updateStatus(userId, 'expired').catch(() => {});
-      return lastKnownGoodCache.get(userId) ?? [];
+      return await lastKnownOrStored(userId);
     }
 
     const spotifyClient = new SpotifyApiClient({
@@ -246,7 +300,7 @@ export async function syncSpotifyTopArtistsAcrossTimeRanges(
         if (refreshErr instanceof SpotifyAuthenticationError) {
           await repo.updateStatus(userId, 'expired').catch(() => {});
         }
-        return lastKnownGoodCache.get(userId) ?? [];
+        return await lastKnownOrStored(userId);
       }
     }
 
@@ -275,7 +329,7 @@ export async function syncSpotifyTopArtistsAcrossTimeRanges(
     });
 
     if (successfulFetches === 0) {
-      return lastKnownGoodCache.get(userId) ?? [];
+      return await lastKnownOrStored(userId);
     }
 
     // Record successful sync timestamp in repository
@@ -375,13 +429,17 @@ export async function syncSpotifyTopArtistsAcrossTimeRanges(
     });
     lastKnownGoodCache.set(userId, consolidatedArtists);
 
+    // Persist durably so rankings/affinities survive disconnect, token expiry, 403/allowlist
+    // removal and restarts. Best-effort: persistence failure never breaks the sync result.
+    await persistAffinities(userId, consolidatedArtists, syncedAt);
+
     return consolidatedArtists;
   } catch (err) {
     console.warn(
       `[SpotifyAffinityService] Sync across time ranges failed for user ${userId}:`,
       err,
     );
-    return lastKnownGoodCache.get(userId) ?? [];
+    return await lastKnownOrStored(userId);
   }
 }
 
@@ -473,5 +531,5 @@ export async function getActiveSpotifyTopArtistsForUser(
     // Fail closed
   }
 
-  return lastKnownGoodCache.get(userId) ?? [];
+  return await lastKnownOrStored(userId);
 }

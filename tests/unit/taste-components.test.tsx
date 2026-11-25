@@ -19,6 +19,9 @@ vi.mock('@/app/profile/taste/actions', () => ({
     .fn()
     .mockResolvedValue({ connected: false, configured: true }),
   disconnectSpotifyAction: vi.fn().mockResolvedValue({ success: true }),
+  getStoredSpotifyArtistsAction: vi
+    .fn()
+    .mockResolvedValue({ artists: [], syncedAt: null }),
   getSpotifyTopArtistsAction: vi
     .fn()
     .mockImplementation(async (timeRange: string, isDemo?: boolean) => {

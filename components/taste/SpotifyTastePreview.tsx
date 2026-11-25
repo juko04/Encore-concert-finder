@@ -26,6 +26,9 @@ interface SpotifyTastePreviewProps {
   ) => Promise<void>;
   isLoading?: boolean;
   isSyntheticPreview?: boolean;
+  /** True when showing the durable saved snapshot (Spotify disconnected/expired). */
+  isStoredSnapshot?: boolean;
+  storedSyncedAt?: string | null;
   error?: string | null;
 }
 
@@ -51,6 +54,8 @@ export function SpotifyTastePreview({
   onAddPreference,
   isLoading = false,
   isSyntheticPreview = false,
+  isStoredSnapshot = false,
+  storedSyncedAt = null,
   error = null,
 }: SpotifyTastePreviewProps) {
   const [addingArtistId, setAddingArtistId] = useState<string | null>(null);
@@ -80,6 +85,17 @@ export function SpotifyTastePreview({
             <h3 className="text-base font-bold text-zinc-900">
               Spotify Listening History
             </h3>
+            {isStoredSnapshot && !isSyntheticPreview && (
+              <span
+                data-testid="stored-snapshot-pill"
+                className="rounded border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-700"
+              >
+                Imported from Spotify
+                {storedSyncedAt
+                  ? ` · saved ${new Date(storedSyncedAt).toISOString().slice(0, 10)}`
+                  : ''}
+              </span>
+            )}
             {isSyntheticPreview && (
               <span
                 data-testid="synthetic-preview-pill"

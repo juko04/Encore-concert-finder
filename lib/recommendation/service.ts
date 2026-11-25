@@ -469,21 +469,9 @@ export async function scoreEventForUser(options: {
   const catalogRepo =
     options.catalogRepo ?? new SupabaseCatalogRepository(client);
 
-  let spotifyRepo = options.spotifyRepo;
-  if (!spotifyRepo) {
-    try {
-      spotifyRepo = new SupabaseSpotifyConnectionRepository(
-        createAdminClient(),
-      );
-    } catch {
-      if (client) spotifyRepo = new SupabaseSpotifyConnectionRepository(client);
-    }
-  }
-
-  const [storedProfile, preferences, connection] = await Promise.all([
+  const [storedProfile, preferences] = await Promise.all([
     profileRepo.getProfile(userId),
     prefRepo.getPreferences(userId),
-    spotifyRepo ? spotifyRepo.getConnection(userId).catch(() => null) : null,
   ]);
 
   const userProfile = applyLocationOverride(
@@ -493,7 +481,9 @@ export async function scoreEventForUser(options: {
   );
 
   let spotifyTopArtists = options.spotifyTopArtists ?? [];
-  if (spotifyTopArtists.length === 0 && connection?.status === 'connected') {
+  // Always consult the affinity service: it syncs when connected and otherwise serves the
+  // durable stored snapshot (disconnected / expired / revoked users keep their rankings).
+  if (spotifyTopArtists.length === 0) {
     try {
       spotifyTopArtists = await getActiveSpotifyTopArtistsForUser(
         userId,
@@ -611,7 +601,9 @@ export async function getPersonalizedDiscoverData(
 
   // 1b. Retrieve Spotify top artists if connected (in-memory cached, fail-closed)
   let spotifyTopArtists: SpotifyTopArtist[] = options.spotifyTopArtists ?? [];
-  if (spotifyTopArtists.length === 0 && isSpotifyConnected) {
+  // Connected: live sync. Disconnected/expired/revoked: the service serves the durable stored
+  // snapshot, so imported Spotify rankings keep influencing scoring.
+  if (spotifyTopArtists.length === 0) {
     try {
       spotifyTopArtists = await getActiveSpotifyTopArtistsForUser(
         userId,

@@ -356,7 +356,7 @@ describe('PostgreSQL Integration: Recommendation Scoring & Profile RLS', () => {
       (r) => r.eventId === testEventId,
     );
     expect(matchedRecArtistFirst).toBeDefined();
-    expect(matchedRecArtistFirst!.weights.artist).toBe(65);
+    expect(matchedRecArtistFirst!.weights.artist).toBe(PRESET_WEIGHTS.artist_first.artist);
   });
 
   it('resolves explicit Spotify provider identity through artist_external_ids, disambiguates same-name artists, and isolates preferences across database reload', async () => {
