@@ -1311,6 +1311,44 @@ export class MemoryCatalogRepository implements ICatalogRepository {
       let eventId: string | null = null;
       let createdVenueId: string | null = null;
 
+      // 0. External-ID conflict pre-check (mirrors apply_canonicalization): when a
+      // resolution is supplied, persist needs_review instead of aborting the batch.
+      if (payload.event && payload.resolution) {
+        const claimedBy = new Map<string, string>();
+        let conflict: string | null = null;
+        for (const a of payload.artists ?? []) {
+          const identity = a.artist_id ?? `name:${a.normalized_name ?? a.name}`;
+          for (const ext of a.external_ids ?? []) {
+            const key = `${ext.provider}\u0000${ext.external_id}`;
+            const prior = claimedBy.get(key);
+            if (prior !== undefined && prior !== identity) {
+              conflict = 'external_id_shared_by_multiple_artists_in_candidate';
+            }
+            claimedBy.set(key, identity);
+            for (const existingExt of this.artistExternalIds.values()) {
+              if (
+                existingExt.provider === ext.provider &&
+                existingExt.externalId === ext.external_id &&
+                existingExt.artistId !== a.artist_id
+              ) {
+                conflict = 'external_id_owned_by_different_artist';
+              }
+            }
+          }
+        }
+        if (conflict) {
+          await this.recordResolution({
+            eventCandidateId: payload.resolution.event_candidate_id,
+            eventId: null,
+            status: 'needs_review',
+            matcherVersion: payload.resolution.matcher_version ?? '1.0.0',
+            confidence: Math.min(payload.resolution.confidence, 0.4),
+            reasons: ['duplicate_external_id_conflict', conflict],
+          });
+          return { eventId: null, status: 'needs_review' };
+        }
+      }
+
       // 1. Create venue if specified in transaction payload
       if (payload.venueToCreate) {
         createdVenueId = payload.venueToCreate.id ?? crypto.randomUUID();

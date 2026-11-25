@@ -531,6 +531,26 @@ export class CanonicalizationCoordinator {
       }
     }
 
+    // 4b. Detect provider external-ID conflicts BEFORE any write. Two different
+    // artists in one listing claiming the same provider id (or an id already owned
+    // by another canonical artist) must never be silently merged and must not abort
+    // the batch: route this candidate to needs_review instead.
+    const externalIdConflict =
+      await this.detectExternalIdConflict(artistPayloads);
+    if (externalIdConflict) {
+      const reasons = ['duplicate_external_id_conflict', externalIdConflict];
+      await this.catalogRepo.applyCanonicalization({
+        resolution: {
+          event_candidate_id: candidateId,
+          status: 'needs_review',
+          matcher_version: '1.0.0',
+          confidence: 0.4,
+          reasons,
+        },
+      });
+      return { eventId: null, status: 'needs_review', reasons };
+    }
+
     // 5. Match Event (Finding 6: Conservative matching)
     const preparedCandidate: EventCandidate = {
       ...candidate,
@@ -822,5 +842,35 @@ export class CanonicalizationCoordinator {
       status: matchResult.decision === 'create' ? 'created' : 'matched',
       reasons: matchResult.reasons,
     };
+  }
+  /**
+   * Returns a reason code when the prepared artist payloads contain a provider
+   * external ID claimed by more than one distinct artist (within this candidate)
+   * or already owned by a different canonical artist. Returns null when clean.
+   */
+  private async detectExternalIdConflict(
+    artistPayloads: NonNullable<CanonicalizationPayload['artists']>,
+  ): Promise<string | null> {
+    const claimedBy = new Map<string, string>();
+    for (const a of artistPayloads) {
+      const identity = a.artist_id ?? `name:${a.normalized_name ?? a.name}`;
+      for (const ext of a.external_ids ?? []) {
+        const key = `${ext.provider}\u0000${ext.external_id}`;
+        const prior = claimedBy.get(key);
+        if (prior !== undefined && prior !== identity) {
+          return 'external_id_shared_by_multiple_artists_in_candidate';
+        }
+        claimedBy.set(key, identity);
+
+        const owner = await this.catalogRepo.findArtistByExternalId(
+          ext.provider,
+          ext.external_id,
+        );
+        if (owner && owner.id !== a.artist_id) {
+          return 'external_id_owned_by_different_artist';
+        }
+      }
+    }
+    return null;
   }
 }
