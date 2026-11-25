@@ -37,6 +37,47 @@ const PREFERRED_IMAGE_WIDTH = 1024;
 const MIN_PREFERRED_IMAGE_WIDTH = 640;
 const MAX_PREFERRED_IMAGE_WIDTH = 1200;
 
+/** Name contains the standalone word "festival" (case-insensitive). */
+const FESTIVAL_NAME_PATTERN = /\bfestival\b/i;
+
+/**
+ * Names that describe a single-act presentation (tribute, laser/light show,
+ * "<album> live" recreation) rather than a multi-act festival. Conservative:
+ * only matches explicit phrases, never bare words like "live" or "party".
+ */
+const SINGLE_ACT_SHOW_PATTERNS: RegExp[] = [
+  /\btribute\b/i,
+  /\blaser\b/i,
+  /\blight\s*show\b/i,
+  /\bclassic albums? live\b/i,
+  /\bperforms?\s+.+\s+(?:album\s+)?live\b/i,
+  /\b(?:album|songs?)\s+live\b/i,
+];
+
+export function isSingleActShowName(name: string): boolean {
+  return SINGLE_ACT_SHOW_PATTERNS.some((p) => p.test(name));
+}
+
+/**
+ * Decides the event kind. An explicit "Festival" in the name always wins.
+ * Tribute / laser-light / single-night album shows are concerts even when
+ * Ticketmaster lists a festival-ish classification or a spanning end date.
+ */
+export function classifyTicketmasterEventKind(input: {
+  name: string;
+  isMultiDay: boolean;
+  hasFestivalClassification: boolean;
+}): EventKind {
+  const namedFestival = FESTIVAL_NAME_PATTERN.test(input.name);
+  if (!namedFestival && isSingleActShowName(input.name)) {
+    return 'concert';
+  }
+  const isFestival =
+    input.isMultiDay || input.hasFestivalClassification || namedFestival;
+  if (!isFestival) return 'concert';
+  return input.isMultiDay ? 'multi_day_festival' : 'festival';
+}
+
 /**
  * Picks one real, https image rendition from a Ticketmaster `images` array.
  *
@@ -307,22 +348,21 @@ export function parseTicketmasterEvent(
     event.dates.end?.localDate && event.dates.end.localDate !== localStartDate,
   );
 
-  const hasFestivalClassification = event.classifications?.some(
-    (c) =>
-      c.genre?.name?.toLowerCase().includes('festival') ||
-      c.subGenre?.name?.toLowerCase().includes('festival'),
+  const hasFestivalClassification = Boolean(
+    event.classifications?.some(
+      (c) =>
+        c.genre?.name?.toLowerCase().includes('festival') ||
+        c.subGenre?.name?.toLowerCase().includes('festival'),
+    ),
   );
 
+  const eventKind: EventKind = classifyTicketmasterEventKind({
+    name: event.name,
+    isMultiDay,
+    hasFestivalClassification,
+  });
   const isFestival =
-    isMultiDay ||
-    Boolean(hasFestivalClassification) ||
-    event.name.toLowerCase().includes('festival');
-
-  const eventKind: EventKind = isFestival
-    ? isMultiDay
-      ? 'multi_day_festival'
-      : 'festival'
-    : 'concert';
+    eventKind === 'festival' || eventKind === 'multi_day_festival';
 
   // 8. Normalized Ticket URL
   let ticketUrl: string | undefined = undefined;
