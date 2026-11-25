@@ -16,6 +16,12 @@ import {
   saveHomeLocationAction,
 } from '@/lib/location/actions';
 
+/**
+ * Fired on `window` after any picker saves or clears the home location, so every other picker on
+ * the page (e.g. the header pill and the in-page picker on /preferences) re-reads the cookie.
+ */
+export const HOME_LOCATION_CHANGED_EVENT = 'encore:home-location-changed';
+
 interface LocationPickerProps {
   /** "desktop" opens a popover; "mobile" expands inline inside the drawer. */
   variant?: 'desktop' | 'mobile';
@@ -64,6 +70,29 @@ export function LocationPicker({ variant = 'desktop' }: LocationPickerProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Keep every picker on the page in sync with the saved location: another picker changed it
+  // (custom event), or it changed in another tab/window (focus / visibility).
+  useEffect(() => {
+    function syncFromCookie() {
+      const fromCookie = readHomeLocationFromCookieString(document.cookie);
+      setCurrent((prev) =>
+        prev?.label === fromCookie?.label &&
+        prev?.lat === fromCookie?.lat &&
+        prev?.lng === fromCookie?.lng
+          ? prev
+          : fromCookie,
+      );
+    }
+    window.addEventListener(HOME_LOCATION_CHANGED_EVENT, syncFromCookie);
+    window.addEventListener('focus', syncFromCookie);
+    document.addEventListener('visibilitychange', syncFromCookie);
+    return () => {
+      window.removeEventListener(HOME_LOCATION_CHANGED_EVENT, syncFromCookie);
+      window.removeEventListener('focus', syncFromCookie);
+      document.removeEventListener('visibilitychange', syncFromCookie);
+    };
+  }, []);
+
   useEffect(() => {
     if (!open) return;
     function onKey(e: KeyboardEvent) {
@@ -100,6 +129,7 @@ export function LocationPicker({ variant = 'desktop' }: LocationPickerProps) {
     setMessage(null);
     setOpen(false);
     setQuery('');
+    window.dispatchEvent(new Event(HOME_LOCATION_CHANGED_EVENT));
     router.refresh();
   }
 
@@ -154,6 +184,7 @@ export function LocationPicker({ variant = 'desktop' }: LocationPickerProps) {
       setCurrent(null);
       setMessage(null);
       setOpen(false);
+      window.dispatchEvent(new Event(HOME_LOCATION_CHANGED_EVENT));
       router.refresh();
     });
   }
