@@ -218,8 +218,10 @@ web3 = 30
 # secret = ""
 
 [auth.email]
-# Allow/disallow new user signups via email to your project.
-enable_signup = false
+# Email provider must stay enabled for password / magic-link login. Public
+# self-registration is blocked by the global [auth] enable_signup = false
+# (invite-only); this flag disables the whole email provider in newer CLIs.
+enable_signup = true
 # If enabled, a user will be required to confirm any email change on both the old, and new email
 # addresses. If disabled, only the new email is required to confirm.
 double_confirm_changes = true

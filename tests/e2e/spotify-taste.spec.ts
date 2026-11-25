@@ -195,11 +195,11 @@ test.describe('Spotify Taste Explorer & Preview E2E Flow', () => {
     // 5. Test time horizon tabs
     const mediumTab = page.locator('[data-testid="tab-medium-term"]');
     await mediumTab.click();
-    await expect(mediumTab).toHaveClass(/bg-zinc-800/);
+    await expect(mediumTab).toHaveClass(/bg-zinc-100/);
 
     const shortTab = page.locator('[data-testid="tab-short-term"]');
     await shortTab.click();
-    await expect(shortTab).toHaveClass(/bg-zinc-800/);
+    await expect(shortTab).toHaveClass(/bg-zinc-100/);
 
     // 6. Locate rising artist (Chappell Roan) and import to concert preferences
     const artistRow = page.locator(
