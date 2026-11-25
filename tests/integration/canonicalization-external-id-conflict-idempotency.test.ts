@@ -194,7 +194,7 @@ describe('Supabase Integration: external-ID conflict idempotency and isolation',
     return data!.length;
   }
 
-  it('repeated processing of the same conflicting candidate is idempotent (3 runs); unrelated events in the batch still complete', async () => {
+  it('repeated processing of a shared-id listing is idempotent (3 runs): collapsed into one artist; unrelated events in the batch complete', async () => {
     if (!db()) return;
     const fixtureJson = JSON.stringify({
       _embedded: {
@@ -221,13 +221,11 @@ describe('Supabase Integration: external-ID conflict idempotency and isolation',
     const like = `%[${nonce}]%`;
 
     const run1 = await ingest(fixtureJson);
-    // (iii) unrelated events complete while the conflicting one is needs_review
-    expect(run1.canonicalEventsCreated).toBe(2);
-    expect(run1.candidatesNeedsReview).toBe(1);
-    expect(run1.reviewReasons['duplicate_external_id_conflict']).toBe(1);
+    expect(run1.canonicalEventsCreated).toBe(3);
+    expect(run1.candidatesNeedsReview).toBe(0);
     expect(await count('events', 'name', 'Fine Show%' + like)).toBe(2);
     expect(await count('events', 'name', 'Conflicting Listing%' + like)).toBe(
-      0,
+      1,
     );
 
     const snapshot = async () => ({
@@ -250,23 +248,22 @@ describe('Supabase Integration: external-ID conflict idempotency and isolation',
       })(),
     });
     const s1 = await snapshot();
-    expect(s1.events).toBe(2);
-    expect(s1.artists).toBe(2);
+    expect(s1.events).toBe(3);
+    // Twin One + Twin Two collapse into ONE artist, plus the two Fine acts
+    expect(s1.artists).toBe(3);
     expect(s1.confRes).toHaveLength(1);
-    expect(s1.confRes[0].status).toBe('needs_review');
-    expect(s1.confRes[0].event_id).toBeNull();
-    expect(s1.confRes[0].reasons).toContain('duplicate_external_id_conflict');
+    expect(s1.confRes[0].status).toBe('created');
+    expect(s1.confRes[0].event_id).not.toBeNull();
 
     const run2 = await ingest(fixtureJson);
     const run3 = await ingest(fixtureJson);
     for (const r of [run2, run3]) {
       expect(r.canonicalEventsCreated).toBe(0);
-      expect(r.candidatesNeedsReview).toBe(1);
+      expect(r.candidatesNeedsReview).toBe(0);
     }
     const s3 = await snapshot();
     expect(s3.events).toBe(s1.events);
     expect(s3.artists).toBe(s1.artists);
-    // exactly one persisted needs_review row after three runs
     expect(s3.confRes).toEqual(s1.confRes);
     expect(s3.confRes).toHaveLength(1);
   });

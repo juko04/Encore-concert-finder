@@ -2,10 +2,8 @@ import React from 'react';
 import Link from 'next/link';
 import { createClient } from '@/lib/supabase/server';
 import { resolveNearContext } from '@/lib/location/near-context';
-import {
-  defaultSearchEndDate,
-  searchCatalogPage,
-} from '@/lib/location/catalog-search';
+import { searchCatalogPage } from '@/lib/location/catalog-search';
+import { getViewerTimeZone } from '@/lib/location/server';
 import { getAuthenticatedUser } from '@/lib/auth/session';
 import { SupabaseCatalogRepository } from '@/lib/repositories/catalog-repository';
 import { Header } from '@/components/index/Header';
@@ -17,7 +15,6 @@ import type {
 } from '@/lib/repositories/interfaces';
 import type { IndexSortBy } from '@/components/index/types';
 import {
-  DISCOVER_TIMEZONE,
   getDiscoverDateWindows,
   isIsoDate,
   resolveCatalogFromDate,
@@ -103,7 +100,9 @@ export default async function SearchPage({ searchParams }: SearchPageProps) {
 
   // Upcoming only: never show shows that already started, even when the URL
   // carries startDate=today (the "Tonight" chip). Malformed dates are ignored.
-  const today = getDiscoverDateWindows().today;
+  const nearCtx = await resolveNearContext(user);
+  const timeZone = await getViewerTimeZone(nearCtx.home);
+  const today = getDiscoverDateWindows(new Date(), timeZone).today;
   const urlStartDate =
     resolvedParams.startDate && isIsoDate(resolvedParams.startDate)
       ? resolvedParams.startDate
@@ -124,8 +123,9 @@ export default async function SearchPage({ searchParams }: SearchPageProps) {
     city: resolvedParams.city || undefined,
     genre: resolvedParams.genre || undefined,
     fromDate,
-    // Same 12-month default horizon as /api/catalog/search so page 1, Load More and counts agree.
-    toDate: urlEndDate ?? defaultSearchEndDate(DISCOVER_TIMEZONE, new Date()),
+    // Unbounded unless an explicit endDate is given (same rule as /api/catalog/search, so
+    // page 1, Load More and counts agree).
+    toDate: urlEndDate,
     excludePastShowtimes,
     minPrice:
       minPrice !== undefined && !Number.isNaN(minPrice) ? minPrice : undefined,
@@ -140,7 +140,6 @@ export default async function SearchPage({ searchParams }: SearchPageProps) {
 
   // Saved preferences power two shortcut chips (signed-in users only). The same server-side
   // derivation is used by /api/catalog/search for Load More.
-  const nearCtx = await resolveNearContext(user);
   const { home, radiusMiles } = nearCtx;
   const profile = nearCtx.profile;
   const budget = profile?.maxNormalTicketPrice ?? null;
@@ -259,6 +258,7 @@ export default async function SearchPage({ searchParams }: SearchPageProps) {
           initialEndDate={urlEndDate}
           initialFreeOnly={freeOnly}
           initialNear={nearActive}
+          timeZone={timeZone}
           initialMaxPrice={
             maxPrice !== undefined && Number.isFinite(maxPrice)
               ? maxPrice

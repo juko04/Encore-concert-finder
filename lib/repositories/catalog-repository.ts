@@ -23,7 +23,12 @@ import type {
 } from '@/lib/domain/catalog';
 import { escapeLikePattern, normalizeUrl } from '@/lib/domain/value-objects';
 import { createAdminClient } from '@/lib/supabase/admin';
-import type { EventListFilters, ICatalogRepository } from './interfaces';
+import type {
+  EventListFilters,
+  EventLocationRow,
+  EventSortOption,
+  ICatalogRepository,
+} from './interfaces';
 import {
   canonicalGenreLabel,
   genreDbTerms,
@@ -370,6 +375,39 @@ interface SearchOpts {
 }
 
 const ID_PAGE_SIZE = 1000;
+const LIGHT_SCAN_CONCURRENCY = 6;
+/** Columns the radius scan needs plus the sort keys (for multi-group merges). */
+const LIGHT_EVENT_SELECT =
+  'id, city, region, lat, lng, name, local_start_date, starts_at, min_price, venues(city, region, lat, lng)';
+
+interface LightEventRow {
+  id: string;
+  city: string | null;
+  region: string | null;
+  lat: number | null;
+  lng: number | null;
+  name: string;
+  local_start_date: string;
+  starts_at: string | null;
+  min_price: number | string | null;
+  venues?: {
+    city: string | null;
+    region: string | null;
+    lat: number | null;
+    lng: number | null;
+  } | null;
+}
+
+/** Same venue-first resolution as the summary mapping in hydrateEventRows. */
+function lightRowToLocation(r: LightEventRow): EventLocationRow {
+  return {
+    id: r.id,
+    city: r.venues?.city ?? r.city ?? null,
+    region: r.venues?.region ?? r.region ?? null,
+    lat: r.venues?.lat ?? r.lat ?? null,
+    lng: r.venues?.lng ?? r.lng ?? null,
+  };
+}
 /** ~37 chars per uuid => ~3 KB of ids per request, safely under URL limits. */
 const SEARCH_IDS_PER_GROUP = 80;
 const SEARCH_GROUP_CONCURRENCY = 6;
@@ -639,6 +677,45 @@ export class SupabaseCatalogRepository implements ICatalogRepository {
 
     let query = this.client.from('events').select(selectString);
 
+    const filtered = await this.applyEventFilters(query, filters, opts);
+    if (filtered === null) return [];
+    query = filtered.query;
+
+    // Database-level sorting BEFORE pagination
+    query = this.applyEventSort(query, filters?.sortBy ?? 'date_asc');
+
+    if (filters?.offset !== undefined && filters.offset > 0) {
+      const limit = filters.limit ?? 20;
+      query = query.range(filters.offset, filters.offset + limit - 1);
+    } else if (filters?.limit) {
+      query = query.limit(filters.limit);
+    }
+
+    const { data: eventsData, error } = await query;
+    if (error) {
+      throw new Error(`Failed to list events: ${error.message}`);
+    }
+
+    const rawRows = eventsData || [];
+    if (rawRows.length === 0) {
+      return [];
+    }
+
+    return this.hydrateEventRows(rawRows);
+  }
+
+  /**
+   * Applies every non-sort filter of listEvents to `query`. Returns null when the filters can
+   * match nothing (venue name with no venue). Shared by listEvents and the light radius scan
+   * so both always agree on the matching set.
+   */
+  private async applyEventFilters(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    query: any,
+    filters: EventListFilters | undefined,
+    opts: SearchOpts | undefined,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  ): Promise<{ query: any } | null> {
     // Filter by status if specified
     if (filters?.status) {
       if (Array.isArray(filters.status)) {
@@ -692,7 +769,7 @@ export class SupabaseCatalogRepository implements ICatalogRepository {
         }
         const vIds = (vData || []).map((v) => v.id);
         if (vIds.length === 0) {
-          return [];
+          return null;
         }
         query = query.in('venue_id', vIds);
       }
@@ -707,7 +784,7 @@ export class SupabaseCatalogRepository implements ICatalogRepository {
       }
       const vIds = (vData || []).map((v) => v.id);
       if (vIds.length === 0) {
-        return [];
+        return null;
       }
       query = query.in('venue_id', vIds);
     }
@@ -748,8 +825,14 @@ export class SupabaseCatalogRepository implements ICatalogRepository {
       }
     }
 
-    // Database-level sorting BEFORE pagination
-    const sortBy = filters?.sortBy ?? 'date_asc';
+    // Wrapped: a PostgREST builder is thenable, so returning it bare from an async function
+    // would execute the request.
+    return { query };
+  }
+
+  /** Database ORDER BY chain for a sort option (id is always the final tiebreaker). */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private applyEventSort(query: any, sortBy: EventSortOption): any {
     if (sortBy === 'price_asc') {
       query = query
         .order('min_price', { ascending: true, nullsFirst: false })
@@ -778,23 +861,13 @@ export class SupabaseCatalogRepository implements ICatalogRepository {
         .order('id', { ascending: true });
     }
 
-    if (filters?.offset !== undefined && filters.offset > 0) {
-      const limit = filters.limit ?? 20;
-      query = query.range(filters.offset, filters.offset + limit - 1);
-    } else if (filters?.limit) {
-      query = query.limit(filters.limit);
-    }
+    return query;
+  }
 
-    const { data: eventsData, error } = await query;
-    if (error) {
-      throw new Error(`Failed to list events: ${error.message}`);
-    }
-
-    const rawRows = eventsData || [];
-    if (rawRows.length === 0) {
-      return [];
-    }
-
+  /** Hydrates event rows (artists, ticket links, sources) into summaries, preserving row order. */
+  private async hydrateEventRows(
+    rawRows: unknown[],
+  ): Promise<CanonicalEventSummary[]> {
     // Deduplicate event rows by ID in case multi-artist matches returned duplicate rows
     const seenEventIds = new Set<string>();
     const rows: EventRow[] = [];
@@ -1144,6 +1217,158 @@ export class SupabaseCatalogRepository implements ICatalogRepository {
       offset,
       limit !== undefined ? offset + limit : undefined,
     );
+  }
+
+  /**
+   * LIGHT scan used by the exact radius search: ids + location of every event matching
+   * `filters` (limit/offset ignored), in the order listEvents returns them. It selects only the
+   * radius/sort columns (no artist, ticket or source hydration), pages in PostgREST's 1000-row
+   * ranges and fetches the remaining ranges in parallel once the exact total is known.
+   */
+  async listEventLocations(
+    filters?: EventListFilters,
+    opts?: SearchOpts,
+  ): Promise<EventLocationRow[]> {
+    if (filters?.searchQuery?.trim() && opts?.searchOr === undefined) {
+      const groups = await this.resolveSearchGroups(filters.searchQuery);
+      if (groups.length === 1) {
+        return this.listEventLocations(filters, { searchOr: groups[0] });
+      }
+      // Multi-group: each group is already in DB order; merge, dedupe and re-sort like
+      // listEventsAcrossSearchGroups does.
+      const results = await mapWithConcurrency(
+        groups,
+        SEARCH_GROUP_CONCURRENCY,
+        (g) => this.fetchLightRows(filters, { searchOr: g }),
+      );
+      const merged = new Map<string, LightEventRow>();
+      for (const rows of results) {
+        for (const r of rows) if (!merged.has(r.id)) merged.set(r.id, r);
+      }
+      const asSummaries = Array.from(merged.values()).map(
+        (r) =>
+          ({
+            id: r.id,
+            title: r.name,
+            localStartDate: r.local_start_date,
+            startsAt: r.starts_at,
+            minPrice: r.min_price == null ? null : Number(r.min_price),
+          }) as unknown as CanonicalEventSummary,
+      );
+      const order = compareEventSummaries(filters.sortBy ?? 'date_asc');
+      const byId = new Map(merged);
+      return asSummaries
+        .sort(order)
+        .map((s) => lightRowToLocation(byId.get(s.id)!));
+    }
+    if (filters?.artistIds && filters.artistIds.length > 50) {
+      // Rare chunked-artist path: reuse the full listing (no radius caller uses it).
+      const full = await this.listEvents({
+        ...filters,
+        limit: undefined,
+        offset: undefined,
+      });
+      return full.map((e) => ({
+        id: e.id,
+        city: e.city ?? null,
+        region: e.region ?? null,
+        lat: e.lat ?? null,
+        lng: e.lng ?? null,
+      }));
+    }
+    return (await this.fetchLightRows(filters, opts)).map(lightRowToLocation);
+  }
+
+  private async fetchLightRows(
+    filters: EventListFilters | undefined,
+    opts: SearchOpts | undefined,
+  ): Promise<LightEventRow[]> {
+    const withArtists =
+      (filters?.artistIds && filters.artistIds.length > 0) || filters?.artistId;
+    const select =
+      LIGHT_EVENT_SELECT +
+      (withArtists ? ', event_artists!inner(artist_id)' : '');
+    const sortBy = filters?.sortBy ?? 'date_asc';
+    const fetchRange = async (
+      page: number,
+      withCount: boolean,
+    ): Promise<{ rows: LightEventRow[]; count: number | null } | null> => {
+      let query = this.client
+        .from('events')
+        .select(select, withCount ? { count: 'exact' } : undefined);
+      const filtered = await this.applyEventFilters(query, filters, opts);
+      if (filtered === null) return null;
+      query = this.applyEventSort(filtered.query, sortBy).range(
+        page * ID_PAGE_SIZE,
+        page * ID_PAGE_SIZE + ID_PAGE_SIZE - 1,
+      );
+      const { data, error, count } = await query;
+      if (error) {
+        throw new Error(`Failed to scan event locations: ${error.message}`);
+      }
+      return {
+        rows: (data ?? []) as unknown as LightEventRow[],
+        count: count ?? null,
+      };
+    };
+
+    const first = await fetchRange(0, true);
+    if (first === null) return [];
+    const pages: LightEventRow[][] = [first.rows];
+    if (first.count !== null) {
+      const totalPages = Math.ceil(first.count / ID_PAGE_SIZE);
+      const rest = await mapWithConcurrency(
+        Array.from({ length: Math.max(0, totalPages - 1) }, (_, i) => i + 1),
+        LIGHT_SCAN_CONCURRENCY,
+        async (page) => (await fetchRange(page, false))?.rows ?? [],
+      );
+      pages.push(...rest);
+    } else {
+      for (
+        let page = 1;
+        pages[pages.length - 1].length === ID_PAGE_SIZE;
+        page++
+      ) {
+        pages.push((await fetchRange(page, false))?.rows ?? []);
+      }
+    }
+    // Same dedupe as listEvents (multi-artist joins can repeat an event row).
+    const seen = new Set<string>();
+    const out: LightEventRow[] = [];
+    for (const rows of pages) {
+      for (const r of rows) {
+        if (seen.has(r.id)) continue;
+        seen.add(r.id);
+        out.push(r);
+      }
+    }
+    return out;
+  }
+
+  /** Hydrates the given events with the same mapping as listEvents; result follows `ids` order. */
+  async getEventsByIds(ids: string[]): Promise<CanonicalEventSummary[]> {
+    if (ids.length === 0) return [];
+    const unique = Array.from(new Set(ids));
+    const CHUNK = 50;
+    const rows: unknown[] = [];
+    for (let i = 0; i < unique.length; i += CHUNK) {
+      const { data, error } = await this.client
+        .from('events')
+        .select('*, venues(*)')
+        .in('id', unique.slice(i, i + CHUNK));
+      if (error) {
+        throw new Error(`Failed to load events by id: ${error.message}`);
+      }
+      rows.push(...(data ?? []));
+    }
+    const byId = new Map(
+      (rows as Array<{ id: string }>).map((r) => [r.id, r] as const),
+    );
+    const ordered = unique.flatMap((id) => {
+      const r = byId.get(id);
+      return r ? [r] : [];
+    });
+    return this.hydrateEventRows(ordered);
   }
 
   async countEvents(

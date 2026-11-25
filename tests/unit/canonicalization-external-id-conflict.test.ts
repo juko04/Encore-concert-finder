@@ -38,35 +38,36 @@ describe('Canonicalization: provider external-ID conflicts route to needs_review
     ],
   });
 
-  it('two different artists sharing one Spotify id in one listing -> needs_review, persisted, nothing else written', async () => {
+  it('two attractions sharing one Spotify id in one listing collapse into ONE artist, linked once, with audit evidence', async () => {
     const cand = thomasCandidate();
     const result = await coordinator.canonicalize(cand);
 
-    expect(result.status).toBe('needs_review');
-    expect(result.eventId).toBeNull();
-    expect(result.reasons).toContain('duplicate_external_id_conflict');
-
-    const res = await repo.findResolutionByCandidateId(cand.id);
-    expect(res?.status).toBe('needs_review');
-    expect(res?.eventId ?? null).toBeNull();
-    expect(res?.reasons).toContain('duplicate_external_id_conflict');
-
-    expect(repo.events.size).toBe(0);
-    expect(repo.artists.size).toBe(0);
-    expect(repo.artistExternalIds.size).toBe(0);
-    expect(repo.eventArtists.size).toBe(0);
-    expect(repo.eventSources.size).toBe(0);
-    expect(repo.eventFieldEvidence.size).toBe(0);
+    expect(result.status).toBe('created');
+    expect(repo.events.size).toBe(1);
+    expect(repo.artists.size).toBe(1);
+    expect(repo.eventArtists.size).toBe(1);
+    // display name is the FIRST attraction's name
+    expect(Array.from(repo.artists.values())[0].name).toBe(
+      'Thomas the Tank Engine',
+    );
+    // the shared Spotify id is stored once
+    expect(repo.artistExternalIds.size).toBe(1);
+    const evidence = Array.from(repo.eventFieldEvidence.values()).filter(
+      (e) => e.fieldName === 'shared_external_id_in_candidate_collapsed',
+    );
+    expect(evidence).toHaveLength(1);
   });
 
   it('an unrelated event in the same batch still completes', async () => {
-    const bad = await coordinator.canonicalize(thomasCandidate());
-    expect(bad.status).toBe('needs_review');
+    const first = await coordinator.canonicalize(thomasCandidate());
+    expect(first.status).toBe('created');
 
     const good = await coordinator.canonicalize({
       ...fixtures.single_show,
       id: crypto.randomUUID(),
       sourceEventId: 'tm-unrelated',
+      localStartDate: '2026-09-02',
+      startsAt: undefined,
       title: 'Unrelated Show',
       ticketUrl: 'https://example.com/unrelated',
       artistNames: ['Unrelated Band'],
@@ -80,8 +81,8 @@ describe('Canonicalization: provider external-ID conflicts route to needs_review
       ],
     });
     expect(good.status).toBe('created');
-    expect(repo.events.size).toBe(1);
-    expect(repo.artists.size).toBe(1);
+    expect(repo.events.size).toBe(2);
+    expect(repo.artists.size).toBe(2);
   });
 
   it('a new artist claiming an external id owned by an existing different artist is not merged', async () => {

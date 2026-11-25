@@ -19,7 +19,7 @@
 export interface EligibilityInput {
   localStartDate: string; // YYYY-MM-DD
   startsAt?: string | null; // ISO 8601 UTC timestamp
-  timezone?: string | null; // IANA timezone, e.g. 'America/Denver'
+  timezone?: string | null; // IANA timezone, e.g. 'America/New_York'
   startTimePrecision?: 'instant' | 'date_only';
   referenceDate?: string; // YYYY-MM-DD date or ISO instant string
   referenceInstant?: Date | string; // Explicit instant for deterministic testing

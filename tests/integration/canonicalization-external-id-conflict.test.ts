@@ -173,7 +173,7 @@ describe('Supabase Integration: external-ID conflicts route to needs_review', ()
     await del('venues', 'id', venueIds);
   });
 
-  it('Ticketmaster listing whose two attractions share one Spotify id -> needs_review persisted, other events complete, no orphans', async () => {
+  it('Ticketmaster listing whose two NEW attractions share one Spotify id -> collapsed into one artist (both TM ids), one event, other events complete, replay idempotent', async () => {
     if (!db()) return;
 
     const fixtureJson = JSON.stringify({
@@ -203,62 +203,77 @@ describe('Supabase Integration: external-ID conflicts route to needs_review', ()
     for (const cand of result.candidates)
       if (cand.id) candidateIds.push(cand.id);
 
-    expect(result.candidatesNeedsReview).toBe(1);
-    expect(result.reviewReasons['duplicate_external_id_conflict']).toBe(1);
-    expect(result.canonicalEventsCreated).toBe(1);
+    expect(result.candidatesNeedsReview).toBe(0);
+    expect(result.canonicalEventsCreated).toBe(2);
 
-    // needs_review persisted (look the persisted candidate up by title; the
-    // pipeline's returned candidates are parse-time objects)
+    const { data: thomasEvents } = await admin!
+      .from('events')
+      .select('id')
+      .ilike('name', `Day Out With Thomas%[${nonce}]`);
+    expect(thomasEvents).toHaveLength(1);
+    const eventId = thomasEvents![0].id as string;
+
+    // Exactly one artist (first attraction's name) linked once, holding both TM ids + one Spotify id
+    const { data: links } = await admin!
+      .from('event_artists')
+      .select('artist_id')
+      .eq('event_id', eventId);
+    expect(links).toHaveLength(1);
+    const artistId = links![0].artist_id as string;
+    const { data: thomasArtists } = await admin!
+      .from('artists')
+      .select('id, name')
+      .ilike('name', `Thomas%[${nonce}]`);
+    expect(thomasArtists).toEqual([
+      { id: artistId, name: `Thomas The Tank Engine [${nonce}]` },
+    ]);
+    const { data: exts } = await admin!
+      .from('artist_external_ids')
+      .select('provider, external_id')
+      .eq('artist_id', artistId);
+    expect(
+      (exts ?? [])
+        .map(
+          (e: { provider: string; external_id: string }) =>
+            `${e.provider}:${e.external_id}`,
+        )
+        .sort(),
+    ).toEqual(
+      [
+        `spotify:${sharedSpotify}`,
+        `ticketmaster:attA_${nonce}`,
+        `ticketmaster:attB_${nonce}`,
+      ].sort(),
+    );
+
+    // The collapse is auditable field evidence, not silent
+    const { data: ev } = await admin!
+      .from('event_field_evidence')
+      .select('field_name')
+      .eq('event_id', eventId)
+      .eq('field_name', 'shared_external_id_in_candidate_collapsed');
+    expect(ev).toHaveLength(1);
+
+    // The candidate observation row itself is untouched and resolved as created
     const { data: thomasRows } = await admin!
       .from('event_candidates')
       .select('id, title')
       .ilike('title', `Day Out With Thomas%[${nonce}]`);
     expect(thomasRows).toHaveLength(1);
-    const thomasCand = { id: thomasRows![0].id as string };
-    candidateIds.push(thomasCand.id);
+    candidateIds.push(thomasRows![0].id as string);
     const { data: res } = await admin!
       .from('candidate_resolutions')
-      .select('status, event_id, reasons')
-      .eq('event_candidate_id', thomasCand.id);
-    expect(res).toHaveLength(1);
-    expect(res![0].status).toBe('needs_review');
-    expect(res![0].event_id).toBeNull();
-    expect(res![0].reasons).toContain('duplicate_external_id_conflict');
+      .select('status, event_id')
+      .eq('event_candidate_id', thomasRows![0].id);
+    expect(res).toEqual([{ status: 'created', event_id: eventId }]);
 
-    // The candidate observation row itself is untouched
-    const { data: candRow } = await admin!
-      .from('event_candidates')
-      .select('id, title')
-      .eq('id', thomasCand.id)
-      .single();
-    expect(candRow?.title).toContain('Day Out With Thomas');
-
-    // No Thomas event, artists, or external ids were written (no orphans)
-    const { data: thomasEvents } = await admin!
-      .from('events')
-      .select('id')
-      .ilike('name', `Day Out With Thomas%[${nonce}]`);
-    expect(thomasEvents).toHaveLength(0);
-    const { data: thomasArtists } = await admin!
-      .from('artists')
-      .select('id')
-      .ilike('name', `Thomas%[${nonce}]`);
-    expect(thomasArtists).toHaveLength(0);
-    const { data: sharedExt } = await admin!
-      .from('artist_external_ids')
-      .select('id')
-      .eq('provider', 'spotify')
-      .eq('external_id', sharedSpotify);
-    expect(sharedExt).toHaveLength(0);
-
-    // The unrelated event completed
     const { data: normalEvents } = await admin!
       .from('events')
       .select('id')
       .ilike('name', `Normal Rock Night%[${nonce}]`);
     expect(normalEvents).toHaveLength(1);
 
-    // Replay skips the persisted needs_review instead of re-processing/raising
+    // Replay creates nothing new
     const replay = await runTicketmasterIngestion({
       useFixture: true,
       fixtureJson,
@@ -269,12 +284,17 @@ describe('Supabase Integration: external-ID conflicts route to needs_review', ()
       catalogRepo,
     });
     expect(replay.canonicalEventsCreated).toBe(0);
-    expect(replay.candidatesNeedsReview).toBe(1);
-    const { data: resAfter } = await admin!
-      .from('candidate_resolutions')
+    expect(replay.candidatesNeedsReview).toBe(0);
+    const { data: thomasArtistsAfter } = await admin!
+      .from('artists')
       .select('id')
-      .eq('event_candidate_id', thomasCand.id);
-    expect(resAfter).toHaveLength(1);
+      .ilike('name', `Thomas%[${nonce}]`);
+    expect(thomasArtistsAfter).toHaveLength(1);
+    const { data: extsAfter } = await admin!
+      .from('artist_external_ids')
+      .select('id')
+      .eq('artist_id', artistId);
+    expect(extsAfter).toHaveLength(3);
   });
 
   async function insertCandidate(title: string): Promise<string> {

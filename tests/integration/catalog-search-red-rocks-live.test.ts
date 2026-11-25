@@ -465,11 +465,23 @@ describe('PostgreSQL Live Integration: Red Rocks Search, Deep Pagination, Timezo
       });
       expect(totalCount).toBeGreaterThan(100);
 
-      const sampleEvents = await catalogRepo.listEvents({
-        fromDate: '2026-01-01',
-        limit: 300,
-      });
-      expect(sampleEvents.length).toBe(totalCount);
+      // Page through EVERY matching record (independent of how large the dev DB is) and
+      // require the page walk to account for exactly the counted total, with no duplicates.
+      const pageSize = 300;
+      const seenIds = new Set<string>();
+      let walked = 0;
+      for (let offset = 0; ; offset += pageSize) {
+        const page = await catalogRepo.listEvents({
+          fromDate: '2026-01-01',
+          limit: pageSize,
+          offset,
+        });
+        for (const ev of page) seenIds.add(ev.id);
+        walked += page.length;
+        if (page.length < pageSize) break;
+      }
+      expect(walked).toBe(totalCount);
+      expect(seenIds.size).toBe(totalCount);
     });
   });
 

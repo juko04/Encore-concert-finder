@@ -103,3 +103,48 @@ export function extractTicketmasterGenres(
   }
   return out;
 }
+
+/** Normalized name of the primary classification's segment ("Music", "Miscellaneous", ...). */
+export function primaryClassificationSegment(
+  classifications: readonly TicketmasterClassification[] | null | undefined,
+): string | null {
+  if (!Array.isArray(classifications) || classifications.length === 0) {
+    return null;
+  }
+  const primary =
+    classifications.find((c) => c?.primary === true) ?? classifications[0];
+  const name = primary?.segment?.name;
+  return typeof name === 'string' && name.trim() ? name.trim() : null;
+}
+
+const RELIGIOUS_GENRE = /\b(?:religious|gospel|christian|worship)\b/i;
+
+/**
+ * Ticketmaster attraction records are shared by name and are sometimes mis-classified: the
+ * generic attraction "House Party" is filed under Religious / Gospel although the listings that
+ * carry it are club nights classified as a non-music segment (Miscellaneous, "Fairs & Festivals").
+ *
+ * Conservative, general rule (no event names): a performer-level Religious/Gospel genre is NOT
+ * trusted when the event's own primary classification contradicts it, i.e. the event has a
+ * genre that is not religious AND its segment is not Music. A Religious artist on a Music
+ * event (a gospel act billed as Pop) keeps its genre, and nothing is dropped when the event
+ * carries no classification at all (nothing contradicts it). Other genres are never touched.
+ */
+export function trustedAttractionGenres(
+  attractionGenres: readonly string[],
+  eventClassifications:
+    readonly TicketmasterClassification[] | null | undefined,
+): string[] {
+  if (!attractionGenres.some((g) => RELIGIOUS_GENRE.test(g))) {
+    return [...attractionGenres];
+  }
+  const eventGenres = extractTicketmasterGenres(eventClassifications);
+  const segment = primaryClassificationSegment(eventClassifications);
+  const eventIsNonMusic = segment !== null && segment.toLowerCase() !== 'music';
+  const eventContradicts =
+    eventGenres.length > 0 &&
+    !eventGenres.some((g) => RELIGIOUS_GENRE.test(g)) &&
+    eventIsNonMusic;
+  if (!eventContradicts) return [...attractionGenres];
+  return attractionGenres.filter((g) => !RELIGIOUS_GENRE.test(g));
+}

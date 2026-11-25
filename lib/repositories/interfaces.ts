@@ -73,11 +73,30 @@ export interface EventListFilters {
   referenceNowIso?: string;
 }
 
+/**
+ * The minimum an event needs for the radius test, as returned by the light scan. Same
+ * city/region/lat/lng resolution as a CanonicalEventSummary (venue first, then the event row).
+ */
+export interface EventLocationRow {
+  id: string;
+  city: string | null;
+  region: string | null;
+  lat: number | null;
+  lng: number | null;
+}
+
 export interface ICatalogRepository {
   // Read operations (public catalog)
   getEventById(id: string): Promise<CanonicalEventDetail | null>;
   listEvents(filters?: EventListFilters): Promise<CanonicalEventSummary[]>;
   countEvents(filters?: EventListFilters): Promise<number>;
+  /**
+   * LIGHT scan: ids + location of EVERY event matching `filters` (limit/offset ignored), in
+   * exactly the order listEvents would return them. No artist/ticket/source hydration.
+   */
+  listEventLocations?(filters?: EventListFilters): Promise<EventLocationRow[]>;
+  /** Hydrates events by id with the same mapping as listEvents, returned in `ids` order. */
+  getEventsByIds?(ids: string[]): Promise<CanonicalEventSummary[]>;
   listCities(): Promise<string[]>;
   getFacets?(): Promise<{
     venues: Array<{ id: string; name: string; city?: string }>;

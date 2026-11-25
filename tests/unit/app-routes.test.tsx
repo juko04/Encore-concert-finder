@@ -14,6 +14,7 @@ const {
   mockGetProfile,
   mockRankEvents,
   mockScoreEventForUser,
+  mockFindArtistExternalIds,
   mockSupabaseClient,
 } = vi.hoisted(() => {
   const mockSupabaseClient = {
@@ -40,6 +41,7 @@ const {
     mockGetProfile: vi.fn(),
     mockRankEvents: vi.fn(),
     mockScoreEventForUser: vi.fn(),
+    mockFindArtistExternalIds: vi.fn(),
     mockSupabaseClient,
   };
 });
@@ -69,6 +71,8 @@ vi.mock('@/lib/repositories/catalog-repository', () => ({
         Array.isArray(r) ? r.length : 1,
       ),
     getEventById: (...args: unknown[]) => mockGetEventById(...args),
+    findArtistExternalIds: (...args: unknown[]) =>
+      mockFindArtistExternalIds(...args),
   })),
 }));
 
@@ -272,6 +276,8 @@ describe('App Router Catalog Integration Routes', () => {
 
       expect(mockGetPersonalizedDiscoverData).toHaveBeenCalledWith({
         userId: 'user-42',
+        // viewer timezone: no cookie / home city in this test, so the UTC fallback
+        timeZone: 'UTC',
       });
       expect(screen.getAllByText(/Phoebe Bridgers/i).length).toBeGreaterThan(0);
     });
@@ -345,6 +351,45 @@ describe('App Router Catalog Integration Routes', () => {
 
       // Verifies 'Sold Out' status badge and/or ticket button label
       expect(screen.getAllByText(/Sold Out/i).length).toBeGreaterThan(0);
+    });
+
+    it('shows a lazy Spotify listen embed for the headliner when the catalog has a verified Spotify id', async () => {
+      mockGetAuthenticatedUser.mockResolvedValueOnce(null);
+      mockGetEventById.mockResolvedValueOnce(sampleEventDetail);
+      mockFindArtistExternalIds.mockResolvedValueOnce([
+        { provider: 'ticketmaster', externalId: 'K8vZ9171EXf' },
+        { provider: 'spotify', externalId: '2MdFJmUQf3ckA99IhFF9my' },
+      ]);
+
+      const jsx = await ConcertDetailPage({
+        params: Promise.resolve({ id: 'event-101' }),
+      });
+      const { container } = render(jsx);
+
+      expect(mockFindArtistExternalIds).toHaveBeenCalledWith('artist-pb');
+      const frame = container.querySelector('iframe[title^="Listen to"]');
+      expect(frame).not.toBeNull();
+      expect(frame?.getAttribute('src')).toBe(
+        'https://open.spotify.com/embed/artist/2MdFJmUQf3ckA99IhFF9my?utm_source=generator',
+      );
+      expect(frame?.getAttribute('loading')).toBe('lazy');
+    });
+
+    it('renders no player (and no fake one) when there is no verified Spotify id', async () => {
+      mockGetAuthenticatedUser.mockResolvedValueOnce(null);
+      mockGetEventById.mockResolvedValueOnce(sampleEventDetail);
+      mockFindArtistExternalIds.mockResolvedValueOnce([
+        { provider: 'ticketmaster', externalId: 'K8vZ9171EXf' },
+        { provider: 'spotify', externalId: 'not-a-valid-spotify-id' },
+      ]);
+
+      const jsx = await ConcertDetailPage({
+        params: Promise.resolve({ id: 'event-101' }),
+      });
+      const { container } = render(jsx);
+
+      expect(container.querySelector('iframe')).toBeNull();
+      expect(screen.queryByText(/Audio Sample/i)).toBeNull();
     });
 
     it('computes personalized score for authenticated user viewing concert', async () => {

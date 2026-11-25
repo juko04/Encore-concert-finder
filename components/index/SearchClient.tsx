@@ -19,10 +19,8 @@ import type {
   IndexInventoryStatus,
 } from './types';
 import { toIndexEventItem } from './types';
-import {
-  DISCOVER_TIMEZONE,
-  getDiscoverDateWindows,
-} from '@/lib/discover/dates';
+import { FALLBACK_TIMEZONE } from '@/lib/location/timezone';
+import { getDiscoverDateWindowsForDate } from '@/lib/discover/dates';
 import { deriveLocalDateFromInstant } from '@/lib/domain/value-objects';
 import type { CanonicalEventSummary } from '@/lib/domain/catalog';
 import type { ScoredEvent } from '@/lib/recommendation/types';
@@ -48,6 +46,8 @@ export interface SearchClientProps {
   initialQuery?: string;
   initialSortBy?: IndexSortBy;
   referenceDate?: string;
+  /** Viewer IANA timezone resolved on the server (cookie -> home city -> UTC). */
+  timeZone?: string;
   title?: string;
   subtitle?: string;
   /** Optional filter state hydrated from /search URL params (set by the page). */
@@ -70,13 +70,10 @@ export interface SearchClientProps {
   };
 }
 
-/** Today (YYYY-MM-DD) in the Discover timezone, never the browser's UTC date. */
-function resolveRefIso(referenceDate?: string): string {
+/** Today (YYYY-MM-DD) in the viewer's timezone, never the browser's UTC date. */
+function resolveRefIso(referenceDate: string | undefined, timeZone: string) {
   if (referenceDate) return referenceDate;
-  return deriveLocalDateFromInstant(
-    new Date().toISOString(),
-    DISCOVER_TIMEZONE,
-  );
+  return deriveLocalDateFromInstant(new Date().toISOString(), timeZone);
 }
 
 function addDaysIso(iso: string, days: number): string {
@@ -96,7 +93,7 @@ function quickDateWindow(
     return { start: refIso, end: addDaysIso(refIso, 7) };
   }
   if (filter === 'this_weekend') {
-    const w = getDiscoverDateWindows(new Date(`${refIso}T12:00:00Z`)).weekend;
+    const w = getDiscoverDateWindowsForDate(refIso).weekend;
     return { start: w.startDate, end: w.endDate };
   }
   return null;
@@ -109,6 +106,7 @@ export function SearchClient({
   initialQuery = '',
   initialSortBy = 'date_asc',
   referenceDate,
+  timeZone = FALLBACK_TIMEZONE,
   title = 'Discover Live Music',
   subtitle = 'Curated concerts, transparent pricing, and personalized music discovery.',
   initialVenue,
@@ -442,7 +440,9 @@ export function SearchClient({
       if (selectedCity !== 'all') params.set('city', selectedCity);
       if (selectedGenre !== 'all') params.set('genre', selectedGenre);
 
-      const refIso = resolveRefIso(referenceDate);
+      // Same viewer timezone as page 1 so Load More and counts agree.
+      params.set('timezone', timeZone);
+      const refIso = resolveRefIso(referenceDate, timeZone);
       const quick = quickDateWindow(dateFilter, refIso);
       if (quick) {
         params.set('startDate', quick.start);
@@ -495,6 +495,7 @@ export function SearchClient({
       sortBy,
       initialNear,
       referenceDate,
+      timeZone,
     ],
   );
 
@@ -643,7 +644,7 @@ export function SearchClient({
 
   // Filter and sort engine
   const filteredEvents = useMemo(() => {
-    const refIso = resolveRefIso(referenceDate);
+    const refIso = resolveRefIso(referenceDate, timeZone);
     const quick = quickDateWindow(dateFilter, refIso);
 
     return normalizedEvents.filter((event) => {
@@ -762,6 +763,7 @@ export function SearchClient({
     selectedGenre,
     statusFilter,
     referenceDate,
+    timeZone,
   ]);
 
   // Sort filtered results

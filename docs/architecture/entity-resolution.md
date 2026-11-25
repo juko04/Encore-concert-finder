@@ -78,7 +78,9 @@ Resolves candidate artists to canonical artists in the catalog:
    - Names are normalized via `normalizeName()` (NFKC, lowercase, leading article stripping, punctuation removal).
    - If multiple canonical artists share a normalized name, the resolver flags `status: 'ambiguous'` with reason `ambiguous_artist_name_multiple_matches`.
    - Distinct artists sharing a common name (e.g. "Ghost" from Sweden vs. "Ghost" from Japan) are never coalesced.
-3. **In-Memory Preparation:** Does not perform upfront database inserts. Unmatched artists are returned with a generated UUID for atomic batch insertion in `apply_canonicalization`.
+3. **Several ids per provider:** An artist matched by one strong id may receive additional ids from the same provider (e.g. two Ticketmaster attractions sharing a Spotify artist) unless another artist already owns that id (`external_id_already_associated_with_different_artist`). Name-only paths stay strict: same name plus a different id of the same provider never merges.
+4. **Shared ids inside one listing:** Attractions of one candidate that carry the same provider + external id and resolve to new artists are one performer (e.g. two Ticketmaster attractions sharing one Spotify artist). The coordinator collapses them into one artist (first attraction's name), attaches all ids once and records `shared_external_id_in_candidate_collapsed` field evidence. If an involved id belongs to a different existing artist, the candidate is a persisted `needs_review` instead.
+5. **In-Memory Preparation:** Does not perform upfront database inserts. Unmatched artists are returned with a generated UUID for atomic batch insertion in `apply_canonicalization`.
 
 ---
 

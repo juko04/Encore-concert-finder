@@ -8,8 +8,10 @@
  */
 
 import type { CanonicalEventSummary } from '@/lib/domain/catalog';
-import type { EventListFilters } from '@/lib/repositories/interfaces';
-import { deriveLocalDateFromInstant } from '@/lib/domain/value-objects';
+import type {
+  EventListFilters,
+  EventLocationRow,
+} from '@/lib/repositories/interfaces';
 import { listEventsNearHome, type NearScanOptions } from './near-search';
 import type { HomePoint } from './radius';
 
@@ -21,6 +23,8 @@ export interface NearScope {
 export interface CatalogSearchRepository {
   listEvents(filters?: EventListFilters): Promise<CanonicalEventSummary[]>;
   countEvents?(filters?: EventListFilters): Promise<number>;
+  listEventLocations?(filters?: EventListFilters): Promise<EventLocationRow[]>;
+  getEventsByIds?(ids: string[]): Promise<CanonicalEventSummary[]>;
 }
 
 export interface CatalogSearchPage {
@@ -33,14 +37,6 @@ export interface CatalogSearchPage {
 
 /** Cache TTL so Load More after page 1 does not re-walk the catalog. */
 export const NEAR_SCAN_CACHE_TTL_MS = 30_000;
-
-/** Default upper date bound shared by the search page and API: 12 months out, venue-timezone local. */
-export function defaultSearchEndDate(timezone: string, now: Date): string {
-  return deriveLocalDateFromInstant(
-    new Date(now.getTime() + 365 * 86400000).toISOString(),
-    timezone,
-  );
-}
 
 /**
  * One page of catalog results. `filters.limit` / `filters.offset` select the page. With

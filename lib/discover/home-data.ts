@@ -123,6 +123,8 @@ export async function getDiscoverHomeData(options: {
    * "Near" row shows everything within that many miles instead of only the home city's shows.
    */
   homeRadiusMiles?: number | null;
+  /** Viewer IANA timezone for "today" / weekend windows (cookie -> home city -> UTC). */
+  timeZone?: string;
 }): Promise<DiscoverHomeData> {
   const { catalogRepo, userId, homeLocation, homeRadiusMiles } = options;
   const useRadius =
@@ -132,7 +134,7 @@ export async function getDiscoverHomeData(options: {
     Boolean(homeLocation);
   const now = options.now ?? new Date();
   const nowIso = now.toISOString();
-  const windows = getDiscoverDateWindows(now);
+  const windows = getDiscoverDateWindows(now, options.timeZone);
 
   const base: EventListFilters = {
     fromDate: windows.today,
@@ -184,6 +186,7 @@ export async function getDiscoverHomeData(options: {
           async () => {
             const data = await getPersonalizedDiscoverData({
               userId,
+              timeZone: options.timeZone,
               locationOverride: homeLocation
                 ? { lat: homeLocation.lat, lng: homeLocation.lng }
                 : undefined,

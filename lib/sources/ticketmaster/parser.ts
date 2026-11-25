@@ -13,6 +13,7 @@ import {
   extractTicketmasterGenres,
   isNonArtistAttraction,
   splitTicketPackageTitle,
+  trustedAttractionGenres,
 } from './listing-filters';
 
 export interface TicketmasterParseContext {
@@ -198,7 +199,10 @@ export function parseTicketmasterEvent(
       const artistImageUrl = selectTicketmasterImage(attr.images);
 
       // Genres Ticketmaster assigns to this performer (never guessed when absent).
-      const artistGenres = extractTicketmasterGenres(attr.classifications);
+      const artistGenres = trustedAttractionGenres(
+        extractTicketmasterGenres(attr.classifications),
+        event.classifications,
+      );
 
       artists.push({
         name: attr.name,

@@ -397,9 +397,13 @@ export class SpotifyArtistMatcher {
       // Branch 3: Exactly 1 candidate found
       const candidate = candidates[0];
       const existingExtIds = await repo.findArtistExternalIds(candidate.id);
-      const existingSpotifyExt = existingExtIds.find(
+      // An artist may hold several Spotify ids; the exact id wins over any other one.
+      const existingSpotifyExts = existingExtIds.filter(
         (e) => e.provider === 'spotify',
       );
+      const existingSpotifyExt =
+        existingSpotifyExts.find((e) => e.externalId === spotifyId) ??
+        existingSpotifyExts[0];
 
       // Subcase 3a: Conflicting Spotify external ID
       if (existingSpotifyExt && existingSpotifyExt.externalId !== spotifyId) {
@@ -462,10 +466,13 @@ export class SpotifyArtistMatcher {
         } catch {
           // Verify if concurrently enriched with the same external ID
           const currentExtIds = await repo.findArtistExternalIds(candidate.id);
-          const currentSpotify = currentExtIds.find(
+          const currentSpotifyIds = currentExtIds.filter(
             (e) => e.provider === 'spotify',
           );
-          if (currentSpotify && currentSpotify.externalId !== spotifyId) {
+          if (
+            currentSpotifyIds.length > 0 &&
+            !currentSpotifyIds.some((e) => e.externalId === spotifyId)
+          ) {
             const ambRes: AmbiguousSpotifyArtist = {
               status: 'ambiguous',
               spotifyId,

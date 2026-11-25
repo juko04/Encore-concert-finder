@@ -8,7 +8,7 @@ import {
   type DiscoverHomeData,
 } from '@/lib/discover/home-data';
 import { getDiscoverDateWindows } from '@/lib/discover/dates';
-import { getHomeLocation } from '@/lib/location/server';
+import { getHomeLocation, getViewerTimeZone } from '@/lib/location/server';
 import { SupabaseProfileRepository } from '@/lib/repositories/profile-repository';
 import { Header } from '@/components/index/Header';
 import { DiscoverHero, EventRow, VenueChips } from '@/components/discover-home';
@@ -18,11 +18,14 @@ export const dynamic = 'force-dynamic';
 export default async function HomePage() {
   const user = await getAuthenticatedUser();
 
+  // Viewer timezone: encore_tz cookie, else home city timezone, else UTC.
+  let timeZone = await getViewerTimeZone();
   let data: DiscoverHomeData;
   try {
     const supabase = await createClient();
     const catalogRepo = new SupabaseCatalogRepository(supabase);
     const homeLocation = await getHomeLocation();
+    timeZone = await getViewerTimeZone(homeLocation);
     let homeRadiusMiles: number | null = null;
     if (user && homeLocation) {
       try {
@@ -38,6 +41,7 @@ export default async function HomePage() {
       userId: user?.id,
       homeLocation,
       homeRadiusMiles,
+      timeZone,
     });
   } catch (err) {
     console.error('[HomePage] Error loading discover data:', err);
@@ -46,7 +50,7 @@ export default async function HomePage() {
       rows: [],
       venueChips: [],
       genreChips: [],
-      windows: getDiscoverDateWindows(),
+      windows: getDiscoverDateWindows(new Date(), timeZone),
     };
   }
 

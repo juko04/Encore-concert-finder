@@ -16,6 +16,7 @@ import {
 } from './icons';
 import { signOutAction } from '@/app/login/actions';
 import { LocationPicker } from '@/components/location/LocationPicker';
+import { TimezoneCookie } from '@/components/location/TimezoneCookie';
 
 export interface HeaderProps {
   savedCount?: number;
@@ -133,6 +134,7 @@ export function Header({
 
   return (
     <header className="sticky top-0 z-40 border-b border-zinc-200/80 bg-white/95 backdrop-blur-md">
+      <TimezoneCookie />
       <div className="mx-auto flex h-14 max-w-7xl items-center justify-between px-4 sm:px-6 lg:px-8">
         {/* Brand / Title */}
         <div className="flex items-center gap-6">

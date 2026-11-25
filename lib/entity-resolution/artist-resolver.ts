@@ -329,17 +329,16 @@ export class ArtistResolver {
     }> = [];
 
     for (const incoming of incomingExternalIds) {
-      const existingForProvider = matchedExtIds.find(
-        (e) => e.provider === incoming.provider,
-      );
-
-      if (existingForProvider) {
-        if (existingForProvider.externalId !== incoming.externalId) {
-          return {
-            conflictReason: 'conflicting_external_id_for_matched_artist',
-          };
-        }
-        // Identical external ID already attached -> idempotent skip
+      // An artist may hold several ids from the same provider (e.g. two Ticketmaster
+      // attractions sharing one Spotify artist). An id it already holds is an idempotent skip;
+      // an additional id is allowed unless another artist owns it (checked below).
+      if (
+        matchedExtIds.some(
+          (e) =>
+            e.provider === incoming.provider &&
+            e.externalId === incoming.externalId,
+        )
+      ) {
         continue;
       }
 

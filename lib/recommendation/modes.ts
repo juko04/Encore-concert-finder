@@ -3,6 +3,7 @@ import type { UserProfile } from '@/lib/domain/profile';
 import type { UserArtistPreference } from '@/lib/domain/user-preference';
 import { calculateHaversineDistanceMiles } from '@/lib/recommendation/factors/distance';
 import type { DiscoveryMode, ScoringWeights } from '@/lib/recommendation/types';
+import { FALLBACK_TIMEZONE } from '@/lib/location/timezone';
 
 export interface DiscoveryModeConfig {
   id: DiscoveryMode;
@@ -101,9 +102,9 @@ export interface ZonedTimeParts {
  */
 export function getZonedTimeParts(
   date: Date,
-  timeZone = 'America/Denver',
+  timeZone = FALLBACK_TIMEZONE,
 ): ZonedTimeParts {
-  const safeTz = timeZone || 'America/Denver';
+  const safeTz = timeZone || FALLBACK_TIMEZONE;
   const dtf = new Intl.DateTimeFormat('en-US', {
     timeZone: safeTz,
     year: 'numeric',
@@ -158,7 +159,7 @@ export function addDaysToDateString(dateString: string, days: number): string {
 export function calculate14DayLookaheadEndDate(
   referenceDate?: string,
   referenceInstant?: string | Date,
-  timeZone = 'America/Denver',
+  timeZone = FALLBACK_TIMEZONE,
 ): string {
   let refDateString = referenceDate;
   if (!refDateString) {
@@ -206,7 +207,7 @@ export function calculateWeekendWindow(
 ): { startDate: string; endDate: string } {
   let referenceDate: string | undefined;
   let referenceInstant: Date | string | undefined;
-  let timeZone = 'America/Denver';
+  let timeZone = FALLBACK_TIMEZONE;
 
   if (
     typeof optionsOrReferenceDate === 'object' &&
@@ -308,7 +309,7 @@ export function isEventEligibleForMode(
   if (mode === 'all') return true;
 
   if (mode === 'this_weekend') {
-    const eventTz = event.timezone || context.timeZone || 'America/Denver';
+    const eventTz = event.timezone || context.timeZone || FALLBACK_TIMEZONE;
     const window = calculateWeekendWindow({
       referenceDate: context.referenceDate,
       referenceInstant: context.referenceInstant,
@@ -348,7 +349,7 @@ export function isEventEligibleForMode(
         : new Date();
       refDateString = getZonedTimeParts(
         refInst,
-        event.timezone || 'America/Denver',
+        event.timezone || context.timeZone || FALLBACK_TIMEZONE,
       ).dateString;
     }
 
@@ -432,7 +433,7 @@ export function isEventEligibleForMode(
         : new Date();
       refDateString = getZonedTimeParts(
         refInst,
-        event.timezone || 'America/Denver',
+        event.timezone || context.timeZone || FALLBACK_TIMEZONE,
       ).dateString;
     }
 

@@ -22,19 +22,47 @@ export interface CityEntry {
   state: string;
   lat: number;
   lng: number;
+  /** IANA timezone of the city (used for the viewer's "today" when no browser timezone is known). */
+  timezone: string;
 }
+
+/**
+ * Default IANA timezone per state in the table. States that span two zones are listed with the
+ * zone of the cities actually in the table; a city in the other part of a split state must pass an
+ * explicit timezone to city() (e.g. a Pacific-time Idaho panhandle city).
+ */
+const STATE_TIMEZONE: Readonly<Record<string, string>> = {
+  CO: 'America/Denver',
+  UT: 'America/Denver',
+  WY: 'America/Denver',
+  NM: 'America/Denver',
+  // Idaho spans Mountain and Pacific: every Idaho city in the table (Boise, Ketchum, Idaho Falls)
+  // is Mountain time. IANA uses America/Boise for Idaho's Mountain portion.
+  ID: 'America/Boise',
+  // Kansas and Missouri cities in the table are Central time (Kansas has four far-west Mountain
+  // counties; none of those cities are in the table).
+  KS: 'America/Chicago',
+  MO: 'America/Chicago',
+};
 
 function city(
   name: string,
   state: string,
   lat: number,
   lng: number,
+  timezone?: string,
 ): CityEntry {
   const slug = `${name}-${state}`
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '');
-  return { slug, name, state, lat, lng };
+  const tz = timezone ?? STATE_TIMEZONE[state];
+  if (!tz) {
+    throw new Error(
+      `No timezone defined for ${name}, ${state} in the city table`,
+    );
+  }
+  return { slug, name, state, lat, lng, timezone: tz };
 }
 
 export const CITIES: readonly CityEntry[] = [

@@ -1047,12 +1047,13 @@ export class SpotifyCatalogEnricher {
 
     // 2. Check artist_external_ids
     let linkedExternalId = false;
-    const { data: existingExt, error: extErr } = await this.supabase
+    // An artist may hold several Spotify ids (artist_external_ids is unique on
+    // (provider, external_id) only): add the verified id when missing, never replace another.
+    const { data: existingExts, error: extErr } = await this.supabase
       .from('artist_external_ids')
       .select('id, external_id')
       .eq('artist_id', artistId)
-      .eq('provider', 'spotify')
-      .maybeSingle();
+      .eq('provider', 'spotify');
 
     if (extErr) {
       throw new Error(
@@ -1060,7 +1061,11 @@ export class SpotifyCatalogEnricher {
       );
     }
 
-    if (!existingExt) {
+    const alreadyLinked = (existingExts ?? []).some(
+      (e: { external_id: string }) => e.external_id === params.spotifyId,
+    );
+
+    if (!alreadyLinked) {
       if (!this.dryRun) {
         const { error: insertExtErr } = await this.supabase
           .from('artist_external_ids')
@@ -1074,23 +1079,6 @@ export class SpotifyCatalogEnricher {
         if (insertExtErr) {
           throw new Error(
             `Failed to insert artist_external_ids for artist ${artistId}: ${insertExtErr.message}`,
-          );
-        }
-      }
-      linkedExternalId = true;
-    } else if (existingExt.external_id !== params.spotifyId) {
-      if (!this.dryRun) {
-        const { error: updateExtErr } = await this.supabase
-          .from('artist_external_ids')
-          .update({
-            external_id: params.spotifyId,
-            provider_url: providerUrl,
-          })
-          .eq('id', existingExt.id);
-
-        if (updateExtErr) {
-          throw new Error(
-            `Failed to update artist_external_ids for artist ${artistId}: ${updateExtErr.message}`,
           );
         }
       }

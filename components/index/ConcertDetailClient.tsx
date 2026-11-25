@@ -16,6 +16,7 @@ import {
   calculateDistanceMiles,
 } from './formatters';
 import { AudioPreviewPlayer } from './AudioPreviewPlayer';
+import { SpotifyArtistEmbed } from './SpotifyArtistEmbed';
 import { EventCard } from './EventCard';
 import { EventImage } from './EventImage';
 import { UndoToast } from './UndoToast';
@@ -513,8 +514,8 @@ export function ConcertDetailClient({
 
         {/* Right Column: Audio Player & Venue Profile */}
         <div className="space-y-6">
-          {/* Audio Preview Track */}
-          {event.spotifyPreviewTrack && (
+          {/* Audio: legacy track preview if supplied, otherwise a Spotify listen for the headliner */}
+          {event.spotifyPreviewTrack ? (
             <div className="space-y-2">
               <h2 className="text-xs font-semibold uppercase tracking-wider text-zinc-400">
                 Audio Sample
@@ -525,6 +526,16 @@ export function ConcertDetailClient({
                 posterColor={event.posterColor}
               />
             </div>
+          ) : (
+            <SpotifyArtistEmbed
+              spotifyArtistId={
+                (
+                  event.artists.find((a) => a.name === headlinerName) ??
+                  event.artists[0]
+                )?.spotifyArtistId
+              }
+              artistName={headlinerName}
+            />
           )}
 
           {/* Venue & Logistics Profile */}

@@ -4,13 +4,18 @@
  * The catalog has no geo query and most venues have no coordinates, so distance is computed
  * per event (venue coordinate, else city centroid; unknown locations excluded; see ./radius).
  * To keep filtering, counts, sorting and paging correct for the WHOLE catalog (never a
- * first-N cap), this walks the catalog server-side in repository-sorted batches until it is
- * exhausted, keeps the qualifying events in the requested sort order, then slices the page.
+ * first-N cap), every matching event is considered and the qualifying ones are kept in the
+ * requested sort order before the page is sliced. When the repository offers the light scan
+ * (listEventLocations + getEventsByIds) only ids and locations are read for the whole catalog
+ * and just the requested page is hydrated; otherwise the catalog is walked in full batches.
  * All non-geographic filters (query, price, dates, genre, ...) still run in the database.
  */
 
 import type { CanonicalEventSummary } from '@/lib/domain/catalog';
-import type { EventListFilters } from '@/lib/repositories/interfaces';
+import type {
+  EventListFilters,
+  EventLocationRow,
+} from '@/lib/repositories/interfaces';
 import { filterEventsWithinRadius, type HomePoint } from './radius';
 
 /** Rows requested per repository call (below the PostgREST 1000-row response cap). */
@@ -20,6 +25,13 @@ export const NEAR_SCAN_CONCURRENCY = 4;
 
 export interface NearListRepository {
   listEvents(filters?: EventListFilters): Promise<CanonicalEventSummary[]>;
+  /**
+   * Optional fast path (see SupabaseCatalogRepository): a LIGHT scan of every matching event's
+   * id + location in sort order, and hydration of just the requested ids. When both exist the
+   * scan never loads artists/tickets/sources for events outside the requested page.
+   */
+  listEventLocations?(filters?: EventListFilters): Promise<EventLocationRow[]>;
+  getEventsByIds?(ids: string[]): Promise<CanonicalEventSummary[]>;
 }
 
 export interface NearScanOptions {
@@ -36,7 +48,7 @@ export interface NearScanOptions {
 const SCAN_CACHE_MAX_ENTRIES = 16;
 const scanCache = new Map<
   string,
-  { at: number; matches: CanonicalEventSummary[] }
+  { at: number; matches: CanonicalEventSummary[] | null; ids: string[] | null }
 >();
 
 /** Test hook. */
@@ -117,6 +129,32 @@ export interface NearPage {
   hasMore: boolean;
 }
 
+/**
+ * Ids (in sort order) of every event matching `filters` within the radius, from the light
+ * scan. Same radius rule as the full scan (venue coordinate, else city centroid; unknown
+ * locations excluded).
+ */
+export async function listEventIdsWithinRadius(
+  repo: Required<Pick<NearListRepository, 'listEventLocations'>>,
+  filters: EventListFilters,
+  home: HomePoint,
+  radiusMiles: number,
+): Promise<string[]> {
+  const rows = await repo.listEventLocations({
+    ...filters,
+    limit: undefined,
+    offset: undefined,
+  });
+  const seen = new Set<string>();
+  const ids: string[] = [];
+  for (const e of filterEventsWithinRadius(rows, home, radiusMiles)) {
+    if (seen.has(e.id)) continue;
+    seen.add(e.id);
+    ids.push(e.id);
+  }
+  return ids;
+}
+
 /** One page of the exact within-radius result set plus the true total. */
 export async function listEventsNearHome(
   repo: NearListRepository,
@@ -132,24 +170,40 @@ export async function listEventsNearHome(
       : batchSizeOrOptions;
   const ttl = opts.cacheTtlMs ?? 0;
   const key = ttl > 0 ? scanCacheKey(filters, home, radiusMiles) : '';
-  let all: CanonicalEventSummary[] | undefined;
+  const fast =
+    typeof repo.listEventLocations === 'function' &&
+    typeof repo.getEventsByIds === 'function';
+  let all: CanonicalEventSummary[] | null = null;
+  let ids: string[] | null = null;
   if (ttl > 0) {
     const hit = scanCache.get(key);
-    if (hit && Date.now() - hit.at < ttl) all = hit.matches;
+    if (hit && Date.now() - hit.at < ttl && (fast ? hit.ids : hit.matches)) {
+      all = hit.matches;
+      ids = hit.ids;
+    }
   }
-  if (!all) {
-    all = await listAllEventsWithinRadius(
-      repo,
-      filters,
-      home,
-      radiusMiles,
-      opts.batchSize ?? NEAR_BATCH_SIZE,
-      Number.POSITIVE_INFINITY,
-      opts.concurrency ?? 1,
-    );
+  if (!all && !ids) {
+    if (fast) {
+      ids = await listEventIdsWithinRadius(
+        { listEventLocations: repo.listEventLocations!.bind(repo) },
+        filters,
+        home,
+        radiusMiles,
+      );
+    } else {
+      all = await listAllEventsWithinRadius(
+        repo,
+        filters,
+        home,
+        radiusMiles,
+        opts.batchSize ?? NEAR_BATCH_SIZE,
+        Number.POSITIVE_INFINITY,
+        opts.concurrency ?? 1,
+      );
+    }
     if (ttl > 0) {
       scanCache.delete(key);
-      scanCache.set(key, { at: Date.now(), matches: all });
+      scanCache.set(key, { at: Date.now(), matches: all, ids });
       while (scanCache.size > SCAN_CACHE_MAX_ENTRIES) {
         const oldest = scanCache.keys().next().value;
         if (oldest === undefined) break;
@@ -157,10 +211,20 @@ export async function listEventsNearHome(
       }
     }
   }
-  const events = all.slice(page.offset, page.offset + page.limit);
+  if (fast && ids) {
+    const pageIds = ids.slice(page.offset, page.offset + page.limit);
+    const events = await repo.getEventsByIds!(pageIds);
+    return {
+      events,
+      totalCount: ids.length,
+      hasMore: page.offset + pageIds.length < ids.length,
+    };
+  }
+  const list = all ?? [];
+  const events = list.slice(page.offset, page.offset + page.limit);
   return {
     events,
-    totalCount: all.length,
-    hasMore: page.offset + events.length < all.length,
+    totalCount: list.length,
+    hasMore: page.offset + events.length < list.length,
   };
 }

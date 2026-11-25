@@ -1393,8 +1393,8 @@ export class MemoryCatalogRepository implements ICatalogRepository {
                 payload.event.normalized_name ?? existing.normalizedName,
               eventKind: payload.event.event_kind ?? existing.eventKind,
               status: payload.event.status ?? existing.status,
-              venueId:
-                venueIdToUse !== undefined ? venueIdToUse : existing.venueId,
+              // Mirrors SQL coalesce(venue_id, new venue, venue_id): never null a known venue.
+              venueId: venueIdToUse ?? existing.venueId,
               city:
                 payload.event.city !== undefined
                   ? payload.event.city
@@ -1526,15 +1526,6 @@ export class MemoryCatalogRepository implements ICatalogRepository {
                   ) {
                     throw new Error(
                       `duplicate key value violates unique constraint "uq_artist_provider_external_id": (${ext.provider}, ${ext.external_id}) already belongs to artist ${existingExt.artistId}`,
-                    );
-                  }
-                  if (
-                    existingExt.artistId === artistId &&
-                    existingExt.provider === ext.provider &&
-                    existingExt.externalId !== ext.external_id
-                  ) {
-                    throw new Error(
-                      `duplicate key value violates unique constraint "uq_artist_provider": artist ${artistId} already has ${ext.provider} id ${existingExt.externalId}`,
                     );
                   }
                 }
@@ -1724,7 +1715,11 @@ export class MemoryUserPreferenceRepository implements IUserPreferenceRepository
         const extIds = await this.catalogRepo.findArtistExternalIds(
           input.artistId,
         );
-        const match = extIds.find((e) => e.provider === 'spotify');
+        // An artist may hold several Spotify ids: prefer the supplied one when it is one of them.
+        const spotifyExts = extIds.filter((e) => e.provider === 'spotify');
+        const match =
+          spotifyExts.find((e) => e.externalId === trimmedSpotifyId) ??
+          spotifyExts[0];
         if (match) canonicalSpotifyExtId = match.externalId;
 
         if (trimmedSpotifyId) {

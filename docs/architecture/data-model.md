@@ -424,9 +424,20 @@ reassigned, and the rest of the batch continues. Payloads that carry only a `res
 (needs_review/rejected without an event) are now persisted too. Without a `resolution`
 in the payload the original unique-violation exception is preserved. The RPC itself is
 not deduplicating: callers (pipeline/repository) skip already-persisted resolutions.
-Known gap: two different Ticketmaster attractions that both resolve to one existing
-artist (so one artist would get two ticketmaster ids) still hit `uq_artist_provider`
-and abort the batch; not addressed.
+Resolved by migration `20261126010000`: `uq_artist_provider UNIQUE (artist_id, provider)`
+is dropped, so an artist may hold several external ids from one provider (e.g. two
+Ticketmaster attractions that share one Spotify artist). `uq_artist_provider_external_id
+UNIQUE (provider, external_id)` is kept: an id can never belong to two artists, and an id
+owned by a different artist is still a persisted `needs_review`
+(`duplicate_external_id_conflict`). Two listed performers that resolve to the same
+canonical artist are linked once (`dedupeArtistPayloads`). Attractions of ONE listing that
+share a strong external id (same provider + id) and resolve to NEW artists are collapsed
+into one artist (`collapseSharedExternalIds`): the first attraction's name is the display
+name, every attraction id plus the shared id is attached once, and an
+`event_field_evidence` row `shared_external_id_in_candidate_collapsed` records each
+collapse. If any involved id is owned by a different existing artist the candidate stays a
+persisted `needs_review`. The stored procedure still rejects (persisted `needs_review`)
+a payload in which two different artist ids claim one id.
 
 ### Genre, image and weight columns
 
@@ -440,3 +451,14 @@ and abort the batch; not addressed.
 | `events.image_url` | `text` | Fill-if-empty, never overwritten |
 | `venues.image_url` | `text` | Fill-if-empty |
 | `profiles.artist_weight` | `smallint` null | Check: null or 20..80; user "artist importance" |
+
+### Artist-less events (coordinator rule, no schema change)
+
+A candidate with no real artist (after the Ticketmaster package/venue attraction filter)
+but at least one source genre (`rawPayload.genres`), a valid venue, timezone and date is
+canonicalized with ZERO `event_artists` rows (the title is the display name; genre/genres,
+price and images are carried). Without a genre, or for a seat/VIP/parking package listing,
+it is a persisted `needs_review` (`missing_artist_identity`). `EventMatcher` merges an
+artist-less candidate only into an artist-less event with the same normalized title on the
+same venue/date (start times 90+ minutes apart stay separate); different titles on the
+same night stay separate events, and an artist-less event never blocks an artist show.

@@ -370,4 +370,49 @@ describe('PostgreSQL integration: near=1 across pages (Load More)', () => {
     expect(byVenue.get(6)).toBeUndefined(); // city Denver, venue coordinate in Seattle
     expect(byVenue.get(5)).toBe(12); // unknown city, venue coordinate in Denver
   });
+
+  it('light scan + id hydration return exactly what the full listEvents walk returns', async () => {
+    for (const sortBy of [
+      'date_asc',
+      'date_desc',
+      'price_asc',
+      'title_asc',
+    ] as const) {
+      const filters = { searchQuery: TOKEN, sortBy };
+      // Oracle: the full (hydrating) walk in 100-row pages.
+      const full: CanonicalEventSummary[] = [];
+      for (let offset = 0; ; offset += 100) {
+        const batch = await repo.listEvents({ ...filters, limit: 100, offset });
+        full.push(...batch);
+        if (batch.length < 100) break;
+      }
+      const light = await repo.listEventLocations(filters);
+      expect(light.map((r) => r.id)).toEqual(full.map((e) => e.id));
+      for (const [i, row] of light.entries()) {
+        expect(row).toEqual({
+          id: full[i].id,
+          city: full[i].city ?? null,
+          region: full[i].region ?? null,
+          lat: full[i].lat ?? null,
+          lng: full[i].lng ?? null,
+        });
+      }
+      // Hydrating a page of ids gives identical summaries, in the requested order.
+      const pageIds = light.slice(45, 95).map((r) => r.id);
+      const hydrated = await repo.getEventsByIds(pageIds);
+      expect(hydrated).toEqual(full.slice(45, 95));
+      // Order follows the ids given, not the database order.
+      const reversed = await repo.getEventsByIds([...pageIds].reverse());
+      expect(reversed.map((e) => e.id)).toEqual([...pageIds].reverse());
+    }
+  });
+
+  it('light scan spans more than one 1000-row range exactly (no cap, no duplicates)', async () => {
+    // The whole upcoming catalog (real rows + the 222 seeded) crosses the page size when the
+    // real catalog is large; either way the light scan must equal the exact count.
+    const filters = { fromDate: isoDay(-1), sortBy: 'date_asc' as const };
+    const light = await repo.listEventLocations(filters);
+    expect(new Set(light.map((r) => r.id)).size).toBe(light.length);
+    expect(light.length).toBe(await repo.countEvents(filters));
+  });
 });

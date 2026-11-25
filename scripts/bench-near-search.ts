@@ -13,6 +13,9 @@
  * Part A (in-memory): N synthetic events (city table + unknown cities) served by an in-memory
  *   repository in 500-row batches; measures the CPU cost of the radius filter + merge, i.e. the
  *   scan minus the database.
+ * Part B/C also time the LIGHT scan used in production (ids + location columns only for the whole
+ *   catalog, then hydration of just the first page) next to the legacy full-hydration walk, so
+ *   one run reports before and after under identical conditions.
  * Part B (real DB, READ ONLY): times the real scan against the local Supabase catalog through
  *   SupabaseCatalogRepository (the same code path as /search and /api/catalog/search). It only
  *   reads; it never writes. The local catalog is small, so the per-batch cost is reported and
@@ -23,6 +26,7 @@ import path from 'node:path';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { assertSafeDatabaseTarget } from '@/lib/supabase/destination-guard';
 import { SupabaseCatalogRepository } from '@/lib/repositories/catalog-repository';
+import { searchCatalogPage } from '@/lib/location/catalog-search';
 import {
   listAllEventsWithinRadius,
   NEAR_BATCH_SIZE,
@@ -174,6 +178,28 @@ async function timeScan(
   return { ms: median(times), matches };
 }
 
+/** Cold first request as served today: light scan of every match + hydrate page 1 (no cache). */
+async function timeLight(
+  repo: SupabaseCatalogRepository,
+  filters: EventListFilters,
+  runs: number,
+) {
+  const times: number[] = [];
+  let matches = 0;
+  for (let run = 0; run < runs; run++) {
+    const t0 = performance.now();
+    const page = await searchCatalogPage(
+      repo,
+      { ...filters, limit: 50, offset: 0 },
+      { home: HOME, radiusMiles: RADIUS },
+      { cacheTtlMs: 0 },
+    );
+    times.push(performance.now() - t0);
+    matches = page.totalCount;
+  }
+  return { ms: median(times), matches };
+}
+
 async function main() {
   const skipDb = process.argv.includes('--no-db');
   console.log(
@@ -254,6 +280,11 @@ async function main() {
     }
   }
 
+  const light = await timeLight(repo, filters, 3);
+  console.log(
+    `  light scan + first page (production path): ${light.matches} matches, median ${light.ms.toFixed(0)} ms`,
+  );
+
   const seedArg = process.argv.indexOf('--seed-real');
   if (seedArg === -1) return;
   const stages = (process.argv[seedArg + 1] ?? '')
@@ -275,7 +306,7 @@ async function main() {
     '\nPart C: real DB with reserved-id synthetic rows ADDED on top of the real catalog',
   );
   console.log(
-    'seeded | catalog total | conc | matches | scan ms (median of 3)',
+    'seeded | catalog total | path                     | matches | cold first request ms (median of 3)',
   );
   const max = stages[stages.length - 1];
   try {
@@ -298,9 +329,13 @@ async function main() {
       for (const concurrency of [1, 4]) {
         const r = await timeScan(repo, filters, concurrency, 3);
         console.log(
-          `${String(seeded).padStart(6)} | ${String(catalogTotal).padStart(13)} | ${String(concurrency).padStart(4)} | ${String(r.matches).padStart(7)} | ${r.ms.toFixed(0)}`,
+          `${String(seeded).padStart(6)} | ${String(catalogTotal).padStart(13)} | legacy full scan, conc ${concurrency} | ${String(r.matches).padStart(7)} | ${r.ms.toFixed(0)}`,
         );
       }
+      const l = await timeLight(repo, filters, 3);
+      console.log(
+        `${String(seeded).padStart(6)} | ${String(catalogTotal).padStart(13)} | light scan + page 1      | ${String(l.matches).padStart(7)} | ${l.ms.toFixed(0)}`,
+      );
     }
   } finally {
     await deleteBenchRows(admin, max);

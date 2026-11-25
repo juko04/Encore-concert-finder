@@ -167,9 +167,14 @@ export class SupabaseUserPreferenceRepository implements IUserPreferenceReposito
         );
       }
 
+      // An artist may own several Spotify ids (e.g. two listings that share one performer).
+      const ownedSpotifyIds = (canonicalExtIds ?? [])
+        .filter((e) => e.provider === 'spotify')
+        .map((e) => e.external_id as string);
       const canonicalSpotifyExtId =
-        canonicalExtIds?.find((e) => e.provider === 'spotify')?.external_id ??
-        null;
+        (trimmedSpotifyId && ownedSpotifyIds.includes(trimmedSpotifyId)
+          ? trimmedSpotifyId
+          : ownedSpotifyIds[0]) ?? null;
 
       if (trimmedSpotifyId) {
         const { data: mappedToArtist, error: mapErr } = await this.client

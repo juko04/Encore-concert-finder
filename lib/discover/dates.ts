@@ -1,14 +1,9 @@
 import { deriveLocalDateFromInstant } from '@/lib/domain/value-objects';
 import { calculateWeekendWindow } from '@/lib/recommendation/modes';
-
-/**
- * Timezone used to decide what "today" and "this weekend" mean on the public
- * Discover home. Mirrors the default used by /api/catalog/search.
- */
-export const DISCOVER_TIMEZONE = 'America/Denver';
+import { FALLBACK_TIMEZONE } from '@/lib/location/timezone';
 
 export interface DiscoverDateWindows {
-  /** Local calendar date (YYYY-MM-DD) in DISCOVER_TIMEZONE. */
+  /** Local calendar date (YYYY-MM-DD) in the viewer's timezone. */
   today: string;
   /** today + 7 days. */
   nextWeekEnd: string;
@@ -27,9 +22,13 @@ function addDays(dateStr: string, days: number): string {
   return dt.toISOString().slice(0, 10);
 }
 
+/**
+ * Date windows ("today", "this weekend", "next 7 days", ...) in the VIEWER's timezone. Callers
+ * resolve it with resolveViewerTimeZone / getViewerTimeZone (cookie -> home city -> UTC).
+ */
 export function getDiscoverDateWindows(
   now: Date = new Date(),
-  timeZone: string = DISCOVER_TIMEZONE,
+  timeZone: string = FALLBACK_TIMEZONE,
 ): DiscoverDateWindows {
   const today = deriveLocalDateFromInstant(now.toISOString(), timeZone);
   const rawWeekend = calculateWeekendWindow({
@@ -93,4 +92,15 @@ export function resolveCatalogFromDate(opts: {
   }
   const fromDate = startDate && startDate > today ? startDate : today;
   return { fromDate, excludePastShowtimes: true };
+}
+
+/**
+ * The windows relative to an already-known local calendar date (YYYY-MM-DD), e.g. the "today"
+ * a server resolved in the viewer's timezone. Evaluated at local noon so the weekend rule that
+ * depends on the hour of day (Friday after 17:00) is the same for every timezone.
+ */
+export function getDiscoverDateWindowsForDate(
+  today: string,
+): DiscoverDateWindows {
+  return getDiscoverDateWindows(new Date(`${today}T12:00:00Z`), 'UTC');
 }

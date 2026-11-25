@@ -3,6 +3,10 @@ import 'server-only';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
+import {
+  getViewerTimeZone,
+  homeLocationFromProfileCoords,
+} from '@/lib/location/server';
 import type { CanonicalEventSummary } from '@/lib/domain/catalog';
 import type { UserProfile } from '@/lib/domain/profile';
 import {
@@ -73,6 +77,8 @@ export interface PersonalizedDiscoverOptions {
   discoveryMode?: unknown;
   referenceDate?: string;
   referenceInstant?: Date | string;
+  /** Viewer IANA timezone; resolved from the encore_tz cookie / home city / UTC when omitted. */
+  timeZone?: string;
   city?: string;
   region?: string;
   searchQuery?: string;
@@ -108,6 +114,8 @@ export interface PublicDiscoverOptions {
   limit?: number;
   referenceDate?: string;
   referenceInstant?: Date | string;
+  /** Viewer IANA timezone; resolved from the encore_tz cookie / home city / UTC when omitted. */
+  timeZone?: string;
 }
 
 export interface PublicDiscoverResult {
@@ -147,8 +155,8 @@ export const PREFERRED_ARTIST_CANDIDATE_LIMIT = FAVORITE_ARTIST_CANDIDATE_LIMIT;
  *
  * Invariant:
  * Local event calendar dates must not be strictly filtered using the current UTC calendar date.
- * For example, at 8:00 PM in America/Denver on 2026-10-25, UTC is already 2026-10-26 02:00:00Z.
- * A strict UTC date filter (`>= '2026-10-26'`) would drop tonight's Denver show.
+ * For example, at 8:00 PM in a US Mountain-time venue on 2026-10-25, UTC is already 2026-10-26 02:00:00Z.
+ * A strict UTC date filter (`>= '2026-10-26'`) would drop tonight's local show.
  *
  * Therefore, candidate retrieval uses a conservative lower bound: 24 hours (1 calendar day)
  * prior to the reference instant. Downstream scoring strictly enforces venue-timezone-aware
@@ -670,6 +678,17 @@ export async function getPersonalizedDiscoverData(
       resolveArtistIdsForPreferences(interestedPrefs, catalogRepo),
     ]);
 
+  // Viewer timezone (explicit option, else encore_tz cookie / home city / UTC). Event-local
+  // eligibility still uses each event's own timezone.
+  const viewerTimeZone =
+    options.timeZone ??
+    (await getViewerTimeZone(
+      homeLocationFromProfileCoords(
+        userProfile?.homeLatApprox,
+        userProfile?.homeLngApprox,
+      ),
+    ));
+
   // Determine date bounds
   let queryFromDate = calculateCandidateRetrievalLowerBound(
     referenceDate,
@@ -681,6 +700,7 @@ export async function getPersonalizedDiscoverData(
     const weekendWindow = calculateWeekendWindow({
       referenceDate,
       referenceInstant,
+      timeZone: viewerTimeZone,
     });
     // Use the earlier of the conservative lower bound and weekend start date
     if (weekendWindow.startDate < queryFromDate) {
@@ -691,7 +711,7 @@ export async function getPersonalizedDiscoverData(
     queryToDate = calculate14DayLookaheadEndDate(
       referenceDate,
       referenceInstant,
-      'America/Denver',
+      viewerTimeZone,
     );
   } else if (activeMode === 'worth_planning_for') {
     const refInstantDate = referenceInstant
@@ -724,6 +744,7 @@ export async function getPersonalizedDiscoverData(
       artistPreferences: userPreferences,
       referenceDate,
       referenceInstant,
+      timeZone: viewerTimeZone,
       city: city || undefined,
     },
   };
@@ -1007,6 +1028,8 @@ export async function getPublicDiscoverData(
     mode ?? discoveryMode,
   );
 
+  const viewerTimeZone = options.timeZone ?? (await getViewerTimeZone());
+
   let queryFromDate = calculateCandidateRetrievalLowerBound(
     referenceDate,
     referenceInstant,
@@ -1017,6 +1040,7 @@ export async function getPublicDiscoverData(
     const weekendWindow = calculateWeekendWindow({
       referenceDate,
       referenceInstant,
+      timeZone: viewerTimeZone,
     });
     if (weekendWindow.startDate < queryFromDate) {
       queryFromDate = weekendWindow.startDate;
@@ -1026,7 +1050,7 @@ export async function getPublicDiscoverData(
     queryToDate = calculate14DayLookaheadEndDate(
       referenceDate,
       referenceInstant,
-      'America/Denver',
+      viewerTimeZone,
     );
   } else if (activeMode === 'worth_planning_for') {
     const refInstantDate = referenceInstant
@@ -1046,6 +1070,7 @@ export async function getPublicDiscoverData(
   const modeContext: ModeEligibilityContext = {
     referenceDate,
     referenceInstant,
+    timeZone: viewerTimeZone,
     city: city || undefined,
   };
 
@@ -1089,6 +1114,7 @@ export async function getPublicDiscoverData(
       isEventEligibleForMode(ev, activeMode, {
         referenceDate,
         referenceInstant,
+        timeZone: viewerTimeZone,
         city: city || undefined,
       }),
     );

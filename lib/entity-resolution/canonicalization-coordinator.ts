@@ -106,6 +106,109 @@ export function mapEventUpdatesToCanonicalizationPayload(
   return result;
 }
 
+type ArtistPayload = NonNullable<CanonicalizationPayload['artists']>[number];
+
+/**
+ * Collapses payload entries that point at the same canonical artist id: the first entry keeps
+ * its billing/sort order (and name for a to-be-created artist), external ids are unioned
+ * (an artist may hold several ids per provider), a missing image is filled from a later entry.
+ */
+export function dedupeArtistPayloads(
+  payloads: ArtistPayload[],
+): ArtistPayload[] {
+  const out: ArtistPayload[] = [];
+  const byId = new Map<string, ArtistPayload>();
+  for (const p of payloads) {
+    const existing = p.artist_id ? byId.get(p.artist_id) : undefined;
+    if (!existing) {
+      const copy: ArtistPayload = {
+        ...p,
+        ...(p.external_ids ? { external_ids: [...p.external_ids] } : {}),
+      };
+      out.push(copy);
+      if (p.artist_id) byId.set(p.artist_id, copy);
+      continue;
+    }
+    for (const ext of p.external_ids ?? []) {
+      const merged = (existing.external_ids ??= []);
+      if (
+        !merged.some(
+          (e) =>
+            e.provider === ext.provider && e.external_id === ext.external_id,
+        )
+      ) {
+        merged.push(ext);
+      }
+    }
+    if (!existing.image_url && p.image_url) existing.image_url = p.image_url;
+  }
+  return out;
+}
+
+export interface CollapsedSharedExternalId {
+  provider: string;
+  external_id: string;
+  display_name: string;
+  collapsed_names: string[];
+}
+
+/**
+ * Attractions of ONE listing that carry the same strong external id (same provider + id) are
+ * the same performer (e.g. two Ticketmaster attractions sharing one Spotify artist). Later
+ * entries are folded into the first one (its name is the display name) and every id is kept
+ * on that single artist. Only entries that resolved to a NEW artist are collapsed into an
+ * earlier entry; ids owned by a different existing artist never reach here as shared claims
+ * (the resolver / conflict check routes those to needs_review). The decisions are returned so
+ * the caller can record them as field evidence.
+ */
+export function collapseSharedExternalIds(payloads: ArtistPayload[]): {
+  payloads: ArtistPayload[];
+  collapsed: CollapsedSharedExternalId[];
+} {
+  const out: ArtistPayload[] = [];
+  const collapsed: CollapsedSharedExternalId[] = [];
+  const claimOwner = new Map<string, ArtistPayload>();
+  const label = (a: ArtistPayload) => a.name ?? a.artist_id ?? 'unknown';
+  for (const p of payloads) {
+    const target = p.name
+      ? (p.external_ids ?? [])
+          .map((e) => claimOwner.get(`${e.provider}\u0000${e.external_id}`))
+          .find((t): t is ArtistPayload => Boolean(t) && t !== p)
+      : undefined;
+    if (!target) {
+      out.push(p);
+      for (const e of p.external_ids ?? []) {
+        const key = `${e.provider}\u0000${e.external_id}`;
+        if (!claimOwner.has(key)) claimOwner.set(key, p);
+      }
+      continue;
+    }
+    for (const e of p.external_ids ?? []) {
+      const key = `${e.provider}\u0000${e.external_id}`;
+      const merged = (target.external_ids ??= []);
+      const shared = claimOwner.get(key) === target;
+      if (
+        !merged.some(
+          (m) => m.provider === e.provider && m.external_id === e.external_id,
+        )
+      ) {
+        merged.push(e);
+      }
+      if (!claimOwner.has(key)) claimOwner.set(key, target);
+      if (shared) {
+        collapsed.push({
+          provider: e.provider,
+          external_id: e.external_id,
+          display_name: label(target),
+          collapsed_names: [label(p)],
+        });
+      }
+    }
+    if (!target.image_url && p.image_url) target.image_url = p.image_url;
+  }
+  return { payloads: out, collapsed };
+}
+
 export class CanonicalizationCoordinator {
   private artistResolver: ArtistResolver;
   private venueResolver: VenueResolver;
@@ -290,8 +393,8 @@ export class CanonicalizationCoordinator {
     }
 
     // 4. Resolve Artists (Finding 5: In-memory prep with ambiguity detection)
-    const artistPayloads: NonNullable<CanonicalizationPayload['artists']> = [];
-    const resolvedArtistIds: string[] = [];
+    const rawArtistPayloads: NonNullable<CanonicalizationPayload['artists']> =
+      [];
 
     const candidateArtists: CandidateArtist[] =
       candidate.artists && candidate.artists.length > 0
@@ -382,7 +485,19 @@ export class CanonicalizationCoordinator {
       }
     }
 
-    if (validCandidateArtists.length === 0) {
+    // Artist-less listings (e.g. club nights such as "Ladies Night") are canonicalized with
+    // zero artists when the source assigned at least one genre: the title is the display name
+    // and nothing is fabricated as an artist. Without any genre (or for a seat/VIP/parking
+    // package listing) the candidate stays in review.
+    const isTicketPackageListing =
+      candidate.rawPayload?.isTicketPackage === true;
+    const canCreateArtistlessEvent =
+      validCandidateArtists.length === 0 &&
+      !isTicketPackageListing &&
+      candidate.title?.trim().length > 0 &&
+      getCandidateGenres(candidate).length > 0;
+
+    if (validCandidateArtists.length === 0 && !canCreateArtistlessEvent) {
       const payload: CanonicalizationPayload = {
         resolution: {
           event_candidate_id: candidateId,
@@ -500,8 +615,7 @@ export class CanonicalizationCoordinator {
       const sortOrd = candidateArtist.sortOrder ?? index;
 
       if (resolved.status === 'matched') {
-        resolvedArtistIds.push(resolved.artistId!);
-        artistPayloads.push({
+        rawArtistPayloads.push({
           artist_id: resolved.artistId!,
           image_url: asHttpsImageUrl(candidateArtist.imageUrl),
           billing_position: billingPos,
@@ -514,8 +628,7 @@ export class CanonicalizationCoordinator {
         });
       } else if (resolved.status === 'to_create') {
         const toCreate = resolved.artistToCreate!;
-        resolvedArtistIds.push(toCreate.id);
-        artistPayloads.push({
+        rawArtistPayloads.push({
           artist_id: toCreate.id,
           name: toCreate.name,
           normalized_name: toCreate.normalizedName,
@@ -530,6 +643,25 @@ export class CanonicalizationCoordinator {
         });
       }
     }
+
+    // Two listed performers can resolve to ONE canonical artist (e.g. two Ticketmaster
+    // attractions sharing a Spotify artist): link it once and let it carry both provider ids.
+    const collapse = collapseSharedExternalIds(rawArtistPayloads);
+    const artistPayloads = dedupeArtistPayloads(collapse.payloads);
+    const collapseEvidences = collapse.collapsed.map((c) => ({
+      field_name: 'shared_external_id_in_candidate_collapsed',
+      source_id: candidate.sourceId,
+      raw_ingest_id: candidate.rawIngestId,
+      candidate_id: candidateId,
+      observed_value: c,
+      value_hash: `shared_external_id_collapsed_${c.provider}_${c.external_id}_${c.collapsed_names.join('|')}`,
+      confidence: candidate.confidence,
+      observed_at: candidate.provenance?.fetchedAt ?? new Date().toISOString(),
+      parser_version: candidate.provenance?.parserVersion ?? '1.0.0',
+    }));
+    const resolvedArtistIds = artistPayloads
+      .map((a) => a.artist_id)
+      .filter((id): id is string => Boolean(id));
 
     // 4b. Detect provider external-ID conflicts BEFORE any write. Two different
     // artists in one listing claiming the same provider id (or an id already owned
@@ -554,6 +686,8 @@ export class CanonicalizationCoordinator {
     // 5. Match Event (Finding 6: Conservative matching)
     const preparedCandidate: EventCandidate = {
       ...candidate,
+      // Placeholder names ("Unknown Artist") are not artist identities for matching.
+      ...(validCandidateArtists.length === 0 ? { artistNames: [] } : {}),
       localStartDate,
       timezone: resolvedTimezone,
     };
@@ -739,7 +873,7 @@ export class CanonicalizationCoordinator {
           source_url: candidate.provenance?.sourceUrl ?? '',
           confidence: candidate.confidence,
         },
-        evidence: creationEvidences,
+        evidence: [...creationEvidences, ...collapseEvidences],
         resolution: {
           event_candidate_id: candidateId,
           status: 'created',
@@ -823,7 +957,8 @@ export class CanonicalizationCoordinator {
                   },
                 ]
               : [],
-          ),
+          )
+          .concat(collapseEvidences),
         resolution: {
           event_candidate_id: candidateId,
           status: 'matched',

@@ -10,10 +10,8 @@ import {
   resolveCatalogFromDate,
 } from '@/lib/discover/dates';
 import { resolveNearContext } from '@/lib/location/near-context';
-import {
-  defaultSearchEndDate,
-  searchCatalogPage,
-} from '@/lib/location/catalog-search';
+import { searchCatalogPage } from '@/lib/location/catalog-search';
+import { getViewerTimeZone } from '@/lib/location/server';
 import type {
   EventListFilters,
   EventSortOption,
@@ -40,15 +38,23 @@ export async function GET(request: Request) {
     const city = searchParams.get('city')?.trim() || undefined;
     const genre = searchParams.get('genre')?.trim() || undefined;
 
-    // Local calendar date derived in validated target timezone (never naive UTC split)
-    const timezone = searchParams.get('timezone')?.trim() || 'America/Denver';
-    if (!isValidTimeZone(timezone)) {
+    // Radius: derived on the server from the session user's profile / home-location cookie,
+    // exactly like /search. Client-supplied coordinates or radius are never read. Guests and
+    // users without a home location get the ordinary (unfiltered) result, nearApplied=false.
+    const nearRequested = searchParams.get('near') === '1';
+    const nearCtx = nearRequested ? await resolveNearContext() : null;
+
+    // Local calendar date derived in a validated viewer timezone (never naive UTC split):
+    // explicit ?timezone=, else the encore_tz cookie, else the home city timezone, else UTC.
+    const timezoneParam = searchParams.get('timezone')?.trim();
+    if (timezoneParam && !isValidTimeZone(timezoneParam)) {
       return badRequest('Invalid timezone');
     }
+    const timezone =
+      timezoneParam || (await getViewerTimeZone(nearCtx?.home ?? null));
     const now = new Date();
     const nowIso = now.toISOString();
     const todayLocalDate = deriveLocalDateFromInstant(nowIso, timezone);
-    const twelveMonthsLocalDate = defaultSearchEndDate(timezone, now);
 
     const startDateParam = searchParams.get('startDate')?.trim();
     const endDateParam = searchParams.get('endDate')?.trim();
@@ -70,7 +76,8 @@ export async function GET(request: Request) {
         today: todayLocalDate,
         includePast,
       });
-    const endDate = endDateParam || twelveMonthsLocalDate;
+    // Unbounded unless an explicit endDate is given (same rule as the /search page).
+    const endDate = endDateParam || undefined;
 
     const minPriceParam = searchParams.get('minPrice');
     const maxPriceParam = searchParams.get('maxPrice');
@@ -167,12 +174,6 @@ export async function GET(request: Request) {
       excludePastShowtimes,
       referenceNowIso: nowIso,
     };
-
-    // Radius: derived on the server from the session user's profile / home-location cookie,
-    // exactly like /search. Client-supplied coordinates or radius are never read. Guests and
-    // users without a home location get the ordinary (unfiltered) result, nearApplied=false.
-    const nearRequested = searchParams.get('near') === '1';
-    const nearCtx = nearRequested ? await resolveNearContext() : null;
 
     const result = await searchCatalogPage(
       catalogRepo,

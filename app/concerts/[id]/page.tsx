@@ -4,6 +4,7 @@ import { createClient } from '@/lib/supabase/server';
 import { getAuthenticatedUser } from '@/lib/auth/session';
 import { SupabaseCatalogRepository } from '@/lib/repositories/catalog-repository';
 import { scoreEventForUser } from '@/lib/recommendation/service';
+import { isValidSpotifyArtistId } from '@/lib/spotify/embed';
 import { getHomeLocation } from '@/lib/location/server';
 import { ConcertDetailClient } from '@/components/index/ConcertDetailClient';
 import { Header } from '@/components/index/Header';
@@ -60,6 +61,28 @@ export default async function ConcertDetailPage({
     eventDetail.ticketLinks[0];
   const inventoryStatus = primaryTicket?.inventoryStatus ?? 'unknown';
 
+  // Verified Spotify id for the headliner (catalog external ids only; never guessed from names),
+  // used for the short "Listen" embed on the event page.
+  const headlinerArtist =
+    eventDetail.artists.find((a) => a.billingPosition === 'headliner') ??
+    eventDetail.artists[0];
+  let headlinerSpotifyId: string | null = null;
+  if (
+    headlinerArtist &&
+    typeof catalogRepo.findArtistExternalIds === 'function'
+  ) {
+    try {
+      const ids = await catalogRepo.findArtistExternalIds(headlinerArtist.id);
+      headlinerSpotifyId =
+        ids.find(
+          (e) =>
+            e.provider === 'spotify' && isValidSpotifyArtistId(e.externalId),
+        )?.externalId ?? null;
+    } catch {
+      headlinerSpotifyId = null;
+    }
+  }
+
   const summary: CanonicalEventSummary = {
     id: eventDetail.id,
     title: eventDetail.name,
@@ -80,6 +103,10 @@ export default async function ConcertDetailPage({
       name: a.name,
       billingPosition: a.billingPosition,
       imageUrl: a.imageUrl ?? null,
+      spotifyArtistId:
+        headlinerArtist && a.id === headlinerArtist.id
+          ? headlinerSpotifyId
+          : null,
     })),
     imageUrl: eventDetail.imageUrl ?? null,
     venue: eventDetail.venue
