@@ -123,6 +123,8 @@ interface EventRow {
   announced_at: string | null;
   genre?: string | null;
   genres?: string[] | null;
+  /** Added by migration 20261126050000; undefined until applied. */
+  genres_source?: string | null;
   /** Added by migration 20261124000000; undefined until that migration is applied. */
   image_url?: string | null;
   created_at: string;
@@ -296,6 +298,7 @@ function mapEventRow(row: EventRow): Event {
     announcedAt: row.announced_at,
     genre: row.genre ?? null,
     genres: Array.isArray(row.genres) ? row.genres : [],
+    genresSource: row.genres_source ?? null,
     imageUrl: row.image_url ?? null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -1079,6 +1082,7 @@ export class SupabaseCatalogRepository implements ICatalogRepository {
             ? 'Festival'
             : null),
         genres: event.genres ?? [],
+        genresSource: event.genresSource ?? null,
         imageUrl: event.imageUrl ?? null,
       });
     }
@@ -1731,6 +1735,35 @@ export class SupabaseCatalogRepository implements ICatalogRepository {
       throw new Error(`Failed to load artists by id: ${error.message}`);
     }
     return (data ?? []).map((row) => mapArtistRow(row as ArtistRow));
+  }
+
+  async fillEventGenres(
+    eventId: string,
+    genres: string[],
+    source: string,
+  ): Promise<boolean> {
+    const clean = Array.from(
+      new Set(genres.map((g) => g?.trim()).filter((g): g is string => !!g)),
+    );
+    if (clean.length === 0) return false;
+    // Fill-if-empty: only events with NO genre of any kind are written, so source-supplied
+    // genres are never overwritten. The origin is recorded in genres_source.
+    const { data, error } = await this.client
+      .from('events')
+      .update({
+        genre: clean[0],
+        genres: clean,
+        genres_source: source,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', eventId)
+      .filter('genres', 'eq', '{}')
+      .is('genre', null)
+      .select('id');
+    if (error) {
+      throw new Error(`Failed to store event genres: ${error.message}`);
+    }
+    return (data ?? []).length > 0;
   }
 
   async fillArtistGenres(

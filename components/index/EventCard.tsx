@@ -146,7 +146,10 @@ export function EventCard({
               )
             ) : null}
 
-            <GenreBadge genre={eventGenreList(event)} />
+            <GenreBadge
+              genre={eventGenreList(event)}
+              inferred={event.genresInferred}
+            />
           </div>
 
           {/* Quick Action Controls (Save, Alert, Calendar Export) */}

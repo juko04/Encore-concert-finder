@@ -82,6 +82,8 @@ export interface IndexEventItem {
   genre?: string | null;
   /** All event-level genres (primary first). */
   genres?: string[];
+  /** True when the genres were inferred (e.g. from the title) rather than source-supplied. */
+  genresInferred?: boolean;
   subgenres?: string[];
   ageRestriction?: string | null;
   imageUrl?: string | null;
@@ -293,6 +295,7 @@ export function toIndexEventItem(
       genres: Array.isArray(canonicalAny.genres)
         ? (canonicalAny.genres as string[])
         : [],
+      genresInferred: canonicalAny.genresSource === 'inferred_title',
       subgenres: Array.isArray(canonicalAny.subgenres)
         ? (canonicalAny.subgenres as string[])
         : undefined,
@@ -422,6 +425,7 @@ export function toIndexEventItem(
     genres: Array.isArray(canonicalAny.genres)
       ? (canonicalAny.genres as string[])
       : [],
+    genresInferred: canonicalAny.genresSource === 'inferred_title',
     subgenres: Array.isArray(canonicalAny.subgenres)
       ? (canonicalAny.subgenres as string[])
       : undefined,

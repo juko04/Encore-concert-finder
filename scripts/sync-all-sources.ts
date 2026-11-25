@@ -9,6 +9,7 @@
  * 3. Independent Venue Group (Larimer Lounge, Lost Lake Lounge, Globe Hall)
  * 4. Cervantes' Masterpiece Ballroom & The Other Side
  * 5. Velvet Elk Lounge & Roots Music Project
+ * 6. Mishawaka Amphitheatre, Bohemian Live Music (Washington's & The Armory), 10 Mile Music Hall
  *
  * Scheduling Horizons:
  * - near-term (0 - 14 days): daily high-frequency refresh
@@ -62,6 +63,7 @@ import {
   VELVET_ELK_CONFIG,
   ROOTS_MUSIC_PROJECT_CONFIG,
   Z2_ENTERTAINMENT_CONFIG,
+  EXTRA_VENUE_SYNC_TARGETS,
 } from '@/lib/sources/venue';
 import {
   MemoryCatalogRepository,
@@ -1168,6 +1170,7 @@ export async function runMultiSourceSync(
           new RootsMusicProjectAdapter(ROOTS_MUSIC_PROJECT_CONFIG),
         fixture: 'tests/fixtures/roots-music-project-events-response.html',
       },
+      ...EXTRA_VENUE_SYNC_TARGETS,
     ];
 
     for (const v of venueConfigs) {

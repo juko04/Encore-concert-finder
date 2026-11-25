@@ -1,0 +1,397 @@
+{
+  "events": [
+    {
+      "id": 54135,
+      "url": "https://bohemianlivemusic.org/event/an-evening-with-firefall/",
+      "title": "An Evening with Firefall",
+      "status": "publish",
+      "all_day": false,
+      "start_date": "2026-11-27 19:00:00",
+      "end_date": "2026-11-27 19:00:00",
+      "timezone": "America/Denver",
+      "cost": "Sold&nbsp;Out",
+      "cost_details": {
+        "currency_symbol": "",
+        "currency_code": "",
+        "currency_position": "",
+        "values": ["60.16"]
+      },
+      "website": "https://bohemianlivemusic.org/event/an-evening-with-firefall/",
+      "hide_from_listings": false,
+      "is_virtual": false,
+      "image": {
+        "url": "https://bohemianlivemusic.org/wp-content/uploads/2026/09/15086ced-2.jpeg"
+      },
+      "venue": {
+        "id": 9780,
+        "venue": "The Armory",
+        "address": "314 East Mountain Avenue",
+        "city": "Fort Collins",
+        "stateprovince": "CO",
+        "zip": "80524",
+        "geo_lat": 40.58733,
+        "geo_lng": -105.073347
+      },
+      "custom_fields": {
+        "_ecp_custom_7": {
+          "label": "Genre",
+          "value": "Classic Rock"
+        }
+      }
+    },
+    {
+      "id": 54329,
+      "url": "https://bohemianlivemusic.org/event/big-richard/",
+      "title": "Big Richard",
+      "status": "publish",
+      "all_day": false,
+      "start_date": "2026-12-05 19:00:00",
+      "end_date": "2026-12-05 19:00:00",
+      "timezone": "America/Denver",
+      "cost": "$18.96 – $24.11",
+      "cost_details": {
+        "currency_symbol": "$",
+        "currency_code": "USD",
+        "currency_position": "prefix",
+        "values": ["18.96", "24.11"]
+      },
+      "website": "",
+      "hide_from_listings": false,
+      "is_virtual": false,
+      "image": {
+        "url": "https://bohemianlivemusic.org/wp-content/uploads/2026/11/e0f08864-2.jpeg"
+      },
+      "venue": {
+        "id": 9778,
+        "venue": "Washington&#8217;s",
+        "address": "132 Laporte Ave",
+        "city": "Fort Collins",
+        "stateprovince": "CO",
+        "zip": "80524",
+        "geo_lat": 40.589517,
+        "geo_lng": -105.077888
+      },
+      "custom_fields": {
+        "_ecp_custom_7": {
+          "label": "Genre",
+          "value": "Americana"
+        }
+      }
+    },
+    {
+      "id": 53352,
+      "url": "https://bohemianlivemusic.org/event/pokey-lafarge/",
+      "title": "Pokey LaFarge",
+      "status": "publish",
+      "all_day": false,
+      "start_date": "2026-12-06 19:00:00",
+      "end_date": "2026-12-06 19:00:00",
+      "timezone": "America/Denver",
+      "cost": "$29.25",
+      "cost_details": {
+        "currency_symbol": "",
+        "currency_code": "",
+        "currency_position": "",
+        "values": ["29.25"]
+      },
+      "website": "https://bohemianlivemusic.org/event/pokey-lafarge/",
+      "hide_from_listings": false,
+      "is_virtual": false,
+      "image": {
+        "url": "https://bohemianlivemusic.org/wp-content/uploads/2026/11/6e95fef7-1.jpeg"
+      },
+      "venue": {
+        "id": 9778,
+        "venue": "Washington&#8217;s",
+        "address": "132 Laporte Ave",
+        "city": "Fort Collins",
+        "stateprovince": "CO",
+        "zip": "80524",
+        "geo_lat": 40.589517,
+        "geo_lng": -105.077888
+      },
+      "custom_fields": {
+        "_ecp_custom_7": {
+          "label": "Genre",
+          "value": "Americana"
+        }
+      }
+    },
+    {
+      "id": 54622,
+      "url": "https://bohemianlivemusic.org/event/father-john-misty-solo/",
+      "title": "FATHER JOHN MISTY (Solo)",
+      "status": "publish",
+      "all_day": false,
+      "start_date": "2026-12-10 20:00:00",
+      "end_date": "2026-12-10 20:00:00",
+      "timezone": "America/Denver",
+      "cost": "Sold&nbsp;Out",
+      "cost_details": {
+        "currency_symbol": "",
+        "currency_code": "",
+        "currency_position": "",
+        "values": ["44.71"]
+      },
+      "website": "https://bohemianlivemusic.org/event/father-john-misty-solo/",
+      "hide_from_listings": false,
+      "is_virtual": false,
+      "image": {
+        "url": "https://bohemianlivemusic.org/wp-content/uploads/2026/11/58c8a341-15.jpeg"
+      },
+      "venue": {
+        "id": 9778,
+        "venue": "Washington&#8217;s",
+        "address": "132 Laporte Ave",
+        "city": "Fort Collins",
+        "stateprovince": "CO",
+        "zip": "80524",
+        "geo_lat": 40.589517,
+        "geo_lng": -105.077888
+      },
+      "custom_fields": {
+        "_ecp_custom_7": {
+          "label": "Genre",
+          "value": "Alternative/Indie Rock"
+        }
+      }
+    },
+    {
+      "id": 54793,
+      "url": "https://bohemianlivemusic.org/event/robert-earl-keen-i-will-survive-christmas/",
+      "title": "Robert Earl Keen &#8211; I Will Survive&#8230; Christmas",
+      "status": "publish",
+      "all_day": false,
+      "start_date": "2026-12-12 19:00:00",
+      "end_date": "2026-12-12 19:00:00",
+      "timezone": "America/Denver",
+      "cost": "$44.71",
+      "cost_details": {
+        "currency_symbol": "$",
+        "currency_code": "USD",
+        "currency_position": "prefix",
+        "values": ["44.71"]
+      },
+      "website": "",
+      "hide_from_listings": false,
+      "is_virtual": false,
+      "image": {
+        "url": "https://bohemianlivemusic.org/wp-content/uploads/2026/10/8df99d8f-7.jpeg"
+      },
+      "venue": {
+        "id": 9778,
+        "venue": "Washington&#8217;s",
+        "address": "132 Laporte Ave",
+        "city": "Fort Collins",
+        "stateprovince": "CO",
+        "zip": "80524",
+        "geo_lat": 40.589517,
+        "geo_lng": -105.077888
+      },
+      "custom_fields": {
+        "_ecp_custom_7": {
+          "label": "Genre",
+          "value": "Americana"
+        }
+      }
+    },
+    {
+      "id": 53714,
+      "url": "https://bohemianlivemusic.org/event/drag-the-river-30th-anniversary-show/",
+      "title": "Drag the River- 30th Anniversary Show",
+      "status": "publish",
+      "all_day": false,
+      "start_date": "2026-12-18 19:00:00",
+      "end_date": "2026-12-18 19:00:00",
+      "timezone": "America/Denver",
+      "cost": "$24.04",
+      "cost_details": {
+        "currency_symbol": "",
+        "currency_code": "",
+        "currency_position": "",
+        "values": ["24.04"]
+      },
+      "website": "https://bohemianlivemusic.org/event/drag-the-river-30th-anniversary-show/",
+      "hide_from_listings": false,
+      "is_virtual": false,
+      "image": {
+        "url": "https://bohemianlivemusic.org/wp-content/uploads/2026/11/086a29a4-2.jpeg"
+      },
+      "venue": {
+        "id": 9778,
+        "venue": "Washington&#8217;s",
+        "address": "132 Laporte Ave",
+        "city": "Fort Collins",
+        "stateprovince": "CO",
+        "zip": "80524",
+        "geo_lat": 40.589517,
+        "geo_lng": -105.077888
+      },
+      "custom_fields": {
+        "_ecp_custom_7": {
+          "label": "Genre",
+          "value": "Country"
+        }
+      }
+    },
+    {
+      "id": 54629,
+      "url": "https://bohemianlivemusic.org/event/the-lone-bellow-2027-tour/",
+      "title": "The Lone Bellow 2027 Tour",
+      "status": "publish",
+      "all_day": false,
+      "start_date": "2027-01-23 19:00:00",
+      "end_date": "2027-01-23 19:00:00",
+      "timezone": "America/Denver",
+      "cost": "Sold&nbsp;Out",
+      "cost_details": {
+        "currency_symbol": "",
+        "currency_code": "",
+        "currency_position": "",
+        "values": ["49.86"]
+      },
+      "website": "https://bohemianlivemusic.org/event/the-lone-bellow-2027-tour/",
+      "hide_from_listings": false,
+      "is_virtual": false,
+      "image": {
+        "url": "https://bohemianlivemusic.org/wp-content/uploads/2026/11/ddb8b758-2.jpeg"
+      },
+      "venue": {
+        "id": 9780,
+        "venue": "The Armory",
+        "address": "314 East Mountain Avenue",
+        "city": "Fort Collins",
+        "stateprovince": "CO",
+        "zip": "80524",
+        "geo_lat": 40.58733,
+        "geo_lng": -105.073347
+      },
+      "custom_fields": {
+        "_ecp_custom_7": {
+          "label": "Genre",
+          "value": "Americana"
+        }
+      }
+    },
+    {
+      "id": 55021,
+      "url": "https://bohemianlivemusic.org/event/cursive-happy-hollow-20th-anniversary/",
+      "title": "Cursive &#8211; Happy Hollow 20th Anniversary",
+      "status": "publish",
+      "all_day": false,
+      "start_date": "2027-03-05 19:00:00",
+      "end_date": "2027-03-05 19:00:00",
+      "timezone": "America/Denver",
+      "cost": "$29.26 – $96.21",
+      "cost_details": {
+        "currency_symbol": "",
+        "currency_code": "",
+        "currency_position": "",
+        "values": ["29.26", "96.21"]
+      },
+      "website": "https://bohemianlivemusic.org/event/cursive-happy-hollow-20th-anniversary/",
+      "hide_from_listings": false,
+      "is_virtual": false,
+      "image": {
+        "url": "https://bohemianlivemusic.org/wp-content/uploads/2026/11/319b3aec-7.jpeg"
+      },
+      "venue": {
+        "id": 9778,
+        "venue": "Washington&#8217;s",
+        "address": "132 Laporte Ave",
+        "city": "Fort Collins",
+        "stateprovince": "CO",
+        "zip": "80524",
+        "geo_lat": 40.589517,
+        "geo_lng": -105.077888
+      },
+      "custom_fields": {
+        "_ecp_custom_7": {
+          "label": "Genre",
+          "value": "Indie"
+        }
+      }
+    },
+    {
+      "id": 54887,
+      "url": "https://bohemianlivemusic.org/event/kcsu-subzer0-feat-chief-ojih-kanna-beyel-invective/",
+      "title": "*RESCHEDULED* KCSU SubZer0 feat. CHIEF OJIH, KANNA, BEYEL &amp; INVECTIVE",
+      "status": "publish",
+      "all_day": false,
+      "start_date": "2027-03-06 19:30:00",
+      "end_date": "2027-03-06 19:30:00",
+      "timezone": "America/Denver",
+      "cost": "$18.96 – $24.13",
+      "cost_details": {
+        "currency_symbol": "$",
+        "currency_code": "USD",
+        "currency_position": "prefix",
+        "values": ["18.96", "24.13"]
+      },
+      "website": "",
+      "hide_from_listings": false,
+      "is_virtual": false,
+      "image": {
+        "url": "https://bohemianlivemusic.org/wp-content/uploads/2026/11/f5271d8f-7.jpeg"
+      },
+      "venue": {
+        "id": 9778,
+        "venue": "Washington&#8217;s",
+        "address": "132 Laporte Ave",
+        "city": "Fort Collins",
+        "stateprovince": "CO",
+        "zip": "80524",
+        "geo_lat": 40.589517,
+        "geo_lng": -105.077888
+      },
+      "custom_fields": {
+        "_ecp_custom_7": {
+          "label": "Genre",
+          "value": "Electronic "
+        }
+      }
+    },
+    {
+      "id": 54573,
+      "url": "https://bohemianlivemusic.org/event/too-many-zooz-audio-lipstick-tour/",
+      "title": "Too Many Zooz: Audio Lipstick Tour",
+      "status": "publish",
+      "all_day": false,
+      "start_date": "2027-03-20 19:00:00",
+      "end_date": "2027-03-20 19:00:00",
+      "timezone": "America/Denver",
+      "cost": "$29.26",
+      "cost_details": {
+        "currency_symbol": "$",
+        "currency_code": "USD",
+        "currency_position": "prefix",
+        "values": ["29.26"]
+      },
+      "website": "",
+      "hide_from_listings": false,
+      "is_virtual": false,
+      "image": {
+        "url": "https://bohemianlivemusic.org/wp-content/uploads/2026/09/bbbbdb4b-6.jpeg"
+      },
+      "venue": {
+        "id": 9778,
+        "venue": "Washington&#8217;s",
+        "address": "132 Laporte Ave",
+        "city": "Fort Collins",
+        "stateprovince": "CO",
+        "zip": "80524",
+        "geo_lat": 40.589517,
+        "geo_lng": -105.077888
+      },
+      "custom_fields": {
+        "_ecp_custom_7": {
+          "label": "Genre",
+          "value": "Funk"
+        }
+      }
+    }
+  ],
+  "rest_url": "https://bohemianlivemusic.org/wp-json/tribe/events/v1/events/?page=1&per_page=50&start_date=2026-11-25 00:00:00&end_date=2028-11-25 23:59:59&status=publish",
+  "total": 10,
+  "total_pages": 1
+}

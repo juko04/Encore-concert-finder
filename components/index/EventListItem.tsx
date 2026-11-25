@@ -128,7 +128,10 @@ export function EventListItem({
               {event.venueName || 'Venue TBA'}
               {event.city ? ` (${event.city})` : ''}
             </span>
-            <GenreBadge genre={eventGenreList(event)} />
+            <GenreBadge
+              genre={eventGenreList(event)}
+              inferred={event.genresInferred}
+            />
           </div>
         </div>
       </div>

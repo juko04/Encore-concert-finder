@@ -160,7 +160,10 @@ export function ConcertDetailClient({
                 </span>
               )}
 
-              <GenreBadge genre={eventGenreList(event)} />
+              <GenreBadge
+                genre={eventGenreList(event)}
+                inferred={event.genresInferred}
+              />
 
               {isPersonalized ? (
                 isDisliked ? (

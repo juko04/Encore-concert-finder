@@ -10,6 +10,7 @@ import type {
   IRawIngestRepository,
   ISourceRepository,
 } from '@/lib/repositories/interfaces';
+import { fillInferredEventGenres } from '@/lib/genres/enrich-event-genres';
 import { TicketmasterDiscoveryAdapter } from './adapter';
 import { overlayTicketmasterImages } from './parser';
 import { ensureTicketmasterSource } from './source-registry';
@@ -469,6 +470,12 @@ export async function runTicketmasterIngestion(
 
       if (outcome.status === 'created' || outcome.status === 'matched') {
         await storeTicketmasterArtistGenres(options.catalogRepo, cand);
+        // No genre from Ticketmaster? Use explicit genre words in the title (marked inferred).
+        await fillInferredEventGenres(
+          options.catalogRepo,
+          outcome.eventId,
+          cand,
+        );
       }
 
       if (outcome.status === 'created') {

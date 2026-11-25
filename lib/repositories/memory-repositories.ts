@@ -879,6 +879,26 @@ export class MemoryCatalogRepository implements ICatalogRepository {
     return out;
   }
 
+  async fillEventGenres(
+    eventId: string,
+    genres: string[],
+    source: string,
+  ): Promise<boolean> {
+    const clean = Array.from(
+      new Set(genres.map((g) => g?.trim()).filter((g): g is string => !!g)),
+    );
+    const ev = this.events.get(eventId);
+    if (!ev || clean.length === 0) return false;
+    if ((ev.genres && ev.genres.length > 0) || ev.genre) return false;
+    this.events.set(eventId, {
+      ...ev,
+      genre: clean[0],
+      genres: clean,
+      genresSource: source,
+    });
+    return true;
+  }
+
   async fillArtistGenres(
     artistId: string,
     genres: string[],

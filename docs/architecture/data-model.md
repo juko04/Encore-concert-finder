@@ -462,3 +462,7 @@ it is a persisted `needs_review` (`missing_artist_identity`). `EventMatcher` mer
 artist-less candidate only into an artist-less event with the same normalized title on the
 same venue/date (start times 90+ minutes apart stay separate); different titles on the
 same night stay separate events, and an artist-less event never blocks an artist show.
+
+### events.genres_source (migration 20261126050000)
+
+Nullable text recording where an event's genres came from. `NULL` = supplied by the ingested source (e.g. Ticketmaster classifications or a venue's own genre field). `inferred_title` = explicit genre words in the show title (`lib/genres/infer.ts`); `ticketmaster_attraction` = exact-name Ticketmaster attraction lookup for the headliner. Written only through `CatalogRepository.fillEventGenres`, which is fill-if-empty (an event with any genre is never touched). The UI marks `inferred_title` genres with a dashed badge.

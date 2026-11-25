@@ -9,3 +9,6 @@ export * from './independent-venue-group';
 export * from './velvet-elk';
 export * from './roots-music-project';
 export * from './z2-entertainment';
+export * from './tribe-events';
+export * from './mishawaka';
+export * from './extra-venue-targets';

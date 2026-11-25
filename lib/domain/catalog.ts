@@ -118,6 +118,8 @@ export interface Event {
   announcedAt?: string | null;
   genre?: string | null;
   genres?: string[];
+  /** null/undefined = from the ingested source; 'inferred_title' etc. = derived (see lib/genres). */
+  genresSource?: string | null;
   imageUrl?: string | null;
   createdAt?: string;
   updatedAt?: string;
@@ -245,6 +247,7 @@ export interface CanonicalEventSummary {
   inventoryStatus?: TicketInventoryStatus;
   genre?: string | null;
   genres?: string[];
+  genresSource?: string | null;
 }
 
 export interface CanonicalEventDetail extends Event {

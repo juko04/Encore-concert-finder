@@ -122,6 +122,15 @@ export interface ICatalogRepository {
     genres: string[],
     source: string,
   ): Promise<boolean>;
+  /**
+   * Fill-if-empty genre write for an EVENT with provenance (events.genres_source). Never
+   * overwrites an event that already has a genre. Returns true when a write happened.
+   */
+  fillEventGenres(
+    eventId: string,
+    genres: string[],
+    source: string,
+  ): Promise<boolean>;
   findArtistIdsByExternalIds(
     provider: string,
     externalIds: string[],
