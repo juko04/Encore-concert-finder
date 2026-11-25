@@ -22,7 +22,8 @@
     "ingest:venue": "vite-node --config vitest.config.ts scripts/ingest-venue.ts",
     "sync:all": "vite-node --config vitest.config.ts scripts/sync-all-sources.ts",
     "cleanup:synthetic": "vite-node --config vitest.config.ts scripts/cleanup-synthetic-data.ts",
-    "audit:synthetic": "vite-node --config vitest.config.ts scripts/cleanup-synthetic-data.ts"
+    "audit:synthetic": "vite-node --config vitest.config.ts scripts/cleanup-synthetic-data.ts",
+    "enrich:venue-images": "vite-node --config vitest.config.ts scripts/enrich-venue-images.ts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.5.2",

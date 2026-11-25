@@ -404,7 +404,7 @@ describe('Index Components Unit Tests', () => {
       );
 
       expect(screen.getByText('The Cure')).toBeInTheDocument();
-      expect(screen.getByText('T')).toBeInTheDocument(); // Initial avatar
+      expect(screen.getByText('C')).toBeInTheDocument(); // Monogram avatar ("The Cure" -> C: leading article skipped)
       expect(screen.getByText('96% Match')).toBeInTheDocument();
 
       const saveButton = screen.getByRole('button', {
@@ -458,7 +458,7 @@ describe('Index Components Unit Tests', () => {
       // Switch to List layout
       const listButton = screen.getByRole('button', { name: /list layout/i });
       fireEvent.click(listButton);
-      expect(screen.getByText('T')).toBeInTheDocument(); // Swatch avatar in list view
+      expect(screen.getByText('C')).toBeInTheDocument(); // Monogram avatar in list view ("The Cure" -> C)
 
       // Filter by Free ($0) mode
       const freeChip = screen.getByRole('button', { name: /free \(\$0\)/i });

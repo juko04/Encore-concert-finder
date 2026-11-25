@@ -2,7 +2,7 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import type { IndexEventItem } from './types';
-import { getArtistAccent } from './formatters';
+import { EventPlaceholder } from './EventPlaceholder';
 
 type ImageSource = 'event' | 'artist' | 'venue';
 export interface ImageCandidate {
@@ -70,8 +70,6 @@ export interface EventImageProps {
   children?: React.ReactNode;
 }
 
-const graphicText = { sm: 'text-sm', md: 'text-4xl', lg: 'text-7xl' };
-
 export function EventImage({
   event,
   className = '',
@@ -86,7 +84,6 @@ export function EventImage({
   const candidates = useMemo(() => getImageCandidates(event), [event]);
   const { current, onError } = useImageCascade(candidates);
   const name = event.headlinerName || event.title;
-  const accent = getArtistAccent(name);
 
   return (
     <div
@@ -109,20 +106,11 @@ export function EventImage({
           className={`h-full w-full object-cover ${imgClassName}`}
         />
       ) : (
-        <div
-          className="flex h-full w-full items-center justify-center"
-          style={{
-            background: `linear-gradient(135deg, ${accent.primary}1f 0%, ${accent.secondary}38 100%)`,
-          }}
-          aria-hidden="true"
-        >
-          <span
-            className={`select-none font-extrabold tracking-tight ${graphicText[graphicSize]}`}
-            style={{ color: accent.primary, opacity: 0.6 }}
-          >
-            {(name || 'E').charAt(0).toUpperCase()}
-          </span>
-        </div>
+        <EventPlaceholder
+          name={name}
+          venueName={event.venueName}
+          size={graphicSize}
+        />
       )}
       {children}
     </div>

@@ -18,6 +18,10 @@ import {
   validateIanaTimezone,
 } from '@/lib/domain/value-objects';
 import type { ICatalogRepository } from '@/lib/repositories/interfaces';
+import {
+  NON_EVENT_REASON,
+  isNonPublicEventTitle,
+} from '@/lib/sources/non-events';
 import { ArtistResolver } from './artist-resolver';
 import { EventMatcher } from './event-matcher';
 import { evaluateFieldMerge, type FieldMergeEvidence } from './field-merge';
@@ -243,6 +247,26 @@ export class CanonicalizationCoordinator {
       );
     }
     const candidateId = candidate.id;
+
+    // Closure / private-booking / hours notices are not public shows: persist a rejection so they
+    // are never retried and never become canonical events.
+    if (isNonPublicEventTitle(candidate.title)) {
+      const payload: CanonicalizationPayload = {
+        resolution: {
+          event_candidate_id: candidateId,
+          status: 'rejected',
+          matcher_version: '1.0.0',
+          confidence: 0.95,
+          reasons: [NON_EVENT_REASON],
+        },
+      };
+      await this.catalogRepo.applyCanonicalization(payload);
+      return {
+        eventId: null,
+        status: 'rejected',
+        reasons: [NON_EVENT_REASON],
+      };
+    }
 
     // Validate venue identity before resolving (avoid creating canonical "Unknown Venue")
     const trimmedVenueName = candidate.venueName?.trim();

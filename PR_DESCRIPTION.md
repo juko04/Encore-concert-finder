@@ -7,6 +7,7 @@ Branch `fix/ui-discover-auth-v2` against `main`:
 - **No hardcoded timezone:** viewer timezone = `encore_tz` cookie (set from the browser) else home-city timezone else UTC (`lib/location/timezone.ts`); Denver defaults removed from discover dates, modes and service.
 - **Spotify:** imported artist affinities persist after disconnect/expiry (disconnect deletes tokens only); the stored listening-period view shows only artists with a rank in the chosen window (no fallback to other periods); a short "Listen" embed of the headliner's top tracks on the event page (only with a verified Spotify id).
 - **Ticketmaster / identity:** seat-package listings are never artists/titles; genres come from Ticketmaster classifications; an artist may hold several external ids from one provider (an id owned by another artist is never reassigned and goes to a persisted `needs_review`); attractions in one listing that share an id collapse into one artist with an auditable evidence row (fixes "Day Out With Thomas"); shows with no artist but at least one genre are created (without a genre: persisted `needs_review`); a performer-level Religious genre is dropped on non-Music events ("House Party"); re-syncing sources without a source-side event id is idempotent.
+- **Non-events and images:** closure / private-booking / hours listings ("Closed for Private Event") are rejected at ingestion (`lib/sources/non-events.ts`, reason `not_a_public_event`) and existing ones are removed by a migration; cards without an image get a generated placeholder (deterministic gradient, one of four patterns, monogram, venue name: `components/index/EventPlaceholder.tsx`); `npm run enrich:venue-images` fills venue images from a venue's own site share image (logos/stickers and multi-venue sites are skipped, so it currently finds none for the seven scraped Colorado venues).
 - **Config:** local Supabase email provider enabled (public signup stays off via `[auth] enable_signup=false`).
 - Bench script: `scripts/bench-near-search.ts`.
 
@@ -42,6 +43,7 @@ All additive:
 - `20261125020000_apply_canonicalization_needs_review_conflicts.sql` - persists needs_review/rejected resolutions and external-id conflicts.
 - `20261126010000_allow_multiple_external_ids_per_provider.sql` - drops `uq_artist_provider` (keeps `uq_artist_provider_external_id`).
 - `20261126030000_event_sources_idempotent_without_external_id.sql` - upsert for event_sources rows without a source event id.
+- `20261126040000_cleanup_non_event_listings.sql` - removes stored closure/private-booking/hours listings (and their orphaned pseudo-artists).
 All applied cleanly to the real local DB over its existing data. Not replayed from an empty DB locally; CI does that. Genres and artist-less shows appear only after a Ticketmaster sync where this is deployed.
 
 ## Source / scraper impact
