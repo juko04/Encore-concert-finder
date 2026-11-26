@@ -360,7 +360,9 @@ describe('SupabaseCatalogRepository - Search with Pagination and Punctuation (MU
       artists: [],
       event_artists: [],
     };
-    let capturedOrClause = '';
+    // Search is now split into request-sized OR groups (URI-too-long fix), so
+    // every group's clause is captured and the assertions run on the union.
+    const capturedOrClauses: string[] = [];
 
     const mockClient = {
       from: vi.fn((table: string) => {
@@ -385,7 +387,7 @@ describe('SupabaseCatalogRepository - Search with Pagination and Punctuation (MU
             return builder;
           }),
           or: vi.fn((clause: string) => {
-            capturedOrClause = clause;
+            capturedOrClauses.push(clause);
             return builder;
           }),
           limit: vi.fn(() => builder),
@@ -512,13 +514,24 @@ describe('SupabaseCatalogRepository - Search with Pagination and Punctuation (MU
 
     // Verify PostgREST .or() double-quote wrapping and quote escaping
     // The name clause MUST be wrapped in double quotes, with internal quotes escaped as ""
-    expect(capturedOrClause).toContain('name.ilike."%Tyler, The ""Creator""%"');
+    const nameClause = 'name.ilike."%Tyler, The ""Creator""%"';
+    expect(
+      capturedOrClauses.filter((c) => c.includes(nameClause)),
+    ).toHaveLength(1);
 
-    // Verify chunking of event IDs in max 200 items per id.in.(...) clause
-    // 1020 items chunked by 200 -> 6 chunks (200, 200, 200, 200, 200, 20)
-    const idInMatches = capturedOrClause.match(/id\.in\.\([^)]+\)/g) || [];
-    expect(idInMatches).toHaveLength(6);
-    expect(capturedOrClause).toContain('event-1015');
+    // Every matched event id is covered exactly once, and no single request
+    // carries more than 80 ids (keeps the URL under the gateway limit).
+    const coveredIds = capturedOrClauses.flatMap((c) =>
+      (c.match(/(?<![a-z_])id\.in\.\(([^)]+)\)/g) || []).flatMap((m) =>
+        m.replace(/^id\.in\.\(|\)$/g, '').split(','),
+      ),
+    );
+    expect(coveredIds).toHaveLength(totalEvents);
+    expect(new Set(coveredIds).size).toBe(totalEvents);
+    expect(coveredIds).toContain('event-1015');
+    for (const c of capturedOrClauses) {
+      expect(c.length).toBeLessThan(4000);
+    }
 
     // Verify the concert beyond 1,000 matches is returned
     expect(results).toHaveLength(1);
@@ -533,7 +546,7 @@ describe('SupabaseCatalogRepository - Search with Pagination and Punctuation (MU
       (_, i) => `venue-${i}`,
     );
     const venueRanges: Array<[number, number]> = [];
-    let capturedOrClause = '';
+    const capturedOrClauses: string[] = [];
 
     const mockClient = {
       from: vi.fn((table: string) => {
@@ -551,7 +564,7 @@ describe('SupabaseCatalogRepository - Search with Pagination and Punctuation (MU
             return builder;
           }),
           or: vi.fn((clause: string) => {
-            capturedOrClause = clause;
+            capturedOrClauses.push(clause);
             return builder;
           }),
           limit: vi.fn(() => builder),
@@ -599,11 +612,19 @@ describe('SupabaseCatalogRepository - Search with Pagination and Punctuation (MU
       [1000, 1999],
     ]);
 
-    // 1050 venues chunked by 200 -> 6 chunks
-    const venueInMatches =
-      capturedOrClause.match(/venue_id\.in\.\([^)]+\)/g) || [];
-    expect(venueInMatches).toHaveLength(6);
-    expect(capturedOrClause).toContain('venue-1049');
+    // 1050 venues are spread over request-sized groups (<= 80 ids each):
+    // every venue id is covered exactly once and no request gets too long.
+    const venueIds = capturedOrClauses.flatMap((c) =>
+      (c.match(/venue_id\.in\.\(([^)]+)\)/g) || []).flatMap((m) =>
+        m.replace(/^venue_id\.in\.\(|\)$/g, '').split(','),
+      ),
+    );
+    expect(venueIds).toHaveLength(totalVenues);
+    expect(new Set(venueIds).size).toBe(totalVenues);
+    expect(venueIds).toContain('venue-1049');
+    for (const c of capturedOrClauses) {
+      expect(c.length).toBeLessThan(4000);
+    }
   });
 
   describe('MemoryCatalogRepository - Price Filtering, includeUnknownPrice & Sorting', () => {

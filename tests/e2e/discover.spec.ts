@@ -500,7 +500,6 @@ test.describe('Discover Page E2E Suite', () => {
     await expect(factorBreakdownA).toContainText('Artist Interest');
     await expect(factorBreakdownA).toContainText('Travel Practicality');
     await expect(factorBreakdownA).toContainText('Ticket Affordability');
-    await expect(factorBreakdownA).toContainText('Timing Suitability');
     // Close drawer
     await whyBtnA.click();
     await expect(factorBreakdownA).not.toBeVisible();

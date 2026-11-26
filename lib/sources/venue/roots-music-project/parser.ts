@@ -1,3 +1,4 @@
+import { buildVenueProvenance } from '../adapter-helpers';
 import * as cheerio from 'cheerio';
 import type {
   CandidateArtist,
@@ -396,18 +397,11 @@ export function parseRootsMusicProjectEvents(
               isCanceled || e.is_cancelled === true ? 'cancelled' : 'scheduled',
             eventId: e.id,
           },
-          provenance: {
-            sourceId: context.sourceId,
-            sourceType: 'venue',
-            acquisitionMethod: 'html_http',
+          provenance: buildVenueProvenance(context, {
             sourceUrl: ticketUrl || context.sourceUrl || baseUrl,
             sourceEventId: e.id ? String(e.id) : undefined,
-            rawIngestId: context.rawIngestId,
-            fetchedAt: context.fetchedAt ?? new Date().toISOString(),
-            contentHash: context.contentHash ?? '',
-            parserVersion: context.parserVersion ?? '1.0.0',
             confidence: 0.98,
-          },
+          }),
         };
 
         candidates.push(candidate);
@@ -471,17 +465,10 @@ export function parseRootsMusicProjectEvents(
             status: isCanceled ? 'cancelled' : 'scheduled',
             url: item.url,
           },
-          provenance: {
-            sourceId: context.sourceId,
-            sourceType: 'venue',
-            acquisitionMethod: 'html_http',
+          provenance: buildVenueProvenance(context, {
             sourceUrl: ticketUrl || context.sourceUrl || baseUrl,
-            rawIngestId: context.rawIngestId,
-            fetchedAt: context.fetchedAt ?? new Date().toISOString(),
-            contentHash: context.contentHash ?? '',
-            parserVersion: context.parserVersion ?? '1.0.0',
             confidence: 0.95,
-          },
+          }),
         });
       }
     } catch {

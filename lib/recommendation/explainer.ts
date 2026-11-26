@@ -6,13 +6,14 @@
  * Invariant: Never claims uncalibrated probability or statistical certainty.
  */
 
-import type { FactorScore, MatchedArtistInfo } from './types';
+import { describeGenreMatch } from './genre';
+import type { FactorScore, GenreMatchInfo, MatchedArtistInfo } from './types';
 
 export interface ExplainerInput {
   artistFactor: FactorScore;
   distanceFactor: FactorScore;
   priceFactor: FactorScore;
-  timingFactor: FactorScore;
+  genreMatch?: GenreMatchInfo;
   matchedArtist?: MatchedArtistInfo;
   isSuppressed: boolean;
   suppressionReason?: string;
@@ -45,6 +46,8 @@ export function buildRecommendationExplanation(input: ExplainerInput): string {
     } else if (input.matchedArtist.preferenceLevel === 'interested') {
       parts.push(`Interested (${input.matchedArtist.name})`);
     }
+  } else if (input.genreMatch) {
+    parts.push(describeGenreMatch(input.genreMatch));
   } else if (input.isExploratory) {
     parts.push('Unfamiliar artist (exploratory)');
   }
@@ -54,10 +57,14 @@ export function buildRecommendationExplanation(input: ExplainerInput): string {
     const distMiles = input.distanceFactor.diagnostics?.distanceMiles as
       number | undefined;
     if (distMiles !== undefined && distMiles !== null) {
+      const approx =
+        input.distanceFactor.diagnostics?.locationPrecision ===
+        'city_level_approximation';
+      const miles = `${approx ? '~' : ''}${Math.round(distMiles)}`;
       if (input.distanceFactor.score >= 70) {
-        parts.push(`Close to home (${Math.round(distMiles)} mi)`);
+        parts.push(`Close to home (${miles} mi)`);
       } else {
-        parts.push(`${Math.round(distMiles)} mi away`);
+        parts.push(`${miles} mi away`);
       }
     }
   } else {
@@ -82,15 +89,6 @@ export function buildRecommendationExplanation(input: ExplainerInput): string {
     }
   } else {
     parts.push('Price TBA');
-  }
-
-  // 4. Timing part (if customized)
-  if (input.timingFactor.isAvailable) {
-    const day = input.timingFactor.diagnostics?.dayOfWeek as string | undefined;
-    if (day && input.timingFactor.score >= 70) {
-      const capitalized = day.charAt(0).toUpperCase() + day.slice(1);
-      parts.push(`Preferred day (${capitalized})`);
-    }
   }
 
   return parts.join(' · ');

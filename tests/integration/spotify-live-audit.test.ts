@@ -457,8 +457,8 @@ describe('Spotify Live Activation & End-to-End Database Integration Audit', () =
 
       expect(scored.scoredEvent.isExploratory).toBe(false);
       expect(scored.scoredEvent.factors.artist.score).toBe(70);
-      // Under balanced preset (50% artist weight), +30 artist points adds +15 composite points (45 -> 60)
-      expect(scored.scoredEvent.score).toBe(60);
+      // Under balanced preset (55% artist weight, see PRESET_WEIGHTS), +30 artist points adds ~+16.5 composite points
+      expect(scored.scoredEvent.score).toBe(61);
       expect(scored.scoredEvent.explanation).toContain('Spotify top artist');
     });
 
@@ -623,8 +623,8 @@ describe('Spotify Live Activation & End-to-End Database Integration Audit', () =
       });
 
       expect(scored.scoredEvent.factors.artist.score).toBe(100);
-      // Under balanced preset (50% artist weight), +60 artist points adds +30 composite points (45 -> 75)
-      expect(scored.scoredEvent.score).toBe(75);
+      // Under balanced preset (55% artist weight, see PRESET_WEIGHTS), +60 artist points adds +33 composite points
+      expect(scored.scoredEvent.score).toBe(77.5);
       expect(scored.scoredEvent.explanation).toContain('Favorite artist');
     });
   });

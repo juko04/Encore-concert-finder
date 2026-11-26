@@ -1,0 +1,1037 @@
+{
+  "researchedOn": "2026-11-24",
+  "source": "docs/research/venue-guides/batch-1..4.json (trimmed to the fields the app uses)",
+  "venues": [
+    {
+      "name": "Red Rocks Amphitheatre",
+      "aliases": ["Red Rocks", "Red Rocks Park and Amphitheatre"],
+      "city": "Morrison",
+      "region": "CO",
+      "confidence": "high",
+      "facts": {
+        "capacity": 9525,
+        "seatingFormat": "mixed",
+        "parkingDifficulty": "hard"
+      },
+      "whyPeopleLikeIt": [
+        {
+          "text": "Natural sandstone setting framed by monoliths; billed as a distinctive outdoor venue and a long-running historic site (dedicated 1941, National Historic Landmark).",
+          "evidence": "official",
+          "sourceUrls": [
+            "https://www.axs.com/venues/101164",
+            "https://www.artsandvenuesdenver.com/news/detail/red-rocks-tops-year-end-charts-after-record-breaking-2023-attendance"
+          ]
+        },
+        {
+          "text": "Consistently ranked among the most-attended outdoor venues; over 1.65 million tickets sold in the 2023 season.",
+          "evidence": "official",
+          "sourceUrls": [
+            "https://www.artsandvenuesdenver.com/news/detail/red-rocks-tops-year-end-charts-after-record-breaking-2023-attendance"
+          ]
+        },
+        {
+          "text": "Parking and park admission are free, with free in-park shuttles on arrival.",
+          "evidence": "official",
+          "sourceUrls": [
+            "https://www.redrocksonline.com/plan-your-visit/getting-here/"
+          ]
+        }
+      ],
+      "considerBeforeAttending": [
+        {
+          "text": "Lots fill early and may leave a long uphill walk; arrive well before doors and wear comfortable shoes.",
+          "evidence": "community",
+          "sourceUrls": [
+            "https://www.westword.com/music/red-rocks-parking-map-pricing-tips-and-more-20858777",
+            "https://www.redrocksonline.com/?p=7074"
+          ]
+        },
+        {
+          "text": "Weather can change fast, including hail; bring layers and rain gear, and expect altitude effects (6,450 ft).",
+          "evidence": "official",
+          "sourceUrls": [
+            "https://www.redrocksonline.com/?p=7074",
+            "https://solwd.net/red-rocks-pro-tips-when-to-go-where-to-park-and-how-to-leave-quickly/"
+          ]
+        },
+        {
+          "text": "Post-show exit is slow; carpool, schedule rideshare ahead (cell service can be spotty), or walk downhill to the pickup lot.",
+          "evidence": "community",
+          "sourceUrls": [
+            "https://www.redrocksonline.com/plan-your-visit/getting-here/",
+            "https://solwd.net/red-rocks-pro-tips-when-to-go-where-to-park-and-how-to-leave-quickly/",
+            "https://www.westword.com/music/red-rocks-parking-map-pricing-tips-and-more-20858777"
+          ]
+        },
+        {
+          "text": "Strict bag rules (no multi-pocket bags, umbrellas, strollers); bathroom lines at the bottom can run 20 to 25 minutes or more.",
+          "evidence": "official",
+          "sourceUrls": [
+            "https://www.redrocksonline.com/plan-your-visit/permitted-prohibited-items/",
+            "https://solwd.net/red-rocks-pro-tips-when-to-go-where-to-park-and-how-to-leave-quickly/"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Fiddler's Green Amphitheatre",
+      "aliases": [
+        "Fiddler's Green",
+        "Fiddlers Green",
+        "Comfort Dental Amphitheatre"
+      ],
+      "city": "Greenwood Village",
+      "region": "CO",
+      "confidence": "medium",
+      "facts": {
+        "capacity": 17000,
+        "seatingFormat": "mixed",
+        "parkingDifficulty": "hard"
+      },
+      "whyPeopleLikeIt": [
+        {
+          "text": "Light rail is a short walk away, giving a way to avoid I-25 traffic.",
+          "evidence": "official",
+          "sourceUrls": ["https://fiddlersgreenamp.com/directions"]
+        },
+        {
+          "text": "Affordable general admission lawn option with first-come choice of spots (lowest listed price $66 on one third-party page; varies).",
+          "evidence": "community",
+          "sourceUrls": [
+            "https://rateyourseats.com/fiddlers-green-amphitheatre/seating/lawn-seats"
+          ]
+        },
+        {
+          "text": "Large capacity venue (about 17,000) hosts major touring acts in an outdoor setting.",
+          "evidence": "official",
+          "sourceUrls": ["https://fiddlersgreenamp.com/venue-info/"]
+        }
+      ],
+      "considerBeforeAttending": [
+        {
+          "text": "Post-show traffic at the I-25 Orchard exit is heavy; consider light rail or leaving early or late.",
+          "evidence": "community",
+          "sourceUrls": [
+            "https://www.arenacapacity.com/fiddlers-green-amphitheatre-parking/",
+            "https://kingfm.com/opinion-top-5-reasons-why-fiddlers-green-amphitheater-is-a-horrible-concert-venue/"
+          ]
+        },
+        {
+          "text": "Strict clear-bag rules; large backpacks are not allowed (lockers available).",
+          "evidence": "official",
+          "sourceUrls": ["https://fiddlersgreenamp.com/policies"]
+        },
+        {
+          "text": "Day-of lot payment is credit card only; prepay via AXS where possible.",
+          "evidence": "official",
+          "sourceUrls": ["https://fiddlersgreenamp.com/directions"]
+        },
+        {
+          "text": "Lawn seats are farthest from the stage and some spots are partly blocked by equipment; arrive early for better placement.",
+          "evidence": "community",
+          "sourceUrls": [
+            "https://rateyourseats.com/fiddlers-green-amphitheatre/seating/lawn-seats"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Mission Ballroom",
+      "aliases": ["The Mission Ballroom"],
+      "city": "Denver",
+      "region": "CO",
+      "confidence": "medium",
+      "facts": {
+        "capacity": 3950,
+        "seatingFormat": "mixed",
+        "parkingDifficulty": "moderate"
+      },
+      "whyPeopleLikeIt": [
+        {
+          "text": "Purpose-built room (opened 2019) with flexible staging and tiered sightlines.",
+          "evidence": "official",
+          "sourceUrls": ["https://www.axs.com/venues/127278"]
+        },
+        {
+          "text": "Reviewers praised clear sound and room to move, even at a sold-out show.",
+          "evidence": "community",
+          "sourceUrls": [
+            "https://www.westword.com/music/mission-ballroom-proved-its-greatness-at-grand-opening-lumineers-concert-11442045"
+          ]
+        },
+        {
+          "text": "Free earplugs and water refill stations reported at launch; RiNo restaurants and breweries nearby for pre-show.",
+          "evidence": "community",
+          "sourceUrls": [
+            "https://www.westword.com/music/mission-ballroom-proved-its-greatness-at-grand-opening-lumineers-concert-11442045",
+            "https://encore-echos.squarespace.com/venue-guides/guide-to-mission-ballroom-in-denver-co"
+          ]
+        }
+      ],
+      "considerBeforeAttending": [
+        {
+          "text": "Parking is limited and paid; prebuy via AXS or use rideshare/A Line.",
+          "evidence": "official",
+          "sourceUrls": [
+            "https://missionballroom.com/faq",
+            "https://encore-echos.squarespace.com/venue-guides/guide-to-mission-ballroom-in-denver-co"
+          ]
+        },
+        {
+          "text": "Cashless concessions and metal-detector entry; allow extra time and leave large bags at home.",
+          "evidence": "official",
+          "sourceUrls": [
+            "https://missionballroom.com/faq",
+            "https://missionballroom.com/policies"
+          ]
+        },
+        {
+          "text": "Age limits differ per show (all-ages to 21+); check before buying for minors.",
+          "evidence": "official",
+          "sourceUrls": ["https://missionballroom.com/faq"]
+        },
+        {
+          "text": "Layout and capacity change per show, so check the seating chart for your event.",
+          "evidence": "official",
+          "sourceUrls": [
+            "https://www.axs.com/venues/127278",
+            "https://encore-echos.squarespace.com/venue-guides/guide-to-mission-ballroom-in-denver-co"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Fillmore Auditorium",
+      "aliases": ["The Fillmore Denver", "Fillmore Denver"],
+      "city": "Denver",
+      "region": "CO",
+      "confidence": "medium",
+      "facts": {
+        "capacity": 3900,
+        "seatingFormat": "mixed",
+        "parkingDifficulty": "moderate"
+      },
+      "whyPeopleLikeIt": [
+        {
+          "text": "Historic room with a big dance floor and chandeliers, hosting a wide range of genres.",
+          "evidence": "official",
+          "sourceUrls": ["https://www.axs.com/venues/101490"]
+        },
+        {
+          "text": "Large GA floor in a roughly 3,900-capacity room, described as Colorado's biggest indoor GA venue.",
+          "evidence": "official",
+          "sourceUrls": [
+            "https://blog.ticketmaster.com/venue-faq-fillmore-auditorium-denver-co"
+          ]
+        },
+        {
+          "text": "Multiple bus routes and rideshare drop near the front gates.",
+          "evidence": "official",
+          "sourceUrls": [
+            "https://www.fillmoredenver.com/visit",
+            "https://www.axs.com/venues/101490"
+          ]
+        }
+      ],
+      "considerBeforeAttending": [
+        {
+          "text": "No re-entry: if you step out you cannot return.",
+          "evidence": "official",
+          "sourceUrls": ["https://www.fillmoredenver.com/visit"]
+        },
+        {
+          "text": "Even sealed water bottles are banned; large bags are not allowed; coat check is card-only.",
+          "evidence": "official",
+          "sourceUrls": ["https://www.fillmoredenver.com/visit"]
+        },
+        {
+          "text": "Parking is mostly private paid lots or street spots that aren't guaranteed; arrive early.",
+          "evidence": "community",
+          "sourceUrls": [
+            "https://www.fillmoreauditorium.org/fillmore-auditorium-parking/"
+          ]
+        },
+        {
+          "text": "Age rules vary by show; 16+ shows need ID.",
+          "evidence": "official",
+          "sourceUrls": [
+            "https://www.fillmoredenver.com/visit",
+            "https://www.axs.com/venues/101490"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Ogden Theatre",
+      "aliases": ["The Ogden", "Ogden Theater"],
+      "city": "Denver",
+      "region": "CO",
+      "confidence": "medium",
+      "facts": {
+        "capacity": 1597,
+        "seatingFormat": "mixed",
+        "parkingDifficulty": "moderate"
+      },
+      "whyPeopleLikeIt": [
+        {
+          "text": "Intimate, multi-level historic theatre with preserved character.",
+          "evidence": "official",
+          "sourceUrls": ["https://www.axs.com/venues/101141"]
+        },
+        {
+          "text": "Smaller room (about 1,600) with a standing GA floor, so you can get close.",
+          "evidence": "community",
+          "sourceUrls": [
+            "https://www.arenacapacity.com/ogden-theatre-bag-policy/",
+            "https://ogdentheatre.com/faq-policies"
+          ]
+        },
+        {
+          "text": "On-site preferred lot behind the theatre and several nearby bus lines.",
+          "evidence": "official",
+          "sourceUrls": [
+            "https://ogdentheatre.com/faq-policies",
+            "https://www.axs.com/venues/101141"
+          ]
+        }
+      ],
+      "considerBeforeAttending": [
+        {
+          "text": "Balcony seats are very limited and first-come; most of the room is standing.",
+          "evidence": "official",
+          "sourceUrls": ["https://ogdentheatre.com/faq-policies"]
+        },
+        {
+          "text": "No bag check reported and large bags are banned; travel light.",
+          "evidence": "community",
+          "sourceUrls": [
+            "https://ogdentheatre.com/faq-policies",
+            "https://www.arenacapacity.com/ogden-theatre-bag-policy/"
+          ]
+        },
+        {
+          "text": "Metal-detector screening and cashless concessions; plan extra time.",
+          "evidence": "official",
+          "sourceUrls": ["https://ogdentheatre.com/faq-policies"]
+        },
+        {
+          "text": "Most shows are 16+, but ages vary by event.",
+          "evidence": "official",
+          "sourceUrls": ["https://ogdentheatre.com/faq-policies"]
+        }
+      ]
+    },
+    {
+      "name": "Gothic Theatre",
+      "aliases": ["The Gothic Theatre", "Gothic"],
+      "city": "Englewood",
+      "region": "CO",
+      "confidence": "medium",
+      "facts": {
+        "capacity": null,
+        "seatingFormat": "mixed",
+        "parkingDifficulty": "moderate"
+      },
+      "whyPeopleLikeIt": [
+        {
+          "text": "Small, historic theatre where reviewers say you can get close to performers and see well from most spots.",
+          "evidence": "community",
+          "sourceUrls": [
+            "https://www.tripadvisor.com/Attraction_Review-g33412-d607041-Reviews-Gothic_Theatre-Englewood_Colorado.html",
+            "https://en.wikipedia.org/wiki/Gothic_Theatre"
+          ]
+        },
+        {
+          "text": "Both a standing floor and some elevated seating exist, so you can choose your spot.",
+          "evidence": "official",
+          "sourceUrls": ["https://www.gothictheatre.com/venue"]
+        }
+      ],
+      "considerBeforeAttending": [
+        {
+          "text": "Balcony seating is very limited and first-come; a reviewer reports single-row barstool seating so others behind must stand.",
+          "evidence": "community",
+          "sourceUrls": [
+            "https://www.gothictheatre.com/venue",
+            "https://www.tripadvisor.com/Attraction_Review-g33412-d607041-Reviews-Gothic_Theatre-Englewood_Colorado.html"
+          ]
+        },
+        {
+          "text": "Allow extra time for metal-detector screening at the door.",
+          "evidence": "official",
+          "sourceUrls": ["https://www.gothictheatre.com/venue"]
+        },
+        {
+          "text": "Age rule varies by show (default 16+); check the listing and bring ID.",
+          "evidence": "official",
+          "sourceUrls": ["https://www.gothictheatre.com/venue"]
+        },
+        {
+          "text": "Reviewers report limited parking and mixed experiences with door staff and some rowdy patrons; anecdotal.",
+          "evidence": "community",
+          "sourceUrls": [
+            "https://www.tripadvisor.com/Attraction_Review-g33412-d607041-Reviews-Gothic_Theatre-Englewood_Colorado.html"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Bluebird Theater",
+      "aliases": ["Bluebird", "The Bluebird"],
+      "city": "Denver",
+      "region": "CO",
+      "confidence": "medium",
+      "facts": {
+        "capacity": 550,
+        "seatingFormat": "mixed",
+        "parkingDifficulty": "hard"
+      },
+      "whyPeopleLikeIt": [
+        {
+          "text": "Small, intimate room with tiered floor so sightlines are reportedly good.",
+          "evidence": "community",
+          "sourceUrls": [
+            "https://www.tripadvisor.com/ShowUserReviews-g33388-d538084-r195815720-Bluebird_Theater-Denver_Colorado.html",
+            "https://en.wikipedia.org/wiki/Bluebird_Theater"
+          ]
+        },
+        {
+          "text": "Historic building (opened 1914, National Register listed) reopened as a music venue in 1994.",
+          "evidence": "official",
+          "sourceUrls": ["https://en.wikipedia.org/wiki/Bluebird_Theater"]
+        }
+      ],
+      "considerBeforeAttending": [
+        {
+          "text": "Parking is tight on Colfax; the lot across the street fills quickly, so arrive early or use transit.",
+          "evidence": "community",
+          "sourceUrls": [
+            "https://bluebirdtheater.net/getting-here",
+            "https://www.tripadvisor.com/ShowUserReviews-g33388-d538084-r195815720-Bluebird_Theater-Denver_Colorado.html"
+          ]
+        },
+        {
+          "text": "Do not park on Adams or Cook streets (permit-only).",
+          "evidence": "official",
+          "sourceUrls": ["https://bluebirdtheater.net/getting-here"]
+        },
+        {
+          "text": "Balcony seats are very few and first-come; most shows are standing.",
+          "evidence": "official",
+          "sourceUrls": [
+            "https://bluebirdtheater.net/frequently-asked-questions"
+          ]
+        },
+        {
+          "text": "Age rule varies by show (default 16+); bring valid ID. Concessions are cashless.",
+          "evidence": "official",
+          "sourceUrls": [
+            "https://bluebirdtheater.net/frequently-asked-questions"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Summit Music Hall",
+      "aliases": ["Summit", "The Summit", "Summit Denver"],
+      "city": "Denver",
+      "region": "CO",
+      "confidence": "medium",
+      "facts": {
+        "capacity": 1100,
+        "seatingFormat": "standing_ga",
+        "parkingDifficulty": "moderate"
+      },
+      "whyPeopleLikeIt": [
+        {
+          "text": "Mid-size room with a standing pit plus balcony on three sides, so you can choose close or elevated views.",
+          "evidence": "community",
+          "sourceUrls": ["https://www.recycledrecordslp.com/?p=68499"]
+        },
+        {
+          "text": "Walkable from Union Station, so transit is a practical alternative to driving.",
+          "evidence": "official",
+          "sourceUrls": [
+            "https://blog.ticketmaster.com/venue-faq-summit-denver-co"
+          ]
+        }
+      ],
+      "considerBeforeAttending": [
+        {
+          "text": "No re-entry, so plan to leave only once.",
+          "evidence": "official",
+          "sourceUrls": ["https://www.ticketfairy.com/events-in-denver/summit"]
+        },
+        {
+          "text": "Balcony has no elevator.",
+          "evidence": "official",
+          "sourceUrls": [
+            "https://www.ticketfairy.com/events-in-denver/summit",
+            "https://www.recycledrecordslp.com/?p=68499"
+          ]
+        },
+        {
+          "text": "Parking costs rise on Rockies game nights and meters cap at two hours.",
+          "evidence": "official",
+          "sourceUrls": ["https://www.ticketfairy.com/events-in-denver/summit"]
+        },
+        {
+          "text": "Age rule varies per event; bring valid ID. Venue purchases are cashless.",
+          "evidence": "official",
+          "sourceUrls": ["https://www.ticketfairy.com/events-in-denver/summit"]
+        }
+      ]
+    },
+    {
+      "name": "Marquis Theater",
+      "aliases": ["Marquis", "The Marquis"],
+      "city": "Denver",
+      "region": "CO",
+      "confidence": "medium",
+      "facts": {
+        "capacity": 450,
+        "seatingFormat": "standing_ga",
+        "parkingDifficulty": "moderate"
+      },
+      "whyPeopleLikeIt": [
+        {
+          "text": "Small room where reviewers say sightlines are good and you are close to the performers.",
+          "evidence": "community",
+          "sourceUrls": ["https://wanderlog.com/place/details/2072476"]
+        },
+        {
+          "text": "Reviewers like the bar and on-site pizza.",
+          "evidence": "community",
+          "sourceUrls": ["https://wanderlog.com/place/details/2072476"]
+        }
+      ],
+      "considerBeforeAttending": [
+        {
+          "text": "Venue is cashless except the box office.",
+          "evidence": "official",
+          "sourceUrls": [
+            "https://www.ticketmaster.com/marquis-billets-denver/venue/246629?page=1"
+          ]
+        },
+        {
+          "text": "Tickets are non-transferable; Will Call needs photo ID plus the purchasing card.",
+          "evidence": "official",
+          "sourceUrls": [
+            "https://www.ticketmaster.com/marquis-billets-denver/venue/246629?page=1"
+          ]
+        },
+        {
+          "text": "Parking is paid and not run by the venue; pre-book via ParkWhiz or expect paid lots.",
+          "evidence": "official",
+          "sourceUrls": [
+            "https://www.ticketmaster.com/marquis-billets-denver/venue/246629?page=1"
+          ]
+        },
+        {
+          "text": "Can be very loud; bring ear protection, especially for kids.",
+          "evidence": "community",
+          "sourceUrls": [
+            "https://wanderlog.com/place/details/2072476",
+            "https://www.ticketmaster.com/marquis-billets-denver/venue/246629?page=1"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Paramount Theatre",
+      "aliases": ["Denver Paramount", "Paramount"],
+      "city": "Denver",
+      "region": "CO",
+      "confidence": "medium",
+      "facts": {
+        "capacity": 1870,
+        "seatingFormat": "seated",
+        "parkingDifficulty": "easy"
+      },
+      "whyPeopleLikeIt": [
+        {
+          "text": "Historic 1930 movie palace (National Register listed) with ornate interior and a Wurlitzer organ.",
+          "evidence": "official",
+          "sourceUrls": [
+            "https://en.wikipedia.org/wiki/Paramount_Theatre_(Denver)"
+          ]
+        },
+        {
+          "text": "Free event parking in Tremont Garage for most ticketed shows plus downtown transit access.",
+          "evidence": "official",
+          "sourceUrls": ["https://www.paramountdenver.com/parking-directions/"]
+        }
+      ],
+      "considerBeforeAttending": [
+        {
+          "text": "No re-entry; leaving to smoke means you cannot return.",
+          "evidence": "official",
+          "sourceUrls": ["https://paramountdenver.com/theatre-policies-faq/"]
+        },
+        {
+          "text": "Bag rules are strict (small bags only, no backpacks, no bag check).",
+          "evidence": "official",
+          "sourceUrls": ["https://paramountdenver.com/theatre-policies-faq/"]
+        },
+        {
+          "text": "Mezzanine and balcony are stairs only; accessible seating is main level only.",
+          "evidence": "official",
+          "sourceUrls": [
+            "https://www.paramountdenver.com/ada-accessibility-guide"
+          ]
+        },
+        {
+          "text": "Two-drink limit per ID check; digital tickets only.",
+          "evidence": "official",
+          "sourceUrls": ["https://paramountdenver.com/theatre-policies-faq/"]
+        }
+      ]
+    },
+    {
+      "name": "Boulder Theater",
+      "aliases": ["Boulder Theatre"],
+      "city": "Boulder",
+      "region": "CO",
+      "confidence": "medium",
+      "facts": {
+        "capacity": 850,
+        "seatingFormat": "mixed",
+        "parkingDifficulty": "moderate"
+      },
+      "whyPeopleLikeIt": [
+        {
+          "text": "Good sound and sightlines from most spots, including the tiered floor.",
+          "evidence": "community",
+          "sourceUrls": [
+            "https://www.tripadvisor.com/Attraction_Review-g33324-d284779-Reviews-or10-Boulder_Theater-Boulder_Colorado.html",
+            "http://venuellama.com/boulder-theater/"
+          ]
+        }
+      ],
+      "considerBeforeAttending": [
+        {
+          "text": "Balcony seating is reportedly first come, first served at GA shows, so arriving early matters for front-row balcony.",
+          "evidence": "community",
+          "sourceUrls": ["http://venuellama.com/boulder-theater/"]
+        },
+        {
+          "text": "Reviewers mention long security lines and crowded lobby/restrooms at busy shows; allow extra entry time.",
+          "evidence": "community",
+          "sourceUrls": [
+            "https://www.tripadvisor.com/Attraction_Review-g33324-d284779-Reviews-or10-Boulder_Theater-Boulder_Colorado.html"
+          ]
+        },
+        {
+          "text": "Large bags are not allowed, so travel light.",
+          "evidence": "official",
+          "sourceUrls": ["https://www.axs.com/venues/100792"]
+        },
+        {
+          "text": "Some reviewers call the building dated or worn and mention high ticket fees.",
+          "evidence": "community",
+          "sourceUrls": [
+            "https://www.colorado.com/businesses/boulder-theater",
+            "https://www.tripadvisor.com/Attraction_Review-g33324-d284779-Reviews-or10-Boulder_Theater-Boulder_Colorado.html"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Fox Theatre",
+      "aliases": ["The Fox Theatre", "Fox Theatre Boulder"],
+      "city": "Boulder",
+      "region": "CO",
+      "confidence": "medium",
+      "facts": {
+        "capacity": 625,
+        "seatingFormat": "standing_ga",
+        "parkingDifficulty": "unknown"
+      },
+      "whyPeopleLikeIt": [
+        {
+          "text": "Intimate, standing-room club of roughly 600 people.",
+          "evidence": "official",
+          "sourceUrls": [
+            "https://uncovercolorado.com/activities/fox-theatre",
+            "https://www.foxtheatre.com/faq"
+          ]
+        }
+      ],
+      "considerBeforeAttending": [
+        {
+          "text": "Most shows are 21+; check the AA/LAA marker and bring a valid photo ID.",
+          "evidence": "official",
+          "sourceUrls": ["https://www.foxtheatre.com/faq"]
+        },
+        {
+          "text": "Mostly standing with limited first-come bench seating, so plan for a long time on your feet.",
+          "evidence": "official",
+          "sourceUrls": ["https://www.foxtheatre.com/faq"]
+        },
+        {
+          "text": "Leave the backpack at home (reported ban).",
+          "evidence": "community",
+          "sourceUrls": ["https://uncovercolorado.com/activities/fox-theatre"]
+        }
+      ]
+    },
+    {
+      "name": "Chautauqua Auditorium",
+      "aliases": ["Colorado Chautauqua Auditorium", "Chautauqua"],
+      "city": "Boulder",
+      "region": "CO",
+      "confidence": "medium",
+      "facts": {
+        "capacity": 1300,
+        "seatingFormat": "mixed",
+        "parkingDifficulty": "hard"
+      },
+      "whyPeopleLikeIt": [
+        {
+          "text": "Historic wooden hall with notable natural acoustics.",
+          "evidence": "community",
+          "sourceUrls": [
+            "https://en.wikipedia.org/wiki/Chautauqua_Auditorium_(Boulder,_Colorado)"
+          ]
+        },
+        {
+          "text": "Free shuttle on concert nights eases the parking problem and offers return service.",
+          "evidence": "official",
+          "sourceUrls": ["https://www.chautauqua.com/2021/hop2chautauqua/"]
+        }
+      ],
+      "considerBeforeAttending": [
+        {
+          "text": "Parking is limited and the venue urges using the shuttle, carpooling or biking.",
+          "evidence": "official",
+          "sourceUrls": ["https://www.chautauqua.com/2021/hop2chautauqua/"]
+        },
+        {
+          "text": "No heating or cooling; dress for outdoor temperatures, especially in September/October.",
+          "evidence": "official",
+          "sourceUrls": ["https://www.chautauqua.com/2021/auditorium-faqs/"]
+        },
+        {
+          "text": "Small bags only (must fit under the seat) and bags are inspected.",
+          "evidence": "official",
+          "sourceUrls": ["https://www.chautauqua.com/2021/auditorium-faqs/"]
+        }
+      ]
+    },
+    {
+      "name": "Roots Music Project",
+      "aliases": ["RMP", "Roots Music Project Boulder"],
+      "city": "Boulder",
+      "region": "CO",
+      "confidence": "low",
+      "facts": {
+        "capacity": 250,
+        "seatingFormat": null,
+        "parkingDifficulty": "easy"
+      },
+      "whyPeopleLikeIt": [
+        {
+          "text": "Small nonprofit room with a relaxed, supportive atmosphere per a county arts listing, and a full bar.",
+          "evidence": "community",
+          "sourceUrls": [
+            "https://www.bouldercountyarts.org/art-spaces/roots-music-project",
+            "https://www.rootsmusicproject.org"
+          ]
+        }
+      ],
+      "considerBeforeAttending": [
+        {
+          "text": "Age rules and doors times vary by event; read each listing before buying.",
+          "evidence": "official",
+          "sourceUrls": ["https://www.rootsmusicproject.org"]
+        }
+      ]
+    },
+    {
+      "name": "Hi-Dive",
+      "aliases": ["hi-dive", "Hi Dive Denver"],
+      "city": "Denver",
+      "region": "CO",
+      "confidence": "low",
+      "facts": {
+        "capacity": null,
+        "seatingFormat": "standing_ga",
+        "parkingDifficulty": "unknown"
+      },
+      "whyPeopleLikeIt": [
+        {
+          "text": "Long-running local rock club that has hosted rising acts before they broke big, with a no-frills interior.",
+          "evidence": "community",
+          "sourceUrls": [
+            "https://www.westword.com/music/denvers-ten-best-small-venues-6044690/"
+          ]
+        },
+        {
+          "text": "Intimate room with close views of bands and cheap drinks per a local guide.",
+          "evidence": "community",
+          "sourceUrls": ["https://www.uncovercolorado.com/activities/hi-dive/"]
+        }
+      ],
+      "considerBeforeAttending": [
+        {
+          "text": "Small space: expect crowding at popular shows; one guide calls the restrooms poor.",
+          "evidence": "community",
+          "sourceUrls": ["https://www.uncovercolorado.com/activities/hi-dive/"]
+        },
+        {
+          "text": "Confirm age policy and doors with the venue; none verified from official pages.",
+          "evidence": "official",
+          "sourceUrls": ["https://hi-dive.com"]
+        }
+      ]
+    },
+    {
+      "name": "Cervantes' Masterpiece Ballroom",
+      "aliases": [
+        "Cervantes Masterpiece",
+        "Cervantes' Ballroom",
+        "Masterpiece Ballroom"
+      ],
+      "city": "Denver",
+      "region": "CO",
+      "confidence": "medium",
+      "facts": {
+        "capacity": 1000,
+        "seatingFormat": "mixed",
+        "parkingDifficulty": "hard"
+      },
+      "whyPeopleLikeIt": [
+        {
+          "text": "Two rooms in one historic building mean varied lineups across electronic, hip-hop, bluegrass and jam acts.",
+          "evidence": "community",
+          "sourceUrls": [
+            "https://en.wikipedia.org/wiki/Cervantes%27_Masterpiece_Ballroom"
+          ]
+        },
+        {
+          "text": "Light rail stop at the door and free coat check in cold weather.",
+          "evidence": "official",
+          "sourceUrls": ["https://cervantesmasterpiece.com/?p=167163"]
+        },
+        {
+          "text": "Reviewers describe good sound and a friendly, orderly crowd and staff.",
+          "evidence": "community",
+          "sourceUrls": [
+            "https://www.303happenings.com/venue/cervantes-masterpiece-ballroom"
+          ]
+        }
+      ],
+      "considerBeforeAttending": [
+        {
+          "text": "No parking lot and street spots fill fast; plan on light rail or rideshare.",
+          "evidence": "official",
+          "sourceUrls": ["https://cervantesmasterpiece.com/?p=167163"]
+        },
+        {
+          "text": "Popular shows can be standing room and crowded, with a line forming before doors; arrive early for a good spot.",
+          "evidence": "community",
+          "sourceUrls": [
+            "https://www.303happenings.com/venue/cervantes-masterpiece-ballroom",
+            "https://lovelydenver.com/places/cervantes-masterpiece-ballroom"
+          ]
+        },
+        {
+          "text": "Age limit varies (mostly 16+, some 18+ or 21+); confirm on the event page.",
+          "evidence": "official",
+          "sourceUrls": ["https://cervantesmasterpiece.com/?p=167163"]
+        },
+        {
+          "text": "One reviewer called the restrooms poor on both sides.",
+          "evidence": "community",
+          "sourceUrls": [
+            "https://www.303happenings.com/venue/cervantes-masterpiece-ballroom"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Cervantes' Other Side",
+      "aliases": ["Cervantes Other Side", "The Other Side"],
+      "city": "Denver",
+      "region": "CO",
+      "confidence": "low",
+      "facts": {
+        "capacity": 450,
+        "seatingFormat": "standing_ga",
+        "parkingDifficulty": "hard"
+      },
+      "whyPeopleLikeIt": [
+        {
+          "text": "A smaller, more intimate room than the Ballroom, described by venue as the same production setup scaled down.",
+          "evidence": "official",
+          "sourceUrls": ["https://cervantesmasterpiece.com/rentals/"]
+        },
+        {
+          "text": "Features bluegrass and indie programming per community listings.",
+          "evidence": "community",
+          "sourceUrls": [
+            "https://www.303happenings.com/venue/cervantes-other-side"
+          ]
+        }
+      ],
+      "considerBeforeAttending": [
+        {
+          "text": "Shares the building with the Ballroom, so two shows may run at once and crowds and street parking get tight.",
+          "evidence": "official",
+          "sourceUrls": ["https://cervantesmasterpiece.com/?p=167163"]
+        },
+        {
+          "text": "Plan on transit or rideshare rather than parking nearby.",
+          "evidence": "official",
+          "sourceUrls": ["https://cervantesmasterpiece.com/?p=167163"]
+        }
+      ]
+    },
+    {
+      "name": "Larimer Lounge",
+      "aliases": ["Larimer Lounge Denver"],
+      "city": "Denver",
+      "region": "CO",
+      "confidence": "low",
+      "facts": {
+        "capacity": 250,
+        "seatingFormat": null,
+        "parkingDifficulty": "unknown"
+      },
+      "whyPeopleLikeIt": [
+        {
+          "text": "Frequent bands, DJs and electronic nights, and many free shows (about 10 of 82 listed events).",
+          "evidence": "community",
+          "sourceUrls": [
+            "https://www.303happenings.com/venue/larimer-lounge",
+            "https://larimerlounge.com/"
+          ]
+        },
+        {
+          "text": "Reviewers praise the music and lighting, and one felt safe with good staff.",
+          "evidence": "community",
+          "sourceUrls": ["https://www.303happenings.com/venue/larimer-lounge"]
+        }
+      ],
+      "considerBeforeAttending": [
+        {
+          "text": "Age limits vary widely; many shows are 21+, so check the event listing.",
+          "evidence": "official",
+          "sourceUrls": ["https://larimerlounge.com/"]
+        },
+        {
+          "text": "Buy tickets directly from the venue's ticketing link; a reviewer said third-party app tickets were refused.",
+          "evidence": "community",
+          "sourceUrls": ["https://www.303happenings.com/venue/larimer-lounge"]
+        },
+        {
+          "text": "Parking and transit not officially published; plan ahead.",
+          "evidence": "official",
+          "sourceUrls": ["https://larimerlounge.com/faq/"]
+        }
+      ]
+    },
+    {
+      "name": "Globe Hall",
+      "aliases": ["Globe Hall Live Music and BBQ"],
+      "city": "Denver",
+      "region": "CO",
+      "confidence": "medium",
+      "facts": {
+        "capacity": 250,
+        "seatingFormat": "standing_ga",
+        "parkingDifficulty": "easy"
+      },
+      "whyPeopleLikeIt": [
+        {
+          "text": "Pairs live shows with BBQ food and a back patio, so you can eat before the show.",
+          "evidence": "official",
+          "sourceUrls": [
+            "https://globehall.com/",
+            "https://303magazine.com/2017/12/globe-hall-denver-venue-review/"
+          ]
+        },
+        {
+          "text": "Small room where shows sell out but it rarely feels overpacked and is easy to move around, per a magazine review.",
+          "evidence": "community",
+          "sourceUrls": [
+            "https://303magazine.com/2017/12/globe-hall-denver-venue-review/"
+          ]
+        },
+        {
+          "text": "Easy parking according to community listing.",
+          "evidence": "community",
+          "sourceUrls": ["https://www.303happenings.com/venue/globe-hall-co"]
+        }
+      ],
+      "considerBeforeAttending": [
+        {
+          "text": "Standing only in the music hall; no seats there.",
+          "evidence": "official",
+          "sourceUrls": ["https://globehall.com/find-us/"]
+        },
+        {
+          "text": "Do not park on Logan Street; use the lot or 45th Street.",
+          "evidence": "official",
+          "sourceUrls": ["https://globehall.com/find-us/"]
+        },
+        {
+          "text": "Student IDs not accepted; bring government-issued ID.",
+          "evidence": "official",
+          "sourceUrls": ["https://globehall.com/find-us/"]
+        },
+        {
+          "text": "The front of a sold-out show can get hot and tight (the 2017 piece mentions people passing out).",
+          "evidence": "community",
+          "sourceUrls": [
+            "https://303magazine.com/2017/12/globe-hall-denver-venue-review/"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Lost Lake Lounge",
+      "aliases": ["Lost Lake", "Lost Lake Denver"],
+      "city": "Denver",
+      "region": "CO",
+      "confidence": "low",
+      "facts": {
+        "capacity": 150,
+        "seatingFormat": null,
+        "parkingDifficulty": "unknown"
+      },
+      "whyPeopleLikeIt": [
+        {
+          "text": "Small, cozy, dark lounge with a dedicated back band room and upgraded sound.",
+          "evidence": "community",
+          "sourceUrls": [
+            "https://www.westword.com/location/lost-lake-5175022",
+            "https://www.westword.com/music/a-look-at-lost-lake-lounges-complete-overhaul-with-two-new-sound-systems-and-a-new-stage-5710406/"
+          ]
+        },
+        {
+          "text": "Free parking lot behind the venue and free street parking per venue FAQ.",
+          "evidence": "official",
+          "sourceUrls": ["https://lost-lake.com/faq/"]
+        }
+      ],
+      "considerBeforeAttending": [
+        {
+          "text": "Age rules conflict across sources; verify on the event page before bringing anyone under 21.",
+          "evidence": "official",
+          "sourceUrls": [
+            "https://lost-lake.com/event/confetti/lost-lake/denver-colorado/",
+            "https://concerts.consequence.net/venues/lost-lake-lounge"
+          ]
+        },
+        {
+          "text": "Very small room; capacity of about 150 may mean quick sellouts.",
+          "evidence": "community",
+          "sourceUrls": [
+            "https://www.westword.com/music/a-look-at-lost-lake-lounges-complete-overhaul-with-two-new-sound-systems-and-a-new-stage-5710406/"
+          ]
+        }
+      ]
+    }
+  ]
+}

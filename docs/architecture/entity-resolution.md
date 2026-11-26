@@ -77,8 +77,11 @@ Resolves candidate artists to canonical artists in the catalog:
 2. **Name Normalization & Disambiguation:**
    - Names are normalized via `normalizeName()` (NFKC, lowercase, leading article stripping, punctuation removal).
    - If multiple canonical artists share a normalized name, the resolver flags `status: 'ambiguous'` with reason `ambiguous_artist_name_multiple_matches`.
-   - Distinct artists sharing a common name (e.g. "Ghost" from Sweden vs. "Ghost" from Japan) are never coalesced.
-3. **In-Memory Preparation:** Does not perform upfront database inserts. Unmatched artists are returned with a generated UUID for atomic batch insertion in `apply_canonicalization`.
+   - Distinct artists sharing a common name (e.g. "Ghost" from Sweden vs. "Ghost" from Japan) are never coalesced when ids disagree or when several same-name artists exist.
+   - **Unique name match (owner decision 2026-11-25):** when exactly ONE existing artist has the normalized name and no incoming external id conflicts with that artist's ids, the resolver returns `status: 'matched'` with reason `unique_name_match_no_conflicting_external_id` (non-conflicting incoming ids are attached to the existing artist). The coordinator records each such match as field evidence `artist_matched_by_unique_name`. A conflicting id still creates a distinct artist (`conflicting_external_id_distinct_artist`); several same-name artists stay `ambiguous`.
+3. **Several ids per provider:** An artist matched by one strong id may receive additional ids from the same provider (e.g. two Ticketmaster attractions sharing a Spotify artist) unless another artist already owns that id (`external_id_already_associated_with_different_artist`). Name-only paths stay strict: same name plus a different id of the same provider never merges.
+4. **Shared ids inside one listing:** Attractions of one candidate that carry the same provider + external id and resolve to new artists are one performer (e.g. two Ticketmaster attractions sharing one Spotify artist). The coordinator collapses them into one artist (first attraction's name), attaches all ids once and records `shared_external_id_in_candidate_collapsed` field evidence. If an involved id belongs to a different existing artist, the candidate is a persisted `needs_review` instead.
+5. **In-Memory Preparation:** Does not perform upfront database inserts. Unmatched artists are returned with a generated UUID for atomic batch insertion in `apply_canonicalization`.
 
 ---
 

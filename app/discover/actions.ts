@@ -14,6 +14,7 @@
  */
 
 import { revalidatePath } from 'next/cache';
+import { getHomeLocation } from '@/lib/location/server';
 import { getAuthenticatedUser } from '@/lib/auth/session';
 import {
   isValidScoringPreset,
@@ -191,8 +192,12 @@ export async function getPersonalizedRecommendationsAction(filters?: {
   }
 
   try {
+    const homeLocation = await getHomeLocation(user.id);
     const data = await getPersonalizedDiscoverData({
       userId: user.id,
+      locationOverride: homeLocation
+        ? { lat: homeLocation.lat, lng: homeLocation.lng }
+        : undefined,
       presetOverride: filters?.preset,
       mode: filters?.mode,
       city: filters?.city,

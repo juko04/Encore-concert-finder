@@ -27,10 +27,9 @@ describe('Recommendation Scoring Engine', () => {
 
     expect(result.preset).toBe('balanced');
     expect(result.weights).toEqual({
-      artist: 50,
-      distance: 20,
+      artist: 55,
+      distance: 25,
       price: 20,
-      timing: 10,
     });
 
     // 1 past event must be filtered as ineligible

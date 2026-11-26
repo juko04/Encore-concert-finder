@@ -12,6 +12,7 @@ import type {
 } from '@/lib/domain/user-preference';
 import type { RecommendationPreset, UserProfile } from '@/lib/domain/profile';
 import type { SpotifyTopArtist } from '@/lib/domain/spotify';
+import type { GenreTasteProfile } from './genre';
 
 export type ScoringPreset = RecommendationPreset;
 
@@ -22,13 +23,12 @@ export interface ScoringWeights {
   artist: number;
   distance: number;
   price: number;
-  timing: number;
 }
 
 export type FieldEvidenceStatus = 'verified' | 'neutral_missing' | 'suppressed';
 
 export interface FactorScore {
-  factor: 'artist' | 'distance' | 'price' | 'timing';
+  factor: 'artist' | 'distance' | 'price';
   score: number; // 0 to 100
   weight: number; // Weight percentage (e.g. 50)
   weightedContribution: number; // (score * weight) / 100
@@ -49,6 +49,19 @@ export interface MatchedArtistInfo {
   spotifyRank?: number;
 }
 
+export interface GenreMatchInfo {
+  /** Genre of the event artist that matched. */
+  eventGenre: string;
+  /** Genre in the user's taste it matched. */
+  tasteGenre: string;
+  /** The user's own artist that taste genre came from. */
+  similarTo: string;
+  /** The user's strongest few artists behind that taste (for "because you listen to ..."). */
+  similarArtists?: string[];
+  /** 0..1 weighted similarity. */
+  similarity: number;
+}
+
 export interface ScoredEvent {
   eventId: string;
   event: CanonicalEventSummary;
@@ -57,7 +70,6 @@ export interface ScoredEvent {
     artist: FactorScore;
     distance: FactorScore;
     price: FactorScore;
-    timing: FactorScore;
   };
   presetUsed: ScoringPreset;
   weights: ScoringWeights;
@@ -65,13 +77,14 @@ export interface ScoredEvent {
   matchedArtist?: MatchedArtistInfo;
   isSuppressed: boolean;
   suppressionReason?: string;
-  isExploratory: boolean; // True if artist is unmarked (exploratory candidate)
+  isExploratory: boolean; // True if there is no artist-fit signal (relevance gate)
+  genreMatch?: GenreMatchInfo; // Present when artist fit came from Spotify genres
   diagnostics: {
     dataAvailability: {
       hasArtistMatch: boolean;
       hasPriceData: boolean;
       hasCoordinates: boolean;
-      hasTimingPreferences: boolean;
+      hasGenreSignal: boolean;
     };
     rawMetrics: {
       distanceMiles?: number | null;
@@ -85,13 +98,27 @@ export interface ScoringContext {
   userProfile?: UserProfile | null;
   artistPreferences: UserArtistPreference[];
   spotifyTopArtists?: SpotifyTopArtist[];
+  /** Pre-built genre taste (otherwise derived from preferences + Spotify top artists). */
+  genreTasteProfile?: GenreTasteProfile;
   referenceDate?: string; // YYYY-MM-DD for deterministic time calculation
   referenceInstant?: Date | string; // Explicit instant for timezone-aware testing
   presetOverride?: ScoringPreset;
   weightsOverride?: ScoringWeights;
-  timingPreferences?: {
-    preferredDays?: string[]; // e.g. ['friday', 'saturday', 'sunday']
-  };
+  /**
+   * Optional runtime overrides (no UI yet). When provided they take precedence over the stored
+   * profile so a future city picker / budget scale can feed the distance and price factors
+   * without writing to the profile.
+   */
+  locationOverride?: {
+    lat: number;
+    lng: number;
+    radiusMiles?: number | null;
+  } | null;
+  budgetOverride?: {
+    maxSpontaneousPrice?: number | null;
+    maxNormalTicketPrice?: number | null;
+    maxFavoriteArtistPrice?: number | null;
+  } | null;
 }
 
 export interface RecommendationResult {

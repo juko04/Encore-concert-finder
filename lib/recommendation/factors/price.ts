@@ -9,13 +9,13 @@
  *    or unknown currencies must NOT be compared numerically without verified conversion rates;
  *    they receive neutral affordability (50).
  * 4. Free admission: A numeric price of zero alone is NOT sufficient evidence that a show is free.
- *    Only events with verified free classification (e.g. eventKind === 'free_event') qualify as free (100).
+ *    Only events with verified free classification (e.g. eventKind === 'free_event') qualify as free (capped at MAX_AFFORDABILITY_SCORE).
  *    Numeric zero without verified free status is treated as unverified/neutral (50).
  * 5. Unavailable user budget: If the user profile does not specify applicable budget thresholds,
  *    affordability is neutral (50) rather than fabricating numbers.
  * 6. Favorite artist budget elasticity: If the artist is marked Favorite AND the profile configures
  *    maxFavoriteArtistPrice, that threshold is applied. Otherwise, normal budget applies.
- * 7. Bounded strictly to [0, 100].
+ * 7. Bounded strictly to [0, 100]; verified-affordable scores are capped at MAX_AFFORDABILITY_SCORE (85).
  */
 
 import type { EventKind } from '@/lib/domain/catalog';
@@ -41,6 +41,12 @@ export interface PriceFactorResult {
 }
 
 export const NEUTRAL_PRICE_SCORE = 50;
+
+/**
+ * Affordability ceiling. Even verified-free or far-under-budget shows never score 100, so
+ * price alone cannot out-rank artist fit in the composite ("free shows must not dominate").
+ */
+export const MAX_AFFORDABILITY_SCORE = 85;
 
 /**
  * Validates monetary ticket price: must be a finite number >= 0.
@@ -109,7 +115,7 @@ export function calculatePriceFactor(
     return {
       factorScore: {
         factor: 'price',
-        score: 100,
+        score: MAX_AFFORDABILITY_SCORE,
         isAvailable: true,
         fieldStatus: 'verified',
         explanation: 'Free event (verified free admission)',
@@ -296,15 +302,15 @@ export function calculatePriceFactor(
   let explanation: string;
 
   if (price <= 0.5 * budgetCeiling) {
-    score = 100;
+    score = MAX_AFFORDABILITY_SCORE;
     explanation = `Exceptional value: tickets from $${price} USD (comfortably under your $${budgetCeiling} threshold)`;
   } else if (price <= budgetCeiling) {
     const ratio = (price - 0.5 * budgetCeiling) / (0.5 * budgetCeiling);
-    score = 100 - 25 * ratio;
+    score = MAX_AFFORDABILITY_SCORE - 15 * ratio;
     explanation = `Under budget: tickets from $${price} USD (within your $${budgetCeiling} threshold)`;
   } else if (price <= 1.5 * budgetCeiling) {
     const ratio = (price - budgetCeiling) / (0.5 * budgetCeiling);
-    score = 75 - 35 * ratio;
+    score = 70 - 35 * ratio;
     explanation = `Slightly exceeds budget: tickets from $${price} USD (above your $${budgetCeiling} threshold)`;
   } else if (price <= 2.0 * budgetCeiling) {
     const ratio = (price - 1.5 * budgetCeiling) / (0.5 * budgetCeiling);

@@ -20,8 +20,6 @@
  *   npx vite-node --config vitest.config.ts scripts/verify-spotify-recommendations.ts -- --preset=balanced
  */
 
-import fs from 'node:fs';
-import path from 'node:path';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { assertSafeDatabaseTarget } from '@/lib/supabase/destination-guard';
 import { SupabaseCatalogRepository } from '@/lib/repositories/catalog-repository';
@@ -32,6 +30,7 @@ import { SpotifyArtistMatcher } from '@/lib/entity-resolution/spotify-artist-mat
 import { getPersonalizedDiscoverData } from '@/lib/recommendation/service';
 import type { SpotifyTopArtist } from '@/lib/domain/spotify';
 import type { ScoredEvent, ScoringPreset } from '@/lib/recommendation/types';
+import { loadEnvLocal } from '@/lib/utils/load-env-local';
 
 export const TARGET_USER_ID = '7e0a5bed-fe7f-40cf-814d-72a944df7965';
 export const REFERENCE_DATE = '2026-11-12';
@@ -40,31 +39,6 @@ interface CliOptions {
   userId?: string;
   preset?: ScoringPreset;
   referenceDate?: string;
-}
-
-function loadEnvLocal(): void {
-  const envPath = path.resolve(process.cwd(), '.env.local');
-  if (fs.existsSync(envPath)) {
-    const lines = fs.readFileSync(envPath, 'utf-8').split('\n');
-    for (const line of lines) {
-      const trimmed = line.trim();
-      if (!trimmed || trimmed.startsWith('#')) continue;
-      const eqIdx = trimmed.indexOf('=');
-      if (eqIdx > 0) {
-        const key = trimmed.slice(0, eqIdx).trim();
-        let val = trimmed.slice(eqIdx + 1).trim();
-        if (
-          (val.startsWith('"') && val.endsWith('"')) ||
-          (val.startsWith("'") && val.endsWith("'"))
-        ) {
-          val = val.slice(1, -1);
-        }
-        if (!process.env[key]) {
-          process.env[key] = val;
-        }
-      }
-    }
-  }
 }
 
 function parseCliArgs(): CliOptions {
@@ -472,17 +446,16 @@ export async function runSpotifyRecommendationsVerification(
     sArt: number,
     sDist: number,
     sPrice: number,
-    sTime: number,
     sComp: number,
     pool: string,
   ) =>
-    `| ${state.padEnd(20)} | ${artist.padEnd(12)} | ${String(sArt).padStart(6)} | ${String(sDist).padStart(6)} | ${String(sPrice).padStart(6)} | ${String(sTime).padStart(6)} | ${String(sComp).padStart(6)} | ${pool.padEnd(15)} |`;
+    `| ${state.padEnd(20)} | ${artist.padEnd(12)} | ${String(sArt).padStart(6)} | ${String(sDist).padStart(6)} | ${String(sPrice).padStart(6)} | ${String(sComp).padStart(6)} | ${pool.padEnd(15)} |`;
 
   console.log(
-    '| State                | Headliner    | S_art  | S_dist | S_pric | S_time | S_comp | Pool            |',
+    '| State                | Headliner    | S_art  | S_dist | S_pric | S_comp | Pool            |',
   );
   console.log(
-    '|----------------------|--------------|--------|--------|--------|--------|--------|-----------------|',
+    '|----------------------|--------------|--------|--------|--------|--------|-----------------|',
   );
   console.log(
     formatRow(
@@ -491,7 +464,6 @@ export async function runSpotifyRecommendationsVerification(
       baselineConcert.factors.artist.score,
       baselineConcert.factors.distance.score,
       baselineConcert.factors.price.score,
-      baselineConcert.factors.timing.score,
       baselineConcert.score,
       baselinePool,
     ),
@@ -503,7 +475,6 @@ export async function runSpotifyRecommendationsVerification(
       boostedConcert.factors.artist.score,
       boostedConcert.factors.distance.score,
       boostedConcert.factors.price.score,
-      boostedConcert.factors.timing.score,
       boostedConcert.score,
       boostedPool,
     ),
@@ -515,7 +486,6 @@ export async function runSpotifyRecommendationsVerification(
       dislikedConcert?.factors.artist.score ?? 0,
       dislikedConcert?.factors.distance.score ?? 0,
       dislikedConcert?.factors.price.score ?? 0,
-      dislikedConcert?.factors.timing.score ?? 0,
       dislikedConcert?.score ?? 0,
       dislikedPool,
     ),
@@ -527,7 +497,6 @@ export async function runSpotifyRecommendationsVerification(
       favoritedConcert?.factors.artist.score ?? 100,
       favoritedConcert?.factors.distance.score ?? 0,
       favoritedConcert?.factors.price.score ?? 0,
-      favoritedConcert?.factors.timing.score ?? 0,
       favoritedConcert?.score ?? 0,
       favoritedPool,
     ),
@@ -587,8 +556,6 @@ export async function runSpotifyRecommendationsVerification(
           distanceContribution:
             baselineConcert.factors.distance.weightedContribution,
           priceContribution: baselineConcert.factors.price.weightedContribution,
-          timingContribution:
-            baselineConcert.factors.timing.weightedContribution,
         },
       },
       spotifyBoosted: {
@@ -604,8 +571,6 @@ export async function runSpotifyRecommendationsVerification(
           distanceContribution:
             boostedConcert.factors.distance.weightedContribution,
           priceContribution: boostedConcert.factors.price.weightedContribution,
-          timingContribution:
-            boostedConcert.factors.timing.weightedContribution,
         },
         boostDelta,
         explanation: boostedConcert.explanation,

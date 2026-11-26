@@ -4,7 +4,9 @@ import path from 'node:path';
 import type { EventCandidate } from '@/lib/domain/event-candidate';
 import type { EventSourceAdapter, RawIngest } from '@/lib/domain/source';
 import { CanonicalizationCoordinator } from '@/lib/entity-resolution/canonicalization-coordinator';
+import { fillInferredEventGenres } from '@/lib/genres/enrich-event-genres';
 import type { ISourceRepository } from '@/lib/repositories/interfaces';
+import { sha256Hex } from '@/lib/utils/content-hash';
 import { CervantesVenueAdapter } from './cervantes/adapter';
 import { IndependentVenueAdapter } from './independent-venue-group/adapter';
 import { VelvetElkAdapter } from './velvet-elk/adapter';
@@ -116,10 +118,7 @@ export async function runVenueIngestion(
       rawHtml = fs.readFileSync(fixturePath, 'utf-8');
     }
 
-    const contentHash = crypto
-      .createHash('sha256')
-      .update(rawHtml)
-      .digest('hex');
+    const contentHash = sha256Hex(rawHtml);
 
     rawIngests = [
       {
@@ -355,6 +354,16 @@ export async function runVenueIngestion(
       }
 
       const outcome = await coordinator.canonicalize(cand);
+
+      if (outcome.status === 'created' || outcome.status === 'matched') {
+        // Venue calendars rarely carry a genre: use explicit genre words in the title
+        // (stored as inferred, fill-if-empty).
+        await fillInferredEventGenres(
+          options.catalogRepo,
+          outcome.eventId,
+          cand,
+        );
+      }
 
       if (outcome.status === 'created') {
         canonicalEventsCreated++;

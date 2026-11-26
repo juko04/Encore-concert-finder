@@ -1,13 +1,18 @@
 'use client';
 
+import { SupportActsLine } from '@/components/index/SupportActsLine';
 import React from 'react';
 import Link from 'next/link';
 import type { IndexEventItem } from './types';
 import {
-  formatIndexDate,
+  formatIndexEventDate,
   formatIndexPrice,
-  getStatusBadge,
+  getVerifiedAvailabilityBadge,
+  hasRealMatchScore,
 } from './formatters';
+import { EventImage } from './EventImage';
+import { GenreBadge } from './GenreBadge';
+import { eventGenreList } from '@/lib/genres/catalog-genres';
 import {
   HeartIcon,
   BellIcon,
@@ -33,29 +38,18 @@ export function EventListItem({
   onToggleAlert,
   href,
 }: EventListItemProps) {
-  const isPersonalized = Boolean(event.personalScore?.isPersonalized);
+  const isPersonalized = hasRealMatchScore(event.personalScore);
   const score = event.personalScore?.score ?? 50;
   const isDisliked = Boolean(event.personalScore?.isDisliked);
   const isFavorite = Boolean(event.personalScore?.isFavorite);
 
   const headlinerName = event.headlinerName || event.title;
-  const headlinerArtist =
-    event.artists?.find(
-      (a) => a.billingPosition === 'headliner' || a.name === headlinerName,
-    ) || event.artists?.[0];
-
-  const displayImage =
-    event.imageUrl ||
-    headlinerArtist?.imageUrl ||
-    event.artists?.find((a) => a.imageUrl)?.imageUrl ||
-    event.venueImageUrl ||
-    null;
 
   const supportActs = (event.artists || []).filter(
     (a) => a.name !== headlinerName && a.billingPosition !== 'headliner',
   );
 
-  const statusBadge = getStatusBadge(
+  const statusBadge = getVerifiedAvailabilityBadge(
     event.inventoryStatus,
     event.ticketRemainingPercent,
   );
@@ -69,30 +63,14 @@ export function EventListItem({
     >
       {/* Left Column: Artwork Thumbnail / Dot + Name + Date + Venue */}
       <div className="flex min-w-0 flex-1 items-start gap-3.5 sm:items-center">
-        {/* Media Thumbnail with Fallback Hierarchy */}
-        {displayImage ? (
-          <div className="shadow-xs relative h-12 w-12 shrink-0 overflow-hidden rounded-lg bg-zinc-100">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={displayImage}
-              alt={headlinerName}
-              loading="lazy"
-              className="h-full w-full object-cover transition-transform duration-150 group-hover:scale-105"
-              onError={(e) => {
-                (e.target as HTMLElement).style.display = 'none';
-              }}
-            />
-          </div>
-        ) : (
-          <div
-            className="shadow-xs relative flex h-12 w-12 shrink-0 items-center justify-center rounded-lg font-mono text-sm font-bold text-white transition-transform duration-150 group-hover:scale-105"
-            style={{
-              background: `linear-gradient(135deg, ${event.posterColor} 0%, ${event.posterSecondaryColor} 100%)`,
-            }}
-          >
-            {headlinerName.charAt(0) || 'E'}
-          </div>
-        )}
+        <EventImage
+          event={event}
+          className="h-12 w-12 shrink-0 rounded-lg"
+          width={96}
+          height={96}
+          graphicSize="sm"
+          imgClassName="transition-transform duration-150 group-hover:scale-105"
+        />
 
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
@@ -104,11 +82,13 @@ export function EventListItem({
             </Link>
 
             {/* Status Badge */}
-            <span
-              className={`rounded border px-1.5 py-0.5 text-[10px] font-medium tracking-wide ${statusBadge.bg}`}
-            >
-              {statusBadge.label}
-            </span>
+            {statusBadge && (
+              <span
+                className={`rounded border px-1.5 py-0.5 text-[10px] font-medium tracking-wide ${statusBadge.bg}`}
+              >
+                {statusBadge.label}
+              </span>
+            )}
 
             {/* Personal Match Score */}
             {isPersonalized &&
@@ -124,38 +104,30 @@ export function EventListItem({
                 </span>
               ) : (
                 <span className="rounded border border-zinc-200 bg-zinc-50 px-1.5 py-0.5 text-[10px] font-medium text-zinc-600">
+                  <span className="sr-only">Personalized match: </span>
                   {score}%
                 </span>
               ))}
           </div>
 
-          {supportActs.length > 0 && (
-            <p className="line-clamp-1 text-[11px] text-zinc-500">
-              with {supportActs.map((a) => a.name).join(', ')}
-            </p>
-          )}
+          <SupportActsLine
+            acts={supportActs}
+            className="line-clamp-1 text-[11px] text-zinc-500"
+          />
 
           <div className="mt-0.5 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-xs text-zinc-500">
             <span className="font-medium text-zinc-700">
-              {formatIndexDate(
-                event.localStartDate,
-                event.doorTime || event.startsAt,
-                event.timezone,
-              )}
+              {formatIndexEventDate(event)}
             </span>
             <span>·</span>
             <span className="truncate">
               {event.venueName || 'Venue TBA'}
               {event.city ? ` (${event.city})` : ''}
             </span>
-            {event.genre && (
-              <>
-                <span>·</span>
-                <span className="font-mono text-[11px] text-zinc-400">
-                  {event.genre.split('/')[0].trim()}
-                </span>
-              </>
-            )}
+            <GenreBadge
+              genre={eventGenreList(event)}
+              inferred={event.genresInferred}
+            />
           </div>
         </div>
       </div>
@@ -174,7 +146,7 @@ export function EventListItem({
           </div>
           {event.ageRestriction &&
             event.ageRestriction.toLowerCase() !== 'all ages' && (
-              <div className="font-mono text-[10px] text-zinc-400">
+              <div className="font-mono text-[10px] text-zinc-500">
                 {event.ageRestriction}
               </div>
             )}
@@ -191,7 +163,7 @@ export function EventListItem({
                 : `Save ${headlinerName} to watchlist`
             }
             aria-pressed={isSaved}
-            className={`flex h-8 w-8 items-center justify-center rounded-lg border transition-all duration-150 ease-out active:scale-[0.92] ${
+            className={`flex h-10 w-10 items-center justify-center rounded-lg border transition-all duration-150 ease-out active:scale-[0.92] ${
               isSaved
                 ? 'border-rose-200 bg-rose-50 text-rose-600'
                 : 'border-transparent text-zinc-400 hover:border-zinc-200 hover:bg-zinc-100 hover:text-zinc-700'
@@ -209,7 +181,7 @@ export function EventListItem({
                 : `Enable ticket alerts for ${headlinerName}`
             }
             aria-pressed={hasAlert}
-            className={`flex h-8 w-8 items-center justify-center rounded-lg border transition-all duration-150 ease-out active:scale-[0.92] ${
+            className={`flex h-10 w-10 items-center justify-center rounded-lg border transition-all duration-150 ease-out active:scale-[0.92] ${
               hasAlert
                 ? 'border-violet-200 bg-violet-50 text-violet-600'
                 : 'border-transparent text-zinc-400 hover:border-zinc-200 hover:bg-zinc-100 hover:text-zinc-700'
@@ -220,7 +192,7 @@ export function EventListItem({
 
           <Link
             href={detailUrl}
-            className="flex h-8 w-8 items-center justify-center rounded-lg border border-transparent text-zinc-400 transition-colors hover:border-zinc-200 hover:bg-zinc-100 hover:text-zinc-700"
+            className="flex h-10 w-10 items-center justify-center rounded-lg border border-transparent text-zinc-400 transition-colors hover:border-zinc-200 hover:bg-zinc-100 hover:text-zinc-700"
             aria-label={`View details for ${headlinerName}`}
           >
             <ArrowRightIcon className="h-4 w-4" />

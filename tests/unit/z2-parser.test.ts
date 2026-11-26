@@ -110,6 +110,17 @@ describe('Z2 Entertainment Parser', () => {
       expect(resolveZ2Venue('Chautauqua Auditorium').venueName).toBe(
         'Chautauqua Auditorium',
       );
+
+      // A non-Z2 room whose shows Z2 sells: located correctly, never defaulted to Boulder.
+      for (const raw of [
+        '10 Mile Music Hall',
+        '10 Mile Music Hall - Frisco',
+        'Ten Mile Music Hall',
+      ]) {
+        const v = resolveZ2Venue(raw) as { venueName: string; city?: string };
+        expect(v.venueName).toBe('10 Mile Music Hall');
+        expect(v.city).toBe('Frisco');
+      }
       expect(resolveZ2Venue('Chautauqua').venueName).toBe(
         'Chautauqua Auditorium',
       );

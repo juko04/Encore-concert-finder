@@ -1,99 +1,105 @@
 import React from 'react';
+import Link from 'next/link';
 import { getAuthenticatedUser } from '@/lib/auth/session';
 import { createClient } from '@/lib/supabase/server';
 import { SupabaseCatalogRepository } from '@/lib/repositories/catalog-repository';
 import {
-  getPersonalizedDiscoverData,
-  getPublicDiscoverData,
-} from '@/lib/recommendation/service';
+  getDiscoverHomeData,
+  type DiscoverHomeData,
+} from '@/lib/discover/home-data';
+import { loadArtistAffinityResolver } from '@/lib/recommendation/artist-affinity-server';
+import { getDiscoverDateWindows } from '@/lib/discover/dates';
+import { getHomeLocation, getViewerTimeZone } from '@/lib/location/server';
+import { SupabaseProfileRepository } from '@/lib/repositories/profile-repository';
 import { Header } from '@/components/index/Header';
-import { SearchClient } from '@/components/index/SearchClient';
-import type { CanonicalEventSummary } from '@/lib/domain/catalog';
-import type { ScoredEvent } from '@/lib/recommendation/types';
+import { DiscoverHero, EventRow, VenueChips } from '@/components/discover-home';
 
 export const dynamic = 'force-dynamic';
 
 export default async function HomePage() {
   const user = await getAuthenticatedUser();
-  const supabase = await createClient();
-  const catalogRepo = new SupabaseCatalogRepository(supabase);
 
-  let events: Array<CanonicalEventSummary | ScoredEvent> = [];
-  let totalCount = 0;
-
-  const [facetsRes, countRes] = await Promise.allSettled([
-    typeof catalogRepo.getFacets === 'function'
-      ? catalogRepo.getFacets()
-      : Promise.resolve(undefined),
-    typeof catalogRepo.countEvents === 'function'
-      ? catalogRepo.countEvents({ excludePastShowtimes: true })
-      : Promise.resolve(0),
-  ]);
-
-  const initialFacets =
-    facetsRes.status === 'fulfilled' ? facetsRes.value : undefined;
-  totalCount = countRes.status === 'fulfilled' ? countRes.value : 0;
-
-  if (user) {
-    try {
-      const personalizedData = await getPersonalizedDiscoverData({
-        userId: user.id,
-      });
-      events = [
-        ...personalizedData.recommendations,
-        ...personalizedData.exploratory,
-      ];
-      if (events.length === 0) {
-        const publicData = await getPublicDiscoverData({ limit: 50 });
-        events = publicData.events;
-      }
-    } catch (err) {
-      console.error(
-        '[HomePage] Error loading personalized recommendations:',
-        err,
-      );
+  // Viewer timezone: encore_tz cookie, else home city timezone, else UTC.
+  let timeZone = await getViewerTimeZone();
+  let data: DiscoverHomeData;
+  try {
+    const supabase = await createClient();
+    const catalogRepo = new SupabaseCatalogRepository(supabase);
+    const homeLocation = await getHomeLocation();
+    timeZone = await getViewerTimeZone(homeLocation);
+    let homeRadiusMiles: number | null = null;
+    if (user && homeLocation) {
       try {
-        const publicData = await getPublicDiscoverData({ limit: 50 });
-        events = publicData.events;
-      } catch (pubErr) {
-        console.error('[HomePage] Error loading public fallback:', pubErr);
-        events = await catalogRepo.listEvents({
-          limit: 50,
-          excludePastShowtimes: true,
-          sortBy: 'date_asc',
-        });
+        homeRadiusMiles =
+          (await new SupabaseProfileRepository().getProfile(user.id))
+            ?.defaultRadiusMiles ?? null;
+      } catch (err) {
+        console.error('[HomePage] profile radius load failed:', err);
       }
     }
-  } else {
-    try {
-      const publicData = await getPublicDiscoverData({ limit: 50 });
-      events = publicData.events;
-    } catch (err) {
-      console.error('[HomePage] Error loading public discover data:', err);
-      try {
-        events = await catalogRepo.listEvents({
-          limit: 50,
-          excludePastShowtimes: true,
-          sortBy: 'date_asc',
-        });
-      } catch (catErr) {
-        console.error('[HomePage] Error loading catalog repo:', catErr);
-        events = [];
-      }
-    }
+    data = await getDiscoverHomeData({
+      catalogRepo,
+      userId: user?.id,
+      homeLocation,
+      homeRadiusMiles,
+      timeZone,
+      artistAffinity: await loadArtistAffinityResolver(
+        user?.id,
+        supabase,
+        catalogRepo,
+      ),
+    });
+  } catch (err) {
+    console.error('[HomePage] Error loading discover data:', err);
+    data = {
+      totalUpcoming: 0,
+      rows: [],
+      venueChips: [],
+      genreChips: [],
+      windows: getDiscoverDateWindows(new Date(), timeZone),
+    };
   }
 
   return (
     <div className="min-h-screen bg-[#fafaf9] text-zinc-900">
       <Header isAuthenticated={Boolean(user)} userEmail={user?.email} />
-      <main className="mx-auto w-full max-w-7xl px-4 py-6 sm:px-6 sm:py-8 lg:px-8">
-        <SearchClient
-          initialEvents={events}
-          totalCount={Math.max(totalCount, events.length)}
-          initialFacets={initialFacets}
-          title="Discover Live Music"
-          subtitle="Curated concerts, transparent pricing, and personalized music discovery in Colorado & beyond."
+      <main className="mx-auto w-full max-w-7xl space-y-10 px-4 py-6 sm:px-6 sm:py-8 lg:px-8">
+        <DiscoverHero
+          totalUpcoming={data.totalUpcoming}
+          windows={data.windows}
+          genreChips={data.genreChips}
         />
+
+        {data.rows.length === 0 && (
+          <p
+            data-testid="discover-empty"
+            className="rounded-2xl border border-dashed border-zinc-300 bg-white p-8 text-center text-sm text-zinc-500"
+          >
+            No upcoming concerts to show right now. Try{' '}
+            <Link
+              href="/search"
+              className="font-semibold text-zinc-800 underline"
+            >
+              searching the full catalog
+            </Link>
+            .
+          </p>
+        )}
+
+        {data.rows.map((row) => (
+          <EventRow key={row.id} {...row} />
+        ))}
+
+        <VenueChips chips={data.venueChips} />
+
+        <div className="border-t border-zinc-200/80 pt-6 text-center">
+          <Link
+            href="/search"
+            className="inline-flex rounded-xl border border-zinc-200 bg-white px-5 py-2.5 text-sm font-semibold text-zinc-800 transition-colors hover:bg-zinc-50"
+          >
+            Browse all concerts →
+          </Link>
+        </div>
       </main>
     </div>
   );

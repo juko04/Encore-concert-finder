@@ -51,12 +51,12 @@ export function ResetPasswordForm({
   return (
     <div
       data-testid="reset-password-container"
-      className="w-full max-w-md rounded-2xl border border-zinc-800/80 bg-zinc-900/60 p-8 shadow-2xl backdrop-blur"
+      className="w-full max-w-md rounded-2xl border border-zinc-200 bg-white p-8 shadow-sm"
     >
-      <h2 className="text-xl font-bold tracking-tight text-white">
+      <h2 className="text-xl font-bold tracking-tight text-zinc-900">
         Change Your Password
       </h2>
-      <p className="mt-1 text-sm text-zinc-400">
+      <p className="mt-1 text-sm text-zinc-500">
         Enter and confirm your new password below.
       </p>
 
@@ -64,7 +64,7 @@ export function ResetPasswordForm({
         <div
           data-testid="reset-password-error-alert"
           role="alert"
-          className="mt-4 rounded-lg border border-red-800/60 bg-red-950/40 p-3 text-sm text-red-200"
+          className="mt-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800"
         >
           {error}
         </div>
@@ -75,13 +75,13 @@ export function ResetPasswordForm({
           <div
             data-testid="reset-password-success-alert"
             role="status"
-            className="rounded-lg border border-emerald-800/60 bg-emerald-950/40 p-3 text-sm text-emerald-200"
+            className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800"
           >
             {successMessage}
           </div>
           <Link
             href="/login"
-            className="flex w-full items-center justify-center rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white shadow-lg transition-colors hover:bg-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            className="flex w-full items-center justify-center rounded-lg bg-zinc-900 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-zinc-800 focus:outline-none focus:ring-2 focus:ring-indigo-500"
           >
             Back to Sign In
           </Link>
@@ -90,14 +90,14 @@ export function ResetPasswordForm({
         <div className="mt-6 space-y-4">
           <div
             data-testid="reset-password-no-session-alert"
-            className="rounded-lg border border-amber-800/60 bg-amber-950/40 p-3 text-sm text-amber-200"
+            className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800"
           >
             No active password reset session was found. Please request a new
             password reset link from the login page.
           </div>
           <Link
             href="/login"
-            className="flex w-full items-center justify-center rounded-lg border border-zinc-700 bg-zinc-800 px-4 py-2.5 text-sm font-semibold text-zinc-200 transition-colors hover:bg-zinc-700"
+            className="flex w-full items-center justify-center rounded-lg border border-zinc-200 bg-zinc-100 px-4 py-2.5 text-sm font-semibold text-zinc-800 transition-colors hover:bg-zinc-200"
           >
             Go to Login
           </Link>
@@ -107,7 +107,7 @@ export function ResetPasswordForm({
           <div>
             <label
               htmlFor="password"
-              className="block text-xs font-medium uppercase tracking-wider text-zinc-400"
+              className="block text-xs font-medium uppercase tracking-wider text-zinc-500"
             >
               New Password
             </label>
@@ -119,7 +119,7 @@ export function ResetPasswordForm({
               required
               minLength={6}
               data-testid="new-password-input"
-              className="mt-1 block w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 placeholder-zinc-500 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+              className="mt-1 block w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-900 placeholder-zinc-500 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
               placeholder="••••••••"
             />
             <p className="mt-1 text-xs text-zinc-500">Minimum 6 characters</p>
@@ -128,7 +128,7 @@ export function ResetPasswordForm({
           <div>
             <label
               htmlFor="confirmPassword"
-              className="block text-xs font-medium uppercase tracking-wider text-zinc-400"
+              className="block text-xs font-medium uppercase tracking-wider text-zinc-500"
             >
               Confirm New Password
             </label>
@@ -140,7 +140,7 @@ export function ResetPasswordForm({
               required
               minLength={6}
               data-testid="confirm-password-input"
-              className="mt-1 block w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 placeholder-zinc-500 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+              className="mt-1 block w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-900 placeholder-zinc-500 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
               placeholder="••••••••"
             />
           </div>
@@ -149,7 +149,7 @@ export function ResetPasswordForm({
             type="submit"
             disabled={isPending}
             data-testid="reset-password-submit-btn"
-            className="mt-6 flex w-full items-center justify-center rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white shadow-lg transition-colors hover:bg-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 focus:ring-offset-zinc-900 disabled:opacity-50"
+            className="mt-6 flex w-full items-center justify-center rounded-lg bg-zinc-900 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-zinc-800 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 focus:ring-offset-white disabled:opacity-50"
           >
             {isPending ? (
               <span className="flex items-center gap-2">

@@ -27,6 +27,7 @@ interface UserArtistPreferenceRow {
     id: string;
     name: string;
     image_url: string | null;
+    genres?: string[] | null;
     artist_external_ids?: Array<{
       provider: string;
       external_id: string;
@@ -56,6 +57,11 @@ function mapRowToDomain(row: UserArtistPreferenceRow): UserArtistPreference {
           id: row.artists.id,
           name: row.artists.name,
           imageUrl: row.artists.image_url,
+          genres: Array.isArray(row.artists.genres)
+            ? row.artists.genres.filter(
+                (g): g is string => typeof g === 'string',
+              )
+            : [],
           spotifyArtistId: canonicalSpotifyExtId ?? effectiveSpotifyArtistId,
         }
       : null,
@@ -64,7 +70,7 @@ function mapRowToDomain(row: UserArtistPreferenceRow): UserArtistPreference {
 }
 
 const PREFERENCE_SELECT_QUERY =
-  '*, artists(id, name, image_url, artist_external_ids(provider, external_id))';
+  '*, artists(*, artist_external_ids(provider, external_id))';
 
 export class SupabaseUserPreferenceRepository implements IUserPreferenceRepository {
   private client: SupabaseClient;
@@ -161,9 +167,14 @@ export class SupabaseUserPreferenceRepository implements IUserPreferenceReposito
         );
       }
 
+      // An artist may own several Spotify ids (e.g. two listings that share one performer).
+      const ownedSpotifyIds = (canonicalExtIds ?? [])
+        .filter((e) => e.provider === 'spotify')
+        .map((e) => e.external_id as string);
       const canonicalSpotifyExtId =
-        canonicalExtIds?.find((e) => e.provider === 'spotify')?.external_id ??
-        null;
+        (trimmedSpotifyId && ownedSpotifyIds.includes(trimmedSpotifyId)
+          ? trimmedSpotifyId
+          : ownedSpotifyIds[0]) ?? null;
 
       if (trimmedSpotifyId) {
         const { data: mappedToArtist, error: mapErr } = await this.client

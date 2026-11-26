@@ -6,9 +6,17 @@ import type {
   EventKind,
   StartTimePrecision,
 } from '@/lib/domain/event-candidate';
+import { withoutEventNameArtists } from '@/lib/events/lineup';
 import type { SourceProvenance } from '@/lib/domain/source';
 import { normalizeUrl } from '@/lib/domain/value-objects';
-import type { TicketmasterEvent } from './types';
+import type { TicketmasterEvent, TicketmasterImage } from './types';
+import { parseVenueCoordinates } from './venue-location';
+import {
+  extractTicketmasterGenres,
+  isNonArtistAttraction,
+  splitTicketPackageTitle,
+  trustedAttractionGenres,
+} from './listing-filters';
 
 export interface TicketmasterParseContext {
   sourceId: string;
@@ -26,6 +34,107 @@ export interface TicketmasterParseContext {
 function extractSpotifyArtistId(url: string): string | null {
   const match = url.match(/artist\/([a-zA-Z0-9]+)/);
   return match ? match[1] : null;
+}
+
+const PREFERRED_IMAGE_WIDTH = 1024;
+const MIN_PREFERRED_IMAGE_WIDTH = 640;
+const MAX_PREFERRED_IMAGE_WIDTH = 1200;
+
+/** Name contains the standalone word "festival" (case-insensitive). */
+const FESTIVAL_NAME_PATTERN = /\bfestival\b/i;
+
+/**
+ * Names that describe a single-act presentation (tribute, laser/light show,
+ * "<album> live" recreation) rather than a multi-act festival. Conservative:
+ * only matches explicit phrases, never bare words like "live" or "party".
+ */
+const SINGLE_ACT_SHOW_PATTERNS: RegExp[] = [
+  /\btribute\b/i,
+  /\blaser\b/i,
+  /\blight\s*show\b/i,
+  /\bclassic albums? live\b/i,
+  /\bperforms?\s+.+\s+(?:album\s+)?live\b/i,
+  /\b(?:album|songs?)\s+live\b/i,
+];
+
+export function isSingleActShowName(name: string): boolean {
+  return SINGLE_ACT_SHOW_PATTERNS.some((p) => p.test(name));
+}
+
+/**
+ * Decides the event kind. An explicit "Festival" in the name always wins.
+ * Tribute / laser-light / single-night album shows are concerts even when
+ * Ticketmaster lists a festival-ish classification or a spanning end date.
+ */
+export function classifyTicketmasterEventKind(input: {
+  name: string;
+  isMultiDay: boolean;
+  hasFestivalClassification: boolean;
+}): EventKind {
+  const namedFestival = FESTIVAL_NAME_PATTERN.test(input.name);
+  if (!namedFestival && isSingleActShowName(input.name)) {
+    return 'concert';
+  }
+  const isFestival =
+    input.isMultiDay || input.hasFestivalClassification || namedFestival;
+  if (!isFestival) return 'concert';
+  return input.isMultiDay ? 'multi_day_festival' : 'festival';
+}
+
+/**
+ * Picks one real, https image rendition from a Ticketmaster `images` array.
+ *
+ * - Ignores entries without a valid https URL.
+ * - Ignores `fallback: true` entries (generic placeholders, not real artwork);
+ *   when only fallbacks exist the result is null rather than a stand-in.
+ * - Prefers 16:9, then a width within 640-1200px, then the width closest to 1024px.
+ * - Deterministic: ties break on URL.
+ */
+export function selectTicketmasterImage(
+  images: TicketmasterImage[] | null | undefined,
+): string | null {
+  if (!Array.isArray(images)) return null;
+
+  const usable: Array<{ url: string; ratio?: string; width: number }> = [];
+  for (const image of images) {
+    if (!image || image.fallback === true || typeof image.url !== 'string') {
+      continue;
+    }
+    let parsed: URL;
+    try {
+      parsed = new URL(image.url.trim());
+    } catch {
+      continue;
+    }
+    if (parsed.protocol !== 'https:') continue;
+    usable.push({
+      url: parsed.toString(),
+      ratio: image.ratio,
+      width: typeof image.width === 'number' ? image.width : 0,
+    });
+  }
+
+  if (usable.length === 0) return null;
+
+  const rank = (img: { ratio?: string; width: number }): number[] => [
+    img.ratio === '16_9' ? 0 : 1,
+    img.width >= MIN_PREFERRED_IMAGE_WIDTH &&
+    img.width <= MAX_PREFERRED_IMAGE_WIDTH
+      ? 0
+      : 1,
+    Math.abs(img.width - PREFERRED_IMAGE_WIDTH),
+  ];
+
+  usable.sort((a, b) => {
+    const ra = rank(a);
+    const rb = rank(b);
+    for (let i = 0; i < ra.length; i++) {
+      if (ra[i] !== rb[i]) return ra[i] - rb[i];
+    }
+    return a.url.localeCompare(b.url);
+  });
+
+  return usable[0].url;
 }
 
 /**
@@ -49,8 +158,25 @@ export function parseTicketmasterEvent(
     confidence: 0.95,
   };
 
+  const ticketPackage = splitTicketPackageTitle(event.name);
+  const venueCoordinates = parseVenueCoordinates(
+    event._embedded?.venues?.[0]?.location,
+  );
+  const eventGenres = extractTicketmasterGenres(event.classifications);
+
   // 2. Artists & Billing
-  const rawAttractions = event._embedded?.attractions || [];
+  // Seat/VIP/parking products and the venue itself are listed as "attractions" but are not
+  // performers: never turn them into artists ("Club Level Seating: Ball Arena").
+  const listedVenueName = event._embedded?.venues?.[0]?.name?.trim() || '';
+  const listedAttractions = (event._embedded?.attractions || []).filter(
+    (attr) => !isNonArtistAttraction(attr.name, listedVenueName),
+  );
+  // A festival often lists itself as an attraction ("Ultra Music Festival"); that is the event,
+  // not a performer (festival-sized bills only; see lib/events/lineup.ts).
+  const rawAttractions = withoutEventNameArtists(
+    listedAttractions,
+    ticketPackage.baseTitle || event.name,
+  );
   const artists: CandidateArtist[] = [];
   const artistNames: string[] = [];
 
@@ -80,11 +206,22 @@ export function parseTicketmasterEvent(
         }
       }
 
+      // Image belongs to this attraction only (never matched by name).
+      const artistImageUrl = selectTicketmasterImage(attr.images);
+
+      // Genres Ticketmaster assigns to this performer (never guessed when absent).
+      const artistGenres = trustedAttractionGenres(
+        extractTicketmasterGenres(attr.classifications),
+        event.classifications,
+      );
+
       artists.push({
         name: attr.name,
         billingPosition: 'unknown',
         sortOrder: index,
         externalIds,
+        ...(artistImageUrl ? { imageUrl: artistImageUrl } : {}),
+        ...(artistGenres.length > 0 ? { genres: artistGenres } : {}),
       });
     });
   }
@@ -103,6 +240,10 @@ export function parseTicketmasterEvent(
     primaryVenue?.country?.countryCode?.trim() ||
     primaryVenue?.country?.name?.trim() ||
     undefined;
+
+  // 3b. Source-supplied images (null when Ticketmaster provides no real image)
+  const eventImageUrl = selectTicketmasterImage(event.images);
+  const venueImageUrl = selectTicketmasterImage(primaryVenue?.images);
 
   // 4. Temporal & Timezone Handling
   const localStartDate = event.dates.start.localDate;
@@ -222,22 +363,21 @@ export function parseTicketmasterEvent(
     event.dates.end?.localDate && event.dates.end.localDate !== localStartDate,
   );
 
-  const hasFestivalClassification = event.classifications?.some(
-    (c) =>
-      c.genre?.name?.toLowerCase().includes('festival') ||
-      c.subGenre?.name?.toLowerCase().includes('festival'),
+  const hasFestivalClassification = Boolean(
+    event.classifications?.some(
+      (c) =>
+        c.genre?.name?.toLowerCase().includes('festival') ||
+        c.subGenre?.name?.toLowerCase().includes('festival'),
+    ),
   );
 
+  const eventKind: EventKind = classifyTicketmasterEventKind({
+    name: event.name,
+    isMultiDay,
+    hasFestivalClassification,
+  });
   const isFestival =
-    isMultiDay ||
-    Boolean(hasFestivalClassification) ||
-    event.name.toLowerCase().includes('festival');
-
-  const eventKind: EventKind = isFestival
-    ? isMultiDay
-      ? 'multi_day_festival'
-      : 'festival'
-    : 'concert';
+    eventKind === 'festival' || eventKind === 'multi_day_festival';
 
   // 8. Normalized Ticket URL
   let ticketUrl: string | undefined = undefined;
@@ -273,7 +413,9 @@ export function parseTicketmasterEvent(
     sourceEventId: event.id,
     sourceType: 'ticketing',
     provenance,
-    title: event.name,
+    // "Club Level Seating: Nickelback" is a seat package for the show "Nickelback": the package
+    // prefix is never part of the show title (rawPayload.name keeps the original).
+    title: ticketPackage.baseTitle || event.name,
     artistNames,
     artists,
     venueName,
@@ -299,6 +441,16 @@ export function parseTicketmasterEvent(
     rawPayload: {
       id: event.id,
       name: event.name,
+      ...(ticketPackage.isPackage ? { isTicketPackage: true } : {}),
+      ...(eventGenres.length > 0 ? { genres: eventGenres } : {}),
+      ...(venueCoordinates
+        ? {
+            venueLocation: {
+              lat: venueCoordinates.lat,
+              lng: venueCoordinates.lng,
+            },
+          }
+        : {}),
       url: event.url,
       dates: event.dates,
       status,
@@ -309,6 +461,91 @@ export function parseTicketmasterEvent(
       ticketing: event.ticketing,
       priceRanges: event.priceRanges,
       feeStatus,
+      ...(eventImageUrl || venueImageUrl
+        ? {
+            images: {
+              source: 'ticketmaster',
+              eventImageUrl,
+              venueImageUrl,
+            },
+          }
+        : {}),
     },
+  };
+}
+
+/**
+ * Overlays freshly parsed source images onto a previously persisted (immutable)
+ * candidate, in memory only, so already-ingested events can be backfilled with
+ * images on re-processing. Nothing is written back to the stored candidate row.
+ * Artist images are matched only by Ticketmaster attraction id, never by name.
+ */
+export function overlayTicketmasterImages<T extends EventCandidate>(
+  existing: T,
+  parsed: EventCandidate,
+): T {
+  const parsedImages = parsed.rawPayload?.images;
+  const parsedGenres = parsed.rawPayload?.genres;
+  const parsedIsPackage = parsed.rawPayload?.isTicketPackage === true;
+  const parsedVenueLocation = parsed.rawPayload?.venueLocation;
+
+  const tmId = (a: CandidateArtist) =>
+    a.externalIds?.find((e) => e.provider === 'ticketmaster')?.externalId;
+  const imageByAttractionId = new Map<string, string>();
+  const genresByAttractionId = new Map<string, string[]>();
+  const parsedAttractionIds = new Set<string>();
+  for (const a of parsed.artists ?? []) {
+    const id = tmId(a);
+    if (!id) continue;
+    parsedAttractionIds.add(id);
+    if (a.imageUrl) imageByAttractionId.set(id, a.imageUrl);
+    if (a.genres && a.genres.length > 0) genresByAttractionId.set(id, a.genres);
+  }
+
+  // Stored candidates may pre-date listing hygiene: performers that are really seat packages or
+  // the venue itself are dropped from the in-memory view (same rule the parser applies).
+  const isStale = (a: CandidateArtist) =>
+    isNonArtistAttraction(a.name, existing.venueName);
+  const hasStaleAttractions = (existing.artists ?? []).some(isStale);
+
+  if (
+    !parsedImages &&
+    !parsedGenres &&
+    !parsedVenueLocation &&
+    !parsedIsPackage &&
+    imageByAttractionId.size === 0 &&
+    genresByAttractionId.size === 0 &&
+    !hasStaleAttractions
+  ) {
+    return existing;
+  }
+
+  const keptArtists = (existing.artists ?? []).filter((a) => !isStale(a));
+  const keptNames = new Set(keptArtists.map((a) => a.name));
+
+  return {
+    ...existing,
+    title: parsedIsPackage ? parsed.title : existing.title,
+    artistNames: hasStaleAttractions
+      ? existing.artistNames.filter((n) => keptNames.has(n))
+      : existing.artistNames,
+    rawPayload: {
+      ...(existing.rawPayload ?? {}),
+      ...(parsedImages ? { images: parsedImages } : {}),
+      ...(parsedGenres ? { genres: parsedGenres } : {}),
+      ...(parsedVenueLocation ? { venueLocation: parsedVenueLocation } : {}),
+      ...(parsedIsPackage ? { isTicketPackage: true } : {}),
+    },
+    artists: keptArtists.map((a) => {
+      const id = tmId(a);
+      const imageUrl = id ? imageByAttractionId.get(id) : undefined;
+      const genres = id ? genresByAttractionId.get(id) : undefined;
+      if (!imageUrl && !genres) return a;
+      return {
+        ...a,
+        ...(imageUrl ? { imageUrl } : {}),
+        ...(genres ? { genres } : {}),
+      };
+    }),
   };
 }

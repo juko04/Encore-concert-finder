@@ -1,6 +1,8 @@
 import 'server-only';
 
+import { withoutEventNameArtists } from '@/lib/events/lineup';
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { isValidCoordinatePair } from '@/lib/location/coordinates';
 import type {
   Artist,
   ArtistExternalId,
@@ -23,7 +25,38 @@ import type {
 } from '@/lib/domain/catalog';
 import { escapeLikePattern, normalizeUrl } from '@/lib/domain/value-objects';
 import { createAdminClient } from '@/lib/supabase/admin';
-import type { EventListFilters, ICatalogRepository } from './interfaces';
+import type {
+  EventListFilters,
+  EventLocationRow,
+  EventSortOption,
+  FestivalDay,
+  ICatalogRepository,
+} from './interfaces';
+import {
+  canonicalGenreLabel,
+  genreDbTerms,
+  normalizeGenreFacets,
+  resolveGenreQuery,
+} from '@/lib/genres/catalog-genres';
+
+/**
+ * PostgREST `or=` clause for the genre filter. Canonical labels expand to every stored spelling
+ * (Hip-Hop -> "hip-hop", "hip hop", "rap", ...); other strings keep the previous substring match.
+ */
+function buildGenreFilterClause(rawGenre: string): string {
+  const trimmed = rawGenre.trim();
+  const label = canonicalGenreLabel(trimmed);
+  const terms = label ? genreDbTerms(label) : [];
+  const needles = terms.length > 0 ? terms : [trimmed];
+  const parts: string[] = [];
+  for (const needle of needles) {
+    const e = escapeLikePattern(needle).replace(/"/g, '""');
+    parts.push(`genre.ilike."%${e}%"`);
+  }
+  const arr = trimmed.toLowerCase().replace(/"/g, '');
+  parts.push(`genres.cs.{"${arr}"}`);
+  return parts.join(',');
+}
 
 // Database row interfaces
 interface ArtistRow {
@@ -31,6 +64,8 @@ interface ArtistRow {
   name: string;
   normalized_name: string;
   image_url: string | null;
+  /** Optional: column added by migration 20261124010000; tolerate absence. */
+  genres?: string[] | null;
   created_at: string;
   updated_at: string;
 }
@@ -47,6 +82,8 @@ interface VenueRow {
   timezone: string | null;
   website: string | null;
   capacity: number | null;
+  /** Added by migration 20261124000000; undefined until that migration is applied. */
+  image_url?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -89,6 +126,14 @@ interface EventRow {
   announced_at: string | null;
   genre?: string | null;
   genres?: string[] | null;
+  /** Added by migration 20261126050000; undefined until applied. */
+  genres_source?: string | null;
+  /** Added by migration 20261126070000; undefined until applied. */
+  festival_group_primary?: boolean | null;
+  festival_group_size?: number | null;
+  festival_group_end_date?: string | null;
+  /** Added by migration 20261124000000; undefined until that migration is applied. */
+  image_url?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -171,12 +216,20 @@ interface CandidateResolutionRow {
   created_at: string;
 }
 
+function normalizeGenreList(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter(
+    (g): g is string => typeof g === 'string' && g.trim() !== '',
+  );
+}
+
 function mapArtistRow(row: ArtistRow): Artist {
   return {
     id: row.id,
     name: row.name,
     normalizedName: row.normalized_name,
     imageUrl: row.image_url,
+    genres: normalizeGenreList(row.genres),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -195,6 +248,7 @@ function mapVenueRow(row: VenueRow): Venue {
     timezone: row.timezone,
     website: row.website,
     capacity: row.capacity,
+    imageUrl: row.image_url ?? null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -251,6 +305,12 @@ function mapEventRow(row: EventRow): Event {
     announcedAt: row.announced_at,
     genre: row.genre ?? null,
     genres: Array.isArray(row.genres) ? row.genres : [],
+    genresSource: row.genres_source ?? null,
+    festivalGroupEndDate:
+      row.festival_group_primary !== false && (row.festival_group_size ?? 1) > 1
+        ? (row.festival_group_end_date ?? null)
+        : null,
+    imageUrl: row.image_url ?? null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -323,6 +383,124 @@ function mapResolutionRow(row: CandidateResolutionRow): CandidateResolution {
   };
 }
 
+/** Internal option: a single, already-resolved PostgREST `or=` search group. */
+interface SearchOpts {
+  searchOr?: string;
+}
+
+const ID_PAGE_SIZE = 1000;
+const LIGHT_SCAN_CONCURRENCY = 6;
+/** Columns the radius scan needs plus the sort keys (for multi-group merges). */
+const LIGHT_EVENT_SELECT =
+  'id, city, region, lat, lng, name, local_start_date, starts_at, min_price, venues(city, region, lat, lng)';
+
+interface LightEventRow {
+  id: string;
+  city: string | null;
+  region: string | null;
+  lat: number | null;
+  lng: number | null;
+  name: string;
+  local_start_date: string;
+  starts_at: string | null;
+  min_price: number | string | null;
+  venues?: {
+    city: string | null;
+    region: string | null;
+    lat: number | null;
+    lng: number | null;
+  } | null;
+}
+
+/** Same venue-first resolution as the summary mapping in hydrateEventRows. */
+function lightRowToLocation(r: LightEventRow): EventLocationRow {
+  return {
+    id: r.id,
+    city: r.venues?.city ?? r.city ?? null,
+    region: r.venues?.region ?? r.region ?? null,
+    lat: r.venues?.lat ?? r.lat ?? null,
+    lng: r.venues?.lng ?? r.lng ?? null,
+  };
+}
+/** ~37 chars per uuid => ~3 KB of ids per request, safely under URL limits. */
+const SEARCH_IDS_PER_GROUP = 80;
+const SEARCH_GROUP_CONCURRENCY = 6;
+
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  concurrency: number,
+  fn: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let next = 0;
+  const workers = Array.from(
+    { length: Math.min(concurrency, items.length) },
+    async () => {
+      while (next < items.length) {
+        const idx = next++;
+        results[idx] = await fn(items[idx]);
+      }
+    },
+  );
+  await Promise.all(workers);
+  return results;
+}
+
+const cmpStr = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
+/** Ascending/descending with NULLs always last (matches nullsFirst:false). */
+const cmpNullable = (
+  a: number | null | undefined,
+  b: number | null | undefined,
+  dir: 1 | -1,
+) => {
+  if (a == null && b == null) return 0;
+  if (a == null) return 1;
+  if (b == null) return -1;
+  return (a - b) * dir;
+};
+const startsAtMs = (e: CanonicalEventSummary) =>
+  e.startsAt ? Date.parse(e.startsAt) : null;
+
+/** In-memory mirror of the ORDER BY chains used by listEvents (id tiebreaker). */
+export function compareEventSummaries(
+  sortBy: string,
+): (a: CanonicalEventSummary, b: CanonicalEventSummary) => number {
+  return (a, b) => {
+    switch (sortBy) {
+      case 'price_asc':
+        return (
+          cmpNullable(a.minPrice, b.minPrice, 1) ||
+          cmpStr(a.localStartDate, b.localStartDate) ||
+          cmpStr(a.id, b.id)
+        );
+      case 'price_desc':
+        return (
+          cmpNullable(a.minPrice, b.minPrice, -1) ||
+          cmpStr(a.localStartDate, b.localStartDate) ||
+          cmpStr(a.id, b.id)
+        );
+      case 'date_desc':
+        return (
+          cmpStr(b.localStartDate, a.localStartDate) ||
+          cmpNullable(startsAtMs(a), startsAtMs(b), -1) ||
+          cmpStr(a.id, b.id)
+        );
+      case 'title_asc':
+        return (
+          cmpStr(a.title, b.title) ||
+          cmpStr(a.localStartDate, b.localStartDate) ||
+          cmpStr(a.id, b.id)
+        );
+      default:
+        return (
+          cmpStr(a.localStartDate, b.localStartDate) ||
+          cmpNullable(startsAtMs(a), startsAtMs(b), 1) ||
+          cmpStr(a.id, b.id)
+        );
+    }
+  };
+}
+
 export class SupabaseCatalogRepository implements ICatalogRepository {
   private client: SupabaseClient;
 
@@ -360,17 +538,33 @@ export class SupabaseCatalogRepository implements ICatalogRepository {
     // Fetch artists
     const { data: artistLinks } = await this.client
       .from('event_artists')
-      .select('*, artists(*)')
+      .select('*, artists(*, artist_external_ids(provider, external_id))')
       .eq('event_id', id)
       .order('sort_order', { ascending: true });
 
-    const artists = ((artistLinks as unknown as EventArtistRow[]) || []).map(
-      (row) => ({
-        id: row.artist_id,
-        name: row.artists?.name ?? 'Unknown Artist',
-        billingPosition: row.billing_position,
-      }),
-    );
+    interface EventArtistDetailRow extends EventArtistRow {
+      artists?:
+        | (ArtistRow & {
+            artist_external_ids?: Array<{
+              provider: string;
+              external_id: string;
+            }> | null;
+          })
+        | null;
+    }
+
+    const artists = (
+      (artistLinks as unknown as EventArtistDetailRow[]) || []
+    ).map((row) => ({
+      id: row.artist_id,
+      name: row.artists?.name ?? 'Unknown Artist',
+      billingPosition: row.billing_position,
+      spotifyArtistId:
+        row.artists?.artist_external_ids?.find(
+          (ext) => ext.provider === 'spotify',
+        )?.external_id ?? null,
+      imageUrl: row.artists?.image_url ?? null,
+    }));
 
     // Fetch ticket links
     const { data: ticketLinksData } = await this.client
@@ -420,13 +614,17 @@ export class SupabaseCatalogRepository implements ICatalogRepository {
 
     return {
       ...event,
-      artists,
+      artists: withoutEventNameArtists(artists, event.name),
       venue: venue
         ? {
             id: venue.id,
             name: venue.name,
+            normalizedName: venue.normalizedName,
             city: venue.city,
             region: venue.region,
+            imageUrl: venue.imageUrl ?? null,
+            lat: venue.lat ?? null,
+            lng: venue.lng ?? null,
           }
         : null,
       ticketLinks,
@@ -438,7 +636,18 @@ export class SupabaseCatalogRepository implements ICatalogRepository {
 
   async listEvents(
     filters?: EventListFilters,
+    opts?: SearchOpts,
   ): Promise<CanonicalEventSummary[]> {
+    if (filters?.searchQuery?.trim() && opts?.searchOr === undefined) {
+      const groups = await this.resolveSearchGroups(
+        filters.searchQuery,
+        SupabaseCatalogRepository.collapsesFestivalDays(filters),
+      );
+      if (groups.length === 1) {
+        return this.listEvents(filters, { searchOr: groups[0] });
+      }
+      return this.listEventsAcrossSearchGroups(filters, groups);
+    }
     // If a large number of artist IDs is supplied, chunk into batches of 50 to avoid oversized request URIs
     const CHUNK_SIZE = 50;
     if (filters?.artistIds && filters.artistIds.length > CHUNK_SIZE) {
@@ -454,12 +663,15 @@ export class SupabaseCatalogRepository implements ICatalogRepository {
         globalLimit !== undefined ? globalOffset + globalLimit : undefined;
 
       const chunkPromises = chunks.map((chunk) =>
-        this.listEvents({
-          ...filters,
-          artistIds: chunk,
-          offset: undefined,
-          limit: chunkFetchLimit,
-        }),
+        this.listEvents(
+          {
+            ...filters,
+            artistIds: chunk,
+            offset: undefined,
+            limit: chunkFetchLimit,
+          },
+          opts,
+        ),
       );
       const chunkResults = await Promise.all(chunkPromises);
       const mergedMap = new Map<string, CanonicalEventSummary>();
@@ -499,6 +711,119 @@ export class SupabaseCatalogRepository implements ICatalogRepository {
 
     let query = this.client.from('events').select(selectString);
 
+    const filtered = await this.applyEventFilters(query, filters, opts);
+    if (filtered === null) return [];
+    query = filtered.query;
+
+    // Database-level sorting BEFORE pagination
+    query = this.applyEventSort(query, filters?.sortBy ?? 'date_asc');
+
+    if (filters?.offset !== undefined && filters.offset > 0) {
+      const limit = filters.limit ?? 20;
+      query = query.range(filters.offset, filters.offset + limit - 1);
+    } else if (filters?.limit) {
+      query = query.limit(filters.limit);
+    }
+
+    const { data: eventsData, error } = await query;
+    if (error) {
+      throw new Error(`Failed to list events: ${error.message}`);
+    }
+
+    const rawRows = eventsData || [];
+    if (rawRows.length === 0) {
+      return [];
+    }
+
+    // Artist-filtered lists do not hide festival days in SQL (the favourite may play day 2), so a
+    // matched later day is shown as its festival's single card instead.
+    const rows =
+      filters?.collapseFestivalDays &&
+      !SupabaseCatalogRepository.collapsesFestivalDays(filters)
+        ? await this.swapToFestivalPrimaries(
+            rawRows as unknown as Array<{
+              id: string;
+              festival_group_id?: string | null;
+              festival_group_primary?: boolean | null;
+            }>,
+          )
+        : rawRows;
+
+    return this.hydrateEventRows(rows, {
+      mergeFestivalLineup: Boolean(filters?.collapseFestivalDays),
+    });
+  }
+
+  /** Replaces rows that are a non-first festival day with their group's primary row (deduped). */
+  private async swapToFestivalPrimaries<
+    T extends {
+      id: string;
+      festival_group_id?: string | null;
+      festival_group_primary?: boolean | null;
+    },
+  >(rows: T[]): Promise<T[]> {
+    const primaryIds = [
+      ...new Set(
+        rows
+          .filter(
+            (r) => r.festival_group_primary === false && r.festival_group_id,
+          )
+          .map((r) => r.festival_group_id as string),
+      ),
+    ];
+    if (primaryIds.length === 0) return rows;
+    const primaries = new Map<string, T>();
+    for (let i = 0; i < primaryIds.length; i += 50) {
+      const { data, error } = await this.client
+        .from('events')
+        .select('*, venues(*)')
+        .in('id', primaryIds.slice(i, i + 50));
+      if (error) {
+        throw new Error(`Failed to load festival primaries: ${error.message}`);
+      }
+      for (const p of (data ?? []) as unknown as T[]) primaries.set(p.id, p);
+    }
+    const seen = new Set<string>();
+    const out: T[] = [];
+    for (const r of rows) {
+      const swapped =
+        r.festival_group_primary === false && r.festival_group_id
+          ? (primaries.get(r.festival_group_id) ?? r)
+          : r;
+      if (seen.has(swapped.id)) continue;
+      seen.add(swapped.id);
+      out.push(swapped);
+    }
+    return out;
+  }
+
+  /**
+   * Applies every non-sort filter of listEvents to `query`. Returns null when the filters can
+   * match nothing (venue name with no venue). Shared by listEvents and the light radius scan
+   * so both always agree on the matching set.
+   */
+  /**
+   * True when the one-card-per-festival collapse applies. It is skipped for artist-id filters:
+   * "events featuring artist X" must return the day X actually plays, and a collapsed group's
+   * non-primary days would otherwise be hidden (the favourite artist's festival would vanish).
+   */
+  private static collapsesFestivalDays(
+    filters: EventListFilters | undefined,
+  ): boolean {
+    return (
+      Boolean(filters?.collapseFestivalDays) &&
+      !(filters?.artistIds && filters.artistIds.length > 0) &&
+      !filters?.artistId
+    );
+  }
+
+  private async applyEventFilters(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    query: any,
+    filters: EventListFilters | undefined,
+    opts: SearchOpts | undefined,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  ): Promise<{ query: any } | null> {
     // Filter by status if specified
     if (filters?.status) {
       if (Array.isArray(filters.status)) {
@@ -518,112 +843,37 @@ export class SupabaseCatalogRepository implements ICatalogRepository {
       query = query.eq('event_artists.artist_id', filters.artistId);
     }
 
-    // Server-side text search across event title, venue name, and artist names
-    if (filters?.searchQuery?.trim()) {
-      const trimmedSearch = filters.searchQuery.trim();
-      const escaped = escapeLikePattern(trimmedSearch);
-      // PostgREST .or() requires quoting for values containing special characters (commas, parentheses, colons, quotes)
-      const quotedEscaped = escaped.replace(/"/g, '""');
-      const orClauses: string[] = [`name.ilike."%${quotedEscaped}%"`];
-
-      // Query matching venues with pagination to avoid silent truncation (Issue 4)
-      const matchedVenueIds: string[] = [];
-      const VENUE_BATCH = 1000;
-      let venueOffset = 0;
-      while (true) {
-        const { data: venuesData, error: venueError } = await this.client
-          .from('venues')
-          .select('id')
-          .ilike('name', `%${escaped}%`)
-          .order('id', { ascending: true })
-          .range(venueOffset, venueOffset + VENUE_BATCH - 1);
-        if (venueError) {
-          throw new Error(
-            `Failed to query venues for search: ${venueError.message}`,
-          );
-        }
-        if (!venuesData || venuesData.length === 0) break;
-        for (const v of venuesData) {
-          matchedVenueIds.push(v.id);
-        }
-        if (venuesData.length < VENUE_BATCH) break;
-        venueOffset += VENUE_BATCH;
-      }
-      for (let i = 0; i < matchedVenueIds.length; i += 200) {
-        const chunk = matchedVenueIds.slice(i, i + 200);
-        orClauses.push(`venue_id.in.(${chunk.join(',')})`);
-      }
-
-      // Query matching artists with pagination (Issue 4)
-      const matchedArtistIds: string[] = [];
-      const ARTIST_BATCH = 1000;
-      let artistOffset = 0;
-      while (true) {
-        const { data: artistsData, error: artistError } = await this.client
-          .from('artists')
-          .select('id')
-          .ilike('name', `%${escaped}%`)
-          .order('id', { ascending: true })
-          .range(artistOffset, artistOffset + ARTIST_BATCH - 1);
-        if (artistError) {
-          throw new Error(
-            `Failed to query artists for search: ${artistError.message}`,
-          );
-        }
-        if (!artistsData || artistsData.length === 0) break;
-        for (const a of artistsData) {
-          matchedArtistIds.push(a.id);
-        }
-        if (artistsData.length < ARTIST_BATCH) break;
-        artistOffset += ARTIST_BATCH;
-      }
-
-      if (matchedArtistIds.length > 0) {
-        // Query event_artists with pagination to prevent silent 1,000-row truncation (Issue 4)
-        const matchedEventIds: string[] = [];
-        const seenEventIds = new Set<string>();
-        const EA_BATCH = 1000;
-        let eaOffset = 0;
-        while (true) {
-          const { data: eaData, error: eaError } = await this.client
-            .from('event_artists')
-            .select('event_id')
-            .in('artist_id', matchedArtistIds)
-            .order('event_id', { ascending: true })
-            .range(eaOffset, eaOffset + EA_BATCH - 1);
-          if (eaError) {
-            throw new Error(
-              `Failed to query event_artists for search: ${eaError.message}`,
-            );
-          }
-          if (!eaData || eaData.length === 0) break;
-          for (const ea of eaData) {
-            if (!seenEventIds.has(ea.event_id)) {
-              seenEventIds.add(ea.event_id);
-              matchedEventIds.push(ea.event_id);
-            }
-          }
-          if (eaData.length < EA_BATCH) break;
-          eaOffset += EA_BATCH;
-        }
-
-        for (let i = 0; i < matchedEventIds.length; i += 200) {
-          const chunk = matchedEventIds.slice(i, i + 200);
-          orClauses.push(`id.in.(${chunk.join(',')})`);
-        }
-      }
-
-      query = query.or(orClauses.join(','));
+    // Text search is resolved up-front into request-sized OR groups (see
+    // resolveSearchGroups); each query only ever carries one bounded group.
+    if (opts?.searchOr) {
+      query = query.or(opts.searchOr);
     }
 
+    const collapsing = SupabaseCatalogRepository.collapsesFestivalDays(filters);
+    if (collapsing) {
+      // One card per multi-day festival: hide every day but the group's first.
+      query = query.eq('festival_group_primary', true);
+    }
+
+    // A collapsed festival card stays listed while the run is still going (its first day may
+    // already be past), so "from today" also accepts a group that ends today or later.
     if (filters?.excludePastShowtimes && filters?.fromDate) {
       const today = filters.fromDate;
       const nowIso = filters.referenceNowIso || new Date().toISOString();
       query = query.or(
-        `local_start_date.gt.${today},and(local_start_date.eq.${today},starts_at.gte.${nowIso}),and(local_start_date.eq.${today},starts_at.is.null)`,
+        [
+          `local_start_date.gt.${today}`,
+          `and(local_start_date.eq.${today},starts_at.gte.${nowIso})`,
+          `and(local_start_date.eq.${today},starts_at.is.null)`,
+          ...(collapsing ? [`festival_group_end_date.gte.${today}`] : []),
+        ].join(','),
       );
     } else if (filters?.fromDate) {
-      query = query.gte('local_start_date', filters.fromDate);
+      query = collapsing
+        ? query.or(
+            `local_start_date.gte.${filters.fromDate},festival_group_end_date.gte.${filters.fromDate}`,
+          )
+        : query.gte('local_start_date', filters.fromDate);
     }
     if (filters?.toDate) {
       query = query.lte('local_start_date', filters.toDate);
@@ -644,7 +894,7 @@ export class SupabaseCatalogRepository implements ICatalogRepository {
         }
         const vIds = (vData || []).map((v) => v.id);
         if (vIds.length === 0) {
-          return [];
+          return null;
         }
         query = query.in('venue_id', vIds);
       }
@@ -659,7 +909,7 @@ export class SupabaseCatalogRepository implements ICatalogRepository {
       }
       const vIds = (vData || []).map((v) => v.id);
       if (vIds.length === 0) {
-        return [];
+        return null;
       }
       query = query.in('venue_id', vIds);
     }
@@ -676,8 +926,7 @@ export class SupabaseCatalogRepository implements ICatalogRepository {
           'event_kind.eq.festival,event_kind.eq.multi_day_festival,genre.ilike.festival,genres.cs.{festival}',
         );
       } else {
-        const escapedG = escapeLikePattern(filters.genre.trim());
-        query = query.or(`genre.ilike."%${escapedG}%",genres.cs.{"${g}"}`);
+        query = query.or(buildGenreFilterClause(filters.genre));
       }
     }
 
@@ -701,8 +950,14 @@ export class SupabaseCatalogRepository implements ICatalogRepository {
       }
     }
 
-    // Database-level sorting BEFORE pagination
-    const sortBy = filters?.sortBy ?? 'date_asc';
+    // Wrapped: a PostgREST builder is thenable, so returning it bare from an async function
+    // would execute the request.
+    return { query };
+  }
+
+  /** Database ORDER BY chain for a sort option (id is always the final tiebreaker). */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private applyEventSort(query: any, sortBy: EventSortOption): any {
     if (sortBy === 'price_asc') {
       query = query
         .order('min_price', { ascending: true, nullsFirst: false })
@@ -731,23 +986,14 @@ export class SupabaseCatalogRepository implements ICatalogRepository {
         .order('id', { ascending: true });
     }
 
-    if (filters?.offset !== undefined && filters.offset > 0) {
-      const limit = filters.limit ?? 20;
-      query = query.range(filters.offset, filters.offset + limit - 1);
-    } else if (filters?.limit) {
-      query = query.limit(filters.limit);
-    }
+    return query;
+  }
 
-    const { data: eventsData, error } = await query;
-    if (error) {
-      throw new Error(`Failed to list events: ${error.message}`);
-    }
-
-    const rawRows = eventsData || [];
-    if (rawRows.length === 0) {
-      return [];
-    }
-
+  /** Hydrates event rows (artists, ticket links, sources) into summaries, preserving row order. */
+  private async hydrateEventRows(
+    rawRows: unknown[],
+    opts?: { mergeFestivalLineup?: boolean },
+  ): Promise<CanonicalEventSummary[]> {
     // Deduplicate event rows by ID in case multi-artist matches returned duplicate rows
     const seenEventIds = new Set<string>();
     const rows: EventRow[] = [];
@@ -814,6 +1060,69 @@ export class SupabaseCatalogRepository implements ICatalogRepository {
       if (sourceRes.data) allSourceLinks.push(...sourceRes.data);
     }
 
+    if (opts?.mergeFestivalLineup) {
+      // A collapsed festival card stands for the whole run: append the other days' artists so
+      // the lineup (and artist scoring) is not limited to day one.
+      const primaryIds = rows
+        .filter(
+          (r) =>
+            r.festival_group_primary !== false &&
+            (r.festival_group_size ?? 1) > 1,
+        )
+        .map((r) => r.id);
+      for (let i = 0; i < primaryIds.length; i += BATCH_CHUNK_SIZE) {
+        const chunk = primaryIds.slice(i, i + BATCH_CHUNK_SIZE);
+        const { data: days, error: daysErr } = await this.client
+          .from('events')
+          .select('id, festival_group_id, local_start_date')
+          .in('festival_group_id', chunk)
+          .order('local_start_date', { ascending: true })
+          .order('id', { ascending: true });
+        if (daysErr) {
+          throw new Error(
+            `Failed to load festival days for lineup: ${daysErr.message}`,
+          );
+        }
+        const otherDays = (
+          (days ?? []) as Array<{ id: string; festival_group_id: string }>
+        ).filter((d) => d.id !== d.festival_group_id);
+        const primaryOf = new Map(
+          otherDays.map((d) => [d.id, d.festival_group_id] as const),
+        );
+        for (let j = 0; j < otherDays.length; j += BATCH_CHUNK_SIZE) {
+          const dayChunk = otherDays.slice(j, j + BATCH_CHUNK_SIZE);
+          const { data: links, error: linkErr } = await this.client
+            .from('event_artists')
+            .select('*, artists(*, artist_external_ids(provider, external_id))')
+            .in(
+              'event_id',
+              dayChunk.map((d) => d.id),
+            )
+            .order('sort_order', { ascending: true });
+          if (linkErr) {
+            throw new Error(
+              `Failed to load festival day artists: ${linkErr.message}`,
+            );
+          }
+          const byDay = new Map<string, unknown[]>();
+          for (const l of (links ?? []) as Array<{ event_id: string }>) {
+            const list = byDay.get(l.event_id) ?? [];
+            list.push(l);
+            byDay.set(l.event_id, list);
+          }
+          // Keep day order (otherDays is date-ordered), then billing order within each day.
+          for (const d of dayChunk) {
+            for (const l of byDay.get(d.id) ?? []) {
+              allArtistLinks.push({
+                ...(l as object),
+                event_id: primaryOf.get(d.id),
+              });
+            }
+          }
+        }
+      }
+    }
+
     // Group relations in-memory by event_id
     interface EventArtistWithExtIds extends Omit<EventArtistRow, 'artists'> {
       artists?:
@@ -834,11 +1143,14 @@ export class SupabaseCatalogRepository implements ICatalogRepository {
         billingPosition: BillingPosition;
         spotifyArtistId?: string | null;
         imageUrl?: string | null;
+        genres?: string[];
       }>
     >();
     for (const aRow of (allArtistLinks as unknown as EventArtistWithExtIds[]) ||
       []) {
       const list = artistsByEventId.get(aRow.event_id) || [];
+      // Merged festival lineups can list the same artist on several days.
+      if (list.some((a) => a.id === aRow.artist_id)) continue;
       const spotifyArtistId =
         aRow.artists?.artist_external_ids?.find(
           (ext) => ext.provider === 'spotify',
@@ -850,6 +1162,7 @@ export class SupabaseCatalogRepository implements ICatalogRepository {
         billingPosition: aRow.billing_position as BillingPosition,
         spotifyArtistId,
         imageUrl: aRow.artists?.image_url ?? null,
+        genres: normalizeGenreList(aRow.artists?.genres),
       });
       artistsByEventId.set(aRow.event_id, list);
     }
@@ -941,7 +1254,7 @@ export class SupabaseCatalogRepository implements ICatalogRepository {
         startTimePrecision: event.startTimePrecision,
         status: event.status,
         eventKind: event.eventKind,
-        artists,
+        artists: withoutEventNameArtists(artists, event.name),
         ticketUrl: event.primaryTicketUrl,
         minPrice,
         maxPrice,
@@ -957,13 +1270,369 @@ export class SupabaseCatalogRepository implements ICatalogRepository {
             ? 'Festival'
             : null),
         genres: event.genres ?? [],
+        genresSource: event.genresSource ?? null,
+        festivalGroupEndDate: event.festivalGroupEndDate ?? null,
+        imageUrl: event.imageUrl ?? null,
       });
     }
 
     return summaries;
   }
 
-  async countEvents(filters?: EventListFilters): Promise<number> {
+  /**
+   * Resolve a free-text query into one or more PostgREST `or=` filter strings.
+   *
+   * Short queries ("a") match hundreds of artists/venues/events. Putting every
+   * matched id into one URL used to fail with "URI too long" (HTTP 500 on
+   * /api/catalog/search). Each returned group is bounded to SEARCH_IDS_PER_GROUP
+   * ids so a single request stays well below URL limits. A match is the UNION of
+   * all groups; callers must dedupe across groups.
+   */
+  private async resolveSearchGroups(
+    searchQuery: string,
+    collapseFestivalDays = false,
+  ): Promise<string[]> {
+    const escaped = escapeLikePattern(searchQuery.trim());
+    const quotedEscaped = escaped.replace(/"/g, '""');
+    // Genre-aware search: "hip hop", "hiphop", "rap" etc. also match events by genre column.
+    const genreLabel = resolveGenreQuery(searchQuery);
+    const genreTerms = genreDbTerms(genreLabel).map((t) => {
+      const e = escapeLikePattern(t).replace(/"/g, '""');
+      return `genre.ilike."%${e}%"`;
+    });
+    const nameClause = [`name.ilike."%${quotedEscaped}%"`, ...genreTerms].join(
+      ',',
+    );
+
+    const pageAll = async (table: 'venues' | 'artists'): Promise<string[]> => {
+      const ids: string[] = [];
+      for (let from = 0; ; from += ID_PAGE_SIZE) {
+        const { data, error } = await this.client
+          .from(table)
+          .select('id')
+          .ilike('name', `%${escaped}%`)
+          .order('id', { ascending: true })
+          .range(from, from + ID_PAGE_SIZE - 1);
+        if (error) {
+          throw new Error(
+            `Failed to query ${table} for search: ${error.message}`,
+          );
+        }
+        if (!data || data.length === 0) break;
+        for (const row of data) ids.push(row.id);
+        if (data.length < ID_PAGE_SIZE) break;
+      }
+      return ids;
+    };
+
+    const [venueIds, artistIds] = await Promise.all([
+      pageAll('venues'),
+      pageAll('artists'),
+    ]);
+
+    // Events that feature a matched artist (artist-id list is chunked too).
+    const eventIdSet = new Set<string>();
+    const artistChunks: string[][] = [];
+    for (let i = 0; i < artistIds.length; i += SEARCH_IDS_PER_GROUP) {
+      artistChunks.push(artistIds.slice(i, i + SEARCH_IDS_PER_GROUP));
+    }
+    await mapWithConcurrency(
+      artistChunks,
+      SEARCH_GROUP_CONCURRENCY,
+      async (chunk) => {
+        for (let from = 0; ; from += ID_PAGE_SIZE) {
+          const { data, error } = await this.client
+            .from('event_artists')
+            .select('event_id')
+            .in('artist_id', chunk)
+            .order('event_id', { ascending: true })
+            .range(from, from + ID_PAGE_SIZE - 1);
+          if (error) {
+            throw new Error(
+              `Failed to query event_artists for search: ${error.message}`,
+            );
+          }
+          if (!data || data.length === 0) break;
+          for (const ea of data) eventIdSet.add(ea.event_id);
+          if (data.length < ID_PAGE_SIZE) break;
+        }
+      },
+    );
+
+    if (collapseFestivalDays && eventIdSet.size > 0) {
+      // Collapsed lists only show a festival's first day, so an artist who plays a later day
+      // must surface that group's primary card (days of one group share festival_group_id =
+      // primary id). The primary still has to satisfy every other filter.
+      const matchedIds = Array.from(eventIdSet);
+      const chunks: string[][] = [];
+      for (let i = 0; i < matchedIds.length; i += SEARCH_IDS_PER_GROUP) {
+        chunks.push(matchedIds.slice(i, i + SEARCH_IDS_PER_GROUP));
+      }
+      await mapWithConcurrency(
+        chunks,
+        SEARCH_GROUP_CONCURRENCY,
+        async (chunk) => {
+          const { data, error } = await this.client
+            .from('events')
+            .select('festival_group_id')
+            .in('id', chunk)
+            .eq('festival_group_primary', false)
+            .not('festival_group_id', 'is', null);
+          if (error) {
+            throw new Error(
+              `Failed to resolve festival groups for search: ${error.message}`,
+            );
+          }
+          for (const row of (data ?? []) as Array<{
+            festival_group_id: string | null;
+          }>) {
+            if (row.festival_group_id) eventIdSet.add(row.festival_group_id);
+          }
+        },
+      );
+    }
+
+    const refs: Array<{ col: 'venue_id' | 'id'; id: string }> = [
+      ...venueIds.map((id) => ({ col: 'venue_id' as const, id })),
+      ...Array.from(eventIdSet)
+        .sort()
+        .map((id) => ({ col: 'id' as const, id })),
+    ];
+    if (refs.length === 0) return [nameClause];
+
+    const groups: string[] = [];
+    for (let i = 0; i < refs.length; i += SEARCH_IDS_PER_GROUP) {
+      const slice = refs.slice(i, i + SEARCH_IDS_PER_GROUP);
+      const parts: string[] = i === 0 ? [nameClause] : [];
+      for (const col of ['venue_id', 'id'] as const) {
+        const ids = slice.filter((r) => r.col === col).map((r) => r.id);
+        if (ids.length > 0) parts.push(`${col}.in.(${ids.join(',')})`);
+      }
+      groups.push(parts.join(','));
+    }
+    return groups;
+  }
+
+  /**
+   * Multi-group search: run one bounded query per group (all other filters
+   * applied), then merge, dedupe and re-apply the DB ordering in memory so
+   * pagination stays deterministic. Each group is asked for its first
+   * offset+limit rows, which is enough to build the global page.
+   */
+  private async listEventsAcrossSearchGroups(
+    filters: EventListFilters,
+    groups: string[],
+  ): Promise<CanonicalEventSummary[]> {
+    const offset = filters.offset ?? 0;
+    const limit = filters.limit;
+    const perGroupLimit = limit !== undefined ? offset + limit : undefined;
+    const results = await mapWithConcurrency(
+      groups,
+      SEARCH_GROUP_CONCURRENCY,
+      (g) =>
+        this.listEvents(
+          { ...filters, offset: undefined, limit: perGroupLimit },
+          { searchOr: g },
+        ),
+    );
+    const merged = new Map<string, CanonicalEventSummary>();
+    for (const rows of results) {
+      for (const ev of rows) if (!merged.has(ev.id)) merged.set(ev.id, ev);
+    }
+    const sorted = Array.from(merged.values()).sort(
+      compareEventSummaries(filters.sortBy ?? 'date_asc'),
+    );
+    return sorted.slice(
+      offset,
+      limit !== undefined ? offset + limit : undefined,
+    );
+  }
+
+  /**
+   * LIGHT scan used by the exact radius search: ids + location of every event matching
+   * `filters` (limit/offset ignored), in the order listEvents returns them. It selects only the
+   * radius/sort columns (no artist, ticket or source hydration), pages in PostgREST's 1000-row
+   * ranges and fetches the remaining ranges in parallel once the exact total is known.
+   */
+  async listEventLocations(
+    filters?: EventListFilters,
+    opts?: SearchOpts,
+  ): Promise<EventLocationRow[]> {
+    if (filters?.searchQuery?.trim() && opts?.searchOr === undefined) {
+      const groups = await this.resolveSearchGroups(
+        filters.searchQuery,
+        SupabaseCatalogRepository.collapsesFestivalDays(filters),
+      );
+      if (groups.length === 1) {
+        return this.listEventLocations(filters, { searchOr: groups[0] });
+      }
+      // Multi-group: each group is already in DB order; merge, dedupe and re-sort like
+      // listEventsAcrossSearchGroups does.
+      const results = await mapWithConcurrency(
+        groups,
+        SEARCH_GROUP_CONCURRENCY,
+        (g) => this.fetchLightRows(filters, { searchOr: g }),
+      );
+      const merged = new Map<string, LightEventRow>();
+      for (const rows of results) {
+        for (const r of rows) if (!merged.has(r.id)) merged.set(r.id, r);
+      }
+      const asSummaries = Array.from(merged.values()).map(
+        (r) =>
+          ({
+            id: r.id,
+            title: r.name,
+            localStartDate: r.local_start_date,
+            startsAt: r.starts_at,
+            minPrice: r.min_price == null ? null : Number(r.min_price),
+          }) as unknown as CanonicalEventSummary,
+      );
+      const order = compareEventSummaries(filters.sortBy ?? 'date_asc');
+      const byId = new Map(merged);
+      return asSummaries
+        .sort(order)
+        .map((s) => lightRowToLocation(byId.get(s.id)!));
+    }
+    if (filters?.artistIds && filters.artistIds.length > 50) {
+      // Rare chunked-artist path: reuse the full listing (no radius caller uses it).
+      const full = await this.listEvents({
+        ...filters,
+        limit: undefined,
+        offset: undefined,
+      });
+      return full.map((e) => ({
+        id: e.id,
+        city: e.city ?? null,
+        region: e.region ?? null,
+        lat: e.lat ?? null,
+        lng: e.lng ?? null,
+      }));
+    }
+    return (await this.fetchLightRows(filters, opts)).map(lightRowToLocation);
+  }
+
+  private async fetchLightRows(
+    filters: EventListFilters | undefined,
+    opts: SearchOpts | undefined,
+  ): Promise<LightEventRow[]> {
+    const withArtists =
+      (filters?.artistIds && filters.artistIds.length > 0) || filters?.artistId;
+    const select =
+      LIGHT_EVENT_SELECT +
+      (withArtists ? ', event_artists!inner(artist_id)' : '');
+    const sortBy = filters?.sortBy ?? 'date_asc';
+    const fetchRange = async (
+      page: number,
+      withCount: boolean,
+    ): Promise<{ rows: LightEventRow[]; count: number | null } | null> => {
+      let query = this.client
+        .from('events')
+        .select(select, withCount ? { count: 'exact' } : undefined);
+      const filtered = await this.applyEventFilters(query, filters, opts);
+      if (filtered === null) return null;
+      query = this.applyEventSort(filtered.query, sortBy).range(
+        page * ID_PAGE_SIZE,
+        page * ID_PAGE_SIZE + ID_PAGE_SIZE - 1,
+      );
+      const { data, error, count } = await query;
+      if (error) {
+        throw new Error(`Failed to scan event locations: ${error.message}`);
+      }
+      return {
+        rows: (data ?? []) as unknown as LightEventRow[],
+        count: count ?? null,
+      };
+    };
+
+    const first = await fetchRange(0, true);
+    if (first === null) return [];
+    const pages: LightEventRow[][] = [first.rows];
+    if (first.count !== null) {
+      const totalPages = Math.ceil(first.count / ID_PAGE_SIZE);
+      const rest = await mapWithConcurrency(
+        Array.from({ length: Math.max(0, totalPages - 1) }, (_, i) => i + 1),
+        LIGHT_SCAN_CONCURRENCY,
+        async (page) => (await fetchRange(page, false))?.rows ?? [],
+      );
+      pages.push(...rest);
+    } else {
+      for (
+        let page = 1;
+        pages[pages.length - 1].length === ID_PAGE_SIZE;
+        page++
+      ) {
+        pages.push((await fetchRange(page, false))?.rows ?? []);
+      }
+    }
+    // Same dedupe as listEvents (multi-artist joins can repeat an event row).
+    const seen = new Set<string>();
+    const out: LightEventRow[] = [];
+    for (const rows of pages) {
+      for (const r of rows) {
+        if (seen.has(r.id)) continue;
+        seen.add(r.id);
+        out.push(r);
+      }
+    }
+    return out;
+  }
+
+  /** Hydrates the given events with the same mapping as listEvents; result follows `ids` order. */
+  async getEventsByIds(ids: string[]): Promise<CanonicalEventSummary[]> {
+    if (ids.length === 0) return [];
+    const unique = Array.from(new Set(ids));
+    const CHUNK = 50;
+    const rows: unknown[] = [];
+    for (let i = 0; i < unique.length; i += CHUNK) {
+      const { data, error } = await this.client
+        .from('events')
+        .select('*, venues(*)')
+        .in('id', unique.slice(i, i + CHUNK));
+      if (error) {
+        throw new Error(`Failed to load events by id: ${error.message}`);
+      }
+      rows.push(...(data ?? []));
+    }
+    const byId = new Map(
+      (rows as Array<{ id: string }>).map((r) => [r.id, r] as const),
+    );
+    const ordered = unique.flatMap((id) => {
+      const r = byId.get(id);
+      return r ? [r] : [];
+    });
+    return this.hydrateEventRows(ordered);
+  }
+
+  async countEvents(
+    filters?: EventListFilters,
+    opts?: SearchOpts & { idPage?: number; out?: string[] },
+  ): Promise<number> {
+    if (filters?.searchQuery?.trim() && opts?.searchOr === undefined) {
+      const groups = await this.resolveSearchGroups(
+        filters.searchQuery,
+        SupabaseCatalogRepository.collapsesFestivalDays(filters),
+      );
+      if (groups.length === 1) {
+        return this.countEvents(filters, { searchOr: groups[0] });
+      }
+      // Groups can overlap (an event may match by title AND artist), so the
+      // exact count is the number of DISTINCT ids across all groups.
+      const seen = new Set<string>();
+      await mapWithConcurrency(groups, SEARCH_GROUP_CONCURRENCY, async (g) => {
+        for (let page = 0; ; page++) {
+          const out: string[] = [];
+          await this.countEvents(filters, {
+            searchOr: g,
+            idPage: page,
+            out,
+          });
+          for (const id of out) seen.add(id);
+          if (out.length < ID_PAGE_SIZE) break;
+        }
+      });
+      return seen.size;
+    }
+    const idMode = opts?.idPage !== undefined;
     const CHUNK_SIZE = 50;
     if (filters?.artistIds && filters.artistIds.length > CHUNK_SIZE) {
       const chunks: string[][] = [];
@@ -996,201 +1665,29 @@ export class SupabaseCatalogRepository implements ICatalogRepository {
       selectString = 'id, event_artists!inner(artist_id)';
     }
 
-    let query = this.client
-      .from('events')
-      .select(selectString, { count: 'exact', head: true });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let query: any = idMode
+      ? this.client.from('events').select(selectString)
+      : this.client
+          .from('events')
+          .select(selectString, { count: 'exact', head: true });
 
-    if (filters?.status) {
-      if (Array.isArray(filters.status)) {
-        query = query.in('status', filters.status);
-      } else {
-        query = query.eq('status', filters.status);
-      }
-    }
+    const filtered = await this.applyEventFilters(query, filters, opts);
+    if (filtered === null) return 0;
+    query = filtered.query;
 
-    if (filters?.artistIds && filters.artistIds.length > 0) {
-      query = query.in('event_artists.artist_id', filters.artistIds);
-    } else if (filters?.artistId) {
-      query = query.eq('event_artists.artist_id', filters.artistId);
-    }
-
-    if (filters?.searchQuery?.trim()) {
-      const trimmedSearch = filters.searchQuery.trim();
-      const escaped = escapeLikePattern(trimmedSearch);
-      const quotedEscaped = escaped.replace(/"/g, '""');
-      const orClauses: string[] = [`name.ilike."%${quotedEscaped}%"`];
-
-      // Query matching venues
-      const matchedVenueIds: string[] = [];
-      const VENUE_BATCH = 1000;
-      let venueOffset = 0;
-      while (true) {
-        const { data: venuesData, error: venueError } = await this.client
-          .from('venues')
-          .select('id')
-          .ilike('name', `%${escaped}%`)
-          .order('id', { ascending: true })
-          .range(venueOffset, venueOffset + VENUE_BATCH - 1);
-        if (venueError) {
-          throw new Error(
-            `Failed to query venues for search: ${venueError.message}`,
-          );
-        }
-        if (!venuesData || venuesData.length === 0) break;
-        for (const v of venuesData) {
-          matchedVenueIds.push(v.id);
-        }
-        if (venuesData.length < VENUE_BATCH) break;
-        venueOffset += VENUE_BATCH;
+    if (idMode) {
+      const page = opts?.idPage ?? 0;
+      const { data: idRows, error: idErr } = await query
+        .order('id', { ascending: true })
+        .range(page * ID_PAGE_SIZE, page * ID_PAGE_SIZE + ID_PAGE_SIZE - 1);
+      if (idErr) {
+        throw new Error(`Failed to count events: ${idErr.message}`);
       }
-      for (let i = 0; i < matchedVenueIds.length; i += 200) {
-        const chunk = matchedVenueIds.slice(i, i + 200);
-        orClauses.push(`venue_id.in.(${chunk.join(',')})`);
+      for (const r of (idRows ?? []) as Array<{ id: string }>) {
+        opts?.out?.push(r.id);
       }
-
-      // Query matching artists
-      const matchedArtistIds: string[] = [];
-      const ARTIST_BATCH = 1000;
-      let artistOffset = 0;
-      while (true) {
-        const { data: artistsData, error: artistError } = await this.client
-          .from('artists')
-          .select('id')
-          .ilike('name', `%${escaped}%`)
-          .order('id', { ascending: true })
-          .range(artistOffset, artistOffset + ARTIST_BATCH - 1);
-        if (artistError) {
-          throw new Error(
-            `Failed to query artists for search: ${artistError.message}`,
-          );
-        }
-        if (!artistsData || artistsData.length === 0) break;
-        for (const a of artistsData) {
-          matchedArtistIds.push(a.id);
-        }
-        if (artistsData.length < ARTIST_BATCH) break;
-        artistOffset += ARTIST_BATCH;
-      }
-
-      if (matchedArtistIds.length > 0) {
-        const matchedEventIds: string[] = [];
-        const seenEventIds = new Set<string>();
-        const EA_BATCH = 1000;
-        let eaOffset = 0;
-        while (true) {
-          const { data: eaData, error: eaError } = await this.client
-            .from('event_artists')
-            .select('event_id')
-            .in('artist_id', matchedArtistIds)
-            .order('event_id', { ascending: true })
-            .range(eaOffset, eaOffset + EA_BATCH - 1);
-          if (eaError) {
-            throw new Error(
-              `Failed to query event_artists for search: ${eaError.message}`,
-            );
-          }
-          if (!eaData || eaData.length === 0) break;
-          for (const ea of eaData) {
-            if (!seenEventIds.has(ea.event_id)) {
-              seenEventIds.add(ea.event_id);
-              matchedEventIds.push(ea.event_id);
-            }
-          }
-          if (eaData.length < EA_BATCH) break;
-          eaOffset += EA_BATCH;
-        }
-
-        for (let i = 0; i < matchedEventIds.length; i += 200) {
-          const chunk = matchedEventIds.slice(i, i + 200);
-          orClauses.push(`id.in.(${chunk.join(',')})`);
-        }
-      }
-
-      query = query.or(orClauses.join(','));
-    }
-
-    if (filters?.excludePastShowtimes && filters?.fromDate) {
-      const today = filters.fromDate;
-      const nowIso = filters.referenceNowIso || new Date().toISOString();
-      query = query.or(
-        `local_start_date.gt.${today},and(local_start_date.eq.${today},starts_at.gte.${nowIso}),and(local_start_date.eq.${today},starts_at.is.null)`,
-      );
-    } else if (filters?.fromDate) {
-      query = query.gte('local_start_date', filters.fromDate);
-    }
-    if (filters?.toDate) {
-      query = query.lte('local_start_date', filters.toDate);
-    }
-    if (filters?.venueId) {
-      const UUID_PATTERN =
-        /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-      if (UUID_PATTERN.test(filters.venueId)) {
-        query = query.eq('venue_id', filters.venueId);
-      } else {
-        const escaped = escapeLikePattern(filters.venueId.trim());
-        const { data: vData, error: vErr } = await this.client
-          .from('venues')
-          .select('id')
-          .ilike('name', `%${escaped}%`);
-        if (vErr) {
-          throw new Error(`Failed to query venues by name: ${vErr.message}`);
-        }
-        const vIds = (vData || []).map((v) => v.id);
-        if (vIds.length === 0) {
-          return 0;
-        }
-        query = query.in('venue_id', vIds);
-      }
-    } else if (filters?.venueName) {
-      const escaped = escapeLikePattern(filters.venueName.trim());
-      const { data: vData, error: vErr } = await this.client
-        .from('venues')
-        .select('id')
-        .ilike('name', `%${escaped}%`);
-      if (vErr) {
-        throw new Error(`Failed to query venues by name: ${vErr.message}`);
-      }
-      const vIds = (vData || []).map((v) => v.id);
-      if (vIds.length === 0) {
-        return 0;
-      }
-      query = query.in('venue_id', vIds);
-    }
-    if (filters?.city) {
-      query = query.ilike('city', `%${filters.city}%`);
-    }
-    if (filters?.region) {
-      query = query.eq('region', filters.region);
-    }
-    if (filters?.genre) {
-      const g = filters.genre.trim().toLowerCase();
-      if (g === 'festival') {
-        query = query.or(
-          'event_kind.eq.festival,event_kind.eq.multi_day_festival,genre.ilike.festival,genres.cs.{festival}',
-        );
-      } else {
-        const escapedG = escapeLikePattern(filters.genre.trim());
-        query = query.or(`genre.ilike."%${escapedG}%",genres.cs.{"${g}"}`);
-      }
-    }
-
-    if (filters?.freeOnly) {
-      query = query.or('event_kind.eq.free_event,min_price.eq.0');
-    }
-    if (filters?.minPrice !== undefined) {
-      query = query.gte('min_price', filters.minPrice);
-    }
-    if (filters?.maxPrice !== undefined) {
-      const includeUnknown = filters.includeUnknownPrice ?? true;
-      if (includeUnknown) {
-        query = query.or(
-          `min_price.is.null,min_price.lte.${filters.maxPrice},event_kind.eq.free_event`,
-        );
-      } else {
-        query = query.or(
-          `min_price.lte.${filters.maxPrice},event_kind.eq.free_event`,
-        );
-      }
+      return opts?.out?.length ?? 0;
     }
 
     const { count, error } = await query;
@@ -1262,20 +1759,18 @@ export class SupabaseCatalogRepository implements ICatalogRepository {
       city: v.city ?? undefined,
     }));
 
-    const genreSet = new Set<string>();
-
-    if (genresRes.data) {
-      for (const row of genresRes.data as Array<{ genre?: string | null }>) {
-        if (row.genre && row.genre.trim().length > 0) {
-          genreSet.add(row.genre.trim());
-        }
-      }
-    }
+    // One shared vocabulary: non-genres ("Live Music", rodeo, ...) are dropped, raw source strings
+    // collapse to canonical labels so filters, badges and search agree.
+    const genres = normalizeGenreFacets(
+      ((genresRes.data ?? []) as Array<{ genre?: string | null }>).map(
+        (row) => row.genre,
+      ),
+    );
 
     return {
       venues,
       cities: citiesList.sort((a, b) => a.localeCompare(b)),
-      genres: Array.from(genreSet).sort((a, b) => a.localeCompare(b)),
+      genres,
     };
   }
 
@@ -1361,6 +1856,147 @@ export class SupabaseCatalogRepository implements ICatalogRepository {
     }
     if (!data || !data.artists) return null;
     return mapArtistRow(data.artists as unknown as ArtistRow);
+  }
+
+  async getArtistsByIds(ids: string[]): Promise<Artist[]> {
+    const unique = Array.from(new Set(ids.filter(Boolean)));
+    if (unique.length === 0) return [];
+    const { data, error } = await this.client
+      .from('artists')
+      .select('*')
+      .in('id', unique);
+    if (error) {
+      throw new Error(`Failed to load artists by id: ${error.message}`);
+    }
+    return (data ?? []).map((row) => mapArtistRow(row as ArtistRow));
+  }
+
+  async listFestivalDays(eventId: string): Promise<FestivalDay[]> {
+    const { data: self, error: selfErr } = await this.client
+      .from('events')
+      .select('festival_group_id')
+      .eq('id', eventId)
+      .maybeSingle();
+    if (selfErr) {
+      throw new Error(`Failed to load festival group: ${selfErr.message}`);
+    }
+    const groupId = (self as { festival_group_id?: string | null } | null)
+      ?.festival_group_id;
+    if (!groupId) return [];
+    const { data, error } = await this.client
+      .from('events')
+      .select('id, name, local_start_date')
+      .eq('festival_group_id', groupId)
+      .order('local_start_date', { ascending: true })
+      .order('id', { ascending: true });
+    if (error) {
+      throw new Error(`Failed to list festival days: ${error.message}`);
+    }
+    return (
+      (data ?? []) as Array<{
+        id: string;
+        name: string;
+        local_start_date: string;
+      }>
+    ).map((r) => ({
+      id: r.id,
+      name: r.name,
+      localStartDate: r.local_start_date,
+    }));
+  }
+
+  /** Recomputes festival day groups (presentation only); returns the number of grouped events. */
+  async refreshFestivalGroups(): Promise<number> {
+    const { data, error } = await this.client.rpc('refresh_festival_groups');
+    if (error) {
+      throw new Error(`Failed to refresh festival groups: ${error.message}`);
+    }
+    return typeof data === 'number' ? data : 0;
+  }
+
+  async fillVenueCoordinatesForEvent(
+    eventId: string,
+    lat: number,
+    lng: number,
+  ): Promise<boolean> {
+    if (!isValidCoordinatePair(lat, lng)) return false;
+    const { data: ev, error: evErr } = await this.client
+      .from('events')
+      .select('venue_id')
+      .eq('id', eventId)
+      .maybeSingle();
+    if (evErr) {
+      throw new Error(`Failed to load event venue: ${evErr.message}`);
+    }
+    const venueId = (ev as { venue_id?: string | null } | null)?.venue_id;
+    if (!venueId) return false;
+    // Fill-if-empty: venues that already have coordinates are never changed.
+    const { data, error } = await this.client
+      .from('venues')
+      .update({ lat, lng, updated_at: new Date().toISOString() })
+      .eq('id', venueId)
+      .is('lat', null)
+      .is('lng', null)
+      .select('id');
+    if (error) {
+      throw new Error(`Failed to store venue coordinates: ${error.message}`);
+    }
+    return (data ?? []).length > 0;
+  }
+
+  async fillEventGenres(
+    eventId: string,
+    genres: string[],
+    source: string,
+  ): Promise<boolean> {
+    const clean = Array.from(
+      new Set(genres.map((g) => g?.trim()).filter((g): g is string => !!g)),
+    );
+    if (clean.length === 0) return false;
+    // Fill-if-empty: only events with NO genre of any kind are written, so source-supplied
+    // genres are never overwritten. The origin is recorded in genres_source.
+    const { data, error } = await this.client
+      .from('events')
+      .update({
+        genre: clean[0],
+        genres: clean,
+        genres_source: source,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', eventId)
+      .filter('genres', 'eq', '{}')
+      .is('genre', null)
+      .select('id');
+    if (error) {
+      throw new Error(`Failed to store event genres: ${error.message}`);
+    }
+    return (data ?? []).length > 0;
+  }
+
+  async fillArtistGenres(
+    artistId: string,
+    genres: string[],
+    source: string,
+  ): Promise<boolean> {
+    const clean = Array.from(
+      new Set(genres.map((g) => g?.trim()).filter((g): g is string => !!g)),
+    );
+    if (clean.length === 0) return false;
+    // Only rows with no genres yet are written (fill-if-empty); provenance is recorded.
+    const { data, error } = await this.client
+      .from('artists')
+      .update({
+        genres: clean,
+        genres_source: source,
+        genres_updated_at: new Date().toISOString(),
+      })
+      .eq('id', artistId)
+      .filter('genres', 'eq', '{}')
+      .select('id');
+    if (error) {
+      throw new Error(`Failed to store artist genres: ${error.message}`);
+    }
+    return (data ?? []).length > 0;
   }
 
   async findArtistIdsByExternalIds(

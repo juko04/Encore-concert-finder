@@ -15,10 +15,9 @@
  *   npx vite-node --config vitest.config.ts scripts/cleanup-john-summit-fixture.ts
  */
 
-import fs from 'node:fs';
-import path from 'node:path';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { assertSafeDatabaseTarget } from '@/lib/supabase/destination-guard';
+import { loadEnvLocal } from '@/lib/utils/load-env-local';
 
 export const SYNTHETIC_SOURCE_SLUG = 'synthetic_fixture_test_john_summit';
 export const SYNTHETIC_EVENT_TITLE = 'TEST EVENT — John Summit (NOT REAL)';
@@ -31,31 +30,6 @@ export interface CleanupResult {
   deletedCandidates: number;
   deletedRawIngests: number;
   deletedSources: number;
-}
-
-function loadEnvLocal(): void {
-  const envPath = path.resolve(process.cwd(), '.env.local');
-  if (fs.existsSync(envPath)) {
-    const lines = fs.readFileSync(envPath, 'utf-8').split('\n');
-    for (const line of lines) {
-      const trimmed = line.trim();
-      if (!trimmed || trimmed.startsWith('#')) continue;
-      const eqIdx = trimmed.indexOf('=');
-      if (eqIdx > 0) {
-        const key = trimmed.slice(0, eqIdx).trim();
-        let val = trimmed.slice(eqIdx + 1).trim();
-        if (
-          (val.startsWith('"') && val.endsWith('"')) ||
-          (val.startsWith("'") && val.endsWith("'"))
-        ) {
-          val = val.slice(1, -1);
-        }
-        if (!process.env[key]) {
-          process.env[key] = val;
-        }
-      }
-    }
-  }
 }
 
 function resolveSupabaseAdmin(): { client: SupabaseClient; url: string } {

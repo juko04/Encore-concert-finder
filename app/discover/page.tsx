@@ -1,4 +1,5 @@
 import React from 'react';
+import { getHomeLocation } from '@/lib/location/server';
 import { getAuthenticatedUser } from '@/lib/auth/session';
 import {
   getPersonalizedDiscoverData,
@@ -32,8 +33,12 @@ export default async function DiscoverPage() {
 
   if (user) {
     try {
+      const homeLocation = await getHomeLocation(user.id);
       const personalizedData = await getPersonalizedDiscoverData({
         userId: user.id,
+        locationOverride: homeLocation
+          ? { lat: homeLocation.lat, lng: homeLocation.lng }
+          : undefined,
       });
 
       return (

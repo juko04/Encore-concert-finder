@@ -74,9 +74,49 @@ export class EventMatcher {
       const candidatePrimaryId = resolvedArtistIds[0];
       let hasDistinctPerformance = false;
 
+      // Artist-less candidate (e.g. a club night): there is no artist identity to compare, so
+      // only an identical normalized title can ever merge it, and only into another
+      // artist-less event. Different titles on the same night are different events.
+      const candidateIsArtistless =
+        resolvedArtistIds.length === 0 && candidateNormArtists.length === 0;
+      let comparedEvents = 0;
+
       for (const existingEvent of sameVenueEvents) {
         const detail = await catalogRepo.getEventById(existingEvent.id);
         if (!detail) continue;
+
+        if (candidateIsArtistless) {
+          const sameTitle =
+            normalizeName(candidate.title) === normalizeName(detail.name);
+          if (!sameTitle) continue;
+          if (detail.artists.length > 0) {
+            // Same title as an event that has artists: cannot tell if it is the same show.
+            return {
+              decision: 'needs_review',
+              confidence: 0.5,
+              reasons: ['same_venue_and_date_same_title_artist_mismatch'],
+            };
+          }
+          if (candidate.startsAt && existingEvent.startsAt) {
+            const diff =
+              Math.abs(
+                new Date(candidate.startsAt).getTime() -
+                  new Date(existingEvent.startsAt).getTime(),
+              ) /
+              (1000 * 60);
+            if (!isNaN(diff) && diff >= 90) continue; // early vs late run
+          }
+          return {
+            decision: 'match',
+            matchedEvent: existingEvent,
+            confidence: 0.9,
+            reasons: ['same_venue_and_date', 'same_title_artistless'],
+          };
+        }
+
+        // An artist-less existing event never competes with a candidate that has artists.
+        if (detail.artists.length === 0) continue;
+        comparedEvents++;
 
         const existingNormArtists = detail.artists.map((a) =>
           normalizeName(a.name),
@@ -215,6 +255,20 @@ export class EventMatcher {
           decision: 'create',
           confidence: 0.9,
           reasons: ['distinct_performance_same_date_non_overlapping_time'],
+        };
+      }
+
+      if (candidateIsArtistless || comparedEvents === 0) {
+        // Nothing comparable on this night (only differently titled artist-less events, or
+        // events the candidate has no identity overlap with): a separate event.
+        return {
+          decision: 'create',
+          confidence: 0.85,
+          reasons: [
+            candidateIsArtistless
+              ? 'artistless_distinct_title_same_date'
+              : 'only_artistless_events_same_date',
+          ],
         };
       }
 

@@ -8,6 +8,7 @@ import {
   getStatusBadge,
   calculateDistanceMiles,
   getArtistAccent,
+  formatMatchScoreLabel,
 } from '@/components/index/formatters';
 
 describe('Index Formatters Unit Tests', () => {
@@ -194,5 +195,14 @@ describe('Index Formatters Unit Tests', () => {
       const distance = calculateDistanceMiles(40.015, -105.2705, origin);
       expect(distance).toBe(0);
     });
+  });
+});
+
+describe('formatMatchScoreLabel', () => {
+  it('labels and clamps 0-100 scores', () => {
+    expect(formatMatchScoreLabel(72)).toBe('Match 72');
+    expect(formatMatchScoreLabel(71.6)).toBe('Match 72');
+    expect(formatMatchScoreLabel(140)).toBe('Match 100');
+    expect(formatMatchScoreLabel(-3)).toBe('Match 0');
   });
 });

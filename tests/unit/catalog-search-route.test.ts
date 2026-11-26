@@ -54,7 +54,7 @@ describe('GET /api/catalog/search (Server-side Pagination & Filter Route)', () =
     mockCountEvents.mockResolvedValueOnce(542);
 
     const url =
-      'http://localhost/api/catalog/search?q=National&venueId=venue-mb&city=Denver&startDate=2026-10-01&endDate=2026-10-31&minPrice=40&maxPrice=100&freeOnly=false&sort=price_asc&page=2&limit=50';
+      'http://localhost/api/catalog/search?q=National&venueId=venue-mb&city=Denver&startDate=2026-10-01&endDate=2026-10-31&includePast=true&minPrice=40&maxPrice=100&freeOnly=false&sort=price_asc&page=2&limit=50';
     const req = new Request(url);
 
     const res = await GET(req);
@@ -72,6 +72,7 @@ describe('GET /api/catalog/search (Server-side Pagination & Filter Route)', () =
         genre: undefined,
         fromDate: '2026-10-01',
         toDate: '2026-10-31',
+        excludePastShowtimes: false, // includePast=true is the only opt-out
         minPrice: 40,
         maxPrice: 100,
         freeOnly: undefined,
@@ -102,6 +103,7 @@ describe('GET /api/catalog/search (Server-side Pagination & Filter Route)', () =
       totalCount: 542,
       totalPages: 11,
       hasMore: true,
+      nearApplied: false,
     });
 
     // Verify pagination headers
@@ -128,6 +130,7 @@ describe('GET /api/catalog/search (Server-side Pagination & Filter Route)', () =
       totalCount: 101,
       totalPages: 3,
       hasMore: false,
+      nearApplied: false,
     });
     expect(res.headers.get('X-Has-More')).toBe('false');
   });
@@ -219,6 +222,7 @@ describe('GET /api/catalog/search (Server-side Pagination & Filter Route)', () =
       totalCount: 3,
       totalPages: 1,
       hasMore: false,
+      nearApplied: false,
     });
   });
 });

@@ -57,6 +57,17 @@ export const Z2_KNOWN_VENUES: Record<string, Z2VenueMapping> = {
       longitude: -105.0768,
     },
   },
+  // Not a Z2-owned room, but Z2/AXS sells its shows; without this entry the feed's default
+  // (Boulder) was applied and a second, wrongly-located venue row was created.
+  '10 mile music hall': {
+    venueName: '10 Mile Music Hall',
+    address: '710 Main St',
+    city: 'Frisco',
+    state: 'CO',
+    postalCode: '80443',
+    country: 'US',
+    timezone: 'America/Denver',
+  },
   'chautauqua auditorium': {
     venueName: 'Chautauqua Auditorium',
     address: '900 Baseline Rd',

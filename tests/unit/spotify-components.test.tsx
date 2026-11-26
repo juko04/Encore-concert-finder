@@ -176,6 +176,48 @@ describe('Spotify UI Components', () => {
       },
     ];
 
+    it('shows each artist rank out of 50, with per-window ranks and affinity when known', () => {
+      const withRanks: SpotifyTopArtist[] = [
+        {
+          ...mockArtists[0],
+          ranksByRange: { short_term: 1, medium_term: 4 },
+          affinity: 0.874,
+        },
+        mockArtists[1],
+      ];
+      render(
+        <SpotifyTastePreview
+          artists={withRanks}
+          timeRange="short_term"
+          onChangeTimeRange={vi.fn()}
+          existingPreferences={[]}
+          onAddPreference={vi.fn()}
+        />,
+      );
+
+      const rank = screen.getByTestId('spotify-rank-artist-1');
+      expect(rank.textContent).toContain('#1');
+      expect(rank.textContent).toContain('of 50');
+
+      const windows = screen.getByTestId('spotify-window-ranks-artist-1');
+      expect(windows.textContent).toContain('4 wk');
+      expect(windows.textContent).toContain('#1');
+      expect(windows.textContent).toContain('6 mo');
+      expect(windows.textContent).toContain('#4');
+      // No long-term rank: shown as a dash, never invented.
+      expect(windows.textContent).toContain('1 yr');
+      expect(windows.textContent).toContain('—');
+      expect(
+        screen.getByTestId('spotify-affinity-artist-1').textContent,
+      ).toContain('87');
+
+      // An artist without window data still shows its rank but no window/affinity line.
+      expect(screen.getByTestId('spotify-rank-artist-2').textContent).toContain(
+        '#2',
+      );
+      expect(screen.queryByTestId('spotify-window-ranks-artist-2')).toBeNull();
+    });
+
     it('renders time horizon tabs and recency hypothesis banner', () => {
       const onChangeRange = vi.fn();
       render(

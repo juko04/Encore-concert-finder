@@ -1,3 +1,4 @@
+import { buildVenueProvenance } from '../adapter-helpers';
 import * as cheerio from 'cheerio';
 import type {
   CandidateArtist,
@@ -468,18 +469,11 @@ export function parseCervantesEvents(
       const sourceEventId = extractSourceEventId(eventUrl, rawTicketUrl);
 
       // 6. Provenance
-      const provenance: SourceProvenance = {
-        sourceId: context.sourceId,
-        sourceType: 'venue',
-        acquisitionMethod: 'html_http',
+      const provenance: SourceProvenance = buildVenueProvenance(context, {
         sourceUrl: eventUrl,
         sourceEventId,
-        rawIngestId: context.rawIngestId,
-        fetchedAt: context.fetchedAt,
-        contentHash: context.contentHash,
-        parserVersion: context.parserVersion,
         confidence: 0.98,
-      };
+      });
 
       const candidate: EventCandidate = {
         rawIngestId: context.rawIngestId,

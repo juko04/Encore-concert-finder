@@ -3,6 +3,7 @@ import type { UserProfile } from '@/lib/domain/profile';
 import type { UserArtistPreference } from '@/lib/domain/user-preference';
 import { calculateHaversineDistanceMiles } from '@/lib/recommendation/factors/distance';
 import type { DiscoveryMode, ScoringWeights } from '@/lib/recommendation/types';
+import { FALLBACK_TIMEZONE } from '@/lib/location/timezone';
 
 export interface DiscoveryModeConfig {
   id: DiscoveryMode;
@@ -36,7 +37,7 @@ export const DISCOVERY_MODE_CONFIGS: Record<
     badge: '📅',
     tagline: 'Concerts happening soon near you',
     description:
-      'Upcoming concerts happening this weekend, emphasizing convenient timing, proximity, and spontaneous affordability.',
+      'Upcoming concerts happening this weekend, emphasizing proximity, and spontaneous affordability.',
     emptyStateHeading: 'No concerts scheduled for this weekend',
     emptyStateDescription:
       'There are no upcoming concerts scheduled in your area this weekend. Try exploring All Shows or check back as weekend dates are added.',
@@ -101,9 +102,9 @@ export interface ZonedTimeParts {
  */
 export function getZonedTimeParts(
   date: Date,
-  timeZone = 'America/Denver',
+  timeZone = FALLBACK_TIMEZONE,
 ): ZonedTimeParts {
-  const safeTz = timeZone || 'America/Denver';
+  const safeTz = timeZone || FALLBACK_TIMEZONE;
   const dtf = new Intl.DateTimeFormat('en-US', {
     timeZone: safeTz,
     year: 'numeric',
@@ -158,7 +159,7 @@ export function addDaysToDateString(dateString: string, days: number): string {
 export function calculate14DayLookaheadEndDate(
   referenceDate?: string,
   referenceInstant?: string | Date,
-  timeZone = 'America/Denver',
+  timeZone = FALLBACK_TIMEZONE,
 ): string {
   let refDateString = referenceDate;
   if (!refDateString) {
@@ -206,7 +207,7 @@ export function calculateWeekendWindow(
 ): { startDate: string; endDate: string } {
   let referenceDate: string | undefined;
   let referenceInstant: Date | string | undefined;
-  let timeZone = 'America/Denver';
+  let timeZone = FALLBACK_TIMEZONE;
 
   if (
     typeof optionsOrReferenceDate === 'object' &&
@@ -308,7 +309,7 @@ export function isEventEligibleForMode(
   if (mode === 'all') return true;
 
   if (mode === 'this_weekend') {
-    const eventTz = event.timezone || context.timeZone || 'America/Denver';
+    const eventTz = event.timezone || context.timeZone || FALLBACK_TIMEZONE;
     const window = calculateWeekendWindow({
       referenceDate: context.referenceDate,
       referenceInstant: context.referenceInstant,
@@ -348,7 +349,7 @@ export function isEventEligibleForMode(
         : new Date();
       refDateString = getZonedTimeParts(
         refInst,
-        event.timezone || 'America/Denver',
+        event.timezone || context.timeZone || FALLBACK_TIMEZONE,
       ).dateString;
     }
 
@@ -432,7 +433,7 @@ export function isEventEligibleForMode(
         : new Date();
       refDateString = getZonedTimeParts(
         refInst,
-        event.timezone || 'America/Denver',
+        event.timezone || context.timeZone || FALLBACK_TIMEZONE,
       ).dateString;
     }
 
@@ -495,14 +496,14 @@ export function getModeScoringWeights(
 ): ScoringWeights {
   switch (mode) {
     case 'this_weekend':
-      // Emphasize convenient timing and local proximity
-      return { timing: 40, distance: 30, price: 15, artist: 15 };
+      // Emphasize local proximity and spontaneous affordability
+      return { distance: 45, price: 25, artist: 30 };
     case 'cheap_and_nearby':
       // Emphasize low price and proximity, welcoming unfamiliar artists
-      return { price: 40, distance: 35, artist: 15, timing: 10 };
+      return { price: 40, distance: 35, artist: 25 };
     case 'worth_planning_for':
       // Emphasize favorite artists and worthwhile destination shows
-      return { artist: 55, price: 15, timing: 15, distance: 15 };
+      return { artist: 65, price: 15, distance: 20 };
     case 'all':
     default:
       return baseWeights;

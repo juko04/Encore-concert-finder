@@ -362,9 +362,12 @@ describe('PostgreSQL Integration: Personalized Discover Experience', () => {
       throw new Error('Admin client not initialized');
     }
 
+    // Ask for the seeded event by name so the check does not depend on how many other Denver
+    // events the dev database holds (the default page is the first 50 by date).
     const publicData = await getPublicDiscoverData({
       client: adminClient,
       city: 'Denver',
+      searchQuery: 'The National',
     });
 
     expect(publicData.events.length).toBeGreaterThan(0);

@@ -23,31 +23,27 @@ describe('Recommendation Presets & Weights', () => {
 
   it('verifies exact weights for every preset', () => {
     expect(PRESET_WEIGHTS.balanced).toEqual({
-      artist: 50,
-      distance: 20,
+      artist: 55,
+      distance: 25,
       price: 20,
-      timing: 10,
     });
 
     expect(PRESET_WEIGHTS.artist_first).toEqual({
-      artist: 65,
+      artist: 70,
       distance: 15,
-      price: 10,
-      timing: 10,
+      price: 15,
     });
 
     expect(PRESET_WEIGHTS.nearby).toEqual({
-      artist: 40,
-      distance: 35,
+      artist: 45,
+      distance: 40,
       price: 15,
-      timing: 10,
     });
 
     expect(PRESET_WEIGHTS.value).toEqual({
-      artist: 40,
+      artist: 45,
       distance: 15,
-      price: 35,
-      timing: 10,
+      price: 40,
     });
   });
 
@@ -55,8 +51,7 @@ describe('Recommendation Presets & Weights', () => {
     for (const preset of VALID_RECOMMENDATION_PRESETS) {
       const weights = PRESET_WEIGHTS[preset];
       expect(validateWeightsSum(weights)).toBe(true);
-      const total =
-        weights.artist + weights.distance + weights.price + weights.timing;
+      const total = weights.artist + weights.distance + weights.price;
       expect(total).toBe(100);
     }
   });

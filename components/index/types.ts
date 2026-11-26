@@ -6,6 +6,8 @@ import type {
   StartTimePrecision,
 } from '@/lib/domain/catalog';
 import type { ScoredEvent } from '@/lib/recommendation/types';
+import { FESTIVAL_BILL_MIN_ARTISTS } from '@/lib/events/lineup';
+import type { ArtistAffinity } from '@/lib/recommendation/artist-affinity';
 
 export type IndexInventoryStatus =
   'available' | 'low_inventory' | 'sold_out' | 'cancelled' | 'unknown';
@@ -36,7 +38,6 @@ export interface IndexPersonalScore {
     artist?: IndexFactorDetail;
     distance?: IndexFactorDetail;
     price?: IndexFactorDetail;
-    timing?: IndexFactorDetail;
   };
 }
 
@@ -46,6 +47,10 @@ export interface IndexArtistItem {
   billingPosition: BillingPosition | 'headliner' | 'support' | string;
   spotifyArtistId?: string | null;
   imageUrl?: string | null;
+  /** Genres of this artist (e.g. from Ticketmaster); used so multi-genre bills show "Mixed". */
+  genres?: string[];
+  /** Set when the signed-in user likes this artist; drives the liked marker and ordering. */
+  affinity?: ArtistAffinity;
 }
 
 export interface IndexTrackPreview {
@@ -66,6 +71,8 @@ export interface IndexEventItem {
   lat?: number | null;
   lng?: number | null;
   localStartDate: string; // YYYY-MM-DD
+  /** Last day of a collapsed multi-day festival (this card is its first day). */
+  festivalGroupEndDate?: string | null;
   startsAt?: string | null;
   doorTime?: string | null;
   timezone?: string;
@@ -79,6 +86,10 @@ export interface IndexEventItem {
   ticketUrl?: string | null;
   presaleDate?: string | null;
   genre?: string | null;
+  /** All event-level genres (primary first). */
+  genres?: string[];
+  /** True when the genres were inferred (e.g. from the title) rather than source-supplied. */
+  genresInferred?: boolean;
   subgenres?: string[];
   ageRestriction?: string | null;
   imageUrl?: string | null;
@@ -107,7 +118,6 @@ export interface IndexEventItem {
     artist: { score: number; weight?: number; explanation: string };
     distance: { score: number; weight?: number; explanation: string };
     price: { score: number; weight?: number; explanation: string };
-    timing: { score: number; weight?: number; explanation: string };
   };
 }
 
@@ -205,6 +215,109 @@ export function resolveInventoryStatus(
 }
 
 /**
+ * Maps the canonical event fields shared by every IndexEventItem branch (everything except
+ * scoring/personal fields). `inventoryStatus` is resolved by the caller because ScoredEvent
+ * inputs may carry their own.
+ */
+function mapCanonicalToIndexBase(
+  canonical: CanonicalEventSummary,
+  inventoryStatus: IndexInventoryStatus,
+): Omit<
+  IndexEventItem,
+  | 'personalScore'
+  | 'sourceName'
+  | 'score'
+  | 'scoreExplanation'
+  | 'isFavorite'
+  | 'isDisliked'
+  | 'isSuppressed'
+  | 'suppressionReason'
+  | 'matchedArtistName'
+  | 'isExploratory'
+  | 'factors'
+> {
+  const palette = getDeterministicPalette(canonical.id || canonical.title);
+  // A festival-sized bill has no single headliner: the card is titled by the event itself (the
+  // event-named pseudo-artist is dropped from lineups, see lib/events/lineup.ts).
+  const isFestivalBill =
+    (canonical.artists?.length ?? 0) >= FESTIVAL_BILL_MIN_ARTISTS;
+  const headliner =
+    canonical.artists?.find((a) => a.billingPosition === 'headliner') ||
+    (isFestivalBill ? undefined : canonical.artists?.[0]);
+  const canonicalAny = canonical as unknown as Record<string, unknown>;
+
+  return {
+    id: canonical.id,
+    title: canonical.title,
+    headlinerName: headliner?.name || canonical.title,
+    artists: (canonical.artists || []).map((a) => ({
+      id: a.id,
+      name: a.name,
+      billingPosition: a.billingPosition,
+      spotifyArtistId: a.spotifyArtistId,
+      imageUrl: (a as { imageUrl?: string | null }).imageUrl ?? null,
+      genres: (a as { genres?: string[] }).genres ?? [],
+      affinity: (a as { affinity?: ArtistAffinity }).affinity,
+    })),
+    venueName: canonical.venueName,
+    venueId: canonical.venueId,
+    city: canonical.city,
+    region: canonical.region,
+    lat: canonical.lat,
+    lng: canonical.lng,
+    localStartDate: canonical.localStartDate,
+    festivalGroupEndDate: canonical.festivalGroupEndDate ?? null,
+    startsAt: canonical.startsAt,
+    doorTime: (canonicalAny.doorTime as string) || null,
+    timezone: canonical.timezone,
+    startTimePrecision: canonical.startTimePrecision,
+    status: canonical.status,
+    eventKind: canonical.eventKind,
+    inventoryStatus,
+    minPrice: canonical.minPrice,
+    maxPrice: canonical.maxPrice,
+    currency: canonical.currency,
+    ticketUrl: canonical.ticketUrl,
+    presaleDate: (canonicalAny.presaleDate as string) || null,
+    genre: (canonicalAny.genre as string) || null,
+    genres: Array.isArray(canonicalAny.genres)
+      ? (canonicalAny.genres as string[])
+      : [],
+    genresInferred: canonicalAny.genresSource === 'inferred_title',
+    subgenres: Array.isArray(canonicalAny.subgenres)
+      ? (canonicalAny.subgenres as string[])
+      : undefined,
+    ageRestriction: (canonicalAny.ageRestriction as string) || undefined,
+    imageUrl:
+      (canonicalAny.imageUrl as string) ||
+      (headliner as { imageUrl?: string | null })?.imageUrl ||
+      null,
+    venueImageUrl:
+      ((canonical.venue as { imageUrl?: string | null } | null)
+        ?.imageUrl as string) || null,
+    ticketRemainingPercent:
+      typeof canonicalAny.ticketRemainingPercent === 'number'
+        ? canonicalAny.ticketRemainingPercent
+        : null,
+    posterColor: (canonicalAny.posterColor as string) || palette.primary,
+    posterSecondaryColor:
+      (canonicalAny.posterSecondaryColor as string) || palette.secondary,
+    spotifyPreviewTrack:
+      (canonicalAny.spotifyPreviewTrack as IndexTrackPreview) || null,
+    whyItSuitsYou: Array.isArray(canonicalAny.whyItSuitsYou)
+      ? (canonicalAny.whyItSuitsYou as string[])
+      : undefined,
+    considerations: Array.isArray(canonicalAny.considerations)
+      ? (canonicalAny.considerations as string[])
+      : undefined,
+    vibeTags: Array.isArray(canonicalAny.vibeTags)
+      ? (canonicalAny.vibeTags as string[])
+      : undefined,
+    description: (canonicalAny.description as string) || null,
+  };
+}
+
+/**
  * Adapts either a CanonicalEventSummary or a ScoredEvent (or prototype object)
  * into a presentation-ready IndexEventItem.
  */
@@ -217,11 +330,6 @@ export function toIndexEventItem(
 
   if (isScoredEvent(input)) {
     const canonical = input.event;
-    const palette = getDeterministicPalette(canonical.id || canonical.title);
-    const headliner =
-      canonical.artists?.find((a) => a.billingPosition === 'headliner') ||
-      canonical.artists?.[0];
-
     const inputAny = input as unknown as Record<string, unknown>;
     const canonicalAny = canonical as unknown as Record<string, unknown>;
 
@@ -253,76 +361,11 @@ export function toIndexEventItem(
           score: input.factors.price.score,
           explanation: input.factors.price.explanation,
         },
-        timing: {
-          score: input.factors.timing.score,
-          explanation: input.factors.timing.explanation,
-        },
       },
     };
 
     return {
-      id: canonical.id,
-      title: canonical.title,
-      headlinerName: headliner?.name || canonical.title,
-      artists: (canonical.artists || []).map((a) => ({
-        id: a.id,
-        name: a.name,
-        billingPosition: a.billingPosition,
-        spotifyArtistId: a.spotifyArtistId,
-        imageUrl: (a as { imageUrl?: string | null }).imageUrl ?? null,
-      })),
-      venueName: canonical.venueName,
-      venueId: canonical.venueId,
-      city: canonical.city,
-      region: canonical.region,
-      lat: canonical.lat,
-      lng: canonical.lng,
-      localStartDate: canonical.localStartDate,
-      startsAt: canonical.startsAt,
-      doorTime: (canonicalAny.doorTime as string) || null,
-      timezone: canonical.timezone,
-      startTimePrecision: canonical.startTimePrecision,
-      status: canonical.status,
-      eventKind: canonical.eventKind,
-      inventoryStatus,
-      minPrice: canonical.minPrice,
-      maxPrice: canonical.maxPrice,
-      currency: canonical.currency,
-      ticketUrl: canonical.ticketUrl,
-      presaleDate: (canonicalAny.presaleDate as string) || null,
-      genre:
-        (canonicalAny.genre as string) ||
-        (canonical.eventKind ? String(canonical.eventKind) : 'Live Music'),
-      subgenres: Array.isArray(canonicalAny.subgenres)
-        ? (canonicalAny.subgenres as string[])
-        : undefined,
-      ageRestriction: (canonicalAny.ageRestriction as string) || 'All Ages',
-      imageUrl:
-        (canonicalAny.imageUrl as string) ||
-        (headliner as { imageUrl?: string | null })?.imageUrl ||
-        null,
-      venueImageUrl:
-        ((canonical.venue as { imageUrl?: string | null } | null)
-          ?.imageUrl as string) || null,
-      ticketRemainingPercent:
-        typeof canonicalAny.ticketRemainingPercent === 'number'
-          ? canonicalAny.ticketRemainingPercent
-          : null,
-      posterColor: (canonicalAny.posterColor as string) || palette.primary,
-      posterSecondaryColor:
-        (canonicalAny.posterSecondaryColor as string) || palette.secondary,
-      spotifyPreviewTrack:
-        (canonicalAny.spotifyPreviewTrack as IndexTrackPreview) || null,
-      whyItSuitsYou: Array.isArray(canonicalAny.whyItSuitsYou)
-        ? (canonicalAny.whyItSuitsYou as string[])
-        : undefined,
-      considerations: Array.isArray(canonicalAny.considerations)
-        ? (canonicalAny.considerations as string[])
-        : undefined,
-      vibeTags: Array.isArray(canonicalAny.vibeTags)
-        ? (canonicalAny.vibeTags as string[])
-        : undefined,
-      description: (canonicalAny.description as string) || null,
+      ...mapCanonicalToIndexBase(canonical, inventoryStatus),
       personalScore,
       sourceName: canonical.sourceName,
       score: input.score,
@@ -350,22 +393,12 @@ export function toIndexEventItem(
           weight: input.factors.price.weight,
           explanation: input.factors.price.explanation,
         },
-        timing: {
-          score: input.factors.timing.score,
-          weight: input.factors.timing.weight,
-          explanation: input.factors.timing.explanation,
-        },
       },
     };
   }
 
   // Pure CanonicalEventSummary (or enriched canonical)
   const canonical = input;
-  const palette = getDeterministicPalette(canonical.id || canonical.title);
-  const headliner =
-    canonical.artists?.find((a) => a.billingPosition === 'headliner') ||
-    canonical.artists?.[0];
-
   const canonicalAny = canonical as unknown as Record<string, unknown>;
 
   const inventoryStatus = resolveInventoryStatus(
@@ -393,68 +426,7 @@ export function toIndexEventItem(
   }
 
   return {
-    id: canonical.id,
-    title: canonical.title,
-    headlinerName: headliner?.name || canonical.title,
-    artists: (canonical.artists || []).map((a) => ({
-      id: a.id,
-      name: a.name,
-      billingPosition: a.billingPosition,
-      spotifyArtistId: a.spotifyArtistId,
-      imageUrl: (a as { imageUrl?: string | null }).imageUrl ?? null,
-    })),
-    venueName: canonical.venueName,
-    venueId: canonical.venueId,
-    city: canonical.city,
-    region: canonical.region,
-    lat: canonical.lat,
-    lng: canonical.lng,
-    localStartDate: canonical.localStartDate,
-    startsAt: canonical.startsAt,
-    doorTime: (canonicalAny.doorTime as string) || null,
-    timezone: canonical.timezone,
-    startTimePrecision: canonical.startTimePrecision,
-    status: canonical.status,
-    eventKind: canonical.eventKind,
-    inventoryStatus,
-    minPrice: canonical.minPrice,
-    maxPrice: canonical.maxPrice,
-    currency: canonical.currency,
-    ticketUrl: canonical.ticketUrl,
-    presaleDate: (canonicalAny.presaleDate as string) || null,
-    genre:
-      (canonicalAny.genre as string) ||
-      (canonical.eventKind ? String(canonical.eventKind) : 'Live Music'),
-    subgenres: Array.isArray(canonicalAny.subgenres)
-      ? (canonicalAny.subgenres as string[])
-      : undefined,
-    ageRestriction: (canonicalAny.ageRestriction as string) || 'All Ages',
-    imageUrl:
-      (canonicalAny.imageUrl as string) ||
-      (headliner as { imageUrl?: string | null })?.imageUrl ||
-      null,
-    venueImageUrl:
-      ((canonical.venue as { imageUrl?: string | null } | null)
-        ?.imageUrl as string) || null,
-    ticketRemainingPercent:
-      typeof canonicalAny.ticketRemainingPercent === 'number'
-        ? canonicalAny.ticketRemainingPercent
-        : null,
-    posterColor: (canonicalAny.posterColor as string) || palette.primary,
-    posterSecondaryColor:
-      (canonicalAny.posterSecondaryColor as string) || palette.secondary,
-    spotifyPreviewTrack:
-      (canonicalAny.spotifyPreviewTrack as IndexTrackPreview) || null,
-    whyItSuitsYou: Array.isArray(canonicalAny.whyItSuitsYou)
-      ? (canonicalAny.whyItSuitsYou as string[])
-      : undefined,
-    considerations: Array.isArray(canonicalAny.considerations)
-      ? (canonicalAny.considerations as string[])
-      : undefined,
-    vibeTags: Array.isArray(canonicalAny.vibeTags)
-      ? (canonicalAny.vibeTags as string[])
-      : undefined,
-    description: (canonicalAny.description as string) || null,
+    ...mapCanonicalToIndexBase(canonical, inventoryStatus),
     personalScore,
     sourceName: canonical.sourceName,
     score: personalScore?.score,

@@ -768,6 +768,38 @@ describe('Ticketmaster Ingestion Foundation', () => {
       expect(url.searchParams.get('apikey')).toBe('test-key');
     });
 
+    it('forwards countryCode from crawl metadata in both fetch and fetchPartitioned', async () => {
+      const fetchMock = vi.fn().mockResolvedValue({
+        ok: true,
+        text: async () =>
+          JSON.stringify({
+            ...fixtureData,
+            page: { size: 50, totalElements: 6, totalPages: 1, number: 0 },
+          }),
+      });
+      global.fetch = fetchMock;
+      const adapter = new TicketmasterDiscoveryAdapter({ apiKey: 'test-key' });
+      const context = {
+        sourceId: adapter.id,
+        metadata: {
+          keyword: 'festival',
+          countryCode: 'US',
+          startDateTime: '2026-11-24T00:00:00Z',
+          endDateTime: '2026-12-08T00:00:00Z',
+        },
+      };
+
+      await adapter.fetch(context as never);
+      await adapter.fetchPartitioned(context as never);
+
+      expect(fetchMock.mock.calls.length).toBeGreaterThanOrEqual(2);
+      for (const [requestUrl] of fetchMock.mock.calls) {
+        expect(
+          new URL(String(requestUrl)).searchParams.get('countryCode'),
+        ).toBe('US');
+      }
+    });
+
     it('trims whitespace from API key to prevent 401 unauthorized errors', () => {
       const client = new TicketmasterApiClient({ apiKey: '  test-key  ' });
       const url = client.buildRequestUrl({});

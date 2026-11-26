@@ -179,6 +179,71 @@ export const Z2_ENTERTAINMENT_CONFIG: VenueSourceConfig = {
   },
 };
 
+// Mishawaka Amphitheatre (Bellvue) - RHP Events list view
+export const MISHAWAKA_SOURCE_SLUG = 'mishawaka-amphitheatre';
+export const MISHAWAKA_DEFAULT_SOURCE_ID =
+  'b0000000-0000-0000-0000-000000000011';
+
+export const MISHAWAKA_CONFIG: VenueSourceConfig = {
+  id: MISHAWAKA_DEFAULT_SOURCE_ID,
+  slug: MISHAWAKA_SOURCE_SLUG,
+  name: 'Mishawaka Amphitheatre',
+  baseUrl: 'https://www.themishawaka.com',
+  calendarUrl: 'https://www.themishawaka.com/events/?view=list',
+  city: 'Bellvue',
+  state: 'CO',
+  country: 'US',
+  defaultTimezone: 'America/Denver',
+  reliabilityScore: 0.95,
+  parserVersion: '1.0.0',
+  defaultAddress: '13714 Poudre Canyon Highway',
+  defaultPostalCode: '80512',
+};
+
+// Bohemian Live Music: Washington's and The Armory (Fort Collins) - Tribe Events REST API
+export const BOHEMIAN_LIVE_MUSIC_SOURCE_SLUG = 'bohemian-live-music';
+export const BOHEMIAN_LIVE_MUSIC_DEFAULT_SOURCE_ID =
+  'b0000000-0000-0000-0000-000000000012';
+
+export const BOHEMIAN_LIVE_MUSIC_CONFIG: VenueSourceConfig = {
+  id: BOHEMIAN_LIVE_MUSIC_DEFAULT_SOURCE_ID,
+  slug: BOHEMIAN_LIVE_MUSIC_SOURCE_SLUG,
+  name: "Bohemian Live Music (Washington's & The Armory)",
+  baseUrl: 'https://bohemianlivemusic.org',
+  calendarUrl: 'https://bohemianlivemusic.org/calendar/',
+  city: 'Fort Collins',
+  state: 'CO',
+  country: 'US',
+  defaultTimezone: 'America/Denver',
+  reliabilityScore: 0.97,
+  parserVersion: '1.0.0',
+};
+
+export const BOHEMIAN_LIVE_MUSIC_API_URL =
+  'https://bohemianlivemusic.org/wp-json/tribe/events/v1/events';
+
+// 10 Mile Music Hall (Frisco) - Tribe Events REST API
+export const TEN_MILE_MUSIC_HALL_SOURCE_SLUG = '10-mile-music-hall';
+export const TEN_MILE_MUSIC_HALL_DEFAULT_SOURCE_ID =
+  'b0000000-0000-0000-0000-000000000013';
+
+export const TEN_MILE_MUSIC_HALL_CONFIG: VenueSourceConfig = {
+  id: TEN_MILE_MUSIC_HALL_DEFAULT_SOURCE_ID,
+  slug: TEN_MILE_MUSIC_HALL_SOURCE_SLUG,
+  name: '10 Mile Music Hall',
+  baseUrl: 'https://10milemusic.com',
+  calendarUrl: 'https://10milemusic.com/show/',
+  city: 'Frisco',
+  state: 'CO',
+  country: 'US',
+  defaultTimezone: 'America/Denver',
+  reliabilityScore: 0.97,
+  parserVersion: '1.0.0',
+};
+
+export const TEN_MILE_MUSIC_HALL_API_URL =
+  'https://10milemusic.com/wp-json/tribe/events/v1/events';
+
 export const DENVER_INDEPENDENT_VENUE_CONFIGS: VenueSourceConfig[] = [
   LARIMER_LOUNGE_CONFIG,
   LOST_LAKE_CONFIG,
@@ -199,6 +264,9 @@ export const ALL_SUPPORTED_VENUE_CONFIGS: VenueSourceConfig[] = [
   VELVET_ELK_CONFIG,
   ROOTS_MUSIC_PROJECT_CONFIG,
   Z2_ENTERTAINMENT_CONFIG,
+  MISHAWAKA_CONFIG,
+  BOHEMIAN_LIVE_MUSIC_CONFIG,
+  TEN_MILE_MUSIC_HALL_CONFIG,
 ];
 
 /**
@@ -263,6 +331,21 @@ export function getVenueSourceConfig(
     norm === 'aggie theater'
   ) {
     return Z2_ENTERTAINMENT_CONFIG;
+  }
+
+  if (norm === 'mishawaka' || norm === 'the mishawaka') {
+    return MISHAWAKA_CONFIG;
+  }
+  if (
+    norm === 'bohemian' ||
+    norm === 'washingtons' ||
+    norm === 'washington s' ||
+    norm === 'the armory'
+  ) {
+    return BOHEMIAN_LIVE_MUSIC_CONFIG;
+  }
+  if (norm === '10 mile' || norm === '10 mile music hall') {
+    return TEN_MILE_MUSIC_HALL_CONFIG;
   }
 
   return undefined;

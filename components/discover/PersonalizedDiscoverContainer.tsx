@@ -36,7 +36,7 @@ const PRESET_CONFIG: Array<{
   {
     id: 'balanced',
     label: 'Balanced',
-    description: 'Even blend of artists, distance, price & timing',
+    description: 'Even blend of artists, distance & price',
   },
   {
     id: 'artist_first',

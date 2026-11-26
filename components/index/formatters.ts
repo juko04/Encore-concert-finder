@@ -387,3 +387,127 @@ export function getArtistAccent(name?: string | null): ArtistAccent {
   const index = Math.abs(hash) % accents.length;
   return accents[index];
 }
+
+/**
+ * Availability badge that only renders when the signal is substantiated.
+ * - sold_out / cancelled: explicit.
+ * - numeric remaining percent (0-100): <5% urgent, <25% caution. Percentages
+ *   at or above 25% show plain availability only if status is 'available'.
+ * - provider-reported 'available' status shows the plain 'Tickets Available'.
+ * - provider-reported low_inventory without a percentage: neutral "Low inventory"
+ *   with no percentage or urgency invented.
+ * Everything else (unknown, presale, missing data, a ticket URL
+ * alone) returns null: unknown stays unknown.
+ */
+export function getVerifiedAvailabilityBadge(
+  status?: IndexInventoryStatus | 'presale' | string | null,
+  remainingPercent?: number | null,
+): StatusBadgeConfig | null {
+  if (status === 'sold_out' || status === 'cancelled') {
+    return getStatusBadge(status, null);
+  }
+  if (
+    typeof remainingPercent === 'number' &&
+    Number.isFinite(remainingPercent) &&
+    remainingPercent >= 0 &&
+    remainingPercent <= 100
+  ) {
+    return remainingPercent < 25 || status === 'available'
+      ? getStatusBadge(status, remainingPercent)
+      : null;
+  }
+  if (status === 'available') return getStatusBadge(status, null);
+  if (status === 'low_inventory') {
+    return {
+      label: 'Low inventory',
+      bg: 'bg-amber-50 text-amber-800 border-amber-200 font-medium',
+      indicatorLevel: 'warning',
+    };
+  }
+  return null;
+}
+
+/** Match chip is shown only for a real score on a signed-in user's event. */
+export function hasRealMatchScore(
+  p?: { isPersonalized?: boolean; score?: number | null } | null,
+): p is { isPersonalized: true; score: number } {
+  return Boolean(
+    p &&
+    p.isPersonalized &&
+    typeof p.score === 'number' &&
+    Number.isFinite(p.score),
+  );
+}
+
+/** Compact card label for a real 0-100 match score, e.g. "Match 72". */
+export function formatMatchScoreLabel(score: number): string {
+  const clamped = Math.max(0, Math.min(100, Math.round(score)));
+  return `Match ${clamped}`;
+}
+
+/**
+ * Label for a card's match score, or null when there is nothing genuine to show: guests,
+ * unscored rows, suppressed (disliked) shows. Shared by the Search and Discover cards so both
+ * surfaces agree.
+ */
+export function getCardMatchScoreLabel(
+  p?: {
+    isPersonalized?: boolean;
+    score?: number | null;
+    isDisliked?: boolean;
+  } | null,
+): string | null {
+  if (p?.isDisliked) return null;
+  if (!hasRealMatchScore(p)) return null;
+  return formatMatchScoreLabel(p.score);
+}
+
+const MONTHS = [
+  'Jan',
+  'Feb',
+  'Mar',
+  'Apr',
+  'May',
+  'Jun',
+  'Jul',
+  'Aug',
+  'Sep',
+  'Oct',
+  'Nov',
+  'Dec',
+];
+
+/** "Apr 1–4" / "Apr 30 – May 2" for a multi-day festival run; falls back to the start date. */
+export function formatFestivalRange(start: string, end: string): string {
+  const [sy, sm, sd] = start.split('T')[0].split('-').map(Number);
+  const [ey, em, ed] = end.split('T')[0].split('-').map(Number);
+  if (!sy || !sm || !sd || !ey || !em || !ed || end <= start) {
+    return formatIndexDate(start);
+  }
+  const yearSuffix = sy !== ey ? `, ${sy}` : '';
+  if (sy === ey && sm === em) {
+    return `${MONTHS[sm - 1]} ${sd}–${ed}`;
+  }
+  return `${MONTHS[sm - 1]} ${sd}${yearSuffix} – ${MONTHS[em - 1]} ${ed}`;
+}
+
+/** Card date label: the festival run for a collapsed festival, else the usual date · time. */
+export function formatIndexEventDate(event: {
+  localStartDate: string;
+  festivalGroupEndDate?: string | null;
+  doorTime?: string | null;
+  startsAt?: string | null;
+  timezone?: string;
+}): string {
+  if (event.festivalGroupEndDate) {
+    return formatFestivalRange(
+      event.localStartDate,
+      event.festivalGroupEndDate,
+    );
+  }
+  return formatIndexDate(
+    event.localStartDate,
+    event.doorTime || event.startsAt,
+    event.timezone,
+  );
+}

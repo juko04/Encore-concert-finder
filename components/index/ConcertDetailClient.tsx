@@ -1,5 +1,8 @@
 'use client';
 
+import { SupportActsLine } from '@/components/index/SupportActsLine';
+import { GenreBadge } from './GenreBadge';
+import { eventGenreList } from '@/lib/genres/catalog-genres';
 import React, { useState, useMemo } from 'react';
 import Link from 'next/link';
 import type { IndexEventItem } from './types';
@@ -7,14 +10,19 @@ import { toIndexEventItem } from './types';
 import type { CanonicalEventSummary } from '@/lib/domain/catalog';
 import type { ScoredEvent } from '@/lib/recommendation/types';
 import {
-  formatIndexDate,
+  formatIndexEventDate,
+  formatFestivalRange,
   formatIndexPrice,
-  getStatusBadge,
-  calculateDistanceMiles,
+  getVerifiedAvailabilityBadge,
+  hasRealMatchScore,
 } from './formatters';
+import { eventDistanceDetails } from '@/lib/location/radius';
 import { AudioPreviewPlayer } from './AudioPreviewPlayer';
+import { SpotifyArtistEmbed } from './SpotifyArtistEmbed';
 import { EventCard } from './EventCard';
+import { EventImage } from './EventImage';
 import { UndoToast } from './UndoToast';
+import { DecisionGuide } from './DecisionGuide';
 import { useWatchlist } from './useWatchlist';
 import {
   ArrowLeftIcon,
@@ -25,7 +33,6 @@ import {
   TicketIcon,
   SparklesIcon,
   AlertCircleIcon,
-  CheckIcon,
   ArrowUpRightIcon,
   StarIcon,
   BanIcon,
@@ -35,6 +42,10 @@ import {
 export interface ConcertDetailClientProps {
   event: CanonicalEventSummary | ScoredEvent | IndexEventItem;
   relatedEvents?: Array<CanonicalEventSummary | ScoredEvent | IndexEventItem>;
+  /** Every day of this event's multi-day festival (empty when it is a single show). */
+  festivalDays?: Array<{ id: string; name: string; localStartDate: string }>;
+  /** Viewer's home coordinates (when configured); omit distance when null. */
+  homeLocation?: { lat: number; lng: number } | null;
   initialPreferences?: Array<{
     artistId: string;
     level: 'favorite' | 'like' | 'ignore';
@@ -51,6 +62,8 @@ export interface ConcertDetailClientProps {
 export function ConcertDetailClient({
   event: rawEvent,
   relatedEvents: rawRelated = [],
+  festivalDays = [],
+  homeLocation = null,
   initialPreferences = [],
   onSetPreference,
   onBack,
@@ -68,12 +81,15 @@ export function ConcertDetailClient({
   const [preferences, setPreferences] = useState(initialPreferences);
   const [showFactorDrawer, setShowFactorDrawer] = useState(false);
 
-  const isPersonalized = Boolean(event.personalScore?.isPersonalized);
+  const isPersonalized = hasRealMatchScore(event.personalScore);
   const score = event.personalScore?.score ?? 50;
   const isDisliked = Boolean(event.personalScore?.isDisliked);
   const isFavorite = Boolean(event.personalScore?.isFavorite);
 
-  const statusBadge = getStatusBadge(event.inventoryStatus);
+  const statusBadge = getVerifiedAvailabilityBadge(
+    event.inventoryStatus,
+    event.ticketRemainingPercent,
+  );
   const isSoldOut = event.inventoryStatus === 'sold_out';
   const isCancelled = event.inventoryStatus === 'cancelled';
 
@@ -82,7 +98,22 @@ export function ConcertDetailClient({
     (a) => a.name !== headlinerName && a.billingPosition !== 'headliner',
   );
 
-  const distanceMiles = calculateDistanceMiles(event.lat, event.lng);
+  const distanceDetails = homeLocation
+    ? eventDistanceDetails(
+        {
+          lat: event.lat,
+          lng: event.lng,
+          city: event.city,
+          region: event.region,
+        },
+        homeLocation,
+      )
+    : null;
+  const distanceMiles =
+    distanceDetails != null
+      ? Math.round(distanceDetails.distanceMiles * 10) / 10
+      : null;
+  const isApproxDistance = distanceDetails?.precision === 'city_centroid';
 
   const handlePreferenceChange = (
     artistId: string,
@@ -127,11 +158,7 @@ export function ConcertDetailClient({
           </Link>
         )}
 
-        <div className="flex items-center gap-2">
-          <span className="font-mono text-[11px] uppercase tracking-wider text-zinc-400">
-            Event ID: {event.id}
-          </span>
-        </div>
+        <div className="flex items-center gap-2"></div>
       </div>
 
       {/* Hero Decision Header Card */}
@@ -148,17 +175,18 @@ export function ConcertDetailClient({
           <div className="max-w-3xl space-y-4">
             {/* Badges */}
             <div className="flex flex-wrap items-center gap-2">
-              <span
-                className={`rounded-md border px-2.5 py-0.5 text-xs font-medium ${statusBadge.bg}`}
-              >
-                {statusBadge.label}
-              </span>
-
-              {event.genre && (
-                <span className="rounded-md border border-zinc-200 bg-zinc-50 px-2.5 py-0.5 font-mono text-xs text-zinc-600">
-                  {event.genre}
+              {statusBadge && (
+                <span
+                  className={`rounded-md border px-2.5 py-0.5 text-xs font-medium ${statusBadge.bg}`}
+                >
+                  {statusBadge.label}
                 </span>
               )}
+
+              <GenreBadge
+                genre={eventGenreList(event)}
+                inferred={event.genresInferred}
+              />
 
               {isPersonalized ? (
                 isDisliked ? (
@@ -176,11 +204,7 @@ export function ConcertDetailClient({
                     <span>{score}% Personalized Match</span>
                   </span>
                 )
-              ) : (
-                <span className="rounded-md border border-zinc-200 bg-zinc-50 px-2.5 py-0.5 font-mono text-xs text-zinc-500">
-                  Guest View · Unbiased
-                </span>
-              )}
+              ) : null}
             </div>
 
             {/* Artist & Title */}
@@ -189,11 +213,10 @@ export function ConcertDetailClient({
                 {headlinerName}
               </h1>
 
-              {supportActs.length > 0 && (
-                <p className="mt-1 text-base font-medium text-zinc-600">
-                  with {supportActs.map((a) => a.name).join(', ')}
-                </p>
-              )}
+              <SupportActsLine
+                acts={supportActs}
+                className="mt-1 text-base font-medium text-zinc-600"
+              />
 
               {event.title && event.title !== headlinerName && (
                 <p className="mt-1 text-sm italic text-zinc-500">
@@ -208,11 +231,7 @@ export function ConcertDetailClient({
                 <CalendarIcon className="h-4 w-4 shrink-0 text-zinc-400" />
                 <div>
                   <div className="text-sm font-semibold text-zinc-900">
-                    {formatIndexDate(
-                      event.localStartDate,
-                      event.doorTime || event.startsAt,
-                      event.timezone,
-                    )}
+                    {formatIndexEventDate(event)}
                   </div>
                   {event.timezone && (
                     <div className="font-mono text-[11px] text-zinc-400">
@@ -231,7 +250,8 @@ export function ConcertDetailClient({
                   <div className="text-[11px] text-zinc-400">
                     {event.city ? `${event.city}` : ''}
                     {event.region ? `, ${event.region}` : ''}
-                    {distanceMiles !== null && ` (${distanceMiles} mi)`}
+                    {distanceMiles !== null &&
+                      ` (${isApproxDistance ? 'approx. ' : ''}${distanceMiles} mi)`}
                   </div>
                 </div>
               </div>
@@ -248,8 +268,8 @@ export function ConcertDetailClient({
                       event.ticketUrl,
                     )}
                   </div>
-                  <div className="text-[11px] text-zinc-400">
-                    Age policy: {event.ageRestriction || 'All Ages'}
+                  <div className="text-[11px] text-zinc-500">
+                    Age policy: {event.ageRestriction || 'Not listed'}
                   </div>
                 </div>
               </div>
@@ -258,6 +278,14 @@ export function ConcertDetailClient({
 
           {/* Action Box: Direct Ticket Link + Save + Alert */}
           <div className="flex shrink-0 flex-col gap-2.5 border-t border-zinc-100 pt-6 sm:w-72 lg:border-l lg:border-t-0 lg:pl-8 lg:pt-0">
+            <EventImage
+              event={event}
+              className="aspect-[4/3] w-full rounded-xl"
+              width={576}
+              height={432}
+              graphicSize="lg"
+              priority
+            />
             {event.ticketUrl && !isCancelled ? (
               <a
                 href={event.ticketUrl}
@@ -265,9 +293,7 @@ export function ConcertDetailClient({
                 rel="noopener noreferrer"
                 className="shadow-xs inline-flex w-full items-center justify-center gap-2 rounded-xl bg-zinc-900 px-5 py-3 text-sm font-semibold text-white transition-transform duration-150 ease-out hover:bg-zinc-800 active:scale-[0.97]"
               >
-                <span>
-                  {isSoldOut ? 'Check Verified Resale' : 'Official Tickets'}
-                </span>
+                <span>{isSoldOut ? 'Ticket site' : 'Official Tickets'}</span>
                 <ArrowUpRightIcon className="h-4 w-4" />
               </a>
             ) : isCancelled ? (
@@ -393,108 +419,56 @@ export function ConcertDetailClient({
       <div className="grid grid-cols-1 gap-8 lg:grid-cols-3">
         {/* Left 2 Columns: Decision Guide & Lineup */}
         <div className="space-y-6 lg:col-span-2">
-          {/* Honest Decision Guide */}
-          <div className="shadow-xs overflow-hidden rounded-3xl border border-zinc-200/90 bg-white">
-            <div className="border-b border-zinc-100 bg-zinc-50/70 px-6 py-4">
-              <h2 className="flex items-center gap-2 text-base font-bold text-zinc-900">
-                <SparklesIcon className="h-4 w-4 text-zinc-700" />
-                <span>Editorial Decision Guide</span>
+          <DecisionGuide event={event} />
+
+          {festivalDays.length > 1 && (
+            <div
+              data-testid="festival-days"
+              className="shadow-xs space-y-3 rounded-3xl border border-zinc-200/90 bg-white p-6"
+            >
+              <h2 className="text-base font-bold text-zinc-900">
+                Festival days
               </h2>
-              <p className="mt-0.5 text-xs text-zinc-500">
-                Authentic evaluation of this show’s strengths and practical
-                considerations before purchasing tickets.
-              </p>
+              <ul className="flex flex-wrap gap-2">
+                {(() => {
+                  const dateCounts = new Map<string, number>();
+                  for (const d of festivalDays) {
+                    dateCounts.set(
+                      d.localStartDate,
+                      (dateCounts.get(d.localStartDate) ?? 0) + 1,
+                    );
+                  }
+                  const seenByDate = new Map<string, number>();
+                  return festivalDays.map((d) => {
+                    const label = formatFestivalRange(
+                      d.localStartDate,
+                      d.localStartDate,
+                    );
+                    const hasDuplicateDate =
+                      (dateCounts.get(d.localStartDate) ?? 0) > 1;
+                    const idx = (seenByDate.get(d.localStartDate) ?? 0) + 1;
+                    seenByDate.set(d.localStartDate, idx);
+                    return (
+                      <li key={d.id}>
+                        <Link
+                          href={`/concerts/${d.id}`}
+                          aria-current={d.id === event.id ? 'page' : undefined}
+                          title={d.name}
+                          className={`inline-flex rounded-full border px-3 py-1 text-xs font-semibold transition ${
+                            d.id === event.id
+                              ? 'border-zinc-900 bg-zinc-900 text-white'
+                              : 'border-zinc-200 bg-white text-zinc-700 hover:border-zinc-300'
+                          }`}
+                        >
+                          {hasDuplicateDate ? `${label} (${idx})` : label}
+                        </Link>
+                      </li>
+                    );
+                  });
+                })()}
+              </ul>
             </div>
-
-            <div className="grid grid-cols-1 gap-6 divide-y divide-zinc-100 p-6 md:grid-cols-2 md:divide-x md:divide-y-0">
-              {/* Why This Suits You */}
-              <div className="space-y-3">
-                <div className="flex items-center gap-2 text-sm font-semibold text-emerald-800">
-                  <div className="flex h-5 w-5 items-center justify-center rounded-full bg-emerald-100">
-                    <CheckIcon className="h-3 w-3 text-emerald-700" />
-                  </div>
-                  <span>Why This Suits You</span>
-                </div>
-
-                <ul className="space-y-2.5 text-xs leading-relaxed text-zinc-600">
-                  {event.whyItSuitsYou && event.whyItSuitsYou.length > 0 ? (
-                    event.whyItSuitsYou.map((reason, i) => (
-                      <li key={i} className="flex items-start gap-2">
-                        <span className="mt-0.5 font-bold text-emerald-500">
-                          ✓
-                        </span>
-                        <span>{reason}</span>
-                      </li>
-                    ))
-                  ) : (
-                    <>
-                      <li className="flex items-start gap-2">
-                        <span className="mt-0.5 font-bold text-emerald-500">
-                          ✓
-                        </span>
-                        <span>
-                          Headlining performance featuring {headlinerName}.
-                        </span>
-                      </li>
-                      <li className="flex items-start gap-2">
-                        <span className="mt-0.5 font-bold text-emerald-500">
-                          ✓
-                        </span>
-                        <span>
-                          Genuine venue listing with direct ticket purchase
-                          verification.
-                        </span>
-                      </li>
-                    </>
-                  )}
-                </ul>
-              </div>
-
-              {/* What to Consider Before Attending */}
-              <div className="space-y-3 pt-6 md:pt-0">
-                <div className="flex items-center gap-2 text-sm font-semibold text-amber-800">
-                  <div className="flex h-5 w-5 items-center justify-center rounded-full bg-amber-100">
-                    <AlertCircleIcon className="h-3 w-3 text-amber-700" />
-                  </div>
-                  <span>What to Consider Before Attending</span>
-                </div>
-
-                <ul className="space-y-2.5 text-xs leading-relaxed text-zinc-600">
-                  {event.considerations && event.considerations.length > 0 ? (
-                    event.considerations.map((con, i) => (
-                      <li key={i} className="flex items-start gap-2">
-                        <span className="mt-0.5 font-bold text-amber-500">
-                          !
-                        </span>
-                        <span>{con}</span>
-                      </li>
-                    ))
-                  ) : (
-                    <>
-                      <li className="flex items-start gap-2">
-                        <span className="mt-0.5 font-bold text-amber-500">
-                          !
-                        </span>
-                        <span>
-                          Verify door times and venue age restrictions before
-                          arrival.
-                        </span>
-                      </li>
-                      <li className="flex items-start gap-2">
-                        <span className="mt-0.5 font-bold text-amber-500">
-                          !
-                        </span>
-                        <span>
-                          Check parking availability and local transport
-                          options.
-                        </span>
-                      </li>
-                    </>
-                  )}
-                </ul>
-              </div>
-            </div>
-          </div>
+          )}
 
           {/* Lineup & Billing Details with Preference Modifiers */}
           <div className="shadow-xs space-y-4 rounded-3xl border border-zinc-200/90 bg-white p-6">
@@ -503,8 +477,8 @@ export function ConcertDetailClient({
             </h2>
             <p className="text-xs text-zinc-500">
               Manage your artist affinity. Favoriting a headliner ensures high
-              priority; ignoring a headliner suppresses the show per Invariant
-              11.
+              priority; ignoring a headliner hides the show from your
+              recommendations.
             </p>
 
             <div className="space-y-3 pt-2">
@@ -611,8 +585,8 @@ export function ConcertDetailClient({
 
         {/* Right Column: Audio Player & Venue Profile */}
         <div className="space-y-6">
-          {/* Audio Preview Track */}
-          {event.spotifyPreviewTrack && (
+          {/* Audio: legacy track preview if supplied, otherwise a Spotify listen for the headliner */}
+          {event.spotifyPreviewTrack ? (
             <div className="space-y-2">
               <h2 className="text-xs font-semibold uppercase tracking-wider text-zinc-400">
                 Audio Sample
@@ -623,6 +597,16 @@ export function ConcertDetailClient({
                 posterColor={event.posterColor}
               />
             </div>
+          ) : (
+            <SpotifyArtistEmbed
+              spotifyArtistId={
+                (
+                  event.artists.find((a) => a.name === headlinerName) ??
+                  event.artists[0]
+                )?.spotifyArtistId
+              }
+              artistName={headlinerName}
+            />
           )}
 
           {/* Venue & Logistics Profile */}

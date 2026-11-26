@@ -1,7 +1,10 @@
 /**
- * Factor 4: Event Timing Suitability Scoring
- * Evaluates date/day suitability against user timing preferences and filters past events
- * using timezone-aware calendar dates and confirmed start instants.
+ * Event Eligibility (past-event detection)
+ *
+ * The former "timing suitability" scoring factor was removed: it only ever scored the
+ * day of the week and added a number users could not interpret. What remains is the
+ * essential, timezone-aware check that already-started or already-finished shows are
+ * never recommended.
  *
  * Invariants:
  * 1. Do NOT compare local dates using UTC strings (toISOString().slice(0, 10)).
@@ -10,30 +13,26 @@
  *    On the day of the event, it remains eligible (isPast = false).
  * 3. If an event has a confirmed start instant (startTimePrecision === 'instant' and startsAt),
  *    compare directly against the reference instant. Already-started events are ineligible (isPast = true).
- * 4. Missing or invalid timezones use a documented conservative fallback (UTC) with diagnostic notation.
- * 5. If no availability preferences exist, apply documented neutral timing (50).
- * 6. Bounded strictly to [0, 100].
+ * 4. Missing or invalid timezones use a documented conservative fallback (UTC).
  */
 
-import type { FactorScore } from '../types';
-
-export interface TimingFactorInput {
+export interface EligibilityInput {
   localStartDate: string; // YYYY-MM-DD
   startsAt?: string | null; // ISO 8601 UTC timestamp
-  timezone?: string | null; // IANA timezone, e.g. 'America/Denver'
+  timezone?: string | null; // IANA timezone, e.g. 'America/New_York'
   startTimePrecision?: 'instant' | 'date_only';
   referenceDate?: string; // YYYY-MM-DD date or ISO instant string
   referenceInstant?: Date | string; // Explicit instant for deterministic testing
-  preferredDays?: string[] | null; // e.g. ['friday', 'saturday', 'sunday']
 }
 
-export interface TimingFactorResult {
-  factorScore: Omit<FactorScore, 'weight' | 'weightedContribution'>;
+export interface EligibilityResult {
   isPast: boolean;
   dayOfWeek: string;
+  eligibilityReason: string;
+  currentLocalDateInTz: string;
+  timezoneValid: boolean;
+  effectiveTimezone: string;
 }
-
-export const NEUTRAL_TIMING_SCORE = 50;
 
 const DAYS_OF_WEEK = [
   'sunday',
@@ -88,11 +87,11 @@ export function getDayOfWeekFromDateString(dateString: string): string {
 }
 
 /**
- * Evaluates timing suitability and eligibility for an event against user preferences.
+ * Determines whether an event has already started/passed in its own timezone.
  */
-export function calculateTimingFactor(
-  input: TimingFactorInput,
-): TimingFactorResult {
+export function checkEventEligibility(
+  input: EligibilityInput,
+): EligibilityResult {
   const {
     localStartDate,
     startsAt,
@@ -100,7 +99,6 @@ export function calculateTimingFactor(
     startTimePrecision,
     referenceDate,
     referenceInstant,
-    preferredDays,
   } = input;
 
   // 1. Resolve reference instant
@@ -128,8 +126,8 @@ export function calculateTimingFactor(
   }
 
   // 2. Validate and resolve event timezone
-  const hasValidTz = isValidIanaTimezone(timezone);
-  const effectiveTimezone = hasValidTz ? timezone! : 'UTC';
+  const timezoneValid = isValidIanaTimezone(timezone);
+  const effectiveTimezone = timezoneValid ? timezone! : 'UTC';
 
   // 3. Determine current local calendar date in the event's timezone
   const currentLocalDateInTz = isExplicitDateOnlyOverride
@@ -140,96 +138,30 @@ export function calculateTimingFactor(
   let isPast = false;
   let eligibilityReason = 'future_or_today';
 
-  // Case A: Event has confirmed start time instant
   if (
     startTimePrecision === 'instant' &&
     startsAt &&
     !isNaN(new Date(startsAt).getTime())
   ) {
+    // Case A: Event has confirmed start time instant
     const eventInstant = new Date(startsAt);
     if (eventInstant.getTime() < nowInstant.getTime()) {
       isPast = true;
       eligibilityReason = 'confirmed_start_instant_passed';
     }
-  } else {
-    // Case B: Date-only event or missing start instant
+  } else if (localStartDate < currentLocalDateInTz) {
+    // Case B: Date-only event or missing start instant.
     // Do NOT invent a start time. On the day of the event, it remains eligible.
-    if (localStartDate < currentLocalDateInTz) {
-      isPast = true;
-      eligibilityReason = 'calendar_day_passed_in_timezone';
-    }
-  }
-
-  // 5. Day of week evaluation
-  const dayOfWeek = getDayOfWeekFromDateString(localStartDate);
-
-  // Invariant 5: If no availability preferences exist, return neutral score (50)
-  if (
-    !preferredDays ||
-    preferredDays.length === 0 ||
-    preferredDays.length === 7
-  ) {
-    return {
-      factorScore: {
-        factor: 'timing',
-        score: NEUTRAL_TIMING_SCORE,
-        isAvailable: false,
-        fieldStatus: 'neutral_missing',
-        explanation: 'Standard timing (no custom availability preferences set)',
-        diagnostics: {
-          localStartDate,
-          currentLocalDateInTz,
-          eventTimezone: timezone ?? 'unspecified',
-          timezoneValid: hasValidTz,
-          effectiveTimezone,
-          dayOfWeek,
-          isPast,
-          eligibilityReason,
-          hasPreferences: false,
-        },
-      },
-      isPast,
-      dayOfWeek,
-    };
-  }
-
-  // User has explicit preferred days
-  const normalizedPreferred = preferredDays.map((d) => d.toLowerCase().trim());
-  const matchesPreferred = normalizedPreferred.includes(dayOfWeek);
-  const capitalizedDay = dayOfWeek.charAt(0).toUpperCase() + dayOfWeek.slice(1);
-
-  let score: number;
-  let explanation: string;
-
-  if (matchesPreferred) {
-    score = 90;
-    explanation = `Convenient timing: event is on a preferred day (${capitalizedDay})`;
-  } else {
-    score = 40;
-    explanation = `Event is outside your preferred days (${capitalizedDay})`;
+    isPast = true;
+    eligibilityReason = 'calendar_day_passed_in_timezone';
   }
 
   return {
-    factorScore: {
-      factor: 'timing',
-      score,
-      isAvailable: true,
-      fieldStatus: 'verified',
-      explanation,
-      diagnostics: {
-        localStartDate,
-        currentLocalDateInTz,
-        eventTimezone: timezone ?? 'unspecified',
-        timezoneValid: hasValidTz,
-        effectiveTimezone,
-        dayOfWeek,
-        isPast,
-        eligibilityReason,
-        matchesPreferred,
-        preferredDays,
-      },
-    },
     isPast,
-    dayOfWeek,
+    dayOfWeek: getDayOfWeekFromDateString(localStartDate),
+    eligibilityReason,
+    currentLocalDateInTz,
+    timezoneValid,
+    effectiveTimezone,
   };
 }

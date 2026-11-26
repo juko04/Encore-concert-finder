@@ -71,6 +71,29 @@ export interface EventListFilters {
   offset?: number;
   excludePastShowtimes?: boolean;
   referenceNowIso?: string;
+  /**
+   * Show a multi-day festival as ONE card (its first day). Off for the calendar, detail pages and
+   * anything that must see every day.
+   */
+  collapseFestivalDays?: boolean;
+}
+
+/**
+ * The minimum an event needs for the radius test, as returned by the light scan. Same
+ * city/region/lat/lng resolution as a CanonicalEventSummary (venue first, then the event row).
+ */
+export interface FestivalDay {
+  id: string;
+  name: string;
+  localStartDate: string;
+}
+
+export interface EventLocationRow {
+  id: string;
+  city: string | null;
+  region: string | null;
+  lat: number | null;
+  lng: number | null;
 }
 
 export interface ICatalogRepository {
@@ -78,6 +101,13 @@ export interface ICatalogRepository {
   getEventById(id: string): Promise<CanonicalEventDetail | null>;
   listEvents(filters?: EventListFilters): Promise<CanonicalEventSummary[]>;
   countEvents(filters?: EventListFilters): Promise<number>;
+  /**
+   * LIGHT scan: ids + location of EVERY event matching `filters` (limit/offset ignored), in
+   * exactly the order listEvents would return them. No artist/ticket/source hydration.
+   */
+  listEventLocations?(filters?: EventListFilters): Promise<EventLocationRow[]>;
+  /** Hydrates events by id with the same mapping as listEvents, returned in `ids` order. */
+  getEventsByIds?(ids: string[]): Promise<CanonicalEventSummary[]>;
   listCities(): Promise<string[]>;
   getFacets?(): Promise<{
     venues: Array<{ id: string; name: string; city?: string }>;
@@ -92,6 +122,41 @@ export interface ICatalogRepository {
     provider: string,
     externalId: string,
   ): Promise<Artist | null>;
+  /** Batch lookup of canonical artists (missing ids are simply absent from the result). */
+  getArtistsByIds(ids: string[]): Promise<Artist[]>;
+  /**
+   * Fill-if-empty genre write with provenance. Never overwrites genres already held and never
+   * writes an empty list. Returns true when a write happened.
+   */
+  fillArtistGenres(
+    artistId: string,
+    genres: string[],
+    source: string,
+  ): Promise<boolean>;
+  /**
+   * Fill-if-empty genre write for an EVENT with provenance (events.genres_source). Never
+   * overwrites an event that already has a genre. Returns true when a write happened.
+   */
+  fillEventGenres(
+    eventId: string,
+    genres: string[],
+    source: string,
+  ): Promise<boolean>;
+  /**
+   * Fill-if-empty coordinates for the VENUE of an event (venues.lat/lng). Never overwrites
+   * coordinates already stored. Returns true when a write happened.
+   */
+  /** Every day of the multi-day festival this event belongs to (empty when it is not grouped). */
+  listFestivalDays(eventId: string): Promise<FestivalDay[]>;
+
+  /** Recomputes festival day groups after ingestion (presentation columns only). */
+  refreshFestivalGroups(): Promise<number>;
+
+  fillVenueCoordinatesForEvent(
+    eventId: string,
+    lat: number,
+    lng: number,
+  ): Promise<boolean>;
   findArtistIdsByExternalIds(
     provider: string,
     externalIds: string[],

@@ -13,7 +13,10 @@
  *      the event is NOT suppressed, but the explanation notes the opening act preference.
  *    - In all other cases where an artist on the bill is disliked: The event is suppressed.
  * 4. Unmarked artists receive neutral exploratory discovery value (40) and are partitioned
- *    into the exploratory pool.
+ *    into the exploratory pool, UNLESS their stored Spotify genres are similar enough to the
+ *    user's taste profile (relevance gate): then the artist-fit score rises above neutral
+ *    (max GENRE_MAX_SCORE, always below a direct artist match) and the show is recommended.
+ *    Unknown genres are never guessed (neutral).
  * 5. Archived artist preferences (where artistId is null and archivedArtistId is set)
  *    never match new canonical artists sharing the same name.
  */
@@ -24,7 +27,16 @@ import type {
   UserArtistPreference,
 } from '@/lib/domain/user-preference';
 import type { SpotifyTopArtist } from '@/lib/domain/spotify';
-import type { FactorScore, MatchedArtistInfo } from '../types';
+import type { FactorScore, MatchedArtistInfo, GenreMatchInfo } from '../types';
+import {
+  computeSpotifyAffinity,
+  spotifyAffinityToArtistScore,
+} from '../spotify-affinity';
+import {
+  calculateGenreFit,
+  describeGenreMatch,
+  type GenreTasteProfile,
+} from '../genre';
 
 declare module '@/lib/domain/spotify' {
   interface SpotifyTopArtist {
@@ -41,11 +53,21 @@ export const ARTIST_PREFERENCE_SCORES: Record<PreferenceLevel, number> = {
 
 export const UNMARKED_ARTIST_SCORE = 40;
 
+/** Genre-derived artist fit: 40 + 25 * similarity (max 65, below direct Spotify/preference matches). */
+export const GENRE_FIT_RANGE = 25;
+export const GENRE_MAX_SCORE = UNMARKED_ARTIST_SCORE + GENRE_FIT_RANGE;
+/** Minimum weighted similarity (same family at full weight is 0.35) for the relevance gate. */
+export const GENRE_RELEVANCE_THRESHOLD = 0.3;
+/** Max penalty when an artist's genres overlap genres the user explicitly dislikes. */
+export const GENRE_DISLIKE_PENALTY = 20;
+
 export interface EventArtistInput {
   id?: string | null;
   name: string;
   billingPosition?: BillingPosition | null;
   spotifyArtistId?: string | null;
+  /** Spotify artist-object genres, when known (never inferred). */
+  genres?: string[] | null;
 }
 
 export interface ArtistFactorResult {
@@ -54,6 +76,7 @@ export interface ArtistFactorResult {
   isSuppressed: boolean;
   suppressionReason?: string;
   isExploratory: boolean;
+  genreMatch?: GenreMatchInfo;
 }
 
 /**
@@ -69,6 +92,7 @@ export function calculateArtistInterestFactor(
   eventArtists: EventArtistInput[],
   userPreferences: UserArtistPreference[],
   spotifyTopArtists?: SpotifyTopArtist[],
+  genreProfile?: GenreTasteProfile,
 ): ArtistFactorResult {
   if (!eventArtists || eventArtists.length === 0) {
     return {
@@ -374,8 +398,21 @@ export function calculateArtistInterestFactor(
       }
 
       if (sa) {
-        // Tiered listening affinity: top 5 -> 70, top 10 -> 65, top 20 -> 60
-        const score = sa.rank <= 5 ? 70 : sa.rank <= 10 ? 65 : 60;
+        // Trend-aware affinity (rising / near-top-of-all-three-lists score highest; long-term-only
+        // listening is capped low). Falls back to rank tiers when no per-window ranks are known.
+        const affinity =
+          sa.affinity ??
+          (sa.ranksByRange
+            ? computeSpotifyAffinity(sa.ranksByRange).affinity
+            : undefined);
+        const score =
+          affinity !== undefined
+            ? spotifyAffinityToArtistScore(affinity)
+            : sa.rank <= 5
+              ? 70
+              : sa.rank <= 10
+                ? 65
+                : 60;
         spotifyMatches.push({
           artist,
           spotifyArtist: sa,
@@ -389,7 +426,9 @@ export function calculateArtistInterestFactor(
       spotifyMatches.sort((a, b) => b.score - a.score);
       const best = spotifyMatches[0];
 
-      let explanation = `🎧 Spotify top artist (#${best.spotifyArtist.rank} in your listening history)`;
+      let explanation = best.spotifyArtist.affinityReason
+        ? `🎧 Spotify: ${best.spotifyArtist.affinityReason}`
+        : `🎧 Spotify top artist (#${best.spotifyArtist.rank} in your listening history)`;
       if (spotifyMatches.length > 1) {
         explanation += ` (+${spotifyMatches.length - 1} more on lineup)`;
       }
@@ -427,8 +466,66 @@ export function calculateArtistInterestFactor(
     }
   }
 
-  // Invariant 4: Unmarked artist receives neutral exploratory discovery score (40)
+  // Genre-based artist fit (similar sub-genre / genre family to the user's taste)
   const primaryArtist = eventArtists[0];
+  let dislikedGenreSimilarity = 0;
+  if (genreProfile && !genreProfile.isEmpty) {
+    let best:
+      | { artist: EventArtistInput; fit: ReturnType<typeof calculateGenreFit> }
+      | undefined;
+    for (const artist of eventArtists) {
+      const fit = calculateGenreFit(artist.genres, genreProfile);
+      dislikedGenreSimilarity = Math.max(
+        dislikedGenreSimilarity,
+        fit.dislikedGenreSimilarity,
+      );
+      if (fit.similarity > (best?.fit.similarity ?? 0)) best = { artist, fit };
+    }
+    if (
+      best &&
+      best.fit.similarity >= GENRE_RELEVANCE_THRESHOLD &&
+      best.fit.matchedGenre &&
+      best.fit.tasteGenre &&
+      best.fit.similarTo
+    ) {
+      const penalty = GENRE_DISLIKE_PENALTY * dislikedGenreSimilarity;
+      const score = Math.max(
+        0,
+        Math.round(
+          (UNMARKED_ARTIST_SCORE +
+            GENRE_FIT_RANGE * best.fit.similarity -
+            penalty) *
+            10,
+        ) / 10,
+      );
+      const genreMatch: GenreMatchInfo = {
+        eventGenre: best.fit.matchedGenre,
+        tasteGenre: best.fit.tasteGenre,
+        similarTo: best.fit.similarTo,
+        similarArtists: best.fit.similarArtists,
+        similarity: best.fit.similarity,
+      };
+      return {
+        factorScore: {
+          factor: 'artist',
+          score,
+          isAvailable: true,
+          fieldStatus: 'verified',
+          explanation: describeGenreMatch(genreMatch, best.artist.name),
+          diagnostics: {
+            genreMatch,
+            genreArtist: best.artist.name,
+            dislikedGenreSimilarity,
+          },
+        },
+        isSuppressed: false,
+        isExploratory: false,
+        genreMatch,
+      };
+    }
+  }
+
+  // Invariant 4: Unmarked artist receives neutral exploratory discovery score (40)
   return {
     factorScore: {
       factor: 'artist',
@@ -439,6 +536,7 @@ export function calculateArtistInterestFactor(
       diagnostics: {
         unmarked: true,
         primaryArtist: primaryArtist.name,
+        dislikedGenreSimilarity,
       },
     },
     isSuppressed: false,

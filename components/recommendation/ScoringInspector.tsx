@@ -273,7 +273,7 @@ export function ScoringInspector({
         </div>
 
         {/* Weights Breakdown Bar */}
-        <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
+        <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-3">
           <div className="rounded-lg bg-zinc-950/60 p-2.5 text-center">
             <span className="text-[11px] text-zinc-400">Artist Interest</span>
             <div className="mt-0.5 text-sm font-bold text-indigo-400">
@@ -290,12 +290,6 @@ export function ScoringInspector({
             <span className="text-[11px] text-zinc-400">Price & Value</span>
             <div className="mt-0.5 text-sm font-bold text-amber-400">
               {weights.price}%
-            </div>
-          </div>
-          <div className="rounded-lg bg-zinc-950/60 p-2.5 text-center">
-            <span className="text-[11px] text-zinc-400">Timing & Date</span>
-            <div className="mt-0.5 text-sm font-bold text-cyan-400">
-              {weights.timing}%
             </div>
           </div>
         </div>
@@ -378,7 +372,7 @@ export function ScoringInspector({
                 </span>{' '}
                 These events feature artists not yet in your preference profile.
                 They are scored with neutral exploratory interest (40) and
-                ranked by price value, venue proximity, and timing convenience.
+                ranked by price value and venue proximity.
               </div>
               {result.exploratory.length === 0 ? (
                 <div className="rounded-xl border border-dashed border-zinc-800 p-8 text-center text-sm text-zinc-400">
@@ -532,12 +526,6 @@ function ScoredEventCard({
         >
           🏷️ Price: {factors.price.score} ({factors.price.weight}%)
         </span>
-        <span
-          className="inline-flex items-center gap-1 rounded bg-zinc-800/80 px-2 py-0.5 text-[11px] text-cyan-300"
-          data-testid={`factor-pill-timing-${event.id}`}
-        >
-          📅 Timing: {factors.timing.score} ({factors.timing.weight}%)
-        </span>
       </div>
 
       {/* Expandable Developer Diagnostics */}
@@ -572,14 +560,6 @@ function ScoredEventCard({
               {factors.price.weightedContribution} pts
               <div className="text-[11px] text-zinc-500">
                 {factors.price.explanation}
-              </div>
-            </div>
-            <div>
-              <span className="text-zinc-500">Timing Factor:</span>{' '}
-              {factors.timing.score} / 100 · Contribution:{' '}
-              {factors.timing.weightedContribution} pts
-              <div className="text-[11px] text-zinc-500">
-                {factors.timing.explanation}
               </div>
             </div>
           </div>

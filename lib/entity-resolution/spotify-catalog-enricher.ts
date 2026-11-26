@@ -87,6 +87,7 @@ export interface SpotifyArtistSearchResult {
     height?: number;
     width?: number;
   }>;
+  genres?: string[];
 }
 
 export interface SpotifyArtistCandidateMatch {
@@ -94,6 +95,7 @@ export interface SpotifyArtistCandidateMatch {
   name: string;
   url?: string;
   images?: Array<{ url: string; height?: number; width?: number }>;
+  genres?: string[];
 }
 
 export interface ArtistEnrichmentResult {
@@ -689,6 +691,10 @@ export class SpotifyCatalogEnricher {
           finalImageUrl = spotifyImageUrl;
         }
       }
+
+      // 3. Store Spotify genres (fill/refresh only with real non-empty data; tolerate the
+      //    column not existing yet if the migration has not been applied)
+      await this.storeArtistGenres(artist.id, matched.genres);
     } else {
       // In dry-run mode, simulate image update check
       if (
@@ -712,6 +718,127 @@ export class SpotifyCatalogEnricher {
       imageUpdated,
       apiRequestsUsed: 1,
     };
+  }
+
+  /**
+   * Persists Spotify artist-object genres for a canonical artist.
+   * - Never writes an empty list over existing genres; never invents genres.
+   * - Records provenance (genres_source, genres_updated_at).
+   * - Returns false (without throwing) if the genres column does not exist yet.
+   */
+  public async storeArtistGenres(
+    artistId: string,
+    genres: string[] | undefined | null,
+    options?: { onlyIfMissing?: boolean },
+  ): Promise<boolean> {
+    const clean = Array.from(
+      new Set(
+        (genres ?? [])
+          .filter((g): g is string => typeof g === 'string')
+          .map((g) => g.trim().toLowerCase())
+          .filter(Boolean),
+      ),
+    );
+    if (clean.length === 0 || this.dryRun) return false;
+    const now = new Date().toISOString();
+    let query = this.supabase
+      .from('artists')
+      .update({
+        genres: clean,
+        genres_source: 'spotify',
+        genres_updated_at: now,
+        updated_at: now,
+      })
+      .eq('id', artistId);
+    // Backfill mode: only ever fill an artist that still has NO genres (guards against races
+    // and against overwriting genres stored since the candidate list was read).
+    if (options?.onlyIfMissing) query = query.eq('genres', '{}');
+    const { data: updatedRows, error } = await query.select('id');
+    if (error) {
+      // 42703 = undefined_column (migration not applied) / PGRST204 = column not in schema cache
+      if (error.code === '42703' || error.code === 'PGRST204') return false;
+      console.warn(
+        `[spotify-enricher] Failed to store genres for ${artistId}: ${error.message}`,
+      );
+      return false;
+    }
+    if (options?.onlyIfMissing) return (updatedRows ?? []).length > 0;
+    return true;
+  }
+
+  /**
+   * Backfills genres for canonical artists that already have a Spotify external ID but no genres.
+   * Uses the batch artists endpoint (falls back per-artist). Returns counts.
+   */
+  public async backfillGenres(options?: { limit?: number }): Promise<{
+    candidates: number;
+    updated: number;
+    /** Dry-run only: how many artists WOULD be updated (nothing is written). */
+    wouldUpdate: number;
+    skippedNoGenres: number;
+  }> {
+    const limit = options?.limit ?? 500;
+    type Row = {
+      artist_id: string;
+      external_id: string;
+      artists?:
+        | { genres?: string[] | null }
+        | Array<{ genres?: string[] | null }>
+        | null;
+    };
+    // Page through the Spotify mappings until `limit` genre-less artists are found, so artists
+    // that already have genres cannot starve the ones that still need them.
+    const PAGE = 1000;
+    const rows: Row[] = [];
+    for (let offset = 0; rows.length < limit; offset += PAGE) {
+      const { data, error } = await this.supabase
+        .from('artist_external_ids')
+        .select('artist_id, external_id, artists(id, genres)')
+        .eq('provider', 'spotify')
+        .order('artist_id', { ascending: true })
+        .range(offset, offset + PAGE - 1);
+      if (error) {
+        throw new Error(
+          `Failed to load Spotify-mapped artists: ${error.message}`,
+        );
+      }
+      const page = (data ?? []) as unknown as Row[];
+      for (const r of page) {
+        const a = Array.isArray(r.artists) ? r.artists[0] : r.artists;
+        if (!a?.genres || a.genres.length === 0) rows.push(r);
+        if (rows.length >= limit) break;
+      }
+      if (page.length < PAGE) break;
+    }
+
+    let updated = 0;
+    let wouldUpdate = 0;
+    let skippedNoGenres = 0;
+    for (let i = 0; i < rows.length; i += 50) {
+      const chunk = rows.slice(i, i + 50);
+      const spotifyMap = await this.getArtistsByIds(
+        chunk.map((r) => r.external_id),
+      );
+      for (const r of chunk) {
+        const sa = spotifyMap.get(r.external_id);
+        if (!sa?.genres || sa.genres.length === 0) {
+          skippedNoGenres++;
+          continue;
+        }
+        if (this.dryRun) {
+          wouldUpdate++;
+          continue;
+        }
+        if (
+          await this.storeArtistGenres(r.artist_id, sa.genres, {
+            onlyIfMissing: true,
+          })
+        ) {
+          updated++;
+        }
+      }
+    }
+    return { candidates: rows.length, updated, wouldUpdate, skippedNoGenres };
   }
 
   /**
@@ -920,12 +1047,13 @@ export class SpotifyCatalogEnricher {
 
     // 2. Check artist_external_ids
     let linkedExternalId = false;
-    const { data: existingExt, error: extErr } = await this.supabase
+    // An artist may hold several Spotify ids (artist_external_ids is unique on
+    // (provider, external_id) only): add the verified id when missing, never replace another.
+    const { data: existingExts, error: extErr } = await this.supabase
       .from('artist_external_ids')
       .select('id, external_id')
       .eq('artist_id', artistId)
-      .eq('provider', 'spotify')
-      .maybeSingle();
+      .eq('provider', 'spotify');
 
     if (extErr) {
       throw new Error(
@@ -933,7 +1061,11 @@ export class SpotifyCatalogEnricher {
       );
     }
 
-    if (!existingExt) {
+    const alreadyLinked = (existingExts ?? []).some(
+      (e: { external_id: string }) => e.external_id === params.spotifyId,
+    );
+
+    if (!alreadyLinked) {
       if (!this.dryRun) {
         const { error: insertExtErr } = await this.supabase
           .from('artist_external_ids')
@@ -947,23 +1079,6 @@ export class SpotifyCatalogEnricher {
         if (insertExtErr) {
           throw new Error(
             `Failed to insert artist_external_ids for artist ${artistId}: ${insertExtErr.message}`,
-          );
-        }
-      }
-      linkedExternalId = true;
-    } else if (existingExt.external_id !== params.spotifyId) {
-      if (!this.dryRun) {
-        const { error: updateExtErr } = await this.supabase
-          .from('artist_external_ids')
-          .update({
-            external_id: params.spotifyId,
-            provider_url: providerUrl,
-          })
-          .eq('id', existingExt.id);
-
-        if (updateExtErr) {
-          throw new Error(
-            `Failed to update artist_external_ids for artist ${artistId}: ${updateExtErr.message}`,
           );
         }
       }

@@ -2,6 +2,15 @@
  * In-memory repository implementations for unit testing and offline development.
  */
 
+import { withoutEventNameArtists } from '@/lib/events/lineup';
+import { groupFestivalDays } from '@/lib/events/festival-groups';
+import { isValidCoordinatePair } from '@/lib/location/coordinates';
+import {
+  eventMatchesGenre,
+  genreMatchesQuery,
+  normalizeGenreFacets,
+  resolveGenreQuery,
+} from '@/lib/genres/catalog-genres';
 import type {
   Artist,
   ArtistExternalId,
@@ -303,6 +312,8 @@ export class MemoryEventCandidateRepository implements IEventCandidateRepository
 }
 
 export class MemoryCatalogRepository implements ICatalogRepository {
+  /** Provenance of genres written via fillArtistGenres (test visibility). */
+  readonly artistGenreSources = new Map<string, string>();
   public artists: Map<string, Artist> = new Map();
   public artistExternalIds: Map<string, ArtistExternalId> = new Map();
   public venues: Map<string, Venue> = new Map();
@@ -333,6 +344,7 @@ export class MemoryCatalogRepository implements ICatalogRepository {
       id: string;
       name: string;
       billingPosition: BillingPosition;
+      imageUrl?: string | null;
     }> = [];
     for (const ea of this.eventArtists.values()) {
       if (ea.eventId === id) {
@@ -341,6 +353,7 @@ export class MemoryCatalogRepository implements ICatalogRepository {
           id: ea.artistId,
           name: a?.name ?? 'Unknown Artist',
           billingPosition: ea.billingPosition,
+          imageUrl: a?.imageUrl ?? null,
         });
       }
     }
@@ -388,13 +401,15 @@ export class MemoryCatalogRepository implements ICatalogRepository {
 
     return {
       ...event,
-      artists,
+      artists: withoutEventNameArtists(artists, event.name),
       venue: venue
         ? {
             id: venue.id,
             name: venue.name,
+            normalizedName: venue.normalizedName,
             city: venue.city,
             region: venue.region,
+            imageUrl: venue.imageUrl ?? null,
           }
         : null,
       ticketLinks,
@@ -425,13 +440,33 @@ export class MemoryCatalogRepository implements ICatalogRepository {
     return min;
   }
 
+  /** Mirrors SupabaseCatalogRepository: artist-id filters never collapse festival days. */
+  private collapsesFestivalDays(filters?: EventListFilters): boolean {
+    return (
+      Boolean(filters?.collapseFestivalDays) &&
+      !(filters?.artistIds && filters.artistIds.length > 0) &&
+      !filters?.artistId
+    );
+  }
+
   private getFilteredEvents(filters?: EventListFilters): Event[] {
     let result = Array.from(this.events.values());
 
+    if (this.collapsesFestivalDays(filters)) {
+      const hidden = this.hiddenFestivalDayIds;
+      result = result.filter((e) => !hidden.has(e.id));
+    }
+
+    // A collapsed festival card stays listed while its run is still going (first day past).
+    const runningToday = (e: Event, from: string): boolean =>
+      this.collapsesFestivalDays(filters) &&
+      Boolean(e.festivalGroupEndDate) &&
+      e.festivalGroupEndDate! >= from;
     if (filters?.excludePastShowtimes && filters?.fromDate) {
       const today = filters.fromDate;
       const nowIso = filters.referenceNowIso || new Date().toISOString();
       result = result.filter((e) => {
+        if (runningToday(e, today)) return true;
         if (e.localStartDate > today) return true;
         if (e.localStartDate === today) {
           if (!e.startsAt) return true;
@@ -440,7 +475,11 @@ export class MemoryCatalogRepository implements ICatalogRepository {
         return false;
       });
     } else if (filters?.fromDate) {
-      result = result.filter((e) => e.localStartDate >= filters.fromDate!);
+      result = result.filter(
+        (e) =>
+          e.localStartDate >= filters.fromDate! ||
+          runningToday(e, filters.fromDate!),
+      );
     }
     if (filters?.toDate) {
       result = result.filter((e) => e.localStartDate <= filters.toDate!);
@@ -470,7 +509,8 @@ export class MemoryCatalogRepository implements ICatalogRepository {
       result = result.filter(
         (e) =>
           e.eventKind?.toLowerCase().includes(g) ||
-          e.name.toLowerCase().includes(g),
+          e.name.toLowerCase().includes(g) ||
+          eventMatchesGenre(filters.genre, e.genre, e.genres),
       );
     }
     if (filters?.city) {
@@ -491,8 +531,11 @@ export class MemoryCatalogRepository implements ICatalogRepository {
     if (filters?.searchQuery) {
       const q = filters.searchQuery.trim().toLowerCase();
       if (q) {
-        result = result.filter((e) => {
+        const matchesSearch = (e: Event): boolean => {
           if (e.name.toLowerCase().includes(q)) return true;
+          if (resolveGenreQuery(q) && genreMatchesQuery(q, e.genre, e.genres)) {
+            return true;
+          }
           const venue = e.venueId ? this.venues.get(e.venueId) : null;
           if (venue?.name.toLowerCase().includes(q)) return true;
           for (const ea of this.eventArtists.values()) {
@@ -502,6 +545,18 @@ export class MemoryCatalogRepository implements ICatalogRepository {
             }
           }
           return false;
+        };
+        const collapsing = this.collapsesFestivalDays(filters);
+        result = result.filter((e) => {
+          if (matchesSearch(e)) return true;
+          // A collapsed card stands for the whole run: a match on a later day counts.
+          return (
+            collapsing &&
+            (this.festivalMemberIds.get(e.id) ?? []).some((id) => {
+              const m = this.events.get(id);
+              return m !== undefined && matchesSearch(m);
+            })
+          );
         });
       }
     }
@@ -563,7 +618,12 @@ export class MemoryCatalogRepository implements ICatalogRepository {
   async listEvents(
     filters?: EventListFilters,
   ): Promise<CanonicalEventSummary[]> {
-    const result = this.getFilteredEvents(filters);
+    let result = this.getFilteredEvents(filters);
+    // Mirrors SupabaseCatalogRepository: artist-filtered lists show a matched later festival day
+    // as its festival's single card.
+    if (filters?.collapseFestivalDays && !this.collapsesFestivalDays(filters)) {
+      result = this.swapToFestivalPrimaries(result);
+    }
 
     const sortBy = filters?.sortBy ?? 'date_asc';
     if (sortBy === 'price_asc') {
@@ -614,9 +674,16 @@ export class MemoryCatalogRepository implements ICatalogRepository {
     const paged = result.slice(offset, offset + limit);
 
     const summaries: CanonicalEventSummary[] = [];
+    const collapsing = Boolean(filters?.collapseFestivalDays);
 
     for (const event of paged) {
       const venue = event.venueId ? this.venues.get(event.venueId) : null;
+      // A collapsed festival card lists the whole run's lineup (primary day first).
+      const lineupEventIds = new Set<string>([
+        event.id,
+        ...(collapsing ? (this.festivalMemberIds.get(event.id) ?? []) : []),
+      ]);
+      const seenLineupArtists = new Set<string>();
       const artists: Array<{
         id?: string;
         name: string;
@@ -624,8 +691,11 @@ export class MemoryCatalogRepository implements ICatalogRepository {
         spotifyArtistId?: string | null;
         imageUrl?: string | null;
       }> = [];
-      for (const ea of this.eventArtists.values()) {
-        if (ea.eventId === event.id) {
+      for (const lineupEventId of lineupEventIds) {
+        for (const ea of this.eventArtists.values()) {
+          if (ea.eventId !== lineupEventId) continue;
+          if (seenLineupArtists.has(ea.artistId)) continue;
+          seenLineupArtists.add(ea.artistId);
           const a = this.artists.get(ea.artistId);
           let spotifyArtistId: string | null = null;
           for (const ext of this.artistExternalIds.values()) {
@@ -639,6 +709,7 @@ export class MemoryCatalogRepository implements ICatalogRepository {
             name: a?.name ?? 'Unknown Artist',
             billingPosition: ea.billingPosition,
             spotifyArtistId,
+            imageUrl: a?.imageUrl ?? null,
           });
         }
       }
@@ -737,7 +808,7 @@ export class MemoryCatalogRepository implements ICatalogRepository {
         startTimePrecision: event.startTimePrecision,
         status: event.status,
         eventKind: event.eventKind,
-        artists,
+        artists: withoutEventNameArtists(artists, event.name),
         ticketUrl: event.primaryTicketUrl,
         minPrice,
         maxPrice,
@@ -746,6 +817,8 @@ export class MemoryCatalogRepository implements ICatalogRepository {
         sources: eventSources,
         ticketLinks: eventTicketLinks,
         inventoryStatus: summaryInventoryStatus,
+        festivalGroupEndDate: event.festivalGroupEndDate ?? null,
+        ...(event.imageUrl ? { imageUrl: event.imageUrl } : {}),
       });
     }
 
@@ -795,10 +868,11 @@ export class MemoryCatalogRepository implements ICatalogRepository {
     for (const e of this.events.values()) {
       if (e.genre) genreSet.add(e.genre);
     }
+    const genres = normalizeGenreFacets(Array.from(genreSet));
     return {
       venues: venues.sort((a, b) => a.name.localeCompare(b.name)),
       cities: cities.sort((a, b) => a.localeCompare(b)),
-      genres: Array.from(genreSet).sort((a, b) => a.localeCompare(b)),
+      genres,
     };
   }
 
@@ -849,6 +923,118 @@ export class MemoryCatalogRepository implements ICatalogRepository {
       }
     }
     return null;
+  }
+
+  async getArtistsByIds(ids: string[]): Promise<Artist[]> {
+    const out: Artist[] = [];
+    for (const id of new Set(ids)) {
+      const a = this.artists.get(id);
+      if (a) out.push(a);
+    }
+    return out;
+  }
+
+  /** Event ids hidden by collapseFestivalDays (computed by refreshFestivalGroups). */
+  private hiddenFestivalDayIds = new Set<string>();
+  /** Primary event id -> the group's other day ids, in date order (computed by refreshFestivalGroups). */
+  private festivalMemberIds = new Map<string, string[]>();
+
+  private swapToFestivalPrimaries(events: Event[]): Event[] {
+    const primaryOf = new Map<string, string>();
+    for (const [primary, members] of this.festivalMemberIds) {
+      for (const m of members) primaryOf.set(m, primary);
+    }
+    const seen = new Set<string>();
+    const out: Event[] = [];
+    for (const e of events) {
+      const primaryId = primaryOf.get(e.id);
+      const swapped = (primaryId && this.events.get(primaryId)) || e;
+      if (seen.has(swapped.id)) continue;
+      seen.add(swapped.id);
+      out.push(swapped);
+    }
+    return out;
+  }
+
+  async listFestivalDays(eventId: string) {
+    const group = groupFestivalDays(Array.from(this.events.values())).find(
+      (g) => g.members.some((m) => m.id === eventId),
+    );
+    return (group?.members ?? []).map((m) => ({
+      id: m.id,
+      name: m.name,
+      localStartDate: m.localStartDate,
+    }));
+  }
+
+  async refreshFestivalGroups(): Promise<number> {
+    this.hiddenFestivalDayIds = new Set();
+    this.festivalMemberIds = new Map();
+    // Like the SQL refresh, start from a clean slate so events that left a group are reset.
+    for (const e of this.events.values()) e.festivalGroupEndDate = null;
+    const groups = groupFestivalDays(Array.from(this.events.values()));
+    let grouped = 0;
+    for (const g of groups) {
+      grouped += g.members.length;
+      this.festivalMemberIds.set(
+        g.primary.id,
+        g.members.filter((m) => m.id !== g.primary.id).map((m) => m.id),
+      );
+      for (const e of g.members) {
+        if (e.id !== g.primary.id) this.hiddenFestivalDayIds.add(e.id);
+        e.festivalGroupEndDate = e.id === g.primary.id ? g.endDate : null;
+      }
+    }
+    return grouped;
+  }
+
+  async fillVenueCoordinatesForEvent(
+    eventId: string,
+    lat: number,
+    lng: number,
+  ): Promise<boolean> {
+    if (!isValidCoordinatePair(lat, lng)) return false;
+    const ev = this.events.get(eventId);
+    const venue = ev?.venueId ? this.venues.get(ev.venueId) : undefined;
+    if (!venue || (venue.lat != null && venue.lng != null)) return false;
+    this.venues.set(venue.id, { ...venue, lat, lng });
+    return true;
+  }
+
+  async fillEventGenres(
+    eventId: string,
+    genres: string[],
+    source: string,
+  ): Promise<boolean> {
+    const clean = Array.from(
+      new Set(genres.map((g) => g?.trim()).filter((g): g is string => !!g)),
+    );
+    const ev = this.events.get(eventId);
+    if (!ev || clean.length === 0) return false;
+    if ((ev.genres && ev.genres.length > 0) || ev.genre) return false;
+    this.events.set(eventId, {
+      ...ev,
+      genre: clean[0],
+      genres: clean,
+      genresSource: source,
+    });
+    return true;
+  }
+
+  async fillArtistGenres(
+    artistId: string,
+    genres: string[],
+    source: string,
+  ): Promise<boolean> {
+    const clean = Array.from(
+      new Set(genres.map((g) => g?.trim()).filter((g): g is string => !!g)),
+    );
+    const artist = this.artists.get(artistId);
+    if (!artist || clean.length === 0) return false;
+    if (Array.isArray(artist.genres) && artist.genres.length > 0) return false;
+    this.artists.set(artistId, { ...artist, genres: clean });
+    this.artistGenreSources.set(artistId, source);
+    return true;
   }
 
   async findArtistIdsByExternalIds(
@@ -1278,6 +1464,44 @@ export class MemoryCatalogRepository implements ICatalogRepository {
       let eventId: string | null = null;
       let createdVenueId: string | null = null;
 
+      // 0. External-ID conflict pre-check (mirrors apply_canonicalization): when a
+      // resolution is supplied, persist needs_review instead of aborting the batch.
+      if (payload.event && payload.resolution) {
+        const claimedBy = new Map<string, string>();
+        let conflict: string | null = null;
+        for (const a of payload.artists ?? []) {
+          const identity = a.artist_id ?? `name:${a.normalized_name ?? a.name}`;
+          for (const ext of a.external_ids ?? []) {
+            const key = `${ext.provider}\u0000${ext.external_id}`;
+            const prior = claimedBy.get(key);
+            if (prior !== undefined && prior !== identity) {
+              conflict = 'external_id_shared_by_multiple_artists_in_candidate';
+            }
+            claimedBy.set(key, identity);
+            for (const existingExt of this.artistExternalIds.values()) {
+              if (
+                existingExt.provider === ext.provider &&
+                existingExt.externalId === ext.external_id &&
+                existingExt.artistId !== a.artist_id
+              ) {
+                conflict = 'external_id_owned_by_different_artist';
+              }
+            }
+          }
+        }
+        if (conflict) {
+          await this.recordResolution({
+            eventCandidateId: payload.resolution.event_candidate_id,
+            eventId: null,
+            status: 'needs_review',
+            matcherVersion: payload.resolution.matcher_version ?? '1.0.0',
+            confidence: Math.min(payload.resolution.confidence, 0.4),
+            reasons: ['duplicate_external_id_conflict', conflict],
+          });
+          return { eventId: null, status: 'needs_review' };
+        }
+      }
+
       // 1. Create venue if specified in transaction payload
       if (payload.venueToCreate) {
         createdVenueId = payload.venueToCreate.id ?? crypto.randomUUID();
@@ -1311,8 +1535,8 @@ export class MemoryCatalogRepository implements ICatalogRepository {
                 payload.event.normalized_name ?? existing.normalizedName,
               eventKind: payload.event.event_kind ?? existing.eventKind,
               status: payload.event.status ?? existing.status,
-              venueId:
-                venueIdToUse !== undefined ? venueIdToUse : existing.venueId,
+              // Mirrors SQL coalesce(venue_id, new venue, venue_id): never null a known venue.
+              venueId: venueIdToUse ?? existing.venueId,
               city:
                 payload.event.city !== undefined
                   ? payload.event.city
@@ -1352,6 +1576,8 @@ export class MemoryCatalogRepository implements ICatalogRepository {
                 payload.event.primary_ticket_url !== undefined
                   ? payload.event.primary_ticket_url
                   : existing.primaryTicketUrl,
+              // Fill-if-empty: never overwrite an existing image.
+              imageUrl: existing.imageUrl ?? payload.event.image_url ?? null,
               updatedAt: new Date().toISOString(),
             });
           }
@@ -1382,11 +1608,23 @@ export class MemoryCatalogRepository implements ICatalogRepository {
             isMultiDay: payload.event.is_multi_day ?? false,
             officialUrl: payload.event.official_url ?? null,
             primaryTicketUrl: payload.event.primary_ticket_url ?? null,
+            imageUrl: payload.event.image_url ?? null,
             announcedAt: null,
             createdAt: now,
             updatedAt: now,
           };
           this.events.set(eventId, created);
+        }
+
+        // Venue image (fill-if-empty), mirroring the SQL function
+        if (payload.event.venue_image_url && venueIdToUse) {
+          const v = this.venues.get(venueIdToUse);
+          if (v && !v.imageUrl) {
+            this.venues.set(venueIdToUse, {
+              ...v,
+              imageUrl: payload.event.venue_image_url,
+            });
+          }
         }
 
         // 2. Artists (link existing or create new inside the transaction)
@@ -1400,9 +1638,21 @@ export class MemoryCatalogRepository implements ICatalogRepository {
                 id: artistId,
                 name: a.name,
                 normalizedName: a.normalized_name ?? normalizeName(a.name),
+                imageUrl: a.image_url ?? null,
                 createdAt: artNow,
                 updatedAt: artNow,
               });
+            }
+
+            // Artist image (fill-if-empty) for matched artists, mirroring the SQL function
+            if (artistId && a.image_url) {
+              const existingArtist = this.artists.get(artistId);
+              if (existingArtist && !existingArtist.imageUrl) {
+                this.artists.set(artistId, {
+                  ...existingArtist,
+                  imageUrl: a.image_url,
+                });
+              }
             }
 
             // Enrich or attach external IDs if provided (for both new and matched artists)
@@ -1418,15 +1668,6 @@ export class MemoryCatalogRepository implements ICatalogRepository {
                   ) {
                     throw new Error(
                       `duplicate key value violates unique constraint "uq_artist_provider_external_id": (${ext.provider}, ${ext.external_id}) already belongs to artist ${existingExt.artistId}`,
-                    );
-                  }
-                  if (
-                    existingExt.artistId === artistId &&
-                    existingExt.provider === ext.provider &&
-                    existingExt.externalId !== ext.external_id
-                  ) {
-                    throw new Error(
-                      `duplicate key value violates unique constraint "uq_artist_provider": artist ${artistId} already has ${ext.provider} id ${existingExt.externalId}`,
                     );
                   }
                 }
@@ -1616,7 +1857,11 @@ export class MemoryUserPreferenceRepository implements IUserPreferenceRepository
         const extIds = await this.catalogRepo.findArtistExternalIds(
           input.artistId,
         );
-        const match = extIds.find((e) => e.provider === 'spotify');
+        // An artist may hold several Spotify ids: prefer the supplied one when it is one of them.
+        const spotifyExts = extIds.filter((e) => e.provider === 'spotify');
+        const match =
+          spotifyExts.find((e) => e.externalId === trimmedSpotifyId) ??
+          spotifyExts[0];
         if (match) canonicalSpotifyExtId = match.externalId;
 
         if (trimmedSpotifyId) {
@@ -2152,6 +2397,10 @@ export class MemoryProfileRepository implements IProfileRepository {
         input.recommendationPreset !== undefined
           ? input.recommendationPreset
           : (existing?.recommendationPreset ?? 'balanced'),
+      artistWeight:
+        input.artistWeight !== undefined
+          ? input.artistWeight
+          : (existing?.artistWeight ?? null),
       createdAt: existing?.createdAt ?? now,
       updatedAt: now,
     };

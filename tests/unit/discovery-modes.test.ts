@@ -551,17 +551,17 @@ describe('Discovery Modes Domain Logic', () => {
 
   describe('getModeScoringWeights', () => {
     it('returns custom weights prioritizing each mode while preserving base weights for "all"', () => {
-      const base = { artist: 25, distance: 25, price: 25, timing: 25 };
+      const base = { artist: 34, distance: 33, price: 33 };
       expect(getModeScoringWeights('all', base)).toEqual(base);
 
       const weekend = getModeScoringWeights('this_weekend', base);
-      expect(weekend.timing).toBeGreaterThan(weekend.artist);
+      expect(weekend.distance).toBeGreaterThan(weekend.artist);
 
       const cheap = getModeScoringWeights('cheap_and_nearby', base);
       expect(cheap.price).toBeGreaterThan(cheap.artist);
 
       const planning = getModeScoringWeights('worth_planning_for', base);
-      expect(planning.artist).toBeGreaterThan(planning.timing);
+      expect(planning.artist).toBeGreaterThan(planning.distance);
     });
   });
 });

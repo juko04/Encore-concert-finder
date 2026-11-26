@@ -5,7 +5,8 @@
  * across short-term, medium-term, and long-term listening windows.
  *
  * Invariants:
- * 1. Read-only listening signals: never mutates user_artist_preferences.
+ * 1. Read-only listening signals: never mutates user_artist_preferences. Synced affinities are
+ *    persisted to user_spotify_artist_affinities and remain after disconnect/expiry/403.
  * 2. Fail-closed: network, auth, or token failures gracefully return last-known-good
  *    or [] without crashing Discover or recommendation scoring.
  * 3. Short TTL in-memory caching: prevents repeated external API calls per user session.
@@ -15,6 +16,10 @@
 import { getServerEnv } from '@/lib/env/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { SupabaseSpotifyConnectionRepository } from '@/lib/repositories/spotify-connection-repository';
+import {
+  SupabaseSpotifyAffinityRepository,
+  type ISpotifyAffinityRepository,
+} from '@/lib/repositories/spotify-affinity-repository';
 import { SpotifyApiClient } from './client';
 import type { SpotifyTimeRange, SpotifyTopArtist } from '@/lib/domain/spotify';
 import {
@@ -22,6 +27,9 @@ import {
   VALID_SPOTIFY_TIME_RANGES,
 } from '@/lib/domain/spotify';
 import type { ICatalogRepository } from '@/lib/repositories/interfaces';
+import { computeSpotifyAffinity } from '@/lib/recommendation/spotify-affinity';
+import { enrichSpotifyArtistGenres } from './genre-enrichment';
+import { createTicketmasterGenreLookup } from '@/lib/sources/ticketmaster/attraction-genres';
 import {
   SpotifyArtistMatcher,
   type SpotifyArtistCandidate,
@@ -32,6 +40,9 @@ declare module '@/lib/domain/spotify' {
     canonicalArtistId?: string | null;
     ranksByRange?: Partial<Record<SpotifyTimeRange, number>>;
     syncedAt?: string;
+    /** 0..1 trend-aware listening affinity (see lib/recommendation/spotify-affinity.ts). */
+    affinity?: number;
+    affinityReason?: string;
   }
 }
 
@@ -161,6 +172,79 @@ export function calculateUnifiedAffinityScore(ranks: {
   return sScore * 0.6 + mScore * 0.3 + lScore * 0.1;
 }
 
+function getAffinityRepo(): SupabaseSpotifyAffinityRepository | null {
+  try {
+    return new SupabaseSpotifyAffinityRepository(createAdminClient());
+  } catch {
+    return null;
+  }
+}
+
+async function persistAffinities(
+  userId: string,
+  artists: SpotifyTopArtist[],
+  syncedAt: string,
+): Promise<void> {
+  const repo = getAffinityRepo();
+  if (!repo) return;
+  try {
+    await repo.replaceAffinities(userId, artists, new Date(syncedAt));
+  } catch (err) {
+    console.warn(
+      `[SpotifyAffinityService] Failed to persist affinities for user ${userId}:`,
+      err,
+    );
+  }
+}
+
+/**
+ * Reads the durable Spotify affinity snapshot for a user. Works with no Spotify connection,
+ * expired/revoked tokens, or an allowlist-removed app. Fail-closed: returns [] on error.
+ */
+export async function getStoredSpotifyAffinities(
+  userId: string,
+  repo?: ISpotifyAffinityRepository,
+): Promise<SpotifyTopArtist[]> {
+  if (!userId || typeof userId !== 'string') return [];
+  const effective = repo ?? getAffinityRepo();
+  if (!effective) return [];
+  try {
+    return await effective.getAffinities(userId);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Restrict consolidated artists to those with a stored rank in the selected listening window,
+ * ordered by that window's rank, with `rank`/`timeRange` set to that window's values.
+ * Never falls back to artists from other windows: no rank in the window means not shown.
+ * With no window given, the consolidated list is returned unchanged.
+ */
+export function selectArtistsForWindow(
+  artists: SpotifyTopArtist[],
+  timeRange?: SpotifyTimeRange,
+): SpotifyTopArtist[] {
+  if (!timeRange) return artists;
+  return artists
+    .filter((a) => {
+      const r = a.ranksByRange?.[timeRange];
+      return typeof r === 'number' && Number.isFinite(r) && r >= 1;
+    })
+    .map((a) => ({
+      ...a,
+      rank: a.ranksByRange?.[timeRange] as number,
+      timeRange,
+    }))
+    .sort((a, b) => a.rank - b.rank);
+}
+
+async function lastKnownOrStored(userId: string): Promise<SpotifyTopArtist[]> {
+  const cached = lastKnownGoodCache.get(userId);
+  if (cached && cached.length > 0) return cached;
+  return getStoredSpotifyAffinities(userId);
+}
+
 export interface SyncSpotifyOptions {
   catalogRepo?: ICatalogRepository;
   allowEnrichment?: boolean;
@@ -185,7 +269,7 @@ export async function syncSpotifyTopArtistsAcrossTimeRanges(
   try {
     serverEnv = getServerEnv();
   } catch {
-    return lastKnownGoodCache.get(userId) ?? [];
+    return await lastKnownOrStored(userId);
   }
 
   if (
@@ -196,7 +280,7 @@ export async function syncSpotifyTopArtistsAcrossTimeRanges(
     !serverEnv.SPOTIFY_REDIRECT_URI ||
     !serverEnv.SPOTIFY_TOKEN_ENCRYPTION_KEY
   ) {
-    return lastKnownGoodCache.get(userId) ?? [];
+    return await lastKnownOrStored(userId);
   }
 
   try {
@@ -208,12 +292,12 @@ export async function syncSpotifyTopArtistsAcrossTimeRanges(
 
     const tokens = await repo.getConnectionTokens(userId);
     if (!tokens) {
-      return lastKnownGoodCache.get(userId) ?? [];
+      return await lastKnownOrStored(userId);
     }
 
     if (tokens.reauthorizationDeadline.getTime() <= Date.now()) {
       await repo.updateStatus(userId, 'expired').catch(() => {});
-      return lastKnownGoodCache.get(userId) ?? [];
+      return await lastKnownOrStored(userId);
     }
 
     const spotifyClient = new SpotifyApiClient({
@@ -240,7 +324,7 @@ export async function syncSpotifyTopArtistsAcrossTimeRanges(
         if (refreshErr instanceof SpotifyAuthenticationError) {
           await repo.updateStatus(userId, 'expired').catch(() => {});
         }
-        return lastKnownGoodCache.get(userId) ?? [];
+        return await lastKnownOrStored(userId);
       }
     }
 
@@ -269,7 +353,7 @@ export async function syncSpotifyTopArtistsAcrossTimeRanges(
     });
 
     if (successfulFetches === 0) {
-      return lastKnownGoodCache.get(userId) ?? [];
+      return await lastKnownOrStored(userId);
     }
 
     // Record successful sync timestamp in repository
@@ -309,11 +393,13 @@ export async function syncSpotifyTopArtistsAcrossTimeRanges(
     const consolidatedArtists: SpotifyTopArtist[] = Array.from(
       artistMap.values(),
     ).map(({ artist, ranks }) => {
-      const trend = calculateArtistTrend(ranks);
-      const unifiedScore = calculateUnifiedAffinityScore(ranks);
+      const result = computeSpotifyAffinity(ranks);
+      const unifiedScore = result.affinity;
       return {
         ...artist,
-        trend,
+        trend: result.trend,
+        affinity: result.affinity,
+        affinityReason: result.reason,
         ranksByRange: ranks,
         timeRange: ranks.short_term ? 'short_term' : 'medium_term',
         _unifiedScore: unifiedScore,
@@ -348,6 +434,10 @@ export async function syncSpotifyTopArtistsAcrossTimeRanges(
       );
     }
 
+    // Spotify no longer returns artist genres: fill them from the catalog / Ticketmaster so the
+    // per-user genre taste (e.g. "mostly electronic") can be inferred. Best-effort, time-boxed.
+    await enrichGenresSafely(consolidatedArtists, options?.catalogRepo);
+
     // Cache consolidated top artists
     affinityCache.set(`${userId}:consolidated`, {
       timestamp: Date.now(),
@@ -363,13 +453,17 @@ export async function syncSpotifyTopArtistsAcrossTimeRanges(
     });
     lastKnownGoodCache.set(userId, consolidatedArtists);
 
+    // Persist durably so rankings/affinities survive disconnect, token expiry, 403/allowlist
+    // removal and restarts. Best-effort: persistence failure never breaks the sync result.
+    await persistAffinities(userId, consolidatedArtists, syncedAt);
+
     return consolidatedArtists;
   } catch (err) {
     console.warn(
       `[SpotifyAffinityService] Sync across time ranges failed for user ${userId}:`,
       err,
     );
-    return lastKnownGoodCache.get(userId) ?? [];
+    return await lastKnownOrStored(userId);
   }
 }
 
@@ -409,6 +503,29 @@ async function resolveAndEnrichSpotifyArtists(
   }
 }
 
+const GENRE_ENRICHMENT_TIMEOUT_MS = 12_000;
+
+async function enrichGenresSafely(
+  artists: SpotifyTopArtist[],
+  catalogRepo?: ICatalogRepository,
+): Promise<void> {
+  try {
+    const apiKey = process.env.TICKETMASTER_API_KEY?.trim();
+    const work = enrichSpotifyArtistGenres(artists, {
+      catalogRepo,
+      lookup: apiKey ? createTicketmasterGenreLookup({ apiKey }) : undefined,
+    });
+    await Promise.race([
+      work,
+      new Promise((resolve) =>
+        setTimeout(resolve, GENRE_ENRICHMENT_TIMEOUT_MS),
+      ),
+    ]);
+  } catch {
+    // Genres stay unknown; scoring falls back to artist-level matching.
+  }
+}
+
 /**
  * Retrieves cached or active Spotify top artists for recommendation scoring.
  * Checks memory cache first; falls back to full multi-range sync or last-known-good on failure.
@@ -438,5 +555,5 @@ export async function getActiveSpotifyTopArtistsForUser(
     // Fail closed
   }
 
-  return lastKnownGoodCache.get(userId) ?? [];
+  return await lastKnownOrStored(userId);
 }

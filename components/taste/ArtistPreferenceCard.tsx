@@ -29,17 +29,17 @@ export function ArtistPreferenceCard({
   return (
     <div
       data-testid={`preference-card-${preference.id}`}
-      className="flex flex-col justify-between gap-4 rounded-xl border border-zinc-800/80 bg-zinc-900/50 p-4 transition-all hover:border-zinc-700 sm:flex-row sm:items-center"
+      className="flex flex-col justify-between gap-4 rounded-xl border border-zinc-200 bg-white p-4 transition-all hover:border-zinc-300 sm:flex-row sm:items-center"
     >
       <div className="flex items-center gap-3.5">
         {preference.canonicalArtist?.imageUrl ? (
           <img
             src={preference.canonicalArtist.imageUrl}
             alt=""
-            className="h-10 w-10 flex-shrink-0 rounded-full object-cover ring-1 ring-zinc-700"
+            className="h-10 w-10 flex-shrink-0 rounded-full object-cover ring-1 ring-zinc-200"
           />
         ) : (
-          <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-indigo-950 font-bold text-indigo-300 ring-1 ring-indigo-800/60">
+          <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-indigo-50 font-bold text-indigo-700 ring-1 ring-indigo-200">
             {preference.artistName.slice(0, 1).toUpperCase()}
           </div>
         )}
@@ -48,7 +48,7 @@ export function ArtistPreferenceCard({
           <div className="flex flex-wrap items-center gap-2">
             <h3
               data-testid={`artist-name-${preference.id}`}
-              className="text-base font-semibold text-white"
+              className="text-base font-semibold text-zinc-900"
             >
               {preference.artistName}
             </h3>
@@ -56,35 +56,35 @@ export function ArtistPreferenceCard({
             {preference.id.startsWith('demo-') ? (
               <span
                 data-testid={`demo-badge-${preference.id}`}
-                className="inline-flex items-center rounded-md border border-amber-800/60 bg-amber-950/40 px-2 py-0.5 text-[10px] font-semibold text-amber-300"
+                className="inline-flex items-center rounded-md border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-700"
               >
                 Simulated Preview
               </span>
             ) : isCatalogMatched ? (
               <span
                 data-testid={`catalog-badge-${preference.id}`}
-                className="inline-flex items-center rounded-md border border-emerald-800/50 bg-emerald-950/40 px-2 py-0.5 text-[10px] font-medium text-emerald-300"
+                className="inline-flex items-center rounded-md border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] font-medium text-emerald-800"
               >
                 In Catalog
               </span>
             ) : (
               <span
                 data-testid={`catalog-badge-${preference.id}`}
-                className="inline-flex items-center rounded-md border border-zinc-700/60 bg-zinc-800/50 px-2 py-0.5 text-[10px] font-medium text-zinc-400"
+                className="inline-flex items-center rounded-md border border-zinc-200 bg-zinc-100 px-2 py-0.5 text-[10px] font-medium text-zinc-500"
               >
                 Not in Catalog
               </span>
             )}
           </div>
 
-          <div className="mt-1 flex items-center gap-2 text-xs text-zinc-400">
+          <div className="mt-1 flex items-center gap-2 text-xs text-zinc-500">
             <span>Preference:</span>
             <PreferenceLevelBadge level={preference.preferenceLevel} />
           </div>
         </div>
       </div>
 
-      <div className="flex flex-wrap items-center gap-2 border-t border-zinc-800/60 pt-3 sm:border-t-0 sm:pt-0">
+      <div className="flex flex-wrap items-center gap-2 border-t border-zinc-200 pt-3 sm:border-t-0 sm:pt-0">
         <label htmlFor={`select-level-${preference.id}`} className="sr-only">
           Change preference level for {preference.artistName}
         </label>
@@ -96,7 +96,7 @@ export function ArtistPreferenceCard({
           onChange={(e) =>
             onUpdateLevel(preference, e.target.value as PreferenceLevel)
           }
-          className="rounded-lg border border-zinc-700 bg-zinc-950 px-2.5 py-1.5 text-xs font-medium text-zinc-200 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:opacity-50"
+          className="rounded-lg border border-zinc-200 bg-white px-2.5 py-1.5 text-xs font-medium text-zinc-800 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:opacity-50"
         >
           <option value="favorite">★ Favorite (Must-see)</option>
           <option value="like">♥ Like (Want to see)</option>
@@ -110,7 +110,7 @@ export function ArtistPreferenceCard({
           disabled={isUpdating}
           onClick={() => onDelete(preference.id)}
           aria-label={`Remove ${preference.artistName} from preferences`}
-          className="rounded-lg border border-zinc-800 bg-zinc-950/80 p-1.5 text-zinc-400 transition-colors hover:border-red-900/60 hover:bg-red-950/30 hover:text-red-400 focus:outline-none focus:ring-1 focus:ring-red-500 disabled:opacity-50"
+          className="rounded-lg border border-zinc-200 bg-zinc-50 p-1.5 text-zinc-500 transition-colors hover:border-red-300 hover:bg-red-50 hover:text-red-700 focus:outline-none focus:ring-1 focus:ring-red-500 disabled:opacity-50"
         >
           <svg
             className="h-4 w-4"

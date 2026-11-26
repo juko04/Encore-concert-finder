@@ -2,6 +2,7 @@
 
 import React, { useState, useMemo } from 'react';
 import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 import type { CanonicalEventSummary } from '@/lib/domain/catalog';
 import type { IndexEventItem } from '@/components/index/types';
 import { toIndexEventItem } from '@/components/index/types';
@@ -19,6 +20,7 @@ import {
   downloadIcsFile,
   generateGoogleCalendarUrl,
 } from '@/lib/utils/calendar-export';
+import { resolveCalendarAnchor } from '@/lib/utils/calendar-month';
 import { formatIndexDate } from '@/components/index/formatters';
 
 export interface CalendarClientProps {
@@ -40,31 +42,20 @@ export function CalendarClient({
   );
   const { savedIds } = useWatchlist();
 
-  // Initial date anchor: referenceDate or first event date or current date
-  const initialDate = useMemo(() => {
-    if (referenceDate) {
-      return new Date(`${referenceDate}T12:00:00Z`);
-    }
-    if (events.length > 0 && events[0].localStartDate) {
-      return new Date(`${events[0].localStartDate}T12:00:00Z`);
-    }
-    return new Date();
-  }, [referenceDate, events]);
-
-  const [currentYear, setCurrentYear] = useState<number>(() =>
-    initialDate.getUTCFullYear(),
+  // Initial anchor: explicit referenceDate, else ?month=YYYY-MM, else today.
+  // Never anchors on the first event's date.
+  const searchParams = useSearchParams();
+  const monthParam = searchParams?.get('month') ?? null;
+  const initialAnchor = useMemo(
+    () => resolveCalendarAnchor({ now: new Date(), referenceDate, monthParam }),
+    [referenceDate, monthParam],
   );
-  const [currentMonth, setCurrentMonth] = useState<number>(() =>
-    initialDate.getUTCMonth(),
-  ); // 0-indexed
-  const [selectedDateStr, setSelectedDateStr] = useState<string>(() => {
-    if (referenceDate) return referenceDate;
-    if (events.length > 0 && events[0].localStartDate) {
-      return events[0].localStartDate;
-    }
-    const pad = (n: number) => String(n).padStart(2, '0');
-    return `${initialDate.getUTCFullYear()}-${pad(initialDate.getUTCMonth() + 1)}-${pad(initialDate.getUTCDate())}`;
-  });
+
+  const [currentYear, setCurrentYear] = useState<number>(initialAnchor.year);
+  const [currentMonth, setCurrentMonth] = useState<number>(initialAnchor.month); // 0-indexed
+  const [selectedDateStr, setSelectedDateStr] = useState<string>(
+    initialAnchor.selectedDate,
+  );
 
   const [savedOnly, setSavedOnly] = useState(false);
 
@@ -88,13 +79,10 @@ export function CalendarClient({
   };
 
   const handleToday = () => {
-    const today = new Date();
-    setCurrentYear(today.getUTCFullYear());
-    setCurrentMonth(today.getUTCMonth());
-    const pad = (n: number) => String(n).padStart(2, '0');
-    setSelectedDateStr(
-      `${today.getUTCFullYear()}-${pad(today.getUTCMonth() + 1)}-${pad(today.getUTCDate())}`,
-    );
+    const today = resolveCalendarAnchor({ now: new Date() });
+    setCurrentYear(today.year);
+    setCurrentMonth(today.month);
+    setSelectedDateStr(today.selectedDate);
   };
 
   // Group events by YYYY-MM-DD

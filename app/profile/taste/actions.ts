@@ -30,10 +30,13 @@ import {
 } from '@/lib/sources/spotify/synthetic-preview';
 import {
   clearSpotifyAffinityCache,
+  getStoredSpotifyAffinities,
+  selectArtistsForWindow,
   syncSpotifyTopArtistsAcrossTimeRanges,
 } from '@/lib/sources/spotify/affinity-service';
 import { SupabaseCatalogRepository } from '@/lib/repositories/catalog-repository';
 import type { ICatalogRepository } from '@/lib/repositories/interfaces';
+import { computeSpotifyAffinity } from '@/lib/recommendation/spotify-affinity';
 
 export interface PreferenceActionResult {
   success?: boolean;
@@ -293,17 +296,10 @@ export async function syncSpotifyArtistsAction(
     ).length;
     const syncedAt = new Date().toISOString();
 
-    const returnedArtists =
-      timeRange && timeRange !== 'short_term'
-        ? artists.filter(
-            (a) =>
-              a.timeRange === timeRange ||
-              (a.ranksByRange && a.ranksByRange[timeRange] !== undefined),
-          )
-        : artists;
+    const returnedArtists = selectArtistsForWindow(artists, timeRange);
 
     return {
-      artists: returnedArtists.length > 0 ? returnedArtists : artists,
+      artists: returnedArtists,
       syncedAt,
       matchedCount,
       totalCount: artists.length,
@@ -315,6 +311,53 @@ export async function syncSpotifyArtistsAction(
       artists: [],
       isSyntheticPreview: false,
       error: 'Failed to sync Spotify listening history. Please try again.',
+    };
+  }
+}
+
+export interface StoredSpotifyArtistsResult {
+  artists: SpotifyTopArtist[];
+  /** ISO timestamp of the most recent stored sync (null when nothing is stored). */
+  syncedAt: string | null;
+  /** Set when data is stored but none of it has a rank in the selected window. */
+  message?: string;
+  error?: string;
+}
+
+const STORED_WINDOW_EMPTY_MESSAGE =
+  'No stored listening data for this period. Reconnect Spotify and sync to import it.';
+
+/**
+ * Returns the durable, previously imported Spotify rankings/affinities. Works after disconnect,
+ * token expiry/revocation, or developer-allowlist removal because it never calls Spotify.
+ */
+export async function getStoredSpotifyArtistsAction(
+  timeRange?: SpotifyTimeRange,
+): Promise<StoredSpotifyArtistsResult> {
+  const user = await getAuthenticatedUser();
+  if (!user) {
+    return { artists: [], syncedAt: null, error: 'Unauthorized' };
+  }
+  try {
+    const stored = await getStoredSpotifyAffinities(user.id);
+    // Only artists with a stored rank in the selected window; never another window's data.
+    const artists = selectArtistsForWindow(stored, timeRange);
+    const message =
+      timeRange && stored.length > 0 && artists.length === 0
+        ? STORED_WINDOW_EMPTY_MESSAGE
+        : undefined;
+    const syncedAt =
+      stored
+        .map((a) => a.syncedAt)
+        .filter((v): v is string => Boolean(v))
+        .sort()
+        .at(-1) ?? null;
+    return message ? { artists, syncedAt, message } : { artists, syncedAt };
+  } catch {
+    return {
+      artists: [],
+      syncedAt: null,
+      error: 'Failed to load stored Spotify artists.',
     };
   }
 }
@@ -467,14 +510,52 @@ export async function getSpotifyTopArtistsAction(
       }
     }
 
-    const artists = await spotifyClient.getTopArtists(
-      currentAccessToken,
-      timeRange,
+    // Fetch all three listening windows so each row can show the artist's rank in every window
+    // (out of Spotify's top 50) next to the Encore affinity score derived from those ranks.
+    // The requested window must succeed; the other two are best-effort enrichment.
+    const otherRanges = VALID_SPOTIFY_TIME_RANGES.filter(
+      (r) => r !== timeRange,
     );
+    const [artists, ...otherResults] = await Promise.all([
+      spotifyClient.getTopArtists(currentAccessToken, timeRange),
+      ...otherRanges.map(async (r): Promise<SpotifyTopArtist[] | null> => {
+        try {
+          return (
+            (await spotifyClient.getTopArtists(currentAccessToken, r)) ?? null
+          );
+        } catch {
+          return null;
+        }
+      }),
+    ]);
     await repo.recordSync(user.id);
 
+    const ranksById = new Map<
+      string,
+      Partial<Record<SpotifyTimeRange, number>>
+    >();
+    for (const a of artists) {
+      ranksById.set(a.id, { [timeRange]: a.rank });
+    }
+    otherRanges.forEach((range, i) => {
+      for (const a of otherResults[i] ?? []) {
+        const ranks = ranksById.get(a.id);
+        if (ranks) ranks[range] = a.rank;
+      }
+    });
+
     return {
-      artists,
+      artists: artists.map((a) => {
+        const ranks = ranksById.get(a.id) ?? { [timeRange]: a.rank };
+        const result = computeSpotifyAffinity(ranks);
+        return {
+          ...a,
+          ranksByRange: ranks,
+          affinity: result.affinity,
+          affinityReason: result.reason,
+          trend: a.trend ?? result.trend,
+        };
+      }),
       isSyntheticPreview: false,
     };
   } catch (err) {

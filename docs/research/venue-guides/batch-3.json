@@ -1,0 +1,136 @@
+{
+"batch":3,
+"researchedOn":"2026-11-24",
+"venues":[
+{
+"name":"Boulder Theater",
+"aliases":["Boulder Theatre"],
+"city":"Boulder",
+"region":"CO",
+"capacity":{"value":850,"sourceUrls":["https://www.axs.com/venues/100792","http://venuellama.com/boulder-theater/"]},
+"seatingFormat":{"value":"mixed","note":"Reviewers describe a multi-tier main floor (standing near the stage and/or reserved rows depending on the show) plus a balcony with fixed seats; GA shows are commonly split between standing on the floor and sitting in the balcony. Layout varies per event. Official site pages for the layout were not retrievable.","sourceUrls":["https://www.tripadvisor.com/Attraction_Review-g33324-d284779-Reviews-or10-Boulder_Theater-Boulder_Colorado.html","https://www.colorado.com/businesses/boulder-theater","http://venuellama.com/boulder-theater/"]},
+"agePolicy":{"text":"AXS venue page says shows are generally all ages unless an event states otherwise, with guests under 15 needing an adult. Varies by show, so check each listing.","sourceUrls":["https://www.axs.com/venues/100792"],"evidence":"official"},
+"doors":{"text":"No standard doors time found. Box office opens about 90 minutes before doors on event nights; the attached lounge opens an hour before doors.","sourceUrls":["https://www.z2ent.com/venues-we-book/boulder-theater","https://www.axs.com/venues/100792"]},
+"parking":{"summary":"No venue lot. Street parking downtown (AXS says typically free after 7 pm) plus several nearby garages. A community reviewer says downtown parking can be tough but street spots are usually findable; another reported a ticket for parking in the disabled space out front.","difficulty":"moderate","sourceUrls":["https://www.axs.com/venues/100792","http://venuellama.com/boulder-theater/","https://www.tripadvisor.com/Attraction_Review-g33324-d284779-Reviews-or10-Boulder_Theater-Boulder_Colorado.html"],"evidence":"community"},
+"transit":{"summary":"AXS notes RTD bus stops downtown near the theater. Specific routes not verified.","sourceUrls":["https://www.axs.com/venues/100792"]},
+"policies":{"bag":"AXS says large bags and containers are prohibited; full official bag rules not retrieved.","reentry":null,"other":"Official site links to separate FAQ, Directions & Parking and Accessibility pages that could not be opened; verify there.","sourceUrls":["https://www.axs.com/venues/100792","https://www.z2ent.com/venues-we-book/boulder-theater"]},
+"accessibility":{"summary":"A venue directory says ADA accessibility is offered with accessible seating requested via the box office. One older Tripadvisor reviewer said it was not wheelchair friendly despite ADA compliance (community-reported, 2016-2018 era). Contact box office (303-786-7030) before attending.","sourceUrls":["https://www.colorado.com/businesses/boulder-theater","https://www.tripadvisor.com/Attraction_Review-g33324-d284779-Reviews-or10-Boulder_Theater-Boulder_Colorado.html","https://www.z2ent.com/venues-we-book/boulder-theater"]},
+"area":{"summary":"Downtown Boulder at 2032 14th St, in a walkable area with things to do before and after shows. A reviewer says shows tend to end early, around 11:30 pm.","sourceUrls":["https://www.z2ent.com/venues-we-book/boulder-theater","http://venuellama.com/boulder-theater/"]},
+"sound":{"summary":"Reviewers consistently praise sound as crisp from floor, seats and balcony, and say sightlines are good thanks to the tiered floor. Some find the reserved-row chairs cramped.","sourceUrls":["http://venuellama.com/boulder-theater/","https://www.tripadvisor.com/Attraction_Review-g33324-d284779-Reviews-or10-Boulder_Theater-Boulder_Colorado.html"],"evidence":"community"},
+"whyPeopleLikeIt":[
+{"text":"Good sound and sightlines from most spots, including the tiered floor.","sourceUrls":["https://www.tripadvisor.com/Attraction_Review-g33324-d284779-Reviews-or10-Boulder_Theater-Boulder_Colorado.html","http://venuellama.com/boulder-theater/"],"evidence":"community"}
+],
+"considerBeforeAttending":[
+{"text":"Balcony seating is reportedly first come, first served at GA shows, so arriving early matters for front-row balcony.","sourceUrls":["http://venuellama.com/boulder-theater/"],"evidence":"community"},
+{"text":"Reviewers mention long security lines and crowded lobby/restrooms at busy shows; allow extra entry time.","sourceUrls":["https://www.tripadvisor.com/Attraction_Review-g33324-d284779-Reviews-or10-Boulder_Theater-Boulder_Colorado.html"],"evidence":"community"},
+{"text":"Large bags are not allowed, so travel light.","sourceUrls":["https://www.axs.com/venues/100792"],"evidence":"official"},
+{"text":"Some reviewers call the building dated or worn and mention high ticket fees.","sourceUrls":["https://www.colorado.com/businesses/boulder-theater","https://www.tripadvisor.com/Attraction_Review-g33324-d284779-Reviews-or10-Boulder_Theater-Boulder_Colorado.html"],"evidence":"community"}
+],
+"confidence":"medium",
+"notes":"Official bouldertheater.com FAQ was unreachable (redirects to z2ent.com page which lacks details). Capacity 850 is from AXS (described as seats) and a directory; actual capacity varies by configuration. Tripadvisor reviews seen were mostly 2016-2018."
+},
+{
+"name":"Fox Theatre",
+"aliases":["The Fox Theatre","Fox Theatre Boulder"],
+"city":"Boulder",
+"region":"CO",
+"capacity":{"value":625,"sourceUrls":["https://www.foxtheatre.com/faq"]},
+"seatingFormat":{"value":"standing_ga","note":"Standing room; bench seating along the outer walls is first come, first served. Guests who cannot stand all show can request accommodation in advance by emailing the address on the FAQ.","sourceUrls":["https://www.foxtheatre.com/faq","https://uncovercolorado.com/activities/fox-theatre"]},
+"agePolicy":{"text":"21+ unless noted. 'AA' means all ages (under 15 needs a parent) and 'LAA' means limited all ages with few tickets. Varies by show.","sourceUrls":["https://www.foxtheatre.com/faq"],"evidence":"official"},
+"doors":{"text":"Specific doors time not stated. Box office opens at 6pm on show nights only.","sourceUrls":["https://www.foxtheatre.com/faq"]},
+"parking":{"summary":"No parking details on the official FAQ. The venue sits on University Hill near CU; a Directions & Parking page exists on the Z2 site but could not be read.","difficulty":"unknown","sourceUrls":["https://www.z2ent.com/venues-we-book/fox-theatre","https://en.wikipedia.org/wiki/Fox_Theatre_(Boulder)"],"evidence":"official"},
+"transit":null,
+"policies":{"bag":"A listing says backpacks are banned; the official FAQ did not mention bags.","reentry":"Guests who step out to smoke may re-enter; general re-entry rules not stated.","other":"Photo ID (license or passport) required for 21+ shows and for ticket pickup. No smoking inside, marijuana included. Listing also reports vaping, weapons and outside food/alcohol are banned.","sourceUrls":["https://www.foxtheatre.com/faq","https://uncovercolorado.com/activities/fox-theatre"]},
+"accessibility":{"summary":"No general accessibility info on the FAQ; physical-condition accommodations are arranged by emailing the venue in advance. Z2 site links to an Accessibility page that could not be read.","sourceUrls":["https://www.foxtheatre.com/faq","https://www.z2ent.com/venues-we-book/fox-theatre"]},
+"area":{"summary":"1135 13th St on University Hill, a commercial and nightlife district across from the CU campus.","sourceUrls":["https://www.z2ent.com/venues-we-book/fox-theatre","https://en.wikipedia.org/wiki/Fox_Theatre_(Boulder)"]},
+"sound":{"summary":"No consistent sound or sightline reports found. With a standing crowd, view depends on where you stand.","sourceUrls":["https://uncovercolorado.com/activities/fox-theatre"],"evidence":"community"},
+"whyPeopleLikeIt":[
+{"text":"Intimate, standing-room club of roughly 600 people.","sourceUrls":["https://uncovercolorado.com/activities/fox-theatre","https://www.foxtheatre.com/faq"],"evidence":"official"}
+],
+"considerBeforeAttending":[
+{"text":"Most shows are 21+; check the AA/LAA marker and bring a valid photo ID.","sourceUrls":["https://www.foxtheatre.com/faq"],"evidence":"official"},
+{"text":"Mostly standing with limited first-come bench seating, so plan for a long time on your feet.","sourceUrls":["https://www.foxtheatre.com/faq"],"evidence":"official"},
+{"text":"Leave the backpack at home (reported ban).","sourceUrls":["https://uncovercolorado.com/activities/fox-theatre"],"evidence":"community"}
+],
+"confidence":"medium",
+"notes":"Capacity: official FAQ 625; Wikipedia says seating 'just over 600', directory says about 600. Parking, transit and sound could not be verified from sources."
+},
+{
+"name":"Chautauqua Auditorium",
+"aliases":["Colorado Chautauqua Auditorium","Chautauqua"],
+"city":"Boulder",
+"region":"CO",
+"capacity":{"value":1300,"sourceUrls":["https://www.cinematreasures.org/theaters/44787"]},
+"seatingFormat":{"value":"mixed","note":"Padded wooden-backed opera seats in lettered reserved sections, plus a general admission area (some benches remain). Wheelchair spots must be selected at purchase.","sourceUrls":["https://www.chautauqua.com/2021/auditorium-faqs/","https://www.cinematreasures.org/theaters/44787"]},
+"agePolicy":{"text":"All ages unless stated. Under 2 free on a lap; over 2 needs a ticket. Check each event.","sourceUrls":["https://www.chautauqua.com/2021/auditorium-faqs/"],"evidence":"official"},
+"doors":{"text":"No doors time on FAQ; listings show start time only. Shuttle begins about 90 minutes before showtime.","sourceUrls":["https://www.chautauqua.com/2021/hop2chautauqua/","https://www.chautauqua.com/2021/auditorium-faqs/"]},
+"parking":{"summary":"Parking on the grounds is very limited. Free curbside first-come parking on the south side of Baseline Rd (paid via pay stations/ParkMobile in summer evenings per Colorado Music Festival). The free HOP 2 Chautauqua shuttle is encouraged; suggested lots include 27th Way Park-n-Ride, New Vista High School (concert nights) and downtown garages. City paid parking at Chautauqua is $2.50/hour on weekends and summer holidays.","difficulty":"hard","sourceUrls":["https://www.chautauqua.com/2021/hop2chautauqua/","https://www.chautauqua.com/2021/auditorium-faqs/","https://coloradomusicfestival.org/plan-your-visit/know-before-you-go/","https://bouldercolorado.gov/services/park-to-park-shuttle"],"evidence":"official"},
+"transit":{"summary":"Free HOP 2 Chautauqua shuttle on Auditorium concert nights: starts 90 min before showtime, buses roughly every 15-20 min, main stop at the RTD station at 14th & Walnut, with stops along Broadway; returns wait after the show. Rideshare to the Dining Hall is another option. Note the separate city Park-to-Park shuttle is weekends only in summer and ended for 2026.","sourceUrls":["https://www.chautauqua.com/2021/hop2chautauqua/","https://www.chautauqua.com/2021/auditorium-faqs/","https://coloradomusicfestival.org/plan-your-visit/know-before-you-go/","https://bouldercolorado.gov/services/park-to-park-shuttle"]},
+"policies":{"bag":"Bags must fit under your seat (about 12x16x12 in or smaller); all bags inspected. Coolers, picnic baskets, framed packs and large umbrellas not allowed.","reentry":null,"other":"Outside food and drink prohibited except water. Beer, wine and soft drinks sold on site.","sourceUrls":["https://www.chautauqua.com/2021/auditorium-faqs/"]},
+"accessibility":{"summary":"ADA access via the south entrance, reserved wheelchair spots and GA accessible seating, designated accessible parking, accessible shuttle pickup, and FM assistive listening with free receivers.","sourceUrls":["https://www.chautauqua.com/2021/auditorium-faqs/","https://www.chautauqua.com/2021/hop2chautauqua/","https://coloradomusicfestival.org/plan-your-visit/know-before-you-go/"]},
+"area":{"summary":"At 900 Baseline Rd at the foot of the Flatirons. The auditorium has no heating or air conditioning and stays about as warm or cool as outdoors; the FAQ suggests a jacket for Sept/Oct shows. Season is roughly May to early autumn (sources differ: May-Oct vs May-Sept).","sourceUrls":["https://www.chautauqua.com/2021/auditorium-faqs/","https://www.cinematreasures.org/theaters/44787"]},
+"sound":{"summary":"The all-wood hall has long been noted for strong natural acoustics, and the Colorado Music Festival chose it for its reverberation.","sourceUrls":["https://en.wikipedia.org/wiki/Chautauqua_Auditorium_(Boulder,_Colorado)"],"evidence":"official"},
+"whyPeopleLikeIt":[
+{"text":"Historic wooden hall with notable natural acoustics.","sourceUrls":["https://en.wikipedia.org/wiki/Chautauqua_Auditorium_(Boulder,_Colorado)"],"evidence":"community"},
+{"text":"Free shuttle on concert nights eases the parking problem and offers return service.","sourceUrls":["https://www.chautauqua.com/2021/hop2chautauqua/"],"evidence":"official"}
+],
+"considerBeforeAttending":[
+{"text":"Parking is limited and the venue urges using the shuttle, carpooling or biking.","sourceUrls":["https://www.chautauqua.com/2021/hop2chautauqua/"],"evidence":"official"},
+{"text":"No heating or cooling; dress for outdoor temperatures, especially in September/October.","sourceUrls":["https://www.chautauqua.com/2021/auditorium-faqs/"],"evidence":"official"},
+{"text":"Small bags only (must fit under the seat) and bags are inspected.","sourceUrls":["https://www.chautauqua.com/2021/auditorium-faqs/"],"evidence":"official"}
+],
+"confidence":"medium",
+"notes":"Capacity 1,300 comes only from Cinema Treasures (secondary); official FAQ gives no number. Season length conflicts between sources. HOP page text appears to be an older 2021-era URL; confirm current shuttle details. No community reviews were gathered for sound beyond history sources."
+},
+{
+"name":"Roots Music Project",
+"aliases":["RMP","Roots Music Project Boulder"],
+"city":"Boulder",
+"region":"CO",
+"capacity":{"value":250,"sourceUrls":["https://www.rootsmusicproject.org"]},
+"seatingFormat":{"value":null,"note":"Not stated. Site describes a warehouse venue with a full stage and bar; seating arrangement varies by event, unverified.","sourceUrls":["https://www.rootsmusicproject.org","https://www.westword.com/?p=40756869"]},
+"agePolicy":{"text":"No venue-wide policy found. Some events are described as all ages; check each event listing.","sourceUrls":["https://www.rootsmusicproject.org"],"evidence":"official"},
+"doors":{"text":"Varies by event; examples on the site include doors at 7pm with show at 8pm.","sourceUrls":["https://www.rootsmusicproject.org"]},
+"parking":{"summary":"A county arts listing says parking is available around the warehouse plus free street parking. Not verified by the venue.","difficulty":"easy","sourceUrls":["https://www.bouldercountyarts.org/art-spaces/roots-music-project"],"evidence":"community"},
+"transit":null,
+"policies":{"bag":null,"reentry":null,"other":"Tickets sold through the venue's ticketing site (RMPtix.com). Full-service bar on site, seasonal biergarten.","sourceUrls":["https://www.rootsmusicproject.org"]},
+"accessibility":null,
+"area":{"summary":"Warehouse space at 4747 Pearl St, Suite V3A, Boulder, a nonprofit founded in 2019 that books mostly Americana and also DJ nights.","sourceUrls":["https://www.rootsmusicproject.org/about","https://www.westword.com/?p=40756869","https://www.bouldercountyarts.org/art-spaces/roots-music-project"]},
+"sound":{"summary":"Venue advertises a state-of-the-art lighting and sound system; no independent sound reports found.","sourceUrls":["https://www.rootsmusicproject.org"],"evidence":"official"},
+"whyPeopleLikeIt":[
+{"text":"Small nonprofit room with a relaxed, supportive atmosphere per a county arts listing, and a full bar.","sourceUrls":["https://www.bouldercountyarts.org/art-spaces/roots-music-project","https://www.rootsmusicproject.org"],"evidence":"community"}
+],
+"considerBeforeAttending":[
+{"text":"Age rules and doors times vary by event; read each listing before buying.","sourceUrls":["https://www.rootsmusicproject.org"],"evidence":"official"}
+],
+"confidence":"low",
+"notes":"Capacity 250 appears in a promotional post on the homepage, not a dedicated FAQ. The county arts listing shows a Broomfield address, conflicting with the venue's 4747 Pearl St, Boulder address. A third-party aggregator page listing a 75-space lot and many policies looked templated (555 phone numbers) and was deliberately not used. Official FAQ unreachable."
+},
+{
+"name":"Hi-Dive",
+"aliases":["hi-dive","Hi Dive Denver"],
+"city":"Denver",
+"region":"CO",
+"capacity":{"value":null,"sourceUrls":[]},
+"seatingFormat":{"value":"standing_ga","note":"Small club where you can stand a few feet from the band, per a local guide. Seating not described; treat as standing.","sourceUrls":["https://www.uncovercolorado.com/activities/hi-dive/"]},
+"agePolicy":{"text":"Not on the official homepage. A single third-party aggregator says generally 21+ with rare all-ages shows and ID required; weak source, verify per show.","sourceUrls":["https://concerts.consequence.net/venues/hi-dive"],"evidence":"community"},
+"doors":{"text":null,"sourceUrls":[]},
+"parking":{"summary":"No reliable parking information found.","difficulty":"unknown","sourceUrls":[],"evidence":"community"},
+"transit":null,
+"policies":{"bag":null,"reentry":null,"other":"Aggregator says ID and the purchasing card are needed for will-call; unverified.","sourceUrls":["https://concerts.consequence.net/venues/hi-dive"]},
+"accessibility":null,
+"area":{"summary":"7 S Broadway, Denver, in the Baker neighborhood. Musician-owned club open since 2003.","sourceUrls":["https://hi-dive.com","https://www.westword.com/music/denvers-ten-best-small-venues-6044690/"]},
+"sound":{"summary":"Owners upgraded the sound system after buying the club (Westword), and a youth music site says it is known for sound quality.","sourceUrls":["https://www.westword.com/music/denvers-ten-best-small-venues-6044690/","https://www.youthonrecord.org/music-ambassador/hi-dive"],"evidence":"community"},
+"whyPeopleLikeIt":[
+{"text":"Long-running local rock club that has hosted rising acts before they broke big, with a no-frills interior.","sourceUrls":["https://www.westword.com/music/denvers-ten-best-small-venues-6044690/"],"evidence":"community"},
+{"text":"Intimate room with close views of bands and cheap drinks per a local guide.","sourceUrls":["https://www.uncovercolorado.com/activities/hi-dive/"],"evidence":"community"}
+],
+"considerBeforeAttending":[
+{"text":"Small space: expect crowding at popular shows; one guide calls the restrooms poor.","sourceUrls":["https://www.uncovercolorado.com/activities/hi-dive/"],"evidence":"community"},
+{"text":"Confirm age policy and doors with the venue; none verified from official pages.","sourceUrls":["https://hi-dive.com"],"evidence":"official"}
+],
+"confidence":"low",
+"notes":"Official hi-dive.com homepage lists no capacity, age, parking or accessibility; FAQ page was unreachable. Westword says only that it is among venues under 500 capacity. Address conflict: homepage says 7 S Broadway; Youth on Record lists 1301 W 10th Ave, treated as outdated. Westword article is older than its 'last year' purchase wording suggests."
+}
+]
+}

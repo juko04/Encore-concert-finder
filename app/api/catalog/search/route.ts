@@ -1,15 +1,31 @@
+import { getAuthenticatedUser } from '@/lib/auth/session';
+import { annotateEventsForUser } from '@/lib/recommendation/artist-affinity-server';
 import { NextResponse } from 'next/server';
 import { createServerClient } from '@supabase/ssr';
 import { createClient } from '@/lib/supabase/server';
 import { getPublicEnv } from '@/lib/env/public';
 import { SupabaseCatalogRepository } from '@/lib/repositories/catalog-repository';
 import { deriveLocalDateFromInstant } from '@/lib/domain/value-objects';
-import type {
-  EventListFilters,
-  EventSortOption,
-} from '@/lib/repositories/interfaces';
+import {
+  isIsoDate,
+  isValidTimeZone,
+  resolveCatalogFromDate,
+} from '@/lib/discover/dates';
+import { resolveNearContext } from '@/lib/location/near-context';
+import { searchCatalogPage } from '@/lib/location/catalog-search';
+import { getViewerTimeZone } from '@/lib/location/server';
+import type { EventListFilters } from '@/lib/repositories/interfaces';
+import {
+  isTruthyFlag,
+  parseEventSort,
+  parseIncludeUnknownPrice,
+} from '@/lib/discover/search-params';
 
 export const dynamic = 'force-dynamic';
+
+function badRequest(message: string) {
+  return NextResponse.json({ error: message }, { status: 400 });
+}
 
 export async function GET(request: Request) {
   try {
@@ -26,24 +42,46 @@ export async function GET(request: Request) {
     const city = searchParams.get('city')?.trim() || undefined;
     const genre = searchParams.get('genre')?.trim() || undefined;
 
-    // Local calendar date derived in validated target timezone (never naive UTC split)
-    const timezone = searchParams.get('timezone')?.trim() || 'America/Denver';
+    // Radius: derived on the server from the session user's profile / home-location cookie,
+    // exactly like /search. Client-supplied coordinates or radius are never read. Guests and
+    // users without a home location get the ordinary (unfiltered) result, nearApplied=false.
+    const nearRequested = searchParams.get('near') === '1';
+    const nearCtx = nearRequested ? await resolveNearContext() : null;
+
+    // Local calendar date derived in a validated viewer timezone (never naive UTC split):
+    // explicit ?timezone=, else the encore_tz cookie, else the home city timezone, else UTC.
+    const timezoneParam = searchParams.get('timezone')?.trim();
+    if (timezoneParam && !isValidTimeZone(timezoneParam)) {
+      return badRequest('Invalid timezone');
+    }
+    const timezone =
+      timezoneParam || (await getViewerTimeZone(nearCtx?.home ?? null));
     const now = new Date();
     const nowIso = now.toISOString();
     const todayLocalDate = deriveLocalDateFromInstant(nowIso, timezone);
-    const twelveMonthsFuture = new Date(now.getTime() + 365 * 86400000);
-    const twelveMonthsLocalDate = deriveLocalDateFromInstant(
-      twelveMonthsFuture.toISOString(),
-      timezone,
-    );
 
     const startDateParam = searchParams.get('startDate')?.trim();
     const endDateParam = searchParams.get('endDate')?.trim();
 
-    const startDate = startDateParam || todayLocalDate;
-    const endDate = endDateParam || twelveMonthsLocalDate;
-    // Exclude completed past showtimes on current day inside the database query unless explicit past startDate is provided
-    const excludePastShowtimes = !startDateParam;
+    if (startDateParam && !isIsoDate(startDateParam)) {
+      return badRequest('startDate must be a valid YYYY-MM-DD date');
+    }
+    if (endDateParam && !isIsoDate(endDateParam)) {
+      return badRequest('endDate must be a valid YYYY-MM-DD date');
+    }
+
+    // Upcoming results never include shows that already started (e.g. the
+    // "Tonight" chip passes startDate=today). includePast=true is the only opt-out.
+    const includePastParam = searchParams.get('includePast');
+    const includePast = isTruthyFlag(includePastParam);
+    const { fromDate: startDate, excludePastShowtimes } =
+      resolveCatalogFromDate({
+        startDate: startDateParam || undefined,
+        today: todayLocalDate,
+        includePast,
+      });
+    // Unbounded unless an explicit endDate is given (same rule as the /search page).
+    const endDate = endDateParam || undefined;
 
     const minPriceParam = searchParams.get('minPrice');
     const maxPriceParam = searchParams.get('maxPrice');
@@ -55,14 +93,17 @@ export async function GET(request: Request) {
       maxPriceParam !== null && maxPriceParam !== ''
         ? Number(maxPriceParam)
         : undefined;
+    if (
+      (minPrice !== undefined && !Number.isFinite(minPrice)) ||
+      (maxPrice !== undefined && !Number.isFinite(maxPrice))
+    ) {
+      return badRequest('minPrice and maxPrice must be numbers');
+    }
     const freeOnlyParam = searchParams.get('freeOnly');
-    const freeOnly = freeOnlyParam === 'true' || freeOnlyParam === '1';
-    const includeUnknownPriceParam = searchParams.get('includeUnknownPrice');
-    const includeUnknownPrice =
-      includeUnknownPriceParam !== null
-        ? includeUnknownPriceParam === 'true' ||
-          includeUnknownPriceParam === '1'
-        : true;
+    const freeOnly = isTruthyFlag(freeOnlyParam);
+    const includeUnknownPrice = parseIncludeUnknownPrice(
+      searchParams.get('includeUnknownPrice'),
+    );
 
     const sort = searchParams.get('sort') || 'date_asc';
     const limitParam = searchParams.get('limit');
@@ -97,18 +138,7 @@ export async function GET(request: Request) {
     }
     const catalogRepo = new SupabaseCatalogRepository(supabase);
 
-    const validSorts: EventSortOption[] = [
-      'price_asc',
-      'price_desc',
-      'date_asc',
-      'date_desc',
-      'title_asc',
-      'score_desc',
-    ];
-    const repoSortBy: EventSortOption =
-      sort && validSorts.includes(sort as EventSortOption)
-        ? (sort as EventSortOption)
-        : 'date_asc';
+    const repoSortBy = parseEventSort(sort);
 
     const filters: EventListFilters = {
       searchQuery: q,
@@ -133,18 +163,24 @@ export async function GET(request: Request) {
       offset,
       excludePastShowtimes,
       referenceNowIso: nowIso,
+      collapseFestivalDays: true,
     };
 
-    const [events, countResult] = await Promise.all([
-      catalogRepo.listEvents(filters),
-      typeof catalogRepo.countEvents === 'function'
-        ? catalogRepo.countEvents(filters)
-        : Promise.resolve(0),
-    ]);
-
-    const totalCount = countResult;
+    const result = await searchCatalogPage(
+      catalogRepo,
+      filters,
+      nearCtx?.scope ?? null,
+    );
+    const { totalCount, hasMore, nearApplied } = result;
+    // Liked-artist markers for Load More pages, derived server-side from the session user.
+    const user = await getAuthenticatedUser().catch(() => null);
+    const events = await annotateEventsForUser(
+      result.events,
+      user?.id,
+      supabase,
+      catalogRepo,
+    );
     const totalPages = Math.ceil(totalCount / limit) || 1;
-    const hasMore = offset + events.length < totalCount;
     const currentPage = Math.floor(offset / limit) + 1;
 
     const pagination = {
@@ -153,6 +189,7 @@ export async function GET(request: Request) {
       totalCount,
       totalPages,
       hasMore,
+      nearApplied,
     };
 
     const headers = {
@@ -161,6 +198,7 @@ export async function GET(request: Request) {
       'X-Limit': String(limit),
       'X-Total-Pages': String(totalPages),
       'X-Has-More': String(hasMore),
+      'X-Near-Applied': String(nearApplied),
     };
 
     if (searchParams.get('format') === 'array') {

@@ -1,6 +1,8 @@
-import Link from 'next/link';
 import { LoginForm } from '@/components/auth/LoginForm';
+import { Header } from '@/components/index/Header';
 import { sanitizeRedirectPath } from '@/lib/auth/redirect';
+
+export const dynamic = 'force-dynamic';
 
 interface LoginPageProps {
   searchParams?: Promise<{
@@ -18,27 +20,24 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
     resolvedParams.method === 'password' ? 'password' : 'magic_link';
 
   return (
-    <main className="flex min-h-screen flex-col items-center justify-center bg-zinc-950 px-4 py-12 text-zinc-100 sm:px-6 lg:px-8">
-      <div className="mb-8 text-center">
-        <Link
-          href="/"
-          className="text-xs font-medium text-zinc-400 hover:text-zinc-200"
-        >
-          ← Back to Home
-        </Link>
-        <h1 className="mt-4 text-3xl font-extrabold tracking-tight sm:text-4xl">
-          <span className="text-white">Encore</span>{' '}
-          <span className="bg-gradient-to-r from-indigo-400 to-cyan-400 bg-clip-text text-transparent">
-            Authentication
-          </span>
-        </h1>
-      </div>
+    <div className="min-h-screen bg-[#fafaf9] text-zinc-900">
+      <Header isAuthenticated={false} />
+      <main className="mx-auto flex w-full max-w-7xl flex-col items-center px-4 py-12 sm:px-6 sm:py-16 lg:px-8">
+        <div className="mb-8 text-center">
+          <h1 className="text-3xl font-bold tracking-tight text-zinc-900 sm:text-4xl">
+            Sign in to Encore
+          </h1>
+          <p className="mt-2 text-sm text-zinc-500">
+            Personalized recommendations, saved shows, and Spotify taste import.
+          </p>
+        </div>
 
-      <LoginForm
-        redirectTo={redirectTo}
-        initialError={error}
-        defaultMethod={method}
-      />
-    </main>
+        <LoginForm
+          redirectTo={redirectTo}
+          initialError={error}
+          defaultMethod={method}
+        />
+      </main>
+    </div>
   );
 }

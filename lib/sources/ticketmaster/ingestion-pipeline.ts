@@ -10,7 +10,11 @@ import type {
   IRawIngestRepository,
   ISourceRepository,
 } from '@/lib/repositories/interfaces';
+import { fillInferredEventGenres } from '@/lib/genres/enrich-event-genres';
+import { isPlausibleCoordinate } from '@/lib/location/coordinates';
+import { getCandidateVenueCoordinates } from './venue-location';
 import { TicketmasterDiscoveryAdapter } from './adapter';
+import { overlayTicketmasterImages } from './parser';
 import { ensureTicketmasterSource } from './source-registry';
 import {
   PipelineDatabaseError,
@@ -65,6 +69,87 @@ export interface TicketmasterIngestionResult {
   partitionsProcessed?: number;
   bisectionsCount?: number;
   truncatedPartitions?: PartitionSummary[];
+}
+
+/**
+ * Persists the genres Ticketmaster assigned to each performer onto the canonical artist
+ * (fill-if-empty, provenance "ticketmaster"). Matching is by Ticketmaster attraction id only
+ * (never by name). Best-effort: a genre write failure never fails event ingestion.
+ */
+export async function storeTicketmasterArtistGenres(
+  catalogRepo: Pick<
+    ICatalogRepository,
+    'findArtistByExternalId' | 'fillArtistGenres'
+  >,
+  candidate: Pick<EventCandidate, 'artists'>,
+): Promise<number> {
+  let written = 0;
+  for (const artist of candidate.artists ?? []) {
+    const genres = artist.genres;
+    if (!Array.isArray(genres) || genres.length === 0) continue;
+    const tmId = artist.externalIds?.find(
+      (e) => e.provider === 'ticketmaster',
+    )?.externalId;
+    if (!tmId) continue;
+    try {
+      const canonical = await catalogRepo.findArtistByExternalId(
+        'ticketmaster',
+        tmId,
+      );
+      if (
+        canonical &&
+        (!canonical.genres || canonical.genres.length === 0) &&
+        (await catalogRepo.fillArtistGenres(
+          canonical.id,
+          genres,
+          'ticketmaster',
+        ))
+      ) {
+        written++;
+      }
+    } catch (err) {
+      console.warn(
+        `[TicketmasterPipeline] Could not store genres for ${artist.name}:`,
+        err instanceof Error ? err.message : err,
+      );
+    }
+  }
+  return written;
+}
+
+/** Best-effort, never throws: stores the candidate's venue coordinates on the event's venue. */
+export async function fillVenueCoordinates(
+  repo: Pick<ICatalogRepository, 'fillVenueCoordinatesForEvent'>,
+  eventId: string | null | undefined,
+  candidate: Pick<EventCandidate, 'rawPayload'> &
+    Partial<Pick<EventCandidate, 'city' | 'state'>>,
+): Promise<boolean> {
+  if (!eventId) return false;
+  const coords = getCandidateVenueCoordinates(candidate);
+  if (!coords) return false;
+  // Source data errors (e.g. a dropped minus sign) must not relocate a venue across the map.
+  if (
+    !isPlausibleCoordinate(
+      coords.lat,
+      coords.lng,
+      candidate.city,
+      candidate.state,
+    )
+  )
+    return false;
+  try {
+    return await repo.fillVenueCoordinatesForEvent(
+      eventId,
+      coords.lat,
+      coords.lng,
+    );
+  } catch (err) {
+    console.warn(
+      '[TicketmasterPipeline] Could not store venue coordinates:',
+      err instanceof Error ? err.message : err,
+    );
+    return false;
+  }
 }
 
 /**
@@ -364,7 +449,11 @@ export async function runTicketmasterIngestion(
 
       if (existingCand) {
         candidatesReused++;
-        persistedCandidates.push(existingCand);
+        // Stored candidates are immutable: overlay current source images in memory
+        // so re-processing can backfill images onto already-ingested events.
+        persistedCandidates.push(
+          overlayTicketmasterImages(existingCand, candidate),
+        );
       } else {
         const savedCand = await options.candidateRepo.create(
           candidate as EventCandidate & {
@@ -415,6 +504,18 @@ export async function runTicketmasterIngestion(
       }
 
       const outcome = await coordinator.canonicalize(cand);
+
+      if (outcome.status === 'created' || outcome.status === 'matched') {
+        await storeTicketmasterArtistGenres(options.catalogRepo, cand);
+        // No genre from Ticketmaster? Use explicit genre words in the title (marked inferred).
+        await fillInferredEventGenres(
+          options.catalogRepo,
+          outcome.eventId,
+          cand,
+        );
+        // Ticketmaster supplies venue coordinates; store them fill-if-empty (never overwrite).
+        await fillVenueCoordinates(options.catalogRepo, outcome.eventId, cand);
+      }
 
       if (outcome.status === 'created') {
         canonicalEventsCreated++;

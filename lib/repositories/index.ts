@@ -9,5 +9,6 @@ export * from './memory-repositories';
 export * from './profile-repository';
 export * from './raw-ingest-repository';
 export * from './source-repository';
+export * from './spotify-affinity-repository';
 export * from './spotify-connection-repository';
 export * from './user-preference-repository';

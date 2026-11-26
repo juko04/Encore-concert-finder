@@ -1,5 +1,11 @@
 'use client';
 
+import {
+  canonicalGenreLabel,
+  eventMatchesGenre,
+  genreMatchesQuery,
+  normalizeGenreFacets,
+} from '@/lib/genres/catalog-genres';
 import React, {
   useState,
   useMemo,
@@ -13,6 +19,9 @@ import type {
   IndexInventoryStatus,
 } from './types';
 import { toIndexEventItem } from './types';
+import { FALLBACK_TIMEZONE } from '@/lib/location/timezone';
+import { getDiscoverDateWindowsForDate } from '@/lib/discover/dates';
+import { deriveLocalDateFromInstant } from '@/lib/domain/value-objects';
 import type { CanonicalEventSummary } from '@/lib/domain/catalog';
 import type { ScoredEvent } from '@/lib/recommendation/types';
 import { EventCard } from './EventCard';
@@ -37,13 +46,57 @@ export interface SearchClientProps {
   initialQuery?: string;
   initialSortBy?: IndexSortBy;
   referenceDate?: string;
+  /** Viewer IANA timezone resolved on the server (cookie -> home city -> UTC). */
+  timeZone?: string;
   title?: string;
   subtitle?: string;
+  /** Optional filter state hydrated from /search URL params (set by the page). */
+  initialVenue?: string;
+  initialCity?: string;
+  initialGenre?: string;
+  initialStartDate?: string;
+  initialEndDate?: string;
+  initialFreeOnly?: boolean;
+  /** ?near=1 was honoured server-side; Load More / refetches must ask for the same radius (the server re-derives home + radius from the session, never from the client). */
+  initialNear?: boolean;
+  /** Hydrated from ?maxPrice= so "Under $30" links keep their price cap. */
+  initialMaxPrice?: number;
+  /** Hydrated from ?includeUnknownPrice=false (verified prices only). */
+  initialIncludeUnknownPrice?: boolean;
   initialFacets?: {
     venues?: Array<{ id: string; name: string; city?: string }>;
     cities?: string[];
     genres?: string[];
   };
+}
+
+/** Today (YYYY-MM-DD) in the viewer's timezone, never the browser's UTC date. */
+function resolveRefIso(referenceDate: string | undefined, timeZone: string) {
+  if (referenceDate) return referenceDate;
+  return deriveLocalDateFromInstant(new Date().toISOString(), timeZone);
+}
+
+function addDaysIso(iso: string, days: number): string {
+  const [y, m, d] = iso.split('-').map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d, 12, 0, 0));
+  dt.setUTCDate(dt.getUTCDate() + days);
+  return dt.toISOString().slice(0, 10);
+}
+
+/** The inclusive date window for a quick date chip; shared by server query + local filter. */
+function quickDateWindow(
+  filter: string,
+  refIso: string,
+): { start: string; end: string } | null {
+  if (filter === 'today') return { start: refIso, end: refIso };
+  if (filter === 'next_7_days') {
+    return { start: refIso, end: addDaysIso(refIso, 7) };
+  }
+  if (filter === 'this_weekend') {
+    const w = getDiscoverDateWindowsForDate(refIso).weekend;
+    return { start: w.startDate, end: w.endDate };
+  }
+  return null;
 }
 
 export function SearchClient({
@@ -53,8 +106,18 @@ export function SearchClient({
   initialQuery = '',
   initialSortBy = 'date_asc',
   referenceDate,
+  timeZone = FALLBACK_TIMEZONE,
   title = 'Discover Live Music',
   subtitle = 'Curated concerts, transparent pricing, and personalized music discovery.',
+  initialVenue,
+  initialCity,
+  initialGenre,
+  initialStartDate,
+  initialEndDate,
+  initialFreeOnly = false,
+  initialNear = false,
+  initialMaxPrice,
+  initialIncludeUnknownPrice = true,
   initialFacets,
 }: SearchClientProps) {
   const baseRaw = rawInitialEvents ?? rawEvents ?? [];
@@ -89,6 +152,12 @@ export function SearchClient({
     genres: initialFacets?.genres || [],
   });
 
+  // Name -> id normalisation of a URL venue must wait for the FULL venue list;
+  // before that, only the venues present in the first page of results are known.
+  const [facetsReady, setFacetsReady] = useState(
+    (initialFacets?.venues?.length ?? 0) > 0,
+  );
+
   useEffect(() => {
     let cancelled = false;
     async function fetchCatalogFacets() {
@@ -97,6 +166,7 @@ export function SearchClient({
         if (res.ok) {
           const data = await res.json();
           if (!cancelled && data.venues) {
+            setFacetsReady(true);
             setCatalogFacets({
               venues: data.venues || [],
               cities: data.cities || [],
@@ -131,15 +201,53 @@ export function SearchClient({
 
   // Search & Filter State
   const [query, setQuery] = useState(initialQuery);
-  const [dateFilter, setDateFilter] = useState<string>('all');
-  const [customStartDate, setCustomStartDate] = useState('');
-  const [customEndDate, setCustomEndDate] = useState('');
-  const [pricePreset, setPricePreset] = useState<string>('all');
-  const [maxPriceBudget, setMaxPriceBudget] = useState<number>(150);
-  const [outsideBudgetAllowed, setOutsideBudgetAllowed] = useState(true);
-  const [selectedVenue, setSelectedVenue] = useState<string>('all');
-  const [selectedCity, setSelectedCity] = useState<string>('all');
-  const [selectedGenre, setSelectedGenre] = useState<string>('all');
+  const [dateFilter, setDateFilter] = useState<string>(
+    initialStartDate || initialEndDate ? 'custom' : 'all',
+  );
+  const [customStartDate, setCustomStartDate] = useState(
+    initialStartDate ?? '',
+  );
+  const [customEndDate, setCustomEndDate] = useState(initialEndDate ?? '');
+  // A URL price cap maps onto a preset when it matches one exactly; otherwise it
+  // becomes the strict budget slider so the cap is never silently dropped.
+  const presetForCap =
+    initialMaxPrice === 25
+      ? 'under_25'
+      : initialMaxPrice === 50
+        ? 'under_50'
+        : initialMaxPrice === 100
+          ? 'under_100'
+          : null;
+  const capUsesBudget =
+    initialMaxPrice !== undefined &&
+    !initialFreeOnly &&
+    (presetForCap === null || !initialIncludeUnknownPrice);
+  const [pricePreset, setPricePreset] = useState<string>(
+    initialFreeOnly
+      ? 'free'
+      : presetForCap && !capUsesBudget
+        ? presetForCap
+        : 'all',
+  );
+  const [maxPriceBudget, setMaxPriceBudget] = useState<number>(
+    capUsesBudget
+      ? // Exact URL value (e.g. 40, 42.5); never rounded or clamped to the slider's range.
+        initialMaxPrice!
+      : 150,
+  );
+  const [outsideBudgetAllowed, setOutsideBudgetAllowed] =
+    useState(!capUsesBudget);
+  const [includeUnknownPrice] = useState(initialIncludeUnknownPrice);
+  const [selectedVenue, setSelectedVenue] = useState<string>(
+    initialVenue || 'all',
+  );
+  const [selectedCity, setSelectedCity] = useState<string>(
+    initialCity || 'all',
+  );
+  const [selectedGenre, setSelectedGenre] = useState<string>(
+    (initialGenre && (canonicalGenreLabel(initialGenre) ?? initialGenre)) ||
+      'all',
+  );
   const [statusFilter, setStatusFilter] = useState<
     IndexInventoryStatus | 'all'
   >('all');
@@ -147,27 +255,110 @@ export function SearchClient({
   const [layout, setLayout] = useState<'grid' | 'list'>('grid');
   const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false);
 
-  // Catalog-wide facet options with fallback to local events
+  // Venue options: one per venue id (no duplicate keys). Rooms that share a
+  // display name get their city appended so they can be told apart. A venue
+  // given by NAME in the URL (homepage chips) that matches no id stays
+  // selectable as a synthetic name-based option so the control reflects the URL.
   const uniqueVenues = useMemo(() => {
+    const byId = new Map<
+      string,
+      { id?: string; name: string; city?: string }
+    >();
+    const noId = new Map<string, { id?: string; name: string }>();
     if (catalogFacets.venues.length > 0) {
-      return catalogFacets.venues;
-    }
-    const map = new Map<string, { id?: string; name: string }>();
-    normalizedEvents.forEach((e) => {
-      if (e.venueName && e.venueName !== 'Venue TBA') {
-        const existing = map.get(e.venueName);
-        if (!existing || (!existing.id && e.venueId)) {
-          map.set(e.venueName, {
-            id: e.venueId ?? undefined,
-            name: e.venueName,
-          });
+      for (const v of catalogFacets.venues as Array<{
+        id?: string;
+        name: string;
+        city?: string;
+      }>) {
+        if (v.id) {
+          if (!byId.has(v.id)) byId.set(v.id, v);
+        } else if (!noId.has(v.name)) {
+          noId.set(v.name, { name: v.name });
         }
       }
-    });
-    return Array.from(map.values()).sort((a, b) =>
-      a.name.localeCompare(b.name),
+    } else {
+      normalizedEvents.forEach((e) => {
+        if (!e.venueName || e.venueName === 'Venue TBA') return;
+        if (e.venueId) {
+          if (!byId.has(e.venueId)) {
+            byId.set(e.venueId, {
+              id: e.venueId,
+              name: e.venueName,
+              city: e.city ?? undefined,
+            });
+          }
+        } else if (!noId.has(e.venueName)) {
+          noId.set(e.venueName, { name: e.venueName });
+        }
+      });
+    }
+    const nameCounts = new Map<string, number>();
+    byId.forEach((v) =>
+      nameCounts.set(v.name, (nameCounts.get(v.name) ?? 0) + 1),
     );
-  }, [catalogFacets.venues, normalizedEvents]);
+    const list: Array<{ id?: string; name: string; label: string }> = [];
+    byId.forEach((v) =>
+      list.push({
+        id: v.id,
+        name: v.name,
+        label:
+          (nameCounts.get(v.name) ?? 0) > 1 && v.city
+            ? `${v.name} — ${v.city}`
+            : v.name,
+      }),
+    );
+    noId.forEach((v) => {
+      if (!nameCounts.has(v.name)) list.push({ ...v, label: v.name });
+    });
+    // URL gave a venue name that no option covers yet (facets still loading).
+    if (
+      selectedVenue !== 'all' &&
+      !list.some(
+        (v) => v.id === selectedVenue || (!v.id && v.name === selectedVenue),
+      )
+    ) {
+      const sameName = list.filter((v) => v.id && v.name === selectedVenue);
+      // A name that resolves to exactly one venue is swapped for its id by the
+      // effect below; several same-name rooms stay a name (all of them) filter.
+      if (sameName.length !== 1) {
+        list.push({
+          name: selectedVenue,
+          label: sameName.length > 1 ? `${selectedVenue} (all)` : selectedVenue,
+        });
+      }
+    }
+    // Identical labels (same name AND city) get a stable ordinal so the picker
+    // never shows two indistinguishable options.
+    const labelCounts = new Map<string, number>();
+    list.forEach((v) =>
+      labelCounts.set(v.label, (labelCounts.get(v.label) ?? 0) + 1),
+    );
+    const seenLabels = new Map<string, number>();
+    list
+      .slice()
+      .sort((a, b) => (a.id ?? a.name).localeCompare(b.id ?? b.name))
+      .forEach((v) => {
+        if ((labelCounts.get(v.label) ?? 0) > 1) {
+          const n = (seenLabels.get(v.label) ?? 0) + 1;
+          seenLabels.set(v.label, n);
+          v.label = `${v.label} (${n})`;
+        }
+      });
+    return list.sort((a, b) => a.label.localeCompare(b.label));
+  }, [catalogFacets.venues, normalizedEvents, selectedVenue]);
+
+  // Normalise a venue NAME from the URL to its venue id once options are known.
+  useEffect(() => {
+    if (selectedVenue === 'all' || !facetsReady) return;
+    if (uniqueVenues.some((v) => v.id === selectedVenue)) return;
+    const matches = uniqueVenues.filter(
+      (v) => v.id && v.name === selectedVenue,
+    );
+    if (matches.length === 1 && matches[0].id) {
+      setSelectedVenue(matches[0].id);
+    }
+  }, [uniqueVenues, selectedVenue, facetsReady]);
 
   const uniqueCities = useMemo(() => {
     if (catalogFacets.cities.length > 0) {
@@ -181,17 +372,11 @@ export function SearchClient({
   }, [catalogFacets.cities, normalizedEvents]);
 
   const uniqueGenres = useMemo(() => {
+    // Shared vocabulary: non-genres dropped, raw strings collapsed to canonical labels.
     if (catalogFacets.genres.length > 0) {
-      return catalogFacets.genres;
+      return normalizeGenreFacets(catalogFacets.genres);
     }
-    const set = new Set<string>();
-    normalizedEvents.forEach((e) => {
-      if (e.genre) {
-        const primary = e.genre.split('/')[0].trim();
-        if (primary) set.add(primary);
-      }
-    });
-    return Array.from(set).sort();
+    return normalizeGenreFacets(normalizedEvents.map((e) => e.genre));
   }, [catalogFacets.genres, normalizedEvents]);
 
   // Active filter count
@@ -234,16 +419,20 @@ export function SearchClient({
     setCurrentPage(1);
   };
 
+  // Primitive (not the uniqueVenues array) so a Load More that merely appends events does not
+  // change buildSearchParams' identity and re-trigger a page-1 refetch that wipes the extra pages.
+  const selectedVenueId = useMemo(
+    () => uniqueVenues.find((v) => v.id === selectedVenue)?.id,
+    [uniqueVenues, selectedVenue],
+  );
+
   const buildSearchParams = useCallback(
     (pageNumber: number) => {
       const params = new URLSearchParams();
       if (query.trim()) params.set('q', query.trim());
       if (selectedVenue !== 'all') {
-        const found = uniqueVenues.find(
-          (v) => v.name === selectedVenue || v.id === selectedVenue,
-        );
-        if (found?.id) {
-          params.set('venueId', found.id);
+        if (selectedVenueId) {
+          params.set('venueId', selectedVenueId);
         } else {
           params.set('venue', selectedVenue);
         }
@@ -251,33 +440,13 @@ export function SearchClient({
       if (selectedCity !== 'all') params.set('city', selectedCity);
       if (selectedGenre !== 'all') params.set('genre', selectedGenre);
 
-      const ref = referenceDate
-        ? new Date(`${referenceDate}T12:00:00Z`)
-        : new Date();
-      const refIso = ref.toISOString().split('T')[0];
-
-      if (dateFilter === 'today') {
-        params.set('startDate', refIso);
-        params.set('endDate', refIso);
-      } else if (dateFilter === 'this_weekend') {
-        try {
-          const [y, m, d] = refIso.split('-').map(Number);
-          const dt = new Date(Date.UTC(y, m - 1, d, 12, 0, 0));
-          const dow = dt.getUTCDay();
-          const diffToFriday = (5 - dow + 7) % 7;
-          const friday = new Date(dt.getTime() + diffToFriday * 86400000);
-          const sunday = new Date(friday.getTime() + 2 * 86400000);
-          params.set('startDate', friday.toISOString().split('T')[0]);
-          params.set('endDate', sunday.toISOString().split('T')[0]);
-        } catch {
-          // ignore
-        }
-      } else if (dateFilter === 'next_7_days') {
-        params.set('startDate', refIso);
-        const maxDate = new Date(ref.getTime() + 7 * 86400000)
-          .toISOString()
-          .split('T')[0];
-        params.set('endDate', maxDate);
+      // Same viewer timezone as page 1 so Load More and counts agree.
+      params.set('timezone', timeZone);
+      const refIso = resolveRefIso(referenceDate, timeZone);
+      const quick = quickDateWindow(dateFilter, refIso);
+      if (quick) {
+        params.set('startDate', quick.start);
+        params.set('endDate', quick.end);
       } else if (dateFilter === 'custom') {
         if (customStartDate) params.set('startDate', customStartDate);
         if (customEndDate) params.set('endDate', customEndDate);
@@ -296,10 +465,14 @@ export function SearchClient({
       if (!outsideBudgetAllowed) {
         params.set('maxPrice', String(maxPriceBudget));
       }
+      if (!includeUnknownPrice && params.has('maxPrice')) {
+        params.set('includeUnknownPrice', 'false');
+      }
 
       if (sortBy) {
         params.set('sort', sortBy);
       }
+      if (initialNear) params.set('near', '1');
 
       params.set('limit', '50');
       params.set('page', String(pageNumber));
@@ -311,15 +484,18 @@ export function SearchClient({
       selectedVenue,
       selectedCity,
       selectedGenre,
-      uniqueVenues,
+      selectedVenueId,
       dateFilter,
       customStartDate,
       customEndDate,
       pricePreset,
       outsideBudgetAllowed,
       maxPriceBudget,
+      includeUnknownPrice,
       sortBy,
+      initialNear,
       referenceDate,
+      timeZone,
     ],
   );
 
@@ -468,10 +644,8 @@ export function SearchClient({
 
   // Filter and sort engine
   const filteredEvents = useMemo(() => {
-    const ref = referenceDate
-      ? new Date(`${referenceDate}T12:00:00Z`)
-      : new Date();
-    const refIso = ref.toISOString().split('T')[0];
+    const refIso = resolveRefIso(referenceDate, timeZone);
+    const quick = quickDateWindow(dateFilter, refIso);
 
     return normalizedEvents.filter((event) => {
       // 1. Keyword search
@@ -484,7 +658,7 @@ export function SearchClient({
         );
         const venueMatch = event.venueName?.toLowerCase().includes(q);
         const cityMatch = event.city?.toLowerCase().includes(q);
-        const genreMatch = event.genre?.toLowerCase().includes(q);
+        const genreMatch = genreMatchesQuery(q, event.genre, event.subgenres);
         const vibeMatch = event.vibeTags?.some((v) =>
           v.toLowerCase().includes(q),
         );
@@ -503,22 +677,11 @@ export function SearchClient({
       }
 
       // 2. Date Filter
-      if (dateFilter === 'today') {
-        if (event.localStartDate !== refIso) return false;
-      } else if (dateFilter === 'this_weekend') {
-        try {
-          const [y, m, d] = event.localStartDate.split('-').map(Number);
-          const dt = new Date(Date.UTC(y, m - 1, d, 12, 0, 0));
-          const dow = dt.getUTCDay();
-          if (dow !== 0 && dow !== 5 && dow !== 6) return false;
-        } catch {
-          return false;
-        }
-      } else if (dateFilter === 'next_7_days') {
-        const maxDate = new Date(ref.getTime() + 7 * 86400000)
-          .toISOString()
-          .split('T')[0];
-        if (event.localStartDate < refIso || event.localStartDate > maxDate) {
+      if (quick) {
+        if (
+          event.localStartDate < quick.start ||
+          event.localStartDate > quick.end
+        ) {
           return false;
         }
       } else if (dateFilter === 'custom') {
@@ -547,9 +710,20 @@ export function SearchClient({
       if (!outsideBudgetAllowed && event.minPrice != null) {
         if (event.minPrice > maxPriceBudget) return false;
       }
+      if (
+        !includeUnknownPrice &&
+        event.minPrice == null &&
+        event.eventKind !== 'free_event'
+      ) {
+        return false;
+      }
 
       // 4. Venue Filter
-      if (selectedVenue !== 'all' && event.venueName !== selectedVenue) {
+      if (
+        selectedVenue !== 'all' &&
+        event.venueId !== selectedVenue &&
+        event.venueName !== selectedVenue
+      ) {
         return false;
       }
 
@@ -560,15 +734,7 @@ export function SearchClient({
 
       // 6. Genre Filter (checks event genre metadata and subgenres)
       if (selectedGenre !== 'all') {
-        const matchesPrimary =
-          event.genre &&
-          event.genre.toLowerCase().includes(selectedGenre.toLowerCase());
-        const matchesSub =
-          event.subgenres &&
-          event.subgenres.some((s) =>
-            s.toLowerCase().includes(selectedGenre.toLowerCase()),
-          );
-        if (!matchesPrimary && !matchesSub) {
+        if (!eventMatchesGenre(selectedGenre, event.genre, event.subgenres)) {
           return false;
         }
       }
@@ -591,11 +757,13 @@ export function SearchClient({
     pricePreset,
     maxPriceBudget,
     outsideBudgetAllowed,
+    includeUnknownPrice,
     selectedVenue,
     selectedCity,
     selectedGenre,
     statusFilter,
     referenceDate,
+    timeZone,
   ]);
 
   // Sort filtered results
@@ -813,7 +981,9 @@ export function SearchClient({
                 min="10"
                 max="250"
                 step="5"
-                value={maxPriceBudget}
+                // The slider only displays a clamped position; the exact value (state) is
+                // never rewritten unless the user moves the control.
+                value={Math.min(Math.max(maxPriceBudget, 10), 250)}
                 onChange={(e) => setMaxPriceBudget(Number(e.target.value))}
                 className="w-full accent-zinc-900"
               />
@@ -833,18 +1003,22 @@ export function SearchClient({
           {/* Venue Selector */}
           {uniqueVenues.length > 0 && (
             <div className="space-y-2 border-t border-zinc-100 pt-4">
-              <label className="text-xs font-semibold text-zinc-800">
+              <label
+                htmlFor="search-venue-select"
+                className="text-xs font-semibold text-zinc-800"
+              >
                 Venue
               </label>
               <select
+                id="search-venue-select"
                 value={selectedVenue}
                 onChange={(e) => setSelectedVenue(e.target.value)}
                 className="focus:outline-hidden w-full rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-xs text-zinc-800 focus:border-zinc-900"
               >
                 <option value="all">All Venues</option>
                 {uniqueVenues.map((v) => (
-                  <option key={v.name} value={v.name}>
-                    {v.name}
+                  <option key={v.id ?? `name:${v.name}`} value={v.id ?? v.name}>
+                    {v.label}
                   </option>
                 ))}
               </select>
@@ -884,7 +1058,11 @@ export function SearchClient({
                 className="focus:outline-hidden w-full rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-xs text-zinc-800 focus:border-zinc-900"
               >
                 <option value="all">All Genres</option>
-                {uniqueGenres.map((g) => (
+                {(selectedGenre !== 'all' &&
+                !uniqueGenres.includes(selectedGenre)
+                  ? [selectedGenre, ...uniqueGenres]
+                  : uniqueGenres
+                ).map((g) => (
                   <option key={g} value={g}>
                     {g}
                   </option>

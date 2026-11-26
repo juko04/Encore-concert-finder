@@ -1,5 +1,10 @@
 'use client';
 
+import {
+  eventMatchesGenre,
+  genreMatchesQuery,
+  normalizeGenreFacets,
+} from '@/lib/genres/catalog-genres';
 import React, { useState, useMemo } from 'react';
 import type { IndexEventItem, IndexMode, IndexSortBy } from './types';
 import { toIndexEventItem } from './types';
@@ -66,14 +71,7 @@ export function IndexFeedContainer({
 
   // Extract unique genres for filter pills
   const uniqueGenres = useMemo(() => {
-    const set = new Set<string>();
-    normalizedEvents.forEach((e) => {
-      if (e.genre) {
-        const primary = e.genre.split('/')[0].trim();
-        if (primary) set.add(primary);
-      }
-    });
-    return Array.from(set).sort();
+    return normalizeGenreFacets(normalizedEvents.map((e) => e.genre));
   }, [normalizedEvents]);
 
   const weekendDates = useMemo(
@@ -121,7 +119,7 @@ export function IndexFeedContainer({
         );
         const venueMatch = e.venueName?.toLowerCase().includes(q);
         const cityMatch = e.city?.toLowerCase().includes(q);
-        const genreMatch = e.genre?.toLowerCase().includes(q);
+        const genreMatch = genreMatchesQuery(q, e.genre);
         return (
           titleMatch ||
           headlinerMatch ||
@@ -136,7 +134,7 @@ export function IndexFeedContainer({
     // 3. Genre filter
     if (selectedGenre !== 'all') {
       result = result.filter((e) =>
-        e.genre?.toLowerCase().includes(selectedGenre.toLowerCase()),
+        eventMatchesGenre(selectedGenre, e.genre, e.subgenres),
       );
     }
 

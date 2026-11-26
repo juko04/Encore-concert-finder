@@ -3,14 +3,19 @@ import 'server-only';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
+import {
+  getViewerTimeZone,
+  homeLocationFromProfileCoords,
+} from '@/lib/location/server';
 import type { CanonicalEventSummary } from '@/lib/domain/catalog';
 import type { UserProfile } from '@/lib/domain/profile';
 import {
+  compareFeedOrder,
   compareScoredEvents,
   rankEvents,
   scoreEvent,
 } from '@/lib/recommendation/engine';
-import { calculateTimingFactor } from '@/lib/recommendation/factors/timing';
+import { checkEventEligibility } from '@/lib/recommendation/factors/eligibility';
 import {
   calculate14DayLookaheadEndDate,
   calculateWeekendWindow,
@@ -22,6 +27,7 @@ import {
 import {
   DEFAULT_PRESET,
   getPresetWeights,
+  applyArtistWeight,
   isValidScoringPreset,
   normalizeScoringPreset,
 } from '@/lib/recommendation/presets';
@@ -47,6 +53,11 @@ import { SupabaseSpotifyConnectionRepository } from '@/lib/repositories/spotify-
 import { SupabaseUserPreferenceRepository } from '@/lib/repositories/user-preference-repository';
 import type { SpotifyTopArtist } from '@/lib/domain/spotify';
 import { getActiveSpotifyTopArtistsForUser } from '@/lib/sources/spotify/affinity-service';
+import {
+  buildGenreTasteProfile,
+  summarizeGenreTaste,
+  type GenreTasteSummaryItem,
+} from '@/lib/recommendation/genre';
 
 export interface PersonalizedDiscoverOptions {
   userId: string;
@@ -57,10 +68,17 @@ export interface PersonalizedDiscoverOptions {
   spotifyRepo?: ISpotifyConnectionRepository;
   spotifyTopArtists?: SpotifyTopArtist[];
   presetOverride?: unknown;
+  locationOverride?: {
+    lat: number;
+    lng: number;
+    radiusMiles?: number | null;
+  } | null;
   mode?: unknown;
   discoveryMode?: unknown;
   referenceDate?: string;
   referenceInstant?: Date | string;
+  /** Viewer IANA timezone; resolved from the encore_tz cookie / home city / UTC when omitted. */
+  timeZone?: string;
   city?: string;
   region?: string;
   searchQuery?: string;
@@ -81,6 +99,8 @@ export interface PersonalizedDiscoverResult {
   hasSpotifyAffinities?: boolean;
   isLocationConfigured: boolean;
   isEmptyCatalog: boolean;
+  /** Genres the user is assumed to like, derived from their artists/Spotify (empty when unknown). */
+  genreTaste?: GenreTasteSummaryItem[];
 }
 
 export interface PublicDiscoverOptions {
@@ -94,6 +114,8 @@ export interface PublicDiscoverOptions {
   limit?: number;
   referenceDate?: string;
   referenceInstant?: Date | string;
+  /** Viewer IANA timezone; resolved from the encore_tz cookie / home city / UTC when omitted. */
+  timeZone?: string;
 }
 
 export interface PublicDiscoverResult {
@@ -120,6 +142,8 @@ export interface PublicDiscoverResult {
  */
 export const FAVORITE_ARTIST_CANDIDATE_LIMIT = 100;
 export const LIKE_ARTIST_CANDIDATE_LIMIT = 75;
+/** Per-genre cap for taste-driven candidate retrieval. */
+export const GENRE_CANDIDATE_LIMIT = 60;
 export const INTERESTED_ARTIST_CANDIDATE_LIMIT = 50;
 export const GENERAL_CATALOG_CANDIDATE_LIMIT = 150;
 
@@ -131,12 +155,12 @@ export const PREFERRED_ARTIST_CANDIDATE_LIMIT = FAVORITE_ARTIST_CANDIDATE_LIMIT;
  *
  * Invariant:
  * Local event calendar dates must not be strictly filtered using the current UTC calendar date.
- * For example, at 8:00 PM in America/Denver on 2026-10-25, UTC is already 2026-10-26 02:00:00Z.
- * A strict UTC date filter (`>= '2026-10-26'`) would drop tonight's Denver show.
+ * For example, at 8:00 PM in a US Mountain-time venue on 2026-10-25, UTC is already 2026-10-26 02:00:00Z.
+ * A strict UTC date filter (`>= '2026-10-26'`) would drop tonight's local show.
  *
  * Therefore, candidate retrieval uses a conservative lower bound: 24 hours (1 calendar day)
  * prior to the reference instant. Downstream scoring strictly enforces venue-timezone-aware
- * eligibility via calculateTimingFactor().
+ * eligibility via checkEventEligibility().
  */
 export function calculateCandidateRetrievalLowerBound(
   referenceDate?: string,
@@ -182,7 +206,7 @@ export const MAX_CANDIDATE_SCAN_PAGES = 5;
  * Invariants:
  * 1. Begins query from `queryFromDate` (24h lookback to protect same-day shows in western timezones).
  * 2. Pushes `status: filters.status ?? 'scheduled'` into database queries to eliminate scan-limit false negatives.
- * 3. Only genuinely eligible scheduled events (`!timing.isPast && ev.status === 'scheduled'`) count
+ * 3. Only genuinely eligible scheduled events (`!eligibility.isPast && ev.status === 'scheduled'`) count
  *    toward the `targetEligibleLimit`. Cancelled, postponed, and past events do not prevent subsequent valid concerts.
  * 4. Ineligible, past, cancelled, and postponed events within the scan window are preserved in the returned
  *    candidate collection so that `totalCandidateCount`, `suppressed`, and `ineligibleCount` diagnostics
@@ -222,7 +246,7 @@ export async function retrieveCandidatesWithLookback(
       if (!candidateIds.has(ev.id)) {
         candidateIds.add(ev.id);
 
-        const timing = calculateTimingFactor({
+        const eligibility = checkEventEligibility({
           localStartDate: ev.localStartDate,
           startsAt: ev.startsAt,
           timezone: ev.timezone,
@@ -232,7 +256,7 @@ export async function retrieveCandidatesWithLookback(
         });
 
         const isTimingAndStatusEligible =
-          !timing.isPast && ev.status === 'scheduled';
+          !eligibility.isPast && ev.status === 'scheduled';
         const isModeEligible =
           !modeOptions?.mode ||
           modeOptions.mode === 'all' ||
@@ -379,6 +403,131 @@ export function applyFairArtistAllocation(
 }
 
 /**
+ * Overlays a validated home-location override (lat/lng) onto the stored profile so that every
+ * distance-dependent code path (engine distance factor, nearby-mode filter, configured flag)
+ * uses the same location. Invalid/non-finite overrides are ignored. When the user has no stored
+ * profile row, a minimal default profile carrying only the override is returned.
+ */
+export function applyLocationOverride(
+  profile: UserProfile | null,
+  override: PersonalizedDiscoverOptions['locationOverride'],
+  userId: string,
+): UserProfile | null {
+  if (
+    !override ||
+    !Number.isFinite(override.lat) ||
+    !Number.isFinite(override.lng) ||
+    Math.abs(override.lat) > 90 ||
+    Math.abs(override.lng) > 180
+  ) {
+    return profile;
+  }
+  if (profile) {
+    return {
+      ...profile,
+      homeLatApprox: override.lat,
+      homeLngApprox: override.lng,
+    };
+  }
+  const now = new Date().toISOString();
+  return {
+    id: userId,
+    homeLatApprox: override.lat,
+    homeLngApprox: override.lng,
+    defaultRadiusMiles: 25,
+    maxSpontaneousPrice: null,
+    maxNormalTicketPrice: null,
+    maxFavoriteArtistPrice: null,
+    travelWillingness: null,
+    recommendationPreset: DEFAULT_PRESET,
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
+/**
+ * Scores ONE event for a signed-in user with exactly the same inputs the Discover/home ranking
+ * uses: saved profile (radius, budgets, preset, artist weight), explicit artist preferences,
+ * Spotify listening (including genre taste) and the chosen home location. Used by the concert
+ * detail page so its "why this fits" breakdown never disagrees with the rest of the site.
+ * Returns null when scoring is not possible; callers fall back to the unscored event.
+ */
+export async function scoreEventForUser(options: {
+  userId: string;
+  event: CanonicalEventSummary;
+  locationOverride?: PersonalizedDiscoverOptions['locationOverride'];
+  client?: SupabaseClient;
+  profileRepo?: IProfileRepository;
+  prefRepo?: IUserPreferenceRepository;
+  catalogRepo?: ICatalogRepository;
+  spotifyRepo?: ISpotifyConnectionRepository;
+  spotifyTopArtists?: SpotifyTopArtist[];
+}): Promise<ScoredEvent | null> {
+  const { userId, event, locationOverride } = options;
+  if (!userId) return null;
+
+  const needsClient =
+    !options.profileRepo || !options.prefRepo || !options.catalogRepo;
+  const client =
+    options.client ?? (needsClient ? await createClient() : undefined);
+  const profileRepo =
+    options.profileRepo ?? new SupabaseProfileRepository(client);
+  const prefRepo =
+    options.prefRepo ?? new SupabaseUserPreferenceRepository(client!);
+  const catalogRepo =
+    options.catalogRepo ?? new SupabaseCatalogRepository(client);
+
+  const [storedProfile, preferences] = await Promise.all([
+    profileRepo.getProfile(userId),
+    prefRepo.getPreferences(userId),
+  ]);
+
+  const userProfile = applyLocationOverride(
+    storedProfile,
+    locationOverride,
+    userId,
+  );
+
+  let spotifyTopArtists = options.spotifyTopArtists ?? [];
+  // Always consult the affinity service: it syncs when connected and otherwise serves the
+  // durable stored snapshot (disconnected / expired / revoked users keep their rankings).
+  if (spotifyTopArtists.length === 0) {
+    try {
+      spotifyTopArtists = await getActiveSpotifyTopArtistsForUser(
+        userId,
+        'short_term',
+        { catalogRepo },
+      );
+    } catch {
+      spotifyTopArtists = [];
+    }
+  }
+
+  const preset: ScoringPreset =
+    userProfile?.recommendationPreset ?? DEFAULT_PRESET;
+  const weights = applyArtistWeight(
+    getPresetWeights(preset),
+    userProfile?.artistWeight,
+  );
+
+  const result = rankEvents([event], {
+    userProfile,
+    artistPreferences: preferences,
+    spotifyTopArtists,
+    presetOverride: preset,
+    weightsOverride: weights,
+    locationOverride: locationOverride ?? undefined,
+  });
+  return (
+    [
+      ...result.recommendations,
+      ...result.exploratory,
+      ...result.suppressed,
+    ][0] ?? null
+  );
+}
+
+/**
  * Retrieves personalized Discover recommendations for an authenticated user.
  * Invariants:
  * 1. Scoped strictly to the verified authenticated user ID (never trusts unverified client input).
@@ -399,6 +548,7 @@ export async function getPersonalizedDiscoverData(
     catalogRepo: injectedCatalogRepo,
     spotifyRepo: injectedSpotifyRepo,
     presetOverride,
+    locationOverride,
     mode,
     discoveryMode,
     referenceDate,
@@ -437,19 +587,31 @@ export async function getPersonalizedDiscoverData(
   }
 
   // 1. Fetch user profile, explicit artist preferences, and Spotify connection in parallel
-  const [userProfile, userPreferences, spotifyConnection] = await Promise.all([
-    profileRepo.getProfile(userId),
-    prefRepo.getPreferences(userId),
-    spotifyRepo
-      ? spotifyRepo.getConnection(userId).catch(() => null)
-      : Promise.resolve(null),
-  ]);
+  const [storedProfile, userPreferences, spotifyConnection] = await Promise.all(
+    [
+      profileRepo.getProfile(userId),
+      prefRepo.getPreferences(userId),
+      spotifyRepo
+        ? spotifyRepo.getConnection(userId).catch(() => null)
+        : Promise.resolve(null),
+    ],
+  );
+
+  // The selected/restored home location (cookie, else saved profile) is the single source of
+  // truth for distance scoring, the "nearby" mode filter, and isLocationConfigured.
+  const userProfile = applyLocationOverride(
+    storedProfile,
+    locationOverride,
+    userId,
+  );
 
   const isSpotifyConnected = spotifyConnection?.status === 'connected';
 
   // 1b. Retrieve Spotify top artists if connected (in-memory cached, fail-closed)
   let spotifyTopArtists: SpotifyTopArtist[] = options.spotifyTopArtists ?? [];
-  if (spotifyTopArtists.length === 0 && isSpotifyConnected) {
+  // Connected: live sync. Disconnected/expired/revoked: the service serves the durable stored
+  // snapshot, so imported Spotify rankings keep influencing scoring.
+  if (spotifyTopArtists.length === 0) {
     try {
       spotifyTopArtists = await getActiveSpotifyTopArtistsForUser(
         userId,
@@ -480,7 +642,15 @@ export async function getPersonalizedDiscoverData(
   const activeMode: DiscoveryMode = normalizeDiscoveryMode(
     mode ?? discoveryMode,
   );
-  const activeWeights = getPresetWeights(activePreset);
+  // The user's artist-importance slider only applies when the preset comes from their profile;
+  // an explicit presetOverride (previews, tests) keeps the pure preset weights.
+  const activeWeights =
+    presetOverride !== undefined && presetOverride !== null
+      ? getPresetWeights(activePreset)
+      : applyArtistWeight(
+          getPresetWeights(activePreset),
+          userProfile?.artistWeight,
+        );
   const modeWeights = getModeScoringWeights(activeMode, activeWeights);
 
   const hasPreferences = userPreferences.length > 0;
@@ -508,6 +678,17 @@ export async function getPersonalizedDiscoverData(
       resolveArtistIdsForPreferences(interestedPrefs, catalogRepo),
     ]);
 
+  // Viewer timezone (explicit option, else encore_tz cookie / home city / UTC). Event-local
+  // eligibility still uses each event's own timezone.
+  const viewerTimeZone =
+    options.timeZone ??
+    (await getViewerTimeZone(
+      homeLocationFromProfileCoords(
+        userProfile?.homeLatApprox,
+        userProfile?.homeLngApprox,
+      ),
+    ));
+
   // Determine date bounds
   let queryFromDate = calculateCandidateRetrievalLowerBound(
     referenceDate,
@@ -519,6 +700,7 @@ export async function getPersonalizedDiscoverData(
     const weekendWindow = calculateWeekendWindow({
       referenceDate,
       referenceInstant,
+      timeZone: viewerTimeZone,
     });
     // Use the earlier of the conservative lower bound and weekend start date
     if (weekendWindow.startDate < queryFromDate) {
@@ -529,7 +711,7 @@ export async function getPersonalizedDiscoverData(
     queryToDate = calculate14DayLookaheadEndDate(
       referenceDate,
       referenceInstant,
-      'America/Denver',
+      viewerTimeZone,
     );
   } else if (activeMode === 'worth_planning_for') {
     const refInstantDate = referenceInstant
@@ -553,6 +735,7 @@ export async function getPersonalizedDiscoverData(
     region: region || undefined,
     status: 'scheduled',
     searchQuery: searchQuery?.trim() || undefined,
+    collapseFestivalDays: true,
   };
 
   const modeOptions = {
@@ -562,6 +745,7 @@ export async function getPersonalizedDiscoverData(
       artistPreferences: userPreferences,
       referenceDate,
       referenceInstant,
+      timeZone: viewerTimeZone,
       city: city || undefined,
     },
   };
@@ -668,6 +852,30 @@ export async function getPersonalizedDiscoverData(
     }
   }
 
+  // Tier 1E: genre-taste retrieval. The user's inferred genres (from their artists/Spotify) pull in
+  // shows by artists they have never heard of, so "you like electronic" actually surfaces more
+  // electronic shows instead of only the ones that happen to sit in the first general pool.
+  const genreTasteProfile = buildGenreTasteProfile({
+    artistPreferences: userPreferences,
+    spotifyTopArtists,
+  });
+  const genreTaste = summarizeGenreTaste(genreTasteProfile, 3);
+  const genreQueryTerms = Array.from(
+    new Set(genreTaste.flatMap((g) => g.rawGenres)),
+  ).slice(0, 4);
+  for (const rawGenre of genreQueryTerms) {
+    candidateQueries.push(
+      retrieveCandidatesWithLookback(
+        catalogRepo,
+        { ...commonFilters, genre: rawGenre },
+        GENRE_CANDIDATE_LIMIT,
+        referenceDate,
+        referenceInstant,
+        modeOptions,
+      ).catch(() => [] as CanonicalEventSummary[]),
+    );
+  }
+
   // Tier 2: General upcoming catalog candidates (discovery pool)
   candidateQueries.push(
     retrieveCandidatesWithLookback(
@@ -760,10 +968,12 @@ export async function getPersonalizedDiscoverData(
     },
     artistPreferences: userPreferences,
     spotifyTopArtists,
+    genreTasteProfile,
     referenceDate,
     referenceInstant,
     presetOverride: activePreset,
     weightsOverride: modeWeights,
+    locationOverride: locationOverride ?? undefined,
   };
 
   const rankResult: RecommendationResult = rankEvents(
@@ -786,6 +996,7 @@ export async function getPersonalizedDiscoverData(
     hasSpotifyAffinities,
     isLocationConfigured,
     isEmptyCatalog: false,
+    genreTaste,
   };
 }
 
@@ -818,6 +1029,8 @@ export async function getPublicDiscoverData(
     mode ?? discoveryMode,
   );
 
+  const viewerTimeZone = options.timeZone ?? (await getViewerTimeZone());
+
   let queryFromDate = calculateCandidateRetrievalLowerBound(
     referenceDate,
     referenceInstant,
@@ -828,6 +1041,7 @@ export async function getPublicDiscoverData(
     const weekendWindow = calculateWeekendWindow({
       referenceDate,
       referenceInstant,
+      timeZone: viewerTimeZone,
     });
     if (weekendWindow.startDate < queryFromDate) {
       queryFromDate = weekendWindow.startDate;
@@ -837,7 +1051,7 @@ export async function getPublicDiscoverData(
     queryToDate = calculate14DayLookaheadEndDate(
       referenceDate,
       referenceInstant,
-      'America/Denver',
+      viewerTimeZone,
     );
   } else if (activeMode === 'worth_planning_for') {
     const refInstantDate = referenceInstant
@@ -857,6 +1071,7 @@ export async function getPublicDiscoverData(
   const modeContext: ModeEligibilityContext = {
     referenceDate,
     referenceInstant,
+    timeZone: viewerTimeZone,
     city: city || undefined,
   };
 
@@ -869,6 +1084,7 @@ export async function getPublicDiscoverData(
       region: region || undefined,
       status: 'scheduled',
       searchQuery: searchQuery?.trim() || undefined,
+      collapseFestivalDays: true,
     },
     limit * 2, // scan enough to satisfy mode eligibility filtering
     referenceDate,
@@ -884,7 +1100,7 @@ export async function getPublicDiscoverData(
     if (ev.status !== 'scheduled') {
       return false;
     }
-    const timing = calculateTimingFactor({
+    const eligibility = checkEventEligibility({
       localStartDate: ev.localStartDate,
       startsAt: ev.startsAt,
       timezone: ev.timezone,
@@ -892,7 +1108,7 @@ export async function getPublicDiscoverData(
       referenceDate,
       referenceInstant,
     });
-    return !timing.isPast;
+    return !eligibility.isPast;
   });
 
   if (activeMode !== 'all') {
@@ -900,6 +1116,7 @@ export async function getPublicDiscoverData(
       isEventEligibleForMode(ev, activeMode, {
         referenceDate,
         referenceInstant,
+        timeZone: viewerTimeZone,
         city: city || undefined,
       }),
     );
@@ -945,7 +1162,7 @@ export interface PersonalizedFeedOptions extends PersonalizedDiscoverOptions {
 
 /**
  * Produces a personalized, ranked feed of scored events suitable for the Index UI.
- * Integrates factor breakdowns (artist, distance, price, timing), user explanations,
+ * Integrates factor breakdowns (artist, distance, price), user explanations,
  * price/free filtering, and flexible sorting.
  */
 export async function getPersonalizedFeed(
@@ -1003,7 +1220,7 @@ export async function getPersonalizedFeed(
     });
   } else {
     // 'score_desc' (default)
-    feed.sort(compareScoredEvents);
+    feed.sort(compareFeedOrder);
   }
 
   // Paging

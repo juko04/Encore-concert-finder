@@ -13,14 +13,14 @@ import {
 import {
   calculatePriceFactor,
   NEUTRAL_PRICE_SCORE,
+  MAX_AFFORDABILITY_SCORE,
 } from '@/lib/recommendation/factors/price';
 import {
-  calculateTimingFactor,
+  checkEventEligibility,
   getDayOfWeekFromDateString,
   getLocalDateInTimezone,
   isValidIanaTimezone,
-  NEUTRAL_TIMING_SCORE,
-} from '@/lib/recommendation/factors/timing';
+} from '@/lib/recommendation/factors/eligibility';
 import { rankEvents } from '@/lib/recommendation/engine';
 import {
   FIXTURE_ARTIST_PREFERENCES,
@@ -657,13 +657,13 @@ describe('Recommendation Factors (Independent Factor Unit Tests)', () => {
       );
     });
 
-    it('scores verified free event with no contradictory price as 100', () => {
+    it('scores verified free event with no contradictory price at the affordability cap (85, not 100)', () => {
       const res = calculatePriceFactor({
         minPrice: null,
         currency: 'USD',
         eventKind: 'free_event',
       });
-      expect(res.factorScore.score).toBe(100);
+      expect(res.factorScore.score).toBe(MAX_AFFORDABILITY_SCORE);
       expect(res.factorScore.isAvailable).toBe(true);
       expect(res.factorScore.fieldStatus).toBe('verified');
       expect(res.factorScore.explanation).toContain(
@@ -672,13 +672,13 @@ describe('Recommendation Factors (Independent Factor Unit Tests)', () => {
       expect(res.factorScore.diagnostics?.isFree).toBe(true);
     });
 
-    it('scores verified free event with zero price as 100', () => {
+    it('scores verified free event with zero price at the affordability cap (85, not 100)', () => {
       const res = calculatePriceFactor({
         minPrice: 0,
         currency: 'USD',
         eventKind: 'free_event',
       });
-      expect(res.factorScore.score).toBe(100);
+      expect(res.factorScore.score).toBe(MAX_AFFORDABILITY_SCORE);
       expect(res.factorScore.isAvailable).toBe(true);
       expect(res.factorScore.fieldStatus).toBe('verified');
       expect(res.factorScore.explanation).toContain(
@@ -786,14 +786,14 @@ describe('Recommendation Factors (Independent Factor Unit Tests)', () => {
       );
     });
 
-    it('scores comfortably under budget USD tickets with high affordability (100)', () => {
+    it('scores comfortably under budget USD tickets with high affordability (capped at 85)', () => {
       const res = calculatePriceFactor({
         minPrice: 20,
         currency: 'USD',
         maxNormalTicketPrice: 60,
         artistPreferenceLevel: 'like',
       });
-      expect(res.factorScore.score).toBe(100);
+      expect(res.factorScore.score).toBe(MAX_AFFORDABILITY_SCORE);
       expect(res.factorScore.explanation).toContain('Exceptional value');
     });
 
@@ -833,7 +833,7 @@ describe('Recommendation Factors (Independent Factor Unit Tests)', () => {
     });
   });
 
-  describe('Factor 4: Event Timing Suitability & Timezone-Aware Eligibility', () => {
+  describe('Event Eligibility (past-event exclusion) & Timezone Handling', () => {
     it('validates IANA timezones and formats local calendar dates correctly', () => {
       expect(isValidIanaTimezone('America/Denver')).toBe(true);
       expect(isValidIanaTimezone('America/New_York')).toBe(true);
@@ -851,7 +851,7 @@ describe('Recommendation Factors (Independent Factor Unit Tests)', () => {
     it('keeps Denver event occurring today eligible when UTC has advanced to tomorrow', () => {
       // 03:30 UTC Nov 20 is 8:30 PM Nov 19 in Denver
       const nowUtcTomorrow = new Date('2026-11-20T03:30:00Z');
-      const res = calculateTimingFactor({
+      const res = checkEventEligibility({
         localStartDate: '2026-11-19',
         timezone: 'America/Denver',
         startTimePrecision: 'date_only',
@@ -864,7 +864,7 @@ describe('Recommendation Factors (Independent Factor Unit Tests)', () => {
     it('keeps Los Angeles event near midnight UTC eligible', () => {
       // 00:30 UTC Oct 23 is 17:30 (5:30 PM Oct 22) in Los Angeles (PDT)
       const nowUtcAhead = new Date('2026-10-23T00:30:00Z');
-      const res = calculateTimingFactor({
+      const res = checkEventEligibility({
         localStartDate: '2026-10-22',
         timezone: 'America/Los_Angeles',
         startTimePrecision: 'date_only',
@@ -876,7 +876,7 @@ describe('Recommendation Factors (Independent Factor Unit Tests)', () => {
     it('keeps New York event close to local midnight eligible on the same day', () => {
       // 03:55 UTC Oct 23 is 23:55 (11:55 PM Oct 22) in New York (EDT)
       const nowLateNight = new Date('2026-10-23T03:55:00Z');
-      const res = calculateTimingFactor({
+      const res = checkEventEligibility({
         localStartDate: '2026-10-22',
         timezone: 'America/New_York',
         startTimePrecision: 'date_only',
@@ -899,7 +899,7 @@ describe('Recommendation Factors (Independent Factor Unit Tests)', () => {
     });
 
     it('flags event with confirmed start time as isPast=true once its start instant has passed', () => {
-      const res = calculateTimingFactor({
+      const res = checkEventEligibility({
         localStartDate: '2026-11-20',
         startsAt: '2026-11-20T20:00:00Z',
         startTimePrecision: 'instant',
@@ -910,7 +910,7 @@ describe('Recommendation Factors (Independent Factor Unit Tests)', () => {
     });
 
     it('keeps future confirmed start time as isPast=false', () => {
-      const res = calculateTimingFactor({
+      const res = checkEventEligibility({
         localStartDate: '2026-11-20',
         startsAt: '2026-11-20T20:00:00Z',
         startTimePrecision: 'instant',
@@ -921,58 +921,26 @@ describe('Recommendation Factors (Independent Factor Unit Tests)', () => {
     });
 
     it('falls back conservatively to UTC when timezone metadata is invalid or missing', () => {
-      const res = calculateTimingFactor({
+      const res = checkEventEligibility({
         localStartDate: '2026-11-20',
         timezone: 'Invalid/NonExistent_Zone',
         referenceDate: '2026-11-01',
       });
       expect(res.isPast).toBe(false);
-      expect(res.factorScore.diagnostics?.timezoneValid).toBe(false);
-      expect(res.factorScore.diagnostics?.effectiveTimezone).toBe('UTC');
+      expect(res.timezoneValid).toBe(false);
+      expect(res.effectiveTimezone).toBe('UTC');
     });
 
     it('flags clearly past dates as isPast=true', () => {
-      const res = calculateTimingFactor({
+      const res = checkEventEligibility({
         localStartDate: '2026-10-15',
         referenceDate: '2026-11-01',
       });
       expect(res.isPast).toBe(true);
     });
 
-    it('returns documented neutral score (50) when user has no custom timing preferences', () => {
-      const res = calculateTimingFactor({
-        localStartDate: '2026-11-15',
-        referenceDate: '2026-11-01',
-        preferredDays: null,
-      });
-      expect(res.factorScore.score).toBe(NEUTRAL_TIMING_SCORE);
-      expect(res.factorScore.isAvailable).toBe(false);
-      expect(res.factorScore.explanation).toContain('no custom availability');
-      expect(res.isPast).toBe(false);
-    });
-
-    it('scores preferred days with high convenience (90)', () => {
-      const res = calculateTimingFactor({
-        localStartDate: '2026-11-14', // Saturday
-        referenceDate: '2026-11-01',
-        preferredDays: ['friday', 'saturday'],
-      });
-      expect(res.factorScore.score).toBe(90);
-      expect(res.factorScore.isAvailable).toBe(true);
-      expect(res.factorScore.explanation).toContain('Convenient timing');
-    });
-
-    it('scores non-preferred days lower (40)', () => {
-      const res = calculateTimingFactor({
-        localStartDate: '2026-11-16', // Monday
-        referenceDate: '2026-11-01',
-        preferredDays: ['friday', 'saturday'],
-      });
-      expect(res.factorScore.score).toBe(40);
-      expect(res.factorScore.isAvailable).toBe(true);
-      expect(res.factorScore.explanation).toContain(
-        'outside your preferred days',
-      );
+    it('derives day of week from a local date string', () => {
+      expect(getDayOfWeekFromDateString('2026-11-14')).toBe('saturday');
     });
   });
 
@@ -1131,7 +1099,7 @@ describe('Recommendation Factors (Independent Factor Unit Tests)', () => {
         expect(scored.score).toBeGreaterThanOrEqual(0);
         expect(scored.score).toBeLessThanOrEqual(100);
 
-        for (const fKey of ['artist', 'distance', 'price', 'timing'] as const) {
+        for (const fKey of ['artist', 'distance', 'price'] as const) {
           const factor = scored.factors[fKey];
           expect(Number.isFinite(factor.score)).toBe(true);
           expect(factor.score).toBeGreaterThanOrEqual(0);

@@ -482,10 +482,8 @@ describe('Index Feed Integration & Factor Breakdown', () => {
     expect(scored.factors.price.score).toBeGreaterThan(0);
     expect(scored.factors.price.isAvailable).toBe(true);
 
-    expect(scored.factors.timing).toBeDefined();
-    expect(scored.factors.timing.factor).toBe('timing');
-    expect(scored.factors.timing.score).toBe(50);
-    expect(scored.factors.timing.fieldStatus).toBe('neutral_missing');
+    // Timing is no longer a scored factor (only past-event eligibility remains)
+    expect((scored.factors as Record<string, unknown>).timing).toBeUndefined();
 
     // Assert clean user-facing explanation for Index UI editorial view
     expect(scored.explanation).toContain('Favorite artist (Khruangbin)');
