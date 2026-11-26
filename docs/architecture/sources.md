@@ -104,6 +104,8 @@ Use case:
 - official platform for some venues/events
 - resale context where relevant
 
+Status: approved 2026-11-26 as a price-only source ("from $X" for unpriced shows), Platform API only, no scraping. See [`phases/active/MARKET_PRICES_PLAN.md`](../phases/active/MARKET_PRICES_PLAN.md).
+
 ### Front Gate Tickets
 Use case:
 - festivals and multi-day events

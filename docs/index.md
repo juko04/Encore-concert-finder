@@ -68,6 +68,7 @@ This document is the authoritative directory and context router for the Encore c
   - [Post-Phase-1 Tooling — Encore Project Hub & Observatory](phases/completed/PROJECT_HUB_IMPLEMENTATION.md)
 - **Active / Upcoming Phases:** [`phases/active/`](phases/active/)
   - [Phase 2 — Live Ingestion & Personalization](phases/active/PHASE_2_IMPLEMENTATION.md) (in progress)
+  - [Market Prices ("From $X") Plan](phases/active/MARKET_PRICES_PLAN.md) (approved 2026-11-26, not started)
 
 ---
 

@@ -36,6 +36,14 @@
 - Shows with no artist are created when the source supplies at least one genre; genres that are
   not source-supplied are inferred only from explicit title words or an exact-name Ticketmaster
   lookup and are marked in `events.genres_source`.
+- Market prices (owner decision, 2026-11-26): shows without a listed price may show a resale
+  "from $X" price from the SeatGeek Platform API, used as a price-only source (no new events,
+  no canonical field changes) and display-only in v1 (no effect on scoring or budget filters).
+  Stored as append-only observations with raw-ingest provenance; shown with SeatGeek
+  attribution. Scraping-based ticket-data vendors (e.g. tickets.dev, TicketsData) are not used:
+  their data comes from scraping the marketplaces, which conflicts with the ingestion "Do not"
+  rules. Revisit only by explicit owner decision after SeatGeek coverage is measured. Plan:
+  `docs/phases/active/MARKET_PRICES_PLAN.md`.
 
 ### Technology
 - Real web app, not single static HTML file.
