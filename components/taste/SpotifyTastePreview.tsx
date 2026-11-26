@@ -1,5 +1,6 @@
 'use client';
 
+import { Select } from '@/components/ui/Select';
 import React, { useState } from 'react';
 import type { SpotifyTimeRange, SpotifyTopArtist } from '@/lib/domain/spotify';
 import type {
@@ -366,22 +367,25 @@ export function SpotifyTastePreview({
                   ) : isAddingThis ? (
                     <div className="flex flex-col gap-1.5 sm:items-end">
                       <div className="flex items-center gap-2">
-                        <select
+                        <Select
                           aria-label="Preference level for artist"
+                          fullWidth={false}
                           value={selectedLevel}
-                          onChange={(e) =>
-                            setSelectedLevel(e.target.value as PreferenceLevel)
+                          onValueChange={(v) =>
+                            setSelectedLevel(v as PreferenceLevel)
                           }
-                          className="rounded-lg border border-zinc-200 bg-white px-2 py-1 text-xs font-medium text-zinc-900 focus:outline-none"
-                        >
-                          <option value="favorite">
-                            ★ Favorite (100 — Max Priority)
-                          </option>
-                          <option value="like">♥ Like (75 — Boost)</option>
-                          <option value="interested">
-                            ✦ Interested (55 — Lower Priority)
-                          </option>
-                        </select>
+                          options={[
+                            {
+                              value: 'favorite',
+                              label: '★ Favorite (100 — Max Priority)',
+                            },
+                            { value: 'like', label: '♥ Like (75 — Boost)' },
+                            {
+                              value: 'interested',
+                              label: '✦ Interested (55 — Lower Priority)',
+                            },
+                          ]}
+                        />
                         <button
                           type="button"
                           data-testid={`confirm-import-btn-${artist.id}`}

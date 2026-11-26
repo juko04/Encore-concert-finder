@@ -1,4 +1,5 @@
 import * as cheerio from 'cheerio';
+import { splitSupportActs } from '@/lib/events/lineup';
 import type { CandidateArtist } from '@/lib/domain/event-candidate';
 
 /** Decodes HTML entities (e.g. `&#8217;`, `&amp;`) and collapses whitespace. */
@@ -99,11 +100,9 @@ export function parseBilling(rawTitle: string): ParsedBilling {
       sortOrder: 1,
     });
   }
-  const supports = [featured, supportPart.replace(/^special guests?\s+/i, '')]
+  const supports = [featured, supportPart]
     .filter(Boolean)
-    .flatMap((part) => part.split(/\s*,\s*(?:and\s+)?/))
-    .map((s) => s.trim())
-    .filter(Boolean);
+    .flatMap((part) => splitSupportActs(part));
   for (const name of supports) {
     artists.push({
       name,

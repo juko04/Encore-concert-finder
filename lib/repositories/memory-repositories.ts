@@ -2,7 +2,7 @@
  * In-memory repository implementations for unit testing and offline development.
  */
 
-import { withoutEventNameArtists } from '@/lib/events/lineup';
+import { cleanLineupForDisplay } from '@/lib/events/lineup';
 import { groupFestivalDays } from '@/lib/events/festival-groups';
 import { isValidCoordinatePair } from '@/lib/location/coordinates';
 import {
@@ -401,7 +401,7 @@ export class MemoryCatalogRepository implements ICatalogRepository {
 
     return {
       ...event,
-      artists: withoutEventNameArtists(artists, event.name),
+      artists: cleanLineupForDisplay(artists, event.name),
       venue: venue
         ? {
             id: venue.id,
@@ -808,8 +808,9 @@ export class MemoryCatalogRepository implements ICatalogRepository {
         startTimePrecision: event.startTimePrecision,
         status: event.status,
         eventKind: event.eventKind,
-        artists: withoutEventNameArtists(artists, event.name),
+        artists: cleanLineupForDisplay(artists, event.name),
         ticketUrl: event.primaryTicketUrl,
+        officialUrl: event.officialUrl ?? null,
         minPrice,
         maxPrice,
         currency,

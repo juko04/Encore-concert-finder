@@ -1,6 +1,6 @@
 import 'server-only';
 
-import { withoutEventNameArtists } from '@/lib/events/lineup';
+import { cleanLineupForDisplay } from '@/lib/events/lineup';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { isValidCoordinatePair } from '@/lib/location/coordinates';
 import type {
@@ -614,7 +614,7 @@ export class SupabaseCatalogRepository implements ICatalogRepository {
 
     return {
       ...event,
-      artists: withoutEventNameArtists(artists, event.name),
+      artists: cleanLineupForDisplay(artists, event.name),
       venue: venue
         ? {
             id: venue.id,
@@ -625,6 +625,7 @@ export class SupabaseCatalogRepository implements ICatalogRepository {
             imageUrl: venue.imageUrl ?? null,
             lat: venue.lat ?? null,
             lng: venue.lng ?? null,
+            website: venue.website ?? null,
           }
         : null,
       ticketLinks,
@@ -1254,8 +1255,9 @@ export class SupabaseCatalogRepository implements ICatalogRepository {
         startTimePrecision: event.startTimePrecision,
         status: event.status,
         eventKind: event.eventKind,
-        artists: withoutEventNameArtists(artists, event.name),
+        artists: cleanLineupForDisplay(artists, event.name),
         ticketUrl: event.primaryTicketUrl,
+        officialUrl: event.officialUrl ?? null,
         minPrice,
         maxPrice,
         currency,

@@ -665,7 +665,10 @@ describe('Entity Resolution Pipeline', () => {
       expect(fieldNames).toContain('local_start_date');
       expect(fieldNames).toContain('starts_at');
       expect(fieldNames).toContain('status');
-      expect(outcome.evidences.length).toBe(3);
+      // A venue-sourced candidate also fills the empty event page link.
+      expect(fieldNames).toContain('official_url');
+      expect(outcome.updates.officialUrl).toBe('https://venue.com/rescheduled');
+      expect(outcome.evidences.length).toBe(4);
     });
 
     describe('multi-day consistency (check_events_multi_day_consistency)', () => {

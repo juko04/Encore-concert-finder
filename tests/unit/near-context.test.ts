@@ -20,6 +20,7 @@ vi.mock('@/lib/location/server', () => ({
 
 import {
   DEFAULT_RADIUS_MILES,
+  GUEST_REGION_RADIUS_MILES,
   resolveNearContext,
 } from '@/lib/location/near-context';
 
@@ -118,7 +119,7 @@ describe('resolveNearContext', () => {
     expect(ctx.radiusMiles).toBe(40);
   });
 
-  it('guest: no user, no profile lookup, no home, scope null, default radius', async () => {
+  it('guest without a picked city: no profile lookup, no home, scope null', async () => {
     getAuthenticatedUser.mockResolvedValue(null);
     const ctx = await resolveNearContext();
     expect(ctx).toMatchObject({
@@ -126,10 +127,23 @@ describe('resolveNearContext', () => {
       profile: null,
       home: null,
       scope: null,
-      radiusMiles: DEFAULT_RADIUS_MILES,
+      radiusMiles: GUEST_REGION_RADIUS_MILES,
     });
     expect(getProfile).not.toHaveBeenCalled();
-    expect(getHomeLocation).not.toHaveBeenCalled();
+    expect(getHomeLocation).toHaveBeenCalledWith(undefined);
+  });
+
+  it('guest who picked a city: scope uses that city and the regional radius', async () => {
+    getAuthenticatedUser.mockResolvedValue(null);
+    getHomeLocation.mockResolvedValue(SEATTLE);
+    const ctx = await resolveNearContext();
+    expect(getProfile).not.toHaveBeenCalled();
+    expect(ctx.home).toBe(SEATTLE);
+    expect(ctx.scope).toEqual({
+      home: { lat: SEATTLE.lat, lng: SEATTLE.lng },
+      radiusMiles: GUEST_REGION_RADIUS_MILES,
+    });
+    expect(GUEST_REGION_RADIUS_MILES).not.toBe(DEFAULT_RADIUS_MILES);
   });
 
   it('an explicit null user (already authenticated as guest) skips the session lookup', async () => {

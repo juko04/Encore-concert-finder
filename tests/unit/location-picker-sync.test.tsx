@@ -59,8 +59,8 @@ describe('LocationPicker instances stay in sync', () => {
 
     // Both start from the saved cookie.
     expect(pickerButtons().map((b) => b.textContent)).toEqual([
-      expect.stringContaining('Near: Boulder'),
-      expect.stringContaining('Near: Boulder'),
+      expect.stringContaining('Near Boulder'),
+      expect.stringContaining('Near Boulder'),
     ]);
 
     // Open the second picker and choose Denver.
@@ -73,20 +73,20 @@ describe('LocationPicker instances stay in sync', () => {
     });
 
     const labels = pickerButtons().map((b) => b.textContent);
-    expect(labels[0]).toContain('Near: Denver');
-    expect(labels[1]).toContain('Near: Denver');
+    expect(labels[0]).toContain('Near Denver');
+    expect(labels[1]).toContain('Near Denver');
     expect(refresh).toHaveBeenCalled();
   });
 
   it('a change made elsewhere (cookie updated, then window focus) is picked up', async () => {
     render(<LocationPicker />);
-    expect(pickerButtons()[0].textContent).toContain('Near: Boulder');
+    expect(pickerButtons()[0].textContent).toContain('Near Boulder');
 
     document.cookie = `${COOKIE}=city:denver-co; path=/`;
     await act(async () => {
       window.dispatchEvent(new Event('focus'));
     });
-    expect(pickerButtons()[0].textContent).toContain('Near: Denver');
+    expect(pickerButtons()[0].textContent).toContain('Near Denver');
   });
 
   it('clearing the location in one picker clears the other', async () => {

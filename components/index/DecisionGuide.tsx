@@ -43,7 +43,7 @@ export function DecisionGuide({ event }: { event: DecisionGuideEventInput }) {
       <div className="border-b border-zinc-100 bg-zinc-50/70 px-6 py-4">
         <h2 className="flex items-center gap-2 text-base font-bold text-zinc-900">
           <SparklesIcon className="h-4 w-4 text-zinc-700" />
-          <span>Editorial Decision Guide</span>
+          <span>Know before you go</span>
         </h2>
         <p className="mt-0.5 text-xs text-zinc-500">
           {guide.venue

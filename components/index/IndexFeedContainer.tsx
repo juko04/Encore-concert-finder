@@ -1,5 +1,6 @@
 'use client';
 
+import { Select } from '@/components/ui/Select';
 import {
   eventMatchesGenre,
   genreMatchesQuery,
@@ -185,7 +186,7 @@ export function IndexFeedContainer({
     { id: 'all', label: 'All Shows', icon: CompassIcon },
     { id: 'this_weekend', label: 'This Weekend', icon: CalendarIcon },
     { id: 'recommended', label: 'Recommended', icon: SparklesIcon },
-    { id: 'free', label: 'Free ($0)', icon: TicketIcon },
+    { id: 'free', label: 'Free', icon: TicketIcon },
   ];
 
   return (
@@ -261,19 +262,20 @@ export function IndexFeedContainer({
         {/* Sort Dropdown */}
         <div className="flex items-center gap-2 text-xs">
           <span className="font-medium text-zinc-500">Sort:</span>
-          <select
-            value={sortBy}
-            onChange={(e) => setSortBy(e.target.value as IndexSortBy)}
+          <Select
             aria-label="Sort concerts"
-            className="shadow-2xs focus:outline-hidden rounded-lg border border-zinc-200 bg-white px-2.5 py-1 text-xs font-medium text-zinc-800 focus:border-zinc-900"
-          >
-            <option value="date_asc">Date (Soonest)</option>
-            <option value="date_desc">Date (Latest)</option>
-            <option value="price_asc">Price (Lowest)</option>
-            <option value="price_desc">Price (Highest)</option>
-            <option value="match_desc">Match Score</option>
-            <option value="title_asc">Artist (A-Z)</option>
-          </select>
+            fullWidth={false}
+            value={sortBy}
+            onValueChange={(v) => setSortBy(v as IndexSortBy)}
+            options={[
+              { value: 'date_asc', label: 'Date (Soonest)' },
+              { value: 'date_desc', label: 'Date (Latest)' },
+              { value: 'price_asc', label: 'Price (Lowest)' },
+              { value: 'price_desc', label: 'Price (Highest)' },
+              { value: 'match_desc', label: 'Match Score' },
+              { value: 'title_asc', label: 'Artist (A-Z)' },
+            ]}
+          />
         </div>
       </div>
 

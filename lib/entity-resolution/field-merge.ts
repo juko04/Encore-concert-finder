@@ -1,4 +1,5 @@
 import type { Event, EventStatus } from '@/lib/domain/catalog';
+import { eventPageUrlFromProvenance } from '@/lib/events/official-url';
 import { normalizeName } from '@/lib/domain/value-objects';
 import {
   getCandidateGenres,
@@ -245,6 +246,20 @@ export function evaluateFieldMerge(
       fieldName: 'primary_ticket_url',
       observedValue: candidate.ticketUrl,
       valueHash: `ticket_${candidate.ticketUrl}`,
+      confidence: candidate.confidence,
+      parserVersion,
+    });
+  }
+
+  // 7b. Event page on the venue/promoter site: fill-if-empty only. A later observation never
+  // replaces an existing page, so the first venue-sourced page stays the canonical link.
+  const eventPage = eventPageUrlFromProvenance(candidate.provenance);
+  if (eventPage && !current.officialUrl) {
+    updates.officialUrl = eventPage;
+    evidences.push({
+      fieldName: 'official_url',
+      observedValue: eventPage,
+      valueHash: `official_url_${eventPage}`,
       confidence: candidate.confidence,
       parserVersion,
     });

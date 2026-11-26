@@ -68,6 +68,7 @@ export default async function HomePage() {
           totalUpcoming={data.totalUpcoming}
           windows={data.windows}
           genreChips={data.genreChips}
+          isAuthenticated={Boolean(user)}
         />
 
         {data.rows.length === 0 && (

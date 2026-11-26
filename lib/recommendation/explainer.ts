@@ -61,7 +61,17 @@ export function buildRecommendationExplanation(input: ExplainerInput): string {
         input.distanceFactor.diagnostics?.locationPrecision ===
         'city_level_approximation';
       const miles = `${approx ? '~' : ''}${Math.round(distMiles)}`;
-      if (input.distanceFactor.score >= 70) {
+      const band = input.distanceFactor.diagnostics?.travelBand;
+      if (band === 'within_radius') {
+        parts.push(`Close to home (${miles} mi)`);
+      } else if (band === 'just_outside') {
+        parts.push(`Just outside your radius (${miles} mi)`);
+      } else if (band === 'day_trip') {
+        parts.push(`Day trip (${miles} mi)`);
+      } else if (band === 'road_trip') {
+        parts.push(`Road trip (${miles} mi)`);
+      } else if (band === undefined && input.distanceFactor.score >= 70) {
+        // Factor scores computed without travel bands (older diagnostics).
         parts.push(`Close to home (${miles} mi)`);
       } else {
         parts.push(`${miles} mi away`);

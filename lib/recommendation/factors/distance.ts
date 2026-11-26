@@ -1,7 +1,8 @@
 /**
  * Factor 2: Distance and Travel Practicality Scoring
- * Computes great-circle (Haversine) distance and bounded utility decay
- * respecting user preferred radius (default_radius_miles) and favorite elasticity.
+ * Computes great-circle (Haversine) distance and scores it by travel band (close to home, just
+ * outside the radius, day trip, road trip, flight), respecting the user's preferred radius
+ * (default_radius_miles) and favorite-artist elasticity.
  *
  * Invariants:
  * 1. Missing coordinates return documented neutral score (50).
@@ -88,6 +89,81 @@ export function calculateHaversineDistanceMiles(
 }
 
 /**
+ * How far is "far"? Distance is scored by how a trip feels:
+ *
+ *   within radius    100 -> 80   close to home
+ *   just outside      72 -> 40   up to 2x the radius (at least radius + 30 mi): still an easy drive
+ *   day trip          40 -> 25   up to 150 mi: there and back in a day
+ *   road trip         25 -> 10   up to 400 mi: an overnight or weekend
+ *   flight            10 -> 5    1,000 mi and beyond: you would fly
+ *
+ * Being inside the radius is a clear boost (the 80 -> 72 step at the edge), yet a venue just past
+ * the radius still ranks far above one that needs a flight. Mile bands are generic travel
+ * distances, not tied to any region; each band starts at or after the previous one, so a large
+ * personal radius pushes the later bands out. Favorite artists use the same bands (a 65 mi trip is
+ * still a day trip) with somewhat higher scores (85, 74 -> 44, 32, 16, 7), while a local show still
+ * beats a favorite past the radius when the viewer picks the Nearby preset.
+ */
+export const DAY_TRIP_MILES = 150;
+export const ROAD_TRIP_MILES = 400;
+export const FLIGHT_MILES = 1000;
+
+export type TravelBand =
+  'within_radius' | 'just_outside' | 'day_trip' | 'road_trip' | 'flight';
+
+interface TravelBands {
+  stretch: number;
+  dayTrip: number;
+  roadTrip: number;
+  /** [miles, score] knots: miles never decrease (the radius repeats for the step), scores always drop. */
+  knots: Array<[number, number]>;
+}
+
+export function travelBands(radius: number, isFavorite: boolean): TravelBands {
+  const stretch = Math.max(radius * 2, radius + 30);
+  const dayTrip = Math.max(DAY_TRIP_MILES, stretch + 30);
+  const roadTrip = Math.max(ROAD_TRIP_MILES, dayTrip + 100);
+  const flight = Math.max(FLIGHT_MILES, roadTrip + 200);
+  // The radius appears twice: the score steps down as you leave it.
+  const knots: Array<[number, number]> = isFavorite
+    ? [
+        [0, 100],
+        [radius, 85],
+        [radius, 74],
+        [stretch, 44],
+        [dayTrip, 32],
+        [roadTrip, 16],
+        [flight, 7],
+      ]
+    : [
+        [0, 100],
+        [radius, 80],
+        [radius, 72],
+        [stretch, 40],
+        [dayTrip, 25],
+        [roadTrip, 10],
+        [flight, 5],
+      ];
+  return { stretch, dayTrip, roadTrip, knots };
+}
+
+function interpolateBands(
+  distance: number,
+  knots: Array<[number, number]>,
+): number {
+  if (distance <= knots[0][0]) return knots[0][1];
+  for (let k = 1; k < knots.length; k += 1) {
+    const [x1, y1] = knots[k];
+    if (distance <= x1) {
+      const [x0, y0] = knots[k - 1];
+      const t = x1 > x0 ? (distance - x0) / (x1 - x0) : 1;
+      return y0 + (y1 - y0) * t;
+    }
+  }
+  return knots[knots.length - 1][1];
+}
+
+/**
  * Evaluates the distance utility factor based on user coordinates and venue coordinates.
  */
 export function calculateDistanceFactor(
@@ -142,30 +218,28 @@ export function calculateDistanceFactor(
   // Effective radius: Favorite artists justify higher travel willingness (1.5x effective radius)
   const effectiveRadius = isFavoriteArtist ? radius * 1.5 : radius;
 
-  let score: number;
+  const bands = travelBands(radius, !!isFavoriteArtist);
+  const score = interpolateBands(distance, bands.knots);
+  const miles = Math.round(distance).toLocaleString('en-US');
   let explanation: string;
-
+  let travelBand: TravelBand;
   if (distance <= radius) {
-    // Within user's explicit preferred radius: smooth decay from 100 at 0mi to 65 at radius
-    const ratio = radius > 0 ? distance / radius : 0;
-    score = 100 - 35 * ratio;
-    explanation = `Close to home (${Math.round(distance)} mi, within your ${radius} mi radius)`;
-  } else if (isFavoriteArtist && distance <= effectiveRadius) {
-    // Beyond standard radius, but within extended favorite travel willingness (1.5x radius)
-    // Smooth decay from 65 at radius down to 50 at 1.5x radius
-    const favoriteDenom = effectiveRadius - radius;
-    const favoriteRatio =
-      favoriteDenom > 0 ? (distance - radius) / favoriteDenom : 0;
-    score = 65 - 15 * favoriteRatio;
-    explanation = `Within extended travel radius for a favorite artist (${Math.round(distance)} mi)`;
+    travelBand = 'within_radius';
+    explanation = `Close to home (${miles} mi, within your ${radius} mi radius)`;
+  } else if (distance <= bands.stretch) {
+    travelBand = 'just_outside';
+    explanation = isFavoriteArtist
+      ? `Within extended travel radius for a favorite artist (${miles} mi)`
+      : `Just outside your ${radius} mi radius (${miles} mi)`;
+  } else if (distance <= bands.dayTrip) {
+    travelBand = 'day_trip';
+    explanation = `Day trip (${miles} mi away)`;
+  } else if (distance <= bands.roadTrip) {
+    travelBand = 'road_trip';
+    explanation = `Road trip (${miles} mi away)`;
   } else {
-    // Beyond effective radius: steep decay down towards floor of 5
-    const overflow = distance - (isFavoriteArtist ? effectiveRadius : radius);
-    const maxOverflow = 1.5 * radius;
-    const decayRatio =
-      maxOverflow > 0 ? Math.min(1, overflow / maxOverflow) : 1;
-    score = Math.max(5, 50 - 45 * decayRatio);
-    explanation = `${Math.round(distance)} mi away (beyond your ${radius} mi preferred radius)`;
+    travelBand = 'flight';
+    explanation = `${miles} mi away, likely a flight`;
   }
 
   const safeScore = Number.isFinite(score) ? score : NEUTRAL_DISTANCE_SCORE;
@@ -186,6 +260,7 @@ export function calculateDistanceFactor(
         preferredRadiusMiles: radius,
         effectiveRadiusMiles: effectiveRadius,
         isFavoriteArtist: !!isFavoriteArtist,
+        travelBand,
       },
     },
     distanceMiles: Number.isFinite(roundedDist) ? roundedDist : null,

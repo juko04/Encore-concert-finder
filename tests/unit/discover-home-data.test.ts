@@ -117,4 +117,51 @@ describe('getDiscoverHomeData', () => {
     expect(data.rows.length).toBeGreaterThan(0);
     spy.mockRestore();
   });
+
+  const idsOf = (row?: { events: Array<unknown> }) =>
+    (row?.events ?? []).map((e) =>
+      typeof e === 'object' && e && 'event' in e
+        ? (e as { event: { id: string } }).event.id
+        : (e as { id: string }).id,
+    );
+
+  it('shows each show in at most one date/city row, and one card per same-night duplicate', async () => {
+    const data = await getDiscoverHomeData({
+      catalogRepo: repo(() => [
+        ev('a', { title: 'The Floozies', venueName: 'Fox Theatre' }),
+        // Same show listed by another source under a slightly different venue name.
+        ev('a2', { title: 'The Floozies', venueName: 'Fox Theatre & Cafe' }),
+        ev('b'),
+      ]),
+      now: NOW,
+    });
+    const claiming = data.rows.filter(
+      (r) => r.id !== 'free' && r.id !== 'under-30',
+    );
+    const all = claiming.flatMap((r) => idsOf(r));
+    expect(new Set(all).size).toBe(all.length);
+    for (const row of data.rows) {
+      const ids = idsOf(row);
+      expect(ids.includes('a') && ids.includes('a2')).toBe(false);
+    }
+  });
+
+  it('keeps rows within the viewer area when a home location is known', async () => {
+    const boulder = { city: 'Boulder', state: 'CO', lat: 40.015, lng: -105.27 };
+    const data = await getDiscoverHomeData({
+      catalogRepo: repo(() => [
+        ev('near', { city: 'Boulder', lat: 40.02, lng: -105.28 }),
+        ev('denver', { city: 'Denver', lat: 39.74, lng: -104.99 }),
+        ev('far', { city: 'Singapore', lat: 1.29, lng: 103.85 }),
+      ]),
+      homeLocation: boulder,
+      now: NOW,
+    });
+    const shown = data.rows.flatMap((r) => idsOf(r));
+    expect(shown).toContain('near');
+    expect(shown).toContain('denver');
+    expect(shown).not.toContain('far');
+    const weekend = data.rows.find((r) => r.id === 'weekend');
+    if (weekend) expect(weekend.subtitle).toMatch(/of Boulder/);
+  });
 });

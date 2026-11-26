@@ -8,12 +8,15 @@ export interface DiscoverHeroProps {
   totalUpcoming: number;
   windows: DiscoverDateWindows;
   genreChips: DiscoverChip[];
+  /** Guests see an invitation to sign in for taste-ranked picks. */
+  isAuthenticated?: boolean;
 }
 
 export function DiscoverHero({
   totalUpcoming,
   windows,
   genreChips,
+  isAuthenticated = false,
 }: DiscoverHeroProps) {
   const quick: DiscoverChip[] = [
     {
@@ -42,6 +45,17 @@ export function DiscoverHero({
             ? `${totalUpcoming.toLocaleString('en-US')} upcoming concerts, with ticket links straight to the source.`
             : 'Upcoming concerts, with ticket links straight to the source.'}
         </p>
+        {!isAuthenticated && (
+          <p data-testid="hero-personalize" className="text-sm text-zinc-600">
+            Members get every show ranked by their taste, budget and distance.{' '}
+            <Link
+              href="/login"
+              className="font-semibold text-zinc-900 underline underline-offset-4 hover:text-zinc-700"
+            >
+              Get your picks →
+            </Link>
+          </p>
+        )}
       </div>
 
       <form
@@ -66,12 +80,13 @@ export function DiscoverHero({
         </button>
       </form>
 
-      <div className="flex flex-wrap items-center gap-2">
+      {/* One scrollable line on phones, wrapping on wider screens. */}
+      <div className="-mx-4 flex items-center gap-2 overflow-x-auto px-4 pb-1 sm:mx-0 sm:flex-wrap sm:overflow-visible sm:px-0 sm:pb-0">
         {[...quick, ...genreChips].map((chip) => (
           <Link
             key={`${chip.label}-${chip.href}`}
             href={chip.href}
-            className="rounded-full border border-zinc-200 bg-white px-3 py-1 text-xs font-medium text-zinc-700 transition-colors hover:border-zinc-300 hover:bg-zinc-50"
+            className="shrink-0 whitespace-nowrap rounded-full border border-zinc-200 bg-white px-3 py-1 text-xs font-medium text-zinc-700 transition-colors hover:border-zinc-300 hover:bg-zinc-50"
           >
             {chip.label}
           </Link>

@@ -1,6 +1,7 @@
 /* eslint-disable @next/next/no-img-element */
 'use client';
 
+import { Select } from '@/components/ui/Select';
 import React from 'react';
 import type {
   PreferenceLevel,
@@ -88,21 +89,21 @@ export function ArtistPreferenceCard({
         <label htmlFor={`select-level-${preference.id}`} className="sr-only">
           Change preference level for {preference.artistName}
         </label>
-        <select
+        <Select
           id={`select-level-${preference.id}`}
           data-testid={`select-level-${preference.id}`}
+          aria-label={`Change preference level for ${preference.artistName}`}
+          fullWidth={false}
           value={preference.preferenceLevel}
           disabled={isUpdating}
-          onChange={(e) =>
-            onUpdateLevel(preference, e.target.value as PreferenceLevel)
-          }
-          className="rounded-lg border border-zinc-200 bg-white px-2.5 py-1.5 text-xs font-medium text-zinc-800 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:opacity-50"
-        >
-          <option value="favorite">★ Favorite (Must-see)</option>
-          <option value="like">♥ Like (Want to see)</option>
-          <option value="interested">✦ Interested (Discover)</option>
-          <option value="dislike">⊘ Dislike (Not interested)</option>
-        </select>
+          onValueChange={(v) => onUpdateLevel(preference, v as PreferenceLevel)}
+          options={[
+            { value: 'favorite', label: '★ Favorite (Must-see)' },
+            { value: 'like', label: '♥ Like (Want to see)' },
+            { value: 'interested', label: '✦ Interested (Discover)' },
+            { value: 'dislike', label: '⊘ Dislike (Not interested)' },
+          ]}
+        />
 
         <button
           type="button"

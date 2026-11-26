@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { splitSupportActs } from '@/lib/events/lineup';
 import * as cheerio from 'cheerio';
 import type {
   CandidateArtist,
@@ -86,6 +87,9 @@ export function resolveZ2Venue(
   return { venueName: rawVenueText.trim() };
 }
 
+/** Separators (besides commas, handled by splitSupportActs) between Z2 support acts. */
+const Z2_SUPPORT_SEPARATORS = /\s+and\s+|\s*&\s*|\s*\/\s*/i;
+
 /**
  * Parses headliner and support acts from title and/or dedicated support elements.
  */
@@ -111,11 +115,9 @@ export function parseZ2Artists(
     headlinerPart = withMatch[1].trim();
     const inlineSupport = withMatch[2].trim();
     if (inlineSupport) {
-      const parts = inlineSupport
-        .split(/,\s*(?:and\s+)?|\s+and\s+|\s*&\s*|\s*\/\s*/i)
-        .map((s) => s.trim())
-        .filter((s) => s.length > 0);
-      supportNames.push(...parts);
+      supportNames.push(
+        ...splitSupportActs(inlineSupport, Z2_SUPPORT_SEPARATORS),
+      );
     }
   }
 
@@ -135,10 +137,7 @@ export function parseZ2Artists(
   if (rawSupport && rawSupport.trim()) {
     let cleanSupport = rawSupport.trim();
     cleanSupport = cleanSupport.replace(/^(?:w\/|with|support:|plus)\s*/i, '');
-    const parts = cleanSupport
-      .split(/,\s*(?:and\s+)?|\s+and\s+|\s*&\s*|\s*\/\s*/i)
-      .map((s) => s.trim())
-      .filter((s) => s.length > 0);
+    const parts = splitSupportActs(cleanSupport, Z2_SUPPORT_SEPARATORS);
 
     for (const p of parts) {
       if (!supportNames.includes(p)) {

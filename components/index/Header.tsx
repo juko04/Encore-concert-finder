@@ -105,11 +105,11 @@ export function Header({
             alertIndicator: alertCount > 0,
           },
           {
-            href: '/profile',
-            label: 'Profile',
+            // Your taste, Spotify and settings. Highlighted on /profile/* and /preferences.
+            href: '/profile/taste',
+            label: 'You',
             icon: UserIcon,
-            // Profile lives at /profile/taste; match any /profile/* path.
-            target: '/profile/taste',
+            alsoActive: ['/profile', '/preferences'],
           },
         ]
       : []),
@@ -121,15 +121,23 @@ export function Header({
     badge?: number;
     alertIndicator?: boolean;
     target?: string;
+    alsoActive?: string[];
   }>;
 
   // The login page already shows the sign-in form; avoid a redundant button.
   const hideSignIn = Boolean(pathname?.startsWith('/login'));
 
-  const isLinkActive = (href: string, matchExact?: boolean) => {
+  const isLinkActive = (
+    href: string,
+    matchExact?: boolean,
+    alsoActive?: string[],
+  ) => {
     if (!pathname) return false;
     if (matchExact) return pathname === href;
-    return pathname.startsWith(href);
+    return (
+      pathname.startsWith(href) ||
+      Boolean(alsoActive?.some((p) => pathname.startsWith(p)))
+    );
   };
 
   return (
@@ -148,9 +156,11 @@ export function Header({
             <div className="flex flex-col">
               <span className="text-base font-semibold leading-none tracking-tight text-zinc-900">
                 ENCORE{' '}
-                <span className="font-light text-zinc-400">{'// INDEX'}</span>
+                <span className="hidden font-light text-zinc-400 sm:inline">
+                  {'// INDEX'}
+                </span>
               </span>
-              <span className="mt-0.5 font-mono text-[10px] uppercase tracking-widest text-zinc-400">
+              <span className="mt-0.5 hidden font-mono text-[10px] uppercase tracking-widest text-zinc-400 sm:block">
                 Curated Live Music
               </span>
             </div>
@@ -162,7 +172,11 @@ export function Header({
             aria-label="Primary"
           >
             {navLinks.map((link) => {
-              const active = isLinkActive(link.href, link.matchExact);
+              const active = isLinkActive(
+                link.href,
+                link.matchExact,
+                link.alsoActive,
+              );
               const Icon = link.icon;
               return (
                 <Link
@@ -195,10 +209,8 @@ export function Header({
         </div>
 
         {/* Right Section / Account / Mobile Menu Toggle */}
-        <div className="flex items-center gap-3">
-          <div className="hidden md:block">
-            <LocationPicker />
-          </div>
+        <div className="flex items-center gap-2 sm:gap-3">
+          <LocationPicker />
           {isAuthenticated && (
             <Link
               href={routes.saved || '/saved'}
@@ -291,7 +303,7 @@ export function Header({
           ) : hideSignIn ? null : (
             <Link
               href="/login"
-              className="rounded-full bg-zinc-900 px-3.5 py-1 text-xs font-semibold text-white transition-transform duration-150 ease-out hover:bg-zinc-800 active:scale-[0.97]"
+              className="whitespace-nowrap rounded-full bg-zinc-900 px-3.5 py-1 text-xs font-semibold text-white transition-transform duration-150 ease-out hover:bg-zinc-800 active:scale-[0.97]"
             >
               Sign In
             </Link>
@@ -325,11 +337,12 @@ export function Header({
           aria-label="Mobile"
           className="animate-in fade-in slide-in-from-top-2 space-y-1 border-b border-zinc-200 bg-white px-4 pb-4 pt-2 duration-150 motion-reduce:animate-none md:hidden"
         >
-          <div className="pb-2">
-            <LocationPicker variant="mobile" />
-          </div>
           {navLinks.map((link) => {
-            const active = isLinkActive(link.href, link.matchExact);
+            const active = isLinkActive(
+              link.href,
+              link.matchExact,
+              link.alsoActive,
+            );
             const Icon = link.icon;
             return (
               <Link

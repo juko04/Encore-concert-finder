@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useEffect, useRef, useState, useTransition } from 'react';
+import { useViewer } from '@/components/auth/ViewerContext';
 import { useRouter } from 'next/navigation';
 import { MapPinIcon } from '@/components/index/icons';
 import { searchCities, type CityEntry } from '@/lib/location/cities';
@@ -34,6 +35,7 @@ interface LocationPickerProps {
  */
 export function LocationPicker({ variant = 'desktop' }: LocationPickerProps) {
   const router = useRouter();
+  const { homeLabel: serverHomeLabel = null } = useViewer();
   const containerRef = useRef<HTMLDivElement>(null);
   const [mounted, setMounted] = useState(false);
   const [current, setCurrent] = useState<HomeLocation | null>(null);
@@ -189,11 +191,10 @@ export function LocationPicker({ variant = 'desktop' }: LocationPickerProps) {
     });
   }
 
-  const buttonLabel = !mounted
-    ? ' '
-    : current
-      ? `Near: ${current.label}`
-      : 'Set your city';
+  // Before mount the cookie is unread; use the label the server resolved so the pill is never
+  // blank on first paint.
+  const shownLabel = mounted ? (current?.label ?? null) : serverHomeLabel;
+  const buttonLabel = shownLabel ?? 'Set your city';
 
   const panelClasses =
     variant === 'desktop'
@@ -217,7 +218,16 @@ export function LocationPicker({ variant = 'desktop' }: LocationPickerProps) {
       >
         <span className="flex items-center gap-1.5">
           <MapPinIcon className="h-3.5 w-3.5 text-zinc-500" />
-          <span className="min-w-[4.5rem] truncate">{buttonLabel}</span>
+          <span className="max-w-[9rem] truncate">
+            {shownLabel && (
+              <span
+                className={`text-zinc-400 ${variant === 'desktop' ? 'hidden sm:inline' : ''}`}
+              >
+                Near{' '}
+              </span>
+            )}
+            {buttonLabel}
+          </span>
         </span>
         <span aria-hidden="true" className="text-zinc-400">
           ▾

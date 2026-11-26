@@ -12,7 +12,11 @@ import {
   annotateEventsWithArtistAffinity,
   type ArtistAffinityResolver,
 } from '@/lib/recommendation/artist-affinity';
-import { listAllEventsWithinRadius } from '@/lib/location/near-search';
+import {
+  listAllEventsWithinRadius,
+  listEventsNearHome,
+} from '@/lib/location/near-search';
+import { GUEST_REGION_RADIUS_MILES } from '@/lib/location/near-context-constants';
 
 export interface DiscoverRow {
   id: string;
@@ -57,7 +61,31 @@ const EMPTY_PERSONALIZED: PersonalizedPick = {
 };
 
 type CatalogReader = Pick<ICatalogRepository, 'listEvents' | 'countEvents'> &
-  Partial<Pick<ICatalogRepository, 'getFacets'>>;
+  Partial<
+    Pick<
+      ICatalogRepository,
+      'getFacets' | 'listEventLocations' | 'getEventsByIds'
+    >
+  >;
+
+function normalizeTitle(title: string): string {
+  return title
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+}
+
+/**
+ * Display-only key for spotting the same show listed twice by different sources (e.g. "Fox
+ * Theatre" vs "Fox Theatre & Cafe" on the same night). Never used for entity resolution: it
+ * only stops one discovery row from showing two cards for what reads as the same show.
+ */
+export function displayDuplicateKey(
+  e: CanonicalEventSummary | ScoredEvent,
+): string {
+  const summary = 'event' in e ? e.event : e;
+  return `${summary.localStartDate}|${normalizeTitle(summary.title)}|${(summary.city ?? '').toLowerCase()}`;
+}
 
 async function safe<T>(label: string, fn: () => Promise<T>, fallback: T) {
   try {
@@ -151,8 +179,34 @@ export async function getDiscoverHomeData(options: {
     collapseFestivalDays: true,
   };
 
-  const list = (extra: EventListFilters) =>
-    catalogRepo.listEvents({ ...base, limit: ROW_LIMIT, ...extra });
+  // When we know where the viewer is, every row stays within their area: the saved radius for
+  // a signed-in user, otherwise a wide regional default. Without a location rows are catalog-wide.
+  const regionRadius =
+    useRadius && typeof homeRadiusMiles === 'number'
+      ? homeRadiusMiles
+      : GUEST_REGION_RADIUS_MILES;
+  const regionHome = homeLocation
+    ? { lat: homeLocation.lat, lng: homeLocation.lng }
+    : null;
+
+  const list = async (
+    extra: EventListFilters,
+  ): Promise<CanonicalEventSummary[]> => {
+    const filters = { ...base, limit: ROW_LIMIT, ...extra };
+    if (!regionHome) return catalogRepo.listEvents(filters);
+    const page = await listEventsNearHome(
+      {
+        listEvents: (f) => catalogRepo.listEvents(f),
+        listEventLocations: catalogRepo.listEventLocations?.bind(catalogRepo),
+        getEventsByIds: catalogRepo.getEventsByIds?.bind(catalogRepo),
+      },
+      filters,
+      regionHome,
+      regionRadius,
+      { limit: filters.limit ?? ROW_LIMIT, offset: 0 },
+    );
+    return page.events;
+  };
 
   const nearPromise =
     useRadius && homeLocation
@@ -214,7 +268,7 @@ export async function getDiscoverHomeData(options: {
       : Promise.resolve(EMPTY_PERSONALIZED),
     safe(
       'pool',
-      () => catalogRepo.listEvents({ ...base, limit: POOL_LIMIT }),
+      () => list({ limit: POOL_LIMIT }),
       [] as CanonicalEventSummary[],
     ),
     safe(
@@ -232,7 +286,11 @@ export async function getDiscoverHomeData(options: {
       () => list({ toDate: windows.nextWeekEnd, limit: ROW_LIMIT * 3 }),
       [] as CanonicalEventSummary[],
     ),
-    safe('free', () => list({ freeOnly: true }), [] as CanonicalEventSummary[]),
+    safe(
+      'free',
+      () => list({ freeOnly: true, limit: ROW_LIMIT * 2 }),
+      [] as CanonicalEventSummary[],
+    ),
     safe(
       'under price',
       () =>
@@ -278,41 +336,54 @@ export async function getDiscoverHomeData(options: {
   ]);
 
   const rows: DiscoverRow[] = [];
-  // Duplicate rule (keep in sync with tests/unit/review-search-home-dedupe):
-  //  - TIME rows (This weekend, Next 7 days, Plan ahead) and CITY rows
-  //    ("In <city>") each claim their shows: a show appears in at most one of
-  //    them, in page order.
-  //  - Intentional overlap is allowed for rows that answer a different
-  //    question: "Near <home city>", "Picked for you", "Free shows" and
-  //    "Under $30" never claim shows and never skip claimed ones.
-  //  - City rows additionally skip shows already shown in "Near <home city>".
+  // Duplicate rule (keep in sync with tests/unit/discover-home-data.test.ts):
+  //  - A show appears at most once on the page: every row claims the shows it displays, in page
+  //    order, and later rows skip claimed ones. "Free shows" and "Under $30" are the exception:
+  //    they answer a price question and may repeat a show from a date row.
+  //  - Within a row, two listings with the same local date, title and city are shown once
+  //    (display-only, see displayDuplicateKey).
   const seen = new Set<string>();
-  const nearIds = new Set<string>();
   const idOf = (e: CanonicalEventSummary | ScoredEvent) =>
     ('event' in e ? e.event : e).id;
-  const take = (
+  const uniqueVisible = (
+    events: Array<CanonicalEventSummary | ScoredEvent>,
+    max: number,
+  ) => {
+    const keys = new Set<string>();
+    const out: Array<CanonicalEventSummary | ScoredEvent> = [];
+    for (const e of events) {
+      if (!isVisible(e)) continue;
+      const key = displayDuplicateKey(e);
+      if (keys.has(key)) continue;
+      keys.add(key);
+      out.push(e);
+      if (out.length >= max) break;
+    }
+    return out;
+  };
+  /** Claims the shows it returns; skips shows an earlier claiming row already featured. */
+  const takeFresh = (
     events: Array<CanonicalEventSummary | ScoredEvent>,
     max = ROW_LIMIT,
   ) => {
-    const out = events.filter(isVisible).slice(0, max);
+    const out = uniqueVisible(
+      events.filter((e) => !seen.has(idOf(e))),
+      max,
+    );
     out.forEach((e) => seen.add(idOf(e)));
     return out;
   };
-  /** Like take(), but skips shows already featured in an earlier claiming row. */
-  const takeFresh = (
-    events: Array<CanonicalEventSummary | ScoredEvent>,
-    extraSkip?: Set<string>,
-  ) =>
-    take(events.filter((e) => !seen.has(idOf(e)) && !extraSkip?.has(idOf(e))));
-  /** Overlap-allowed rows: visible filter only, no claiming. */
+  /** Price rows: may repeat shows from date rows, never claim. */
   const takeShared = (
     events: Array<CanonicalEventSummary | ScoredEvent>,
     max = ROW_LIMIT,
-  ) => events.filter(isVisible).slice(0, max);
+  ) => uniqueVisible(events, max);
+  const regionLabel = homeLocation?.city
+    ? `Within ${regionRadius} miles of ${homeLocation.city}`
+    : undefined;
 
   const nearEvents = await nearPromise;
-  const nearRow = takeShared(nearEvents);
-  nearRow.forEach((e) => nearIds.add(idOf(e)));
+  const nearRow = takeFresh(nearEvents);
   if (useRadius && homeLocation && nearRow.length > 0) {
     rows.push({
       id: 'near-home',
@@ -333,7 +404,7 @@ export async function getDiscoverHomeData(options: {
   }
 
   const picked = personalized.picked;
-  const pickedRow = takeShared(picked);
+  const pickedRow = takeFresh(picked);
   if (pickedRow.length > 0) {
     rows.push({
       id: 'picked',
@@ -347,7 +418,7 @@ export async function getDiscoverHomeData(options: {
   // Genre taste row: dynamic per user. Only appears when the user's own listening implies a
   // genre and we hold shows that fit it; the subtitle states the assumption and its basis.
   const topTaste = personalized.genreTaste[0];
-  const genreRowEvents = takeShared(personalized.genreEvents);
+  const genreRowEvents = takeFresh(personalized.genreEvents);
   if (topTaste && genreRowEvents.length >= 3) {
     rows.push({
       id: 'genre-taste',
@@ -363,6 +434,7 @@ export async function getDiscoverHomeData(options: {
     rows.push({
       id: 'weekend',
       title: 'This weekend',
+      subtitle: regionLabel,
       events: weekendRow,
       seeAllHref: search({
         startDate: windows.weekend.startDate,
@@ -376,6 +448,7 @@ export async function getDiscoverHomeData(options: {
     rows.push({
       id: 'next-7-days',
       title: 'Next 7 days',
+      subtitle: regionLabel,
       events: nextWeekRow,
       seeAllHref: search({
         startDate: windows.today,
@@ -389,7 +462,9 @@ export async function getDiscoverHomeData(options: {
     rows.push({
       id: 'free',
       title: 'Free shows',
-      subtitle: 'Verified free admission',
+      subtitle: regionLabel
+        ? `Verified free admission · ${regionLabel.replace(/^W/, 'w')}`
+        : 'Verified free admission',
       events: freeRow,
       seeAllHref: search({ freeOnly: 'true' }),
     });
@@ -434,7 +509,7 @@ export async function getDiscoverHomeData(options: {
     ),
   );
   topCities.forEach(({ name }, i) => {
-    const cityRow = takeFresh(cityRows[i], nearIds);
+    const cityRow = takeFresh(cityRows[i]);
     if (cityRow.length > 0) {
       rows.push({
         id: `city-${name.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`,
@@ -450,7 +525,9 @@ export async function getDiscoverHomeData(options: {
     rows.push({
       id: 'plan-ahead',
       title: 'Plan ahead',
-      subtitle: 'Shows more than a month out',
+      subtitle: regionLabel
+        ? `More than a month out · ${regionLabel.replace(/^W/, 'w')}`
+        : 'Shows more than a month out',
       events: planAheadRow,
       seeAllHref: search({
         startDate: windows.planAheadStart,

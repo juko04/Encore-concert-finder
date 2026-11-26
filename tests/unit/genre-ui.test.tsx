@@ -35,7 +35,7 @@ describe('GenreBadge', () => {
     const { rerender, container } = render(<GenreBadge genre="Hip-Hop/Rap" />);
     expect(screen.getByTestId('genre-badge')).toHaveTextContent('Hip-Hop');
     rerender(<GenreBadge genre="Rock/Jazz" />);
-    expect(screen.getByTestId('genre-badge')).toHaveTextContent('Mixed');
+    expect(screen.getByTestId('genre-badge')).toHaveTextContent('RockJazz');
     rerender(<GenreBadge genre="Live Music" />);
     expect(container).toBeEmptyDOMElement();
     rerender(<GenreBadge genre="Zorblax" />);
@@ -55,7 +55,7 @@ describe('EventCard match score and genre', () => {
       />,
     );
     const score = screen.getByTestId('card-match-score');
-    expect(score).toHaveTextContent('Match 72');
+    expect(score).toHaveTextContent('72% match');
     const price = screen.getByText('Check ticket prices');
     expect(
       price.compareDocumentPosition(score) & Node.DOCUMENT_POSITION_FOLLOWING,
@@ -87,7 +87,7 @@ describe('EventCard match score and genre', () => {
     const { rerender } = render(
       <EventCard event={makeEvent({ genre: 'Rock/Pop/Hip-Hop' })} />,
     );
-    expect(screen.getByTestId('genre-badge')).toHaveTextContent('Mixed');
+    expect(screen.getByTestId('genre-badge')).toHaveTextContent('RockPop+1');
     rerender(<EventCard event={makeEvent({ genre: 'Live Music' })} />);
     expect(screen.queryByTestId('genre-badge')).toBeNull();
     rerender(<EventListItem event={makeEvent({ genre: 'Jazz' })} />);

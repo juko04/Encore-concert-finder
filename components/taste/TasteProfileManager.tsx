@@ -1,5 +1,6 @@
 'use client';
 
+import { Select } from '@/components/ui/Select';
 import React, { useEffect, useState, useTransition } from 'react';
 import type {
   PreferenceLevel,
@@ -600,20 +601,21 @@ export function TasteProfileManager({
                   <label htmlFor="modal-pref-level" className="sr-only">
                     Preference Level
                   </label>
-                  <select
+                  <Select
                     id="modal-pref-level"
                     data-testid="modal-pref-level-select"
+                    aria-label="Preference Level"
+                    fullWidth={false}
+                    size="md"
                     value={addLevel}
-                    onChange={(e) =>
-                      setAddLevel(e.target.value as PreferenceLevel)
-                    }
-                    className="rounded-lg border border-zinc-200 bg-white px-3 py-2 text-xs font-medium text-zinc-900 focus:border-indigo-500 focus:outline-none"
-                  >
-                    <option value="favorite">★ Favorite (Must-see)</option>
-                    <option value="like">♥ Like (Want to see)</option>
-                    <option value="interested">✦ Interested (Discover)</option>
-                    <option value="dislike">⊘ Dislike (Not interested)</option>
-                  </select>
+                    onValueChange={(v) => setAddLevel(v as PreferenceLevel)}
+                    options={[
+                      { value: 'favorite', label: '★ Favorite (Must-see)' },
+                      { value: 'like', label: '♥ Like (Want to see)' },
+                      { value: 'interested', label: '✦ Interested (Discover)' },
+                      { value: 'dislike', label: '⊘ Dislike (Not interested)' },
+                    ]}
+                  />
                 </div>
 
                 <button

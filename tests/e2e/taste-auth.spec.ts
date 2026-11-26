@@ -174,7 +174,8 @@ test.describe('Authenticated Music Taste Profile Browser E2E Flow', () => {
     // Modal/confirmation panel appears
     await expect(page.getByTestId('add-artist-dialog')).toBeVisible();
     const modalSelect = page.getByTestId('modal-pref-level-select');
-    await modalSelect.selectOption('interested');
+    await modalSelect.click();
+    await page.getByRole('option', { name: /Interested/ }).click();
     await page.getByTestId('confirm-add-btn').click();
 
     // 5. Verify preference card is rendered in list with "Interested"
@@ -196,7 +197,8 @@ test.describe('Authenticated Music Taste Profile Browser E2E Flow', () => {
       name: new RegExp(`Change preference level for ${customArtistName}`, 'i'),
     });
     await expect(levelSelect).toBeVisible();
-    await levelSelect.selectOption('favorite');
+    await levelSelect.click();
+    await page.getByRole('option', { name: /Favorite/ }).click();
 
     // Verify UI reflects update
     await expect(page.getByTestId('badge-favorite')).toBeVisible();

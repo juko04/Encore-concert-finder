@@ -1,5 +1,6 @@
 'use client';
 
+import { Select } from '@/components/ui/Select';
 import {
   canonicalGenreLabel,
   eventMatchesGenre,
@@ -29,6 +30,7 @@ import { EventListItem } from './EventListItem';
 import { UndoToast } from './UndoToast';
 import { useWatchlist } from './useWatchlist';
 import { SavedShowTicker } from './SavedShowTicker';
+import { useViewer } from '@/components/auth/ViewerContext';
 import {
   SearchIcon,
   SlidersIcon,
@@ -254,6 +256,7 @@ export function SearchClient({
   const [sortBy, setSortBy] = useState<IndexSortBy>(initialSortBy);
   const [layout, setLayout] = useState<'grid' | 'list'>('grid');
   const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false);
+  const { isAuthenticated } = useViewer();
 
   // Venue options: one per venue id (no duplicate keys). Rooms that share a
   // display name get their city appended so they can be told apart. A venue
@@ -297,11 +300,17 @@ export function SearchClient({
     byId.forEach((v) =>
       nameCounts.set(v.name, (nameCounts.get(v.name) ?? 0) + 1),
     );
-    const list: Array<{ id?: string; name: string; label: string }> = [];
+    const list: Array<{
+      id?: string;
+      name: string;
+      label: string;
+      city?: string;
+    }> = [];
     byId.forEach((v) =>
       list.push({
         id: v.id,
         name: v.name,
+        city: v.city,
         label:
           (nameCounts.get(v.name) ?? 0) > 1 && v.city
             ? `${v.name} — ${v.city}`
@@ -347,6 +356,29 @@ export function SearchClient({
       });
     return list.sort((a, b) => a.label.localeCompare(b.label));
   }, [catalogFacets.venues, normalizedEvents, selectedVenue]);
+
+  // Venue picker grouped by city so a long, multi-city list is scannable. Venues without a known
+  // city go last under "Other". A trailing " - Redirect" (a source artefact) is not shown.
+  const venueGroups = useMemo(() => {
+    const groups = new Map<string, typeof uniqueVenues>();
+    for (const v of uniqueVenues) {
+      const city = v.city?.trim() || 'Other';
+      const list = groups.get(city) ?? [];
+      list.push(v);
+      groups.set(city, list);
+    }
+    return Array.from(groups.entries())
+      .sort(([a], [b]) =>
+        a === 'Other' ? 1 : b === 'Other' ? -1 : a.localeCompare(b),
+      )
+      .map(([city, venues]) => ({
+        city,
+        venues: venues.map((v) => ({
+          ...v,
+          label: v.label.replace(/\s+-\s+Redirect$/i, ''),
+        })),
+      }));
+  }, [uniqueVenues]);
 
   // Normalise a venue NAME from the URL to its venue id once options are known.
   useEffect(() => {
@@ -418,6 +450,85 @@ export function SearchClient({
     setSearchError(null);
     setCurrentPage(1);
   };
+
+  const DATE_LABELS: Record<string, string> = {
+    today: 'Today',
+    this_weekend: 'This weekend',
+    next_7_days: 'Next 7 days',
+    custom: 'Custom dates',
+  };
+  const PRICE_LABELS: Record<string, string> = {
+    free: 'Free',
+    under_25: 'Under $25',
+    under_50: 'Under $50',
+    under_100: 'Under $100',
+  };
+  const STATUS_LABELS: Record<string, string> = {
+    available: 'Tickets available',
+    low_inventory: 'Low inventory',
+    sold_out: 'Sold out',
+  };
+  const activeChips: Array<{ key: string; label: string; clear: () => void }> =
+    [];
+  if (query.trim()) {
+    activeChips.push({
+      key: 'q',
+      label: `“${query.trim()}”`,
+      clear: () => setQuery(''),
+    });
+  }
+  if (dateFilter !== 'all') {
+    activeChips.push({
+      key: 'date',
+      label: DATE_LABELS[dateFilter] ?? dateFilter,
+      clear: () => setDateFilter('all'),
+    });
+  }
+  if (pricePreset !== 'all') {
+    activeChips.push({
+      key: 'price',
+      label: PRICE_LABELS[pricePreset] ?? pricePreset,
+      clear: () => setPricePreset('all'),
+    });
+  }
+  if (!outsideBudgetAllowed) {
+    activeChips.push({
+      key: 'budget',
+      label: `Up to $${maxPriceBudget}`,
+      clear: () => setOutsideBudgetAllowed(true),
+    });
+  }
+  if (selectedVenue !== 'all') {
+    activeChips.push({
+      key: 'venue',
+      label:
+        uniqueVenues
+          .find((v) => (v.id ?? v.name) === selectedVenue)
+          ?.label.replace(/\s+-\s+Redirect$/i, '') ?? selectedVenue,
+      clear: () => setSelectedVenue('all'),
+    });
+  }
+  if (selectedCity !== 'all') {
+    activeChips.push({
+      key: 'city',
+      label: selectedCity,
+      clear: () => setSelectedCity('all'),
+    });
+  }
+  if (selectedGenre !== 'all') {
+    activeChips.push({
+      key: 'genre',
+      label: selectedGenre,
+      clear: () => setSelectedGenre('all'),
+    });
+  }
+  if (statusFilter !== 'all') {
+    activeChips.push({
+      key: 'status',
+      label: STATUS_LABELS[statusFilter] ?? statusFilter,
+      clear: () => setStatusFilter('all'),
+    });
+  }
 
   // Primitive (not the uniqueVenues array) so a Load More that merely appends events does not
   // change buildSearchParams' identity and re-trigger a page-1 refetch that wipes the extra pages.
@@ -886,10 +997,22 @@ export function SearchClient({
 
       {/* Layout Grid: Left Sidebar Filters (Desktop) + Right Event Feed */}
       <div className="grid grid-cols-1 gap-8 md:grid-cols-4">
-        {/* Desktop Filter Sidebar */}
+        {/* Phones: the filters open as a bottom sheet over a dimmed page. */}
+        {mobileFiltersOpen && (
+          <button
+            type="button"
+            aria-label="Close filters"
+            onClick={() => setMobileFiltersOpen(false)}
+            className="fixed inset-0 z-40 bg-zinc-900/40 md:hidden"
+          />
+        )}
+        {/* Filter sidebar (desktop) / bottom sheet (phones) */}
         <aside
-          className={`shadow-2xs space-y-6 rounded-2xl border border-zinc-200/90 bg-white p-5 md:block ${
-            mobileFiltersOpen ? 'block' : 'hidden md:block'
+          data-testid="search-filters"
+          className={`shadow-2xs space-y-6 border-zinc-200/90 bg-white p-5 md:static md:z-auto md:block md:max-h-none md:overflow-visible md:rounded-2xl md:border md:pb-5 ${
+            mobileFiltersOpen
+              ? 'fixed inset-x-0 bottom-0 z-50 block max-h-[85vh] overflow-y-auto rounded-t-2xl border-t pb-24'
+              : 'hidden'
           }`}
         >
           <div className="flex items-center justify-between border-b border-zinc-100 pb-3">
@@ -914,17 +1037,18 @@ export function SearchClient({
               <CalendarIcon className="h-3.5 w-3.5 text-zinc-400" />
               <span>Date Range</span>
             </label>
-            <select
+            <Select
+              aria-label="Date range"
               value={dateFilter}
-              onChange={(e) => setDateFilter(e.target.value)}
-              className="focus:outline-hidden w-full rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-xs text-zinc-800 focus:border-zinc-900"
-            >
-              <option value="all">All Dates</option>
-              <option value="today">Today Only</option>
-              <option value="this_weekend">This Weekend</option>
-              <option value="next_7_days">Next 7 Days</option>
-              <option value="custom">Custom Range</option>
-            </select>
+              onValueChange={setDateFilter}
+              options={[
+                { value: 'all', label: 'All Dates' },
+                { value: 'today', label: 'Today Only' },
+                { value: 'this_weekend', label: 'This Weekend' },
+                { value: 'next_7_days', label: 'Next 7 Days' },
+                { value: 'custom', label: 'Custom Range' },
+              ]}
+            />
 
             {dateFilter === 'custom' && (
               <div className="mt-2 space-y-2 pt-1">
@@ -956,48 +1080,35 @@ export function SearchClient({
               <TicketIcon className="h-3.5 w-3.5 text-zinc-400" />
               <span>Ticket Pricing</span>
             </label>
-            <select
-              value={pricePreset}
-              onChange={(e) => setPricePreset(e.target.value)}
-              className="focus:outline-hidden w-full rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-xs text-zinc-800 focus:border-zinc-900"
-            >
-              <option value="all">All Prices</option>
-              <option value="free">Free ($0) Only</option>
-              <option value="under_25">Under $25</option>
-              <option value="under_50">Under $50</option>
-              <option value="under_100">Under $100</option>
-            </select>
-
-            {/* Budget Slider */}
-            <div className="mt-3 space-y-1.5">
-              <div className="flex items-center justify-between text-xs text-zinc-600">
-                <span>Max Budget:</span>
-                <span className="font-mono font-semibold">
-                  ${maxPriceBudget}
-                </span>
-              </div>
-              <input
-                type="range"
-                min="10"
-                max="250"
-                step="5"
-                // The slider only displays a clamped position; the exact value (state) is
-                // never rewritten unless the user moves the control.
-                value={Math.min(Math.max(maxPriceBudget, 10), 250)}
-                onChange={(e) => setMaxPriceBudget(Number(e.target.value))}
-                className="w-full accent-zinc-900"
-              />
-
-              <label className="mt-2 flex items-center gap-2 pt-1 text-xs text-zinc-600">
-                <input
-                  type="checkbox"
-                  checked={outsideBudgetAllowed}
-                  onChange={(e) => setOutsideBudgetAllowed(e.target.checked)}
-                  className="rounded border-zinc-300 text-zinc-900 focus:ring-zinc-900"
-                />
-                <span>Include shows outside budget</span>
-              </label>
-            </div>
+            <Select
+              aria-label="Ticket price"
+              value={outsideBudgetAllowed ? pricePreset : 'budget'}
+              onValueChange={(v) => {
+                if (v === 'budget') {
+                  setPricePreset('all');
+                  setOutsideBudgetAllowed(false);
+                } else {
+                  setPricePreset(v);
+                  setOutsideBudgetAllowed(true);
+                }
+              }}
+              options={[
+                { value: 'all', label: 'Any price' },
+                { value: 'free', label: 'Free only' },
+                { value: 'under_25', label: 'Under $25' },
+                { value: 'under_50', label: 'Under $50' },
+                { value: 'under_100', label: 'Under $100' },
+                // A cap that came from the URL (e.g. "Listed price up to $40") stays selectable.
+                ...(capUsesBudget
+                  ? [{ value: 'budget', label: `Up to $${maxPriceBudget}` }]
+                  : []),
+              ]}
+            />
+            {!includeUnknownPrice && (
+              <p className="text-[11px] text-zinc-500">
+                Only shows with a listed price.
+              </p>
+            )}
           </div>
 
           {/* Venue Selector */}
@@ -1009,19 +1120,22 @@ export function SearchClient({
               >
                 Venue
               </label>
-              <select
+              <Select
                 id="search-venue-select"
+                aria-label="Venue"
                 value={selectedVenue}
-                onChange={(e) => setSelectedVenue(e.target.value)}
-                className="focus:outline-hidden w-full rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-xs text-zinc-800 focus:border-zinc-900"
-              >
-                <option value="all">All Venues</option>
-                {uniqueVenues.map((v) => (
-                  <option key={v.id ?? `name:${v.name}`} value={v.id ?? v.name}>
-                    {v.label}
-                  </option>
-                ))}
-              </select>
+                onValueChange={setSelectedVenue}
+                options={[
+                  { value: 'all', label: 'All Venues' },
+                  ...venueGroups.map((g) => ({
+                    label: g.city,
+                    options: g.venues.map((v) => ({
+                      value: v.id ?? v.name,
+                      label: v.label,
+                    })),
+                  })),
+                ]}
+              />
             </div>
           )}
 
@@ -1031,18 +1145,15 @@ export function SearchClient({
               <label className="text-xs font-semibold text-zinc-800">
                 City / Region
               </label>
-              <select
+              <Select
+                aria-label="City / Region"
                 value={selectedCity}
-                onChange={(e) => setSelectedCity(e.target.value)}
-                className="focus:outline-hidden w-full rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-xs text-zinc-800 focus:border-zinc-900"
-              >
-                <option value="all">All Cities</option>
-                {uniqueCities.map((c) => (
-                  <option key={c} value={c}>
-                    {c}
-                  </option>
-                ))}
-              </select>
+                onValueChange={setSelectedCity}
+                options={[
+                  { value: 'all', label: 'All Cities' },
+                  ...uniqueCities.map((c) => ({ value: c, label: c })),
+                ]}
+              />
             </div>
           )}
 
@@ -1052,22 +1163,19 @@ export function SearchClient({
               <label className="text-xs font-semibold text-zinc-800">
                 Genre
               </label>
-              <select
+              <Select
+                aria-label="Genre"
                 value={selectedGenre}
-                onChange={(e) => setSelectedGenre(e.target.value)}
-                className="focus:outline-hidden w-full rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-xs text-zinc-800 focus:border-zinc-900"
-              >
-                <option value="all">All Genres</option>
-                {(selectedGenre !== 'all' &&
-                !uniqueGenres.includes(selectedGenre)
-                  ? [selectedGenre, ...uniqueGenres]
-                  : uniqueGenres
-                ).map((g) => (
-                  <option key={g} value={g}>
-                    {g}
-                  </option>
-                ))}
-              </select>
+                onValueChange={setSelectedGenre}
+                options={[
+                  { value: 'all', label: 'All Genres' },
+                  ...(selectedGenre !== 'all' &&
+                  !uniqueGenres.includes(selectedGenre)
+                    ? [selectedGenre, ...uniqueGenres]
+                    : uniqueGenres
+                  ).map((g) => ({ value: g, label: g })),
+                ]}
+              />
             </div>
           )}
 
@@ -1076,18 +1184,29 @@ export function SearchClient({
             <label className="text-xs font-semibold text-zinc-800">
               Availability
             </label>
-            <select
+            <Select
+              aria-label="Availability"
               value={statusFilter}
-              onChange={(e) =>
-                setStatusFilter(e.target.value as IndexInventoryStatus | 'all')
+              onValueChange={(v) =>
+                setStatusFilter(v as IndexInventoryStatus | 'all')
               }
-              className="focus:outline-hidden w-full rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-xs text-zinc-800 focus:border-zinc-900"
+              options={[
+                { value: 'all', label: 'All Statuses' },
+                { value: 'available', label: 'Tickets Available' },
+                { value: 'low_inventory', label: 'Low Inventory' },
+                { value: 'sold_out', label: 'Sold Out' },
+              ]}
+            />
+          </div>
+
+          <div className="fixed inset-x-0 bottom-0 z-50 border-t border-zinc-200 bg-white p-4 md:hidden">
+            <button
+              type="button"
+              onClick={() => setMobileFiltersOpen(false)}
+              className="w-full rounded-xl bg-zinc-900 py-3 text-sm font-semibold text-white"
             >
-              <option value="all">All Statuses</option>
-              <option value="available">Tickets Available</option>
-              <option value="low_inventory">Low Inventory</option>
-              <option value="sold_out">Sold Out</option>
-            </select>
+              Show {serverTotalCount || sortedEvents.length} concerts
+            </button>
           </div>
         </aside>
 
@@ -1109,6 +1228,36 @@ export function SearchClient({
               >
                 Retry
               </button>
+            </div>
+          )}
+
+          {/* Active filters as removable chips */}
+          {activeChips.length > 0 && (
+            <div
+              data-testid="active-filter-chips"
+              className="flex flex-wrap items-center gap-2"
+            >
+              {activeChips.map((chip) => (
+                <button
+                  key={chip.key}
+                  type="button"
+                  onClick={chip.clear}
+                  aria-label={`Clear filter: ${chip.label}`}
+                  className="inline-flex items-center gap-1 rounded-full border border-zinc-300 bg-white px-3 py-1 text-xs font-medium text-zinc-700 hover:border-zinc-400"
+                >
+                  <span>{chip.label}</span>
+                  <XIcon className="h-3 w-3 text-zinc-400" />
+                </button>
+              ))}
+              {activeChips.length > 1 && (
+                <button
+                  type="button"
+                  onClick={handleResetFilters}
+                  className="text-xs font-semibold text-zinc-500 hover:text-zinc-900 hover:underline"
+                >
+                  Clear all
+                </button>
+              )}
             </div>
           )}
 
@@ -1143,19 +1292,26 @@ export function SearchClient({
 
             <div className="flex items-center gap-2">
               <span className="text-xs text-zinc-500">Sort:</span>
-              <select
-                value={sortBy}
-                onChange={(e) => setSortBy(e.target.value as IndexSortBy)}
+              <Select
                 aria-label="Sort search results"
-                className="focus:outline-hidden rounded-lg border border-zinc-200 bg-white px-2.5 py-1 text-xs font-medium text-zinc-800 focus:border-zinc-900"
-              >
-                <option value="date_asc">Date (Soonest)</option>
-                <option value="date_desc">Date (Latest)</option>
-                <option value="price_asc">Price (Lowest)</option>
-                <option value="price_desc">Price (Highest)</option>
-                <option value="match_desc">Match Score</option>
-                <option value="title_asc">Artist (A-Z)</option>
-              </select>
+                fullWidth={false}
+                value={sortBy}
+                onValueChange={(v) => setSortBy(v as IndexSortBy)}
+                options={[
+                  { value: 'date_asc', label: 'Date (Soonest)' },
+                  { value: 'date_desc', label: 'Date (Latest)' },
+                  { value: 'price_asc', label: 'Price (Lowest)' },
+                  { value: 'price_desc', label: 'Price (Highest)' },
+                  {
+                    value: 'match_desc',
+                    label: isAuthenticated
+                      ? 'Best match'
+                      : 'Best match (sign in)',
+                    disabled: !isAuthenticated,
+                  },
+                  { value: 'title_asc', label: 'Artist (A-Z)' },
+                ]}
+              />
             </div>
           </div>
 
