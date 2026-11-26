@@ -11,7 +11,16 @@ Durable architecture records belong in [`docs/architecture/`](docs/architecture/
 - **Active Branch:** `feat/festival-groups-affinity-locations` (PR #22, stacked on `fix/ui-discover-auth-v2` / PR #21). Nothing merged.
 - **Current Status:** Integrated and verified locally 2026-11-25 across unit, PostgreSQL integration, production build, Playwright E2E, and headless Chromium live UI checks. Ready for PR #22 CI verification and independent review.
 
-### Latest (2026-11-25, branch `feat/festival-groups-affinity-locations`, PR #22)
+### Latest (2026-11-26, branch `feat/market-prices-seatgeek`, market-prices plan approved)
+
+- UI/UX polish is on `feat/ux-polish`, open as PR #25 (includes PR #24's commit). Do NOT merge autonomously.
+- Prices: Ticketmaster omits `priceRanges` for ~80% of listings (Mission Ballroom 0/53); nothing is dropped. Owner approved `docs/phases/active/MARKET_PRICES_PLAN.md` on 2026-11-26: SeatGeek Platform API as a price-only "from $X" source, display-only in v1; scraping-based vendors not used (decision log, Data).
+- PR A built (uncommitted): migration `20261127020000_market_price_observations.sql` (append-only table + `market_prices_current` view, RLS), `lib/sources/seatgeek/` (client, parser, matcher, pipeline, store, source registry), `npm run sync:market-prices` (dry run by default; `--fixture`, `--write`), fixture `tests/fixtures/seatgeek/events-page.json`, tests `tests/unit/seatgeek-*.test.ts` and `tests/integration/market-price-observations.test.ts`.
+- Verified 2026-11-26: format, lint, typecheck, unit 1661/1661, integration 176/176 (local Postgres), build. E2E not run (no UI change). The migration was applied locally with psql (the CLI refused because PR #25's `20261127010000` is applied locally but not on this branch).
+- PR #25 files that had leaked into this working tree are stashed (`git stash list`: "PR #25 leftovers"), identical to `feat/ux-polish`.
+- Blocker for the PR A dry-run gate: owner must add `SEATGEEK_CLIENT_ID` to `.env.local` (never commit or paste it).
+
+### Earlier (2026-11-25, branch `feat/festival-groups-affinity-locations`, PR #22)
 
 - **Three completed workstreams (picked up from WIP on `fix/ui-discover-auth-v2` + cross-layer coordinator fixes):**
   1. **Venue Coordinates & Location Calculations:** Added `lib/sources/ticketmaster/venue-location.ts` (`parseVenueCoordinates`, `getCandidateVenueCoordinates`), wired fill-if-empty venue coordinate persistence into `lib/sources/ticketmaster/ingestion-pipeline.ts` + `parser.ts`, hardened `isPlausibleCoordinate` / `resolveEventCoordinates` / `eventDistanceDetails` in `lib/location/radius.ts` (rejecting `(0,0)`, dropped longitude minus signs, and foreign coords under US states), updated `lib/recommendation/engine.ts` to use `resolveEventCoordinates`, and updated `app/concerts/[id]/page.tsx` + `components/index/ConcertDetailClient.tsx` to use viewer `homeLocation` (with `approx.` city-centroid fallback instead of hardcoded Denver). Locally 234/256 venues have coordinates; the remaining 22 are rejected corrupt coords (3), TM fixtures without coords (8), or venue-scraped CO venues using city centroids (11).
@@ -118,7 +127,7 @@ Durable architecture records belong in [`docs/architecture/`](docs/architecture/
 
 ## Next Immediate Action
 
-Submit final verification report and evidence manifest for user signoff. Do NOT autonomously merge into `main`.
+Market prices are **paused** (owner, 2026-11-26: SeatGeek developer account setup not working yet). When resumed: owner adds `SEATGEEK_CLIENT_ID` to `.env.local`; then run `npm run sync:market-prices -- --states=CO` (dry run) and report the match rate (gate: >= 50% of unpriced shows) before any UI work (PR B). PR #25 awaits review. Do NOT autonomously merge into `main`.
 
 #### Package listings, Spotify matching, genre taste (2026-11-24, same branch, uncommitted)
 

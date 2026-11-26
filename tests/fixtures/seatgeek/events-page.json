@@ -1,0 +1,269 @@
+{
+  "_fixture": "Synthetic SeatGeek /2/events page for tests and --fixture dry runs. Not real listings or prices. No client id.",
+  "events": [
+    {
+      "id": 7000001,
+      "title": "Fixture Artist Alpha with Fixture Opener",
+      "short_title": "Fixture Artist Alpha with Fixture Opener",
+      "type": "concert",
+      "url": "https://seatgeek.com/synthetic-fixture-7000001/tickets",
+      "datetime_local": "2031-03-14T20:00:00",
+      "datetime_utc": "2031-03-15T01:00:00",
+      "datetime_tbd": false,
+      "date_tbd": false,
+      "time_tbd": false,
+      "taxonomies": [
+        {
+          "id": 2000000,
+          "name": "concert"
+        }
+      ],
+      "performers": [
+        {
+          "name": "Fixture Artist Alpha",
+          "short_name": "Fixture Artist Alpha",
+          "primary": true
+        },
+        {
+          "name": "Fixture Opener",
+          "short_name": "Fixture Opener",
+          "primary": false
+        }
+      ],
+      "venue": {
+        "id": 900001,
+        "name": "Synthetic Ballroom (Fixture)",
+        "city": "Fixture City",
+        "state": "ZZ",
+        "country": "US",
+        "timezone": "America/Chicago",
+        "location": {
+          "lat": 41.0,
+          "lon": -95.0
+        }
+      },
+      "stats": {
+        "listing_count": 120,
+        "lowest_price": 48,
+        "average_price": 72,
+        "highest_price": 210
+      }
+    },
+    {
+      "id": 7000002,
+      "title": "PARKING: Fixture Artist Alpha",
+      "short_title": "PARKING: Fixture Artist Alpha",
+      "type": "parking",
+      "url": "https://seatgeek.com/synthetic-fixture-7000002/tickets",
+      "datetime_local": "2031-03-14T20:00:00",
+      "datetime_utc": "2031-03-15T01:00:00",
+      "datetime_tbd": false,
+      "date_tbd": false,
+      "time_tbd": false,
+      "taxonomies": [
+        {
+          "id": 2010000,
+          "name": "parking"
+        }
+      ],
+      "performers": [],
+      "venue": {
+        "id": 900001,
+        "name": "Synthetic Ballroom (Fixture)",
+        "city": "Fixture City",
+        "state": "ZZ",
+        "country": "US",
+        "timezone": "America/Chicago",
+        "location": {
+          "lat": 41.0,
+          "lon": -95.0
+        }
+      },
+      "stats": {
+        "listing_count": 15,
+        "lowest_price": 25,
+        "average_price": 30,
+        "highest_price": 40
+      }
+    },
+    {
+      "id": 7000003,
+      "title": "Fixture Fest 2031 - 3 Day Pass",
+      "short_title": "Fixture Fest 2031 - 3 Day Pass",
+      "type": "music_festival",
+      "url": "https://seatgeek.com/synthetic-fixture-7000003/tickets",
+      "datetime_local": "2031-06-20T12:00:00",
+      "datetime_utc": "2031-06-20T17:00:00",
+      "datetime_tbd": false,
+      "date_tbd": false,
+      "time_tbd": false,
+      "taxonomies": [
+        {
+          "id": 2010000,
+          "name": "music_festival"
+        }
+      ],
+      "performers": [
+        {
+          "name": "Fixture Fest",
+          "short_name": "Fixture Fest",
+          "primary": true
+        }
+      ],
+      "venue": {
+        "id": 900002,
+        "name": "Synthetic Fairgrounds (Fixture)",
+        "city": "Fixture City",
+        "state": "ZZ",
+        "country": "US",
+        "timezone": "America/Chicago",
+        "location": {
+          "lat": 41.05,
+          "lon": -95.05
+        }
+      },
+      "stats": {
+        "listing_count": 340,
+        "lowest_price": 189,
+        "average_price": 260,
+        "highest_price": 900
+      }
+    },
+    {
+      "id": 7000004,
+      "title": "Fixture Artist Beta",
+      "short_title": "Fixture Artist Beta",
+      "type": "concert",
+      "url": "https://seatgeek.com/synthetic-fixture-7000004/tickets",
+      "datetime_local": "2031-04-01T19:30:00",
+      "datetime_utc": "2031-04-02T00:30:00",
+      "datetime_tbd": false,
+      "date_tbd": false,
+      "time_tbd": false,
+      "taxonomies": [
+        {
+          "id": 2000000,
+          "name": "concert"
+        }
+      ],
+      "performers": [
+        {
+          "name": "Fixture Artist Beta",
+          "short_name": "Fixture Artist Beta",
+          "primary": true
+        }
+      ],
+      "venue": {
+        "id": 900001,
+        "name": "Synthetic Ballroom (Fixture)",
+        "city": "Fixture City",
+        "state": "ZZ",
+        "country": "US",
+        "timezone": "America/Chicago",
+        "location": {
+          "lat": 41.0,
+          "lon": -95.0
+        }
+      },
+      "stats": {
+        "listing_count": 0,
+        "lowest_price": null,
+        "average_price": null,
+        "highest_price": null
+      }
+    },
+    {
+      "id": 7000005,
+      "title": "Fixture Artist Gamma (Date TBD)",
+      "short_title": "Fixture Artist Gamma (Date TBD)",
+      "type": "concert",
+      "url": "https://seatgeek.com/synthetic-fixture-7000005/tickets",
+      "datetime_local": "2031-05-01T03:30:00",
+      "datetime_utc": "2031-05-01T08:30:00",
+      "datetime_tbd": true,
+      "date_tbd": true,
+      "time_tbd": true,
+      "taxonomies": [
+        {
+          "id": 2000000,
+          "name": "concert"
+        }
+      ],
+      "performers": [
+        {
+          "name": "Fixture Artist Gamma",
+          "short_name": "Fixture Artist Gamma",
+          "primary": true
+        }
+      ],
+      "venue": {
+        "id": 900001,
+        "name": "Synthetic Ballroom (Fixture)",
+        "city": "Fixture City",
+        "state": "ZZ",
+        "country": "US",
+        "timezone": "America/Chicago",
+        "location": {
+          "lat": 41.0,
+          "lon": -95.0
+        }
+      },
+      "stats": {
+        "listing_count": 12,
+        "lowest_price": 30,
+        "average_price": 40,
+        "highest_price": 60
+      }
+    },
+    {
+      "id": 7000006,
+      "title": "Fixture Artist Delta",
+      "short_title": "Fixture Artist Delta",
+      "type": "concert",
+      "url": "https://seatgeek.com/synthetic-fixture-7000006/tickets",
+      "datetime_local": "2031-04-10T19:00:00",
+      "datetime_utc": "2031-04-10T23:00:00",
+      "datetime_tbd": false,
+      "date_tbd": false,
+      "time_tbd": false,
+      "taxonomies": [
+        {
+          "id": 2000000,
+          "name": "concert"
+        }
+      ],
+      "performers": [
+        {
+          "name": "Fixture Artist Delta",
+          "short_name": "Fixture Artist Delta",
+          "primary": true
+        }
+      ],
+      "venue": {
+        "id": 900003,
+        "name": "Synthetic Hall (Fixture)",
+        "city": "Fixture Town",
+        "state": "ON",
+        "country": "CA",
+        "timezone": "America/Toronto",
+        "location": {
+          "lat": 43.6,
+          "lon": -79.4
+        }
+      },
+      "stats": {
+        "listing_count": 40,
+        "lowest_price": 55,
+        "average_price": 80,
+        "highest_price": 140
+      }
+    }
+  ],
+  "meta": {
+    "total": 6,
+    "took": 3,
+    "page": 1,
+    "per_page": 100,
+    "geolocation": null
+  }
+}
