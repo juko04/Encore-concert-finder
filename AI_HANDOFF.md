@@ -11,6 +11,11 @@ Durable architecture records belong in [`docs/architecture/`](docs/architecture/
 - **Active Branch:** `feat/festival-groups-affinity-locations` (PR #22, stacked on `fix/ui-discover-auth-v2` / PR #21). Nothing merged.
 - **Current Status:** Integrated and verified locally 2026-11-25 across unit, PostgreSQL integration, production build, Playwright E2E, and headless Chromium live UI checks. Ready for PR #22 CI verification and independent review.
 
+### Latest (2026-11-25, branch `fix/detail-breakdown-venue-link`, off `main`, uncommitted)
+
+- Concert detail: factor breakdown now shows each factor's weight, points and the sum that makes the match %; shown inline in the hero's left column when it fits beside the action column (measured), otherwise collapsed behind the toggle. Ticket button falls back to venue website → public source event page → venue web search (`lib/events/venue-link.ts`). `CanonicalEventDetail.venue.website` added.
+- Limits: 0/256 local venues have `website`; `event_sources` is service-role only, so anon/user reads get no source URLs and most no-ticket shows fall to the search link. Proper fix: persist venue-scraped event pages as `events.official_url` at ingestion (not done). Duplicate seen: The Floozies 2026-12-04 at "Fox Theatre" (z2ent) vs "Fox Theatre & Cafe" (TM).
+
 ### Latest (2026-11-25, branch `feat/festival-groups-affinity-locations`, PR #22)
 
 - **Three completed workstreams (picked up from WIP on `fix/ui-discover-auth-v2` + cross-layer coordinator fixes):**

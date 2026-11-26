@@ -24,6 +24,8 @@ export type IndexSortBy =
 
 export interface IndexFactorDetail {
   score: number;
+  /** Percentage weight (0-100) this factor carries in the composite score. */
+  weight?: number;
   explanation: string;
 }
 
@@ -351,14 +353,17 @@ export function toIndexEventItem(
       factors: {
         artist: {
           score: input.factors.artist.score,
+          weight: input.factors.artist.weight,
           explanation: input.factors.artist.explanation,
         },
         distance: {
           score: input.factors.distance.score,
+          weight: input.factors.distance.weight,
           explanation: input.factors.distance.explanation,
         },
         price: {
           score: input.factors.price.score,
+          weight: input.factors.price.weight,
           explanation: input.factors.price.explanation,
         },
       },

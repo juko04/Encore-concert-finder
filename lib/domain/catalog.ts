@@ -275,6 +275,7 @@ export interface CanonicalEventDetail extends Event {
     imageUrl?: string | null;
     lat?: number | null;
     lng?: number | null;
+    website?: string | null;
   } | null;
   ticketLinks: EventTicketLink[];
   promoters: Array<{
