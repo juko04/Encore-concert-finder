@@ -1,5 +1,6 @@
 import 'server-only';
 
+import { withoutEventNameArtists } from '@/lib/events/lineup';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { isValidCoordinatePair } from '@/lib/location/coordinates';
 import type {
@@ -613,7 +614,7 @@ export class SupabaseCatalogRepository implements ICatalogRepository {
 
     return {
       ...event,
-      artists,
+      artists: withoutEventNameArtists(artists, event.name),
       venue: venue
         ? {
             id: venue.id,
@@ -734,10 +735,66 @@ export class SupabaseCatalogRepository implements ICatalogRepository {
       return [];
     }
 
-    return this.hydrateEventRows(rawRows, {
-      mergeFestivalLineup:
-        SupabaseCatalogRepository.collapsesFestivalDays(filters),
+    // Artist-filtered lists do not hide festival days in SQL (the favourite may play day 2), so a
+    // matched later day is shown as its festival's single card instead.
+    const rows =
+      filters?.collapseFestivalDays &&
+      !SupabaseCatalogRepository.collapsesFestivalDays(filters)
+        ? await this.swapToFestivalPrimaries(
+            rawRows as unknown as Array<{
+              id: string;
+              festival_group_id?: string | null;
+              festival_group_primary?: boolean | null;
+            }>,
+          )
+        : rawRows;
+
+    return this.hydrateEventRows(rows, {
+      mergeFestivalLineup: Boolean(filters?.collapseFestivalDays),
     });
+  }
+
+  /** Replaces rows that are a non-first festival day with their group's primary row (deduped). */
+  private async swapToFestivalPrimaries<
+    T extends {
+      id: string;
+      festival_group_id?: string | null;
+      festival_group_primary?: boolean | null;
+    },
+  >(rows: T[]): Promise<T[]> {
+    const primaryIds = [
+      ...new Set(
+        rows
+          .filter(
+            (r) => r.festival_group_primary === false && r.festival_group_id,
+          )
+          .map((r) => r.festival_group_id as string),
+      ),
+    ];
+    if (primaryIds.length === 0) return rows;
+    const primaries = new Map<string, T>();
+    for (let i = 0; i < primaryIds.length; i += 50) {
+      const { data, error } = await this.client
+        .from('events')
+        .select('*, venues(*)')
+        .in('id', primaryIds.slice(i, i + 50));
+      if (error) {
+        throw new Error(`Failed to load festival primaries: ${error.message}`);
+      }
+      for (const p of (data ?? []) as unknown as T[]) primaries.set(p.id, p);
+    }
+    const seen = new Set<string>();
+    const out: T[] = [];
+    for (const r of rows) {
+      const swapped =
+        r.festival_group_primary === false && r.festival_group_id
+          ? (primaries.get(r.festival_group_id) ?? r)
+          : r;
+      if (seen.has(swapped.id)) continue;
+      seen.add(swapped.id);
+      out.push(swapped);
+    }
+    return out;
   }
 
   /**
@@ -1197,7 +1254,7 @@ export class SupabaseCatalogRepository implements ICatalogRepository {
         startTimePrecision: event.startTimePrecision,
         status: event.status,
         eventKind: event.eventKind,
-        artists,
+        artists: withoutEventNameArtists(artists, event.name),
         ticketUrl: event.primaryTicketUrl,
         minPrice,
         maxPrice,

@@ -160,8 +160,41 @@ export function displayGenreLabel(
 ): string | null {
   const labels = genreLabelsOf(genre);
   if (labels.length === 0) return null;
-  if (labels.length > 1) return MIXED_GENRE_LABEL;
+  if (labels.length > 1) return dominantGenreLabel(genre) ?? MIXED_GENRE_LABEL;
   return labels[0];
+}
+
+/** Entries needed before one genre may stand for a large bill (a festival lineup). */
+export const DOMINANT_GENRE_MIN_ENTRIES = 8;
+export const DOMINANT_GENRE_MIN_SHARE = 0.6;
+
+/**
+ * For a big bill (festival) whose genre entries are mostly one genre, that genre; otherwise null.
+ * Counts every raw entry (an artist's genres repeat per artist), so one stray pop act on an EDM
+ * festival does not turn the badge into "Mixed". Small bills are never summarised this way.
+ */
+function dominantGenreLabel(
+  genre: string | readonly string[] | null | undefined,
+): string | null {
+  if (!Array.isArray(genre)) return null;
+  const counts = new Map<string, number>();
+  let total = 0;
+  for (const entry of genre) {
+    for (const label of genreLabelsOf(entry)) {
+      counts.set(label, (counts.get(label) ?? 0) + 1);
+      total++;
+    }
+  }
+  if (total < DOMINANT_GENRE_MIN_ENTRIES) return null;
+  let top: string | null = null;
+  let topCount = 0;
+  for (const [label, count] of counts) {
+    if (count > topCount) {
+      top = label;
+      topCount = count;
+    }
+  }
+  return top && topCount / total >= DOMINANT_GENRE_MIN_SHARE ? top : null;
 }
 
 export interface EventGenreSource {

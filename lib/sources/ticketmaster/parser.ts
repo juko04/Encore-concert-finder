@@ -6,6 +6,7 @@ import type {
   EventKind,
   StartTimePrecision,
 } from '@/lib/domain/event-candidate';
+import { withoutEventNameArtists } from '@/lib/events/lineup';
 import type { SourceProvenance } from '@/lib/domain/source';
 import { normalizeUrl } from '@/lib/domain/value-objects';
 import type { TicketmasterEvent, TicketmasterImage } from './types';
@@ -167,8 +168,14 @@ export function parseTicketmasterEvent(
   // Seat/VIP/parking products and the venue itself are listed as "attractions" but are not
   // performers: never turn them into artists ("Club Level Seating: Ball Arena").
   const listedVenueName = event._embedded?.venues?.[0]?.name?.trim() || '';
-  const rawAttractions = (event._embedded?.attractions || []).filter(
+  const listedAttractions = (event._embedded?.attractions || []).filter(
     (attr) => !isNonArtistAttraction(attr.name, listedVenueName),
+  );
+  // A festival often lists itself as an attraction ("Ultra Music Festival"); that is the event,
+  // not a performer (festival-sized bills only; see lib/events/lineup.ts).
+  const rawAttractions = withoutEventNameArtists(
+    listedAttractions,
+    ticketPackage.baseTitle || event.name,
   );
   const artists: CandidateArtist[] = [];
   const artistNames: string[] = [];

@@ -11,6 +11,8 @@ import {
   getCardMatchScoreLabel,
 } from '@/components/index/formatters';
 import { SupportActsLine } from '@/components/index/SupportActsLine';
+import { GenreBadge } from '@/components/index/GenreBadge';
+import { eventGenreList } from '@/lib/genres/catalog-genres';
 import { EventImage } from '@/components/index/EventImage';
 
 export interface DiscoverEventCardProps {
@@ -85,6 +87,11 @@ export function DiscoverEventCard({ event }: DiscoverEventCardProps) {
         <SupportActsLine
           acts={supportActs}
           className="line-clamp-1 text-xs text-zinc-500"
+        />
+        <GenreBadge
+          genre={eventGenreList(event)}
+          inferred={event.genresInferred}
+          className="self-start"
         />
         <p className="line-clamp-1 text-xs text-zinc-500">
           {timePart ? `${timePart} · ` : ''}

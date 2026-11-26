@@ -6,6 +6,7 @@ import type {
   StartTimePrecision,
 } from '@/lib/domain/catalog';
 import type { ScoredEvent } from '@/lib/recommendation/types';
+import { FESTIVAL_BILL_MIN_ARTISTS } from '@/lib/events/lineup';
 import type { ArtistAffinity } from '@/lib/recommendation/artist-affinity';
 
 export type IndexInventoryStatus =
@@ -236,9 +237,13 @@ function mapCanonicalToIndexBase(
   | 'factors'
 > {
   const palette = getDeterministicPalette(canonical.id || canonical.title);
+  // A festival-sized bill has no single headliner: the card is titled by the event itself (the
+  // event-named pseudo-artist is dropped from lineups, see lib/events/lineup.ts).
+  const isFestivalBill =
+    (canonical.artists?.length ?? 0) >= FESTIVAL_BILL_MIN_ARTISTS;
   const headliner =
     canonical.artists?.find((a) => a.billingPosition === 'headliner') ||
-    canonical.artists?.[0];
+    (isFestivalBill ? undefined : canonical.artists?.[0]);
   const canonicalAny = canonical as unknown as Record<string, unknown>;
 
   return {

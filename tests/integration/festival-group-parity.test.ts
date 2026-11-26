@@ -424,11 +424,19 @@ describe.skipIf(!creds)(
       }
     });
 
-    it('artist-id retrieval returns the day the artist plays, not a hidden day', async () => {
+    it('artist-id retrieval finds the festival once, as its single card (not a hidden day)', async () => {
       const filters = { ...base(), artistIds: [artistIds[2]] };
-      const days = await repo.listEvents(filters);
-      expect(days.map((e) => e.id)).toEqual([eventIds[2]]);
+      const cards = await repo.listEvents(filters);
+      // The artist plays a later day; the festival is returned as its primary-day card.
+      expect(cards.map((e) => e.id)).toEqual([eventIds[0]]);
+      expect(cards[0].festivalGroupEndDate).toBeTruthy();
       expect(await repo.countEvents(filters)).toBe(1);
+      // Two matching artists on different days: still one card.
+      const both = await repo.listEvents({
+        ...base(),
+        artistIds: [artistIds[0], artistIds[2]],
+      });
+      expect(both.map((e) => e.id)).toEqual([eventIds[0]]);
     });
 
     it('a festival under way stays listed (collapsed) until its last day; uncollapsed views are unchanged', async () => {

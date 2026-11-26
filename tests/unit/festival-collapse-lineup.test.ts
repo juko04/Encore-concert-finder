@@ -90,16 +90,27 @@ describe("collapsed festival cards keep every day's artists", () => {
     ).toBe(1);
   });
 
-  it('artist-id filters never collapse, so a favourite playing day 3 is returned for day 3', async () => {
+  it('a favourite playing day 3 returns the festival once, as its single merged card', async () => {
     const { repo, days } = seed();
     await repo.refreshFestivalGroups();
+    // Day 3 is not hidden in the query (the favourite's festival must not vanish) but is shown as
+    // the festival's one card: the primary day with the whole run's lineup and date range.
     const hits = await repo.listEvents({
       collapseFestivalDays: true,
       artistIds: ['a2'],
     });
-    expect(hits.map((e) => e.id)).toEqual([days[2].id]);
-    // That day row is a real event with its own lineup (not merged).
-    expect(hits[0].artists.map((a) => a.name)).toEqual(['Charlie Trio']);
+    expect(hits.map((e) => e.id)).toEqual([days[0].id]);
+    expect(hits[0].festivalGroupEndDate).toBe('2027-07-03');
+    expect(hits[0].artists.map((a) => a.name)).toContain('Charlie Trio');
+    // Two favourites on different days still give one card.
+    const both = await repo.listEvents({
+      collapseFestivalDays: true,
+      artistIds: ['a0', 'a2'],
+    });
+    expect(both).toHaveLength(1);
+    // Without the collapse flag the real day row is returned.
+    const raw = await repo.listEvents({ artistIds: ['a2'] });
+    expect(raw.map((e) => e.id)).toEqual([days[2].id]);
   });
 
   it('refresh clears the group end date of events that left a group', async () => {

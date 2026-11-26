@@ -2,6 +2,7 @@
  * In-memory repository implementations for unit testing and offline development.
  */
 
+import { withoutEventNameArtists } from '@/lib/events/lineup';
 import { groupFestivalDays } from '@/lib/events/festival-groups';
 import { isValidCoordinatePair } from '@/lib/location/coordinates';
 import {
@@ -400,7 +401,7 @@ export class MemoryCatalogRepository implements ICatalogRepository {
 
     return {
       ...event,
-      artists,
+      artists: withoutEventNameArtists(artists, event.name),
       venue: venue
         ? {
             id: venue.id,
@@ -617,7 +618,12 @@ export class MemoryCatalogRepository implements ICatalogRepository {
   async listEvents(
     filters?: EventListFilters,
   ): Promise<CanonicalEventSummary[]> {
-    const result = this.getFilteredEvents(filters);
+    let result = this.getFilteredEvents(filters);
+    // Mirrors SupabaseCatalogRepository: artist-filtered lists show a matched later festival day
+    // as its festival's single card.
+    if (filters?.collapseFestivalDays && !this.collapsesFestivalDays(filters)) {
+      result = this.swapToFestivalPrimaries(result);
+    }
 
     const sortBy = filters?.sortBy ?? 'date_asc';
     if (sortBy === 'price_asc') {
@@ -668,7 +674,7 @@ export class MemoryCatalogRepository implements ICatalogRepository {
     const paged = result.slice(offset, offset + limit);
 
     const summaries: CanonicalEventSummary[] = [];
-    const collapsing = this.collapsesFestivalDays(filters);
+    const collapsing = Boolean(filters?.collapseFestivalDays);
 
     for (const event of paged) {
       const venue = event.venueId ? this.venues.get(event.venueId) : null;
@@ -802,7 +808,7 @@ export class MemoryCatalogRepository implements ICatalogRepository {
         startTimePrecision: event.startTimePrecision,
         status: event.status,
         eventKind: event.eventKind,
-        artists,
+        artists: withoutEventNameArtists(artists, event.name),
         ticketUrl: event.primaryTicketUrl,
         minPrice,
         maxPrice,
@@ -932,6 +938,23 @@ export class MemoryCatalogRepository implements ICatalogRepository {
   private hiddenFestivalDayIds = new Set<string>();
   /** Primary event id -> the group's other day ids, in date order (computed by refreshFestivalGroups). */
   private festivalMemberIds = new Map<string, string[]>();
+
+  private swapToFestivalPrimaries(events: Event[]): Event[] {
+    const primaryOf = new Map<string, string>();
+    for (const [primary, members] of this.festivalMemberIds) {
+      for (const m of members) primaryOf.set(m, primary);
+    }
+    const seen = new Set<string>();
+    const out: Event[] = [];
+    for (const e of events) {
+      const primaryId = primaryOf.get(e.id);
+      const swapped = (primaryId && this.events.get(primaryId)) || e;
+      if (seen.has(swapped.id)) continue;
+      seen.add(swapped.id);
+      out.push(swapped);
+    }
+    return out;
+  }
 
   async listFestivalDays(eventId: string) {
     const group = groupFestivalDays(Array.from(this.events.values())).find(
