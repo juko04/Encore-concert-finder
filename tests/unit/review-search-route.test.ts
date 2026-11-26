@@ -20,8 +20,7 @@ const get = (qs: string) =>
   GET(new Request(`http://localhost/api/catalog/search?${qs}`));
 // With no timezone cookie or home city the route's viewer timezone is UTC (no hardcoded Colorado
 // zone), so "today" here must be the UTC date or the test flakes in the evening Mountain Time.
-const today = () =>
-  deriveLocalDateFromInstant(new Date().toISOString(), 'UTC');
+const today = () => deriveLocalDateFromInstant(new Date().toISOString(), 'UTC');
 
 describe('/api/catalog/search review regressions', () => {
   beforeEach(() => {
