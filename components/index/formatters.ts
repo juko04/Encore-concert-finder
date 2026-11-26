@@ -119,7 +119,7 @@ export function formatIndexPrice(
     ) {
       return `Contradictory Pricing ($${minPrice} / Free Event)`;
     }
-    return 'Free ($0)';
+    return 'Free';
   }
 
   // 2. Verified zero minPrice
@@ -127,7 +127,7 @@ export function formatIndexPrice(
     minPrice === 0 &&
     (maxPrice === 0 || maxPrice === null || maxPrice === undefined)
   ) {
-    return 'Free ($0)';
+    return 'Free';
   }
 
   // 3. Missing prices
@@ -142,6 +142,8 @@ export function formatIndexPrice(
   const cur = currency?.trim().toUpperCase();
   const sym =
     cur === 'EUR' ? '€' : cur === 'GBP' ? '£' : cur === 'CAD' ? 'CAD ' : '$';
+  // Whole amounts stay whole ($25); anything with cents always shows two places ($55.30, never $55.3).
+  const amt = (n: number) => (Number.isInteger(n) ? String(n) : n.toFixed(2));
 
   if (
     minPrice !== null &&
@@ -150,15 +152,15 @@ export function formatIndexPrice(
     maxPrice !== undefined &&
     minPrice !== maxPrice
   ) {
-    return `${sym}${minPrice}–${sym}${maxPrice}`;
+    return `${sym}${amt(minPrice)}–${sym}${amt(maxPrice)}`;
   }
 
   if (minPrice !== null && minPrice !== undefined) {
-    return `${sym}${minPrice}`;
+    return `${sym}${amt(minPrice)}`;
   }
 
   if (maxPrice !== null && maxPrice !== undefined) {
-    return `Up to ${sym}${maxPrice}`;
+    return `Up to ${sym}${amt(maxPrice)}`;
   }
 
   return ticketUrl ? 'Check ticket prices' : 'Price TBA';
@@ -439,10 +441,10 @@ export function hasRealMatchScore(
   );
 }
 
-/** Compact card label for a real 0-100 match score, e.g. "Match 72". */
+/** Compact label for a real 0-100 match score, e.g. "72% match". */
 export function formatMatchScoreLabel(score: number): string {
   const clamped = Math.max(0, Math.min(100, Math.round(score)));
-  return `Match ${clamped}`;
+  return `${clamped}% match`;
 }
 
 /**

@@ -1,17 +1,14 @@
 'use client';
 
+import { GuestGate } from '@/components/auth/GuestGate';
 import { SupportActsLine } from '@/components/index/SupportActsLine';
 import { GenreBadge } from './GenreBadge';
+import { MatchScore } from './MatchScore';
 import { eventGenreList } from '@/lib/genres/catalog-genres';
-import React, {
-  useState,
-  useMemo,
-  useRef,
-  useLayoutEffect,
-  useEffect,
-} from 'react';
+import React, { useState, useMemo } from 'react';
 import type { VenueLink } from '@/lib/events/venue-link';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import type { IndexEventItem } from './types';
 import { toIndexEventItem } from './types';
 import type { CanonicalEventSummary } from '@/lib/domain/catalog';
@@ -38,12 +35,9 @@ import {
   CalendarIcon,
   MapPinIcon,
   TicketIcon,
-  SparklesIcon,
-  AlertCircleIcon,
   ArrowUpRightIcon,
   StarIcon,
   BanIcon,
-  SlidersIcon,
 } from './icons';
 
 export interface ConcertDetailClientProps {
@@ -89,22 +83,8 @@ export function ConcertDetailClient({
     useWatchlist();
 
   const [preferences, setPreferences] = useState(initialPreferences);
-  // Breakdown is shown inline by default when it fits beside the action column;
-  // an explicit toggle by the viewer always wins.
-  const [breakdownToggled, setBreakdownToggled] = useState<boolean | null>(
-    null,
-  );
-  const [breakdownFits, setBreakdownFits] = useState(true);
-  const showFactorDrawer = breakdownToggled ?? breakdownFits;
-  const infoColumnRef = useRef<HTMLDivElement>(null);
-  const actionColumnRef = useRef<HTMLDivElement>(null);
-  const breakdownRef = useRef<HTMLDivElement>(null);
-  const breakdownHeightRef = useRef(0);
 
   const isPersonalized = hasRealMatchScore(event.personalScore);
-  const score = event.personalScore?.score ?? 50;
-  const isDisliked = Boolean(event.personalScore?.isDisliked);
-  const isFavorite = Boolean(event.personalScore?.isFavorite);
 
   const statusBadge = getVerifiedAvailabilityBadge(
     event.inventoryStatus,
@@ -113,7 +93,20 @@ export function ConcertDetailClient({
   const isSoldOut = event.inventoryStatus === 'sold_out';
   const isCancelled = event.inventoryStatus === 'cancelled';
 
+  const router = useRouter();
   const headlinerName = event.headlinerName || event.title;
+  const knownPrice = formatIndexPrice(
+    event.minPrice,
+    event.maxPrice,
+    event.currency,
+    event.eventKind,
+    null,
+  );
+  // "Get tickets · $25" when a price is listed; nothing when it is not.
+  const ticketPriceSuffix =
+    knownPrice !== 'Price TBA' && knownPrice !== 'Free'
+      ? ` · ${knownPrice}`
+      : '';
   const supportActs = (event.artists || []).filter(
     (a) => a.name !== headlinerName && a.billingPosition !== 'headliner',
   );
@@ -134,38 +127,6 @@ export function ConcertDetailClient({
       ? Math.round(distanceDetails.distanceMiles * 10) / 10
       : null;
   const isApproxDistance = distanceDetails?.precision === 'city_centroid';
-
-  const factors = event.personalScore?.factors;
-  const hasFactors = Boolean(factors);
-
-  const useIsoLayoutEffect =
-    typeof window === 'undefined' ? useEffect : useLayoutEffect;
-  useIsoLayoutEffect(() => {
-    const info = infoColumnRef.current;
-    const action = actionColumnRef.current;
-    if (!info || !action || !hasFactors) return;
-    const measure = () => {
-      const breakdown = breakdownRef.current;
-      const visibleHeight = breakdown?.offsetHeight ?? 0;
-      if (visibleHeight > 0) breakdownHeightRef.current = visibleHeight;
-      // Columns stacked (narrow screens): no empty space beside the actions.
-      const sideBySide = action.offsetLeft > info.offsetLeft;
-      const infoWithout = info.offsetHeight - visibleHeight;
-      setBreakdownFits(
-        sideBySide &&
-          infoWithout + breakdownHeightRef.current <= action.offsetHeight + 8,
-      );
-    };
-    measure();
-    if (typeof ResizeObserver === 'undefined') {
-      window.addEventListener('resize', measure);
-      return () => window.removeEventListener('resize', measure);
-    }
-    const observer = new ResizeObserver(measure);
-    observer.observe(info);
-    observer.observe(action);
-    return () => observer.disconnect();
-  }, [hasFactors]);
 
   const handlePreferenceChange = (
     artistId: string,
@@ -198,15 +159,27 @@ export function ConcertDetailClient({
             className="inline-flex items-center gap-1.5 text-xs font-medium text-zinc-500 transition-colors hover:text-zinc-900"
           >
             <ArrowLeftIcon className="h-3.5 w-3.5" />
-            <span>Back to Concerts</span>
+            <span>Back</span>
           </button>
         ) : (
           <Link
             href={backHref}
+            onClick={(e) => {
+              // Return to wherever the visitor came from inside Encore (search with its filters,
+              // a home row, the calendar). A direct visit or outside link falls back to href.
+              if (
+                typeof window !== 'undefined' &&
+                window.history.length > 1 &&
+                document.referrer.startsWith(window.location.origin)
+              ) {
+                e.preventDefault();
+                router.back();
+              }
+            }}
             className="inline-flex items-center gap-1.5 text-xs font-medium text-zinc-500 transition-colors hover:text-zinc-900"
           >
             <ArrowLeftIcon className="h-3.5 w-3.5" />
-            <span>Back to Concerts</span>
+            <span>Back</span>
           </Link>
         )}
 
@@ -224,10 +197,7 @@ export function ConcertDetailClient({
         />
 
         <div className="flex flex-col justify-between gap-6 lg:flex-row lg:items-start">
-          <div
-            ref={infoColumnRef}
-            className="min-w-0 max-w-3xl flex-1 space-y-4"
-          >
+          <div className="min-w-0 max-w-3xl flex-1 space-y-4">
             {/* Badges */}
             <div className="flex flex-wrap items-center gap-2">
               {statusBadge && (
@@ -243,22 +213,8 @@ export function ConcertDetailClient({
                 inferred={event.genresInferred}
               />
 
-              {isPersonalized ? (
-                isDisliked ? (
-                  <span className="inline-flex items-center gap-1 rounded-md border border-rose-200 bg-rose-50 px-2.5 py-0.5 text-xs font-medium text-rose-700">
-                    <AlertCircleIcon className="h-3.5 w-3.5" />
-                    <span>Suppressed (Disliked Artist)</span>
-                  </span>
-                ) : isFavorite ? (
-                  <span className="inline-flex items-center gap-1 rounded-md border border-amber-200 bg-amber-50 px-2.5 py-0.5 text-xs font-semibold text-amber-800">
-                    <SparklesIcon className="h-3.5 w-3.5 text-amber-600" />
-                    <span>Favorite Artist · {score}% Match</span>
-                  </span>
-                ) : (
-                  <span className="inline-flex items-center gap-1 rounded-md border border-zinc-200 bg-zinc-50 px-2.5 py-0.5 text-xs font-medium text-zinc-700">
-                    <span>{score}% Personalized Match</span>
-                  </span>
-                )
+              {isPersonalized && event.personalScore ? (
+                <MatchScore personalScore={event.personalScore} size="md" />
               ) : null}
             </div>
 
@@ -288,11 +244,6 @@ export function ConcertDetailClient({
                   <div className="text-sm font-semibold text-zinc-900">
                     {formatIndexEventDate(event)}
                   </div>
-                  {event.timezone && (
-                    <div className="font-mono text-[11px] text-zinc-400">
-                      Timezone: {event.timezone}
-                    </div>
-                  )}
                 </div>
               </div>
 
@@ -315,48 +266,27 @@ export function ConcertDetailClient({
                 <TicketIcon className="h-4 w-4 shrink-0 text-zinc-400" />
                 <div>
                   <div className="font-mono text-sm font-semibold tabular-nums text-zinc-900">
+                    {/* The ticket button is the action; this cell only states the price. */}
                     {formatIndexPrice(
                       event.minPrice,
                       event.maxPrice,
                       event.currency,
                       event.eventKind,
-                      event.ticketUrl,
-                    )}
+                      null,
+                    ).replace('Price TBA', 'Price not listed')}
                   </div>
-                  <div className="text-[11px] text-zinc-500">
-                    Age policy: {event.ageRestriction || 'Not listed'}
-                  </div>
+                  {event.ageRestriction && (
+                    <div className="text-[11px] text-zinc-500">
+                      {event.ageRestriction}
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
-
-            {/* Personalized Factor Breakdown (inline when it fits) */}
-            {factors && (
-              <div
-                ref={breakdownRef}
-                data-testid="factor-breakdown"
-                className={`border-t border-zinc-100 pt-5 ${
-                  breakdownToggled === true
-                    ? 'block'
-                    : breakdownToggled === false || !breakdownFits
-                      ? 'hidden'
-                      : 'hidden lg:block'
-                }`}
-              >
-                <FactorBreakdown
-                  factors={factors}
-                  score={score}
-                  isSuppressed={isDisliked}
-                />
-              </div>
-            )}
           </div>
 
           {/* Action Box: Direct Ticket Link + Save + Alert */}
-          <div
-            ref={actionColumnRef}
-            className="flex shrink-0 flex-col gap-2.5 border-t border-zinc-100 pt-6 sm:w-72 lg:border-l lg:border-t-0 lg:pl-8 lg:pt-0"
-          >
+          <div className="flex shrink-0 flex-col gap-2.5 border-t border-zinc-100 pt-6 sm:w-72 lg:border-l lg:border-t-0 lg:pl-8 lg:pt-0">
             <EventImage
               event={event}
               className="aspect-[4/3] w-full rounded-xl"
@@ -372,7 +302,10 @@ export function ConcertDetailClient({
                 rel="noopener noreferrer"
                 className="shadow-xs inline-flex w-full items-center justify-center gap-2 rounded-xl bg-zinc-900 px-5 py-3 text-sm font-semibold text-white transition-transform duration-150 ease-out hover:bg-zinc-800 active:scale-[0.97]"
               >
-                <span>{isSoldOut ? 'Ticket site' : 'Official Tickets'}</span>
+                <span>
+                  {isSoldOut ? 'Ticket site' : 'Get tickets'}
+                  {!isSoldOut && ticketPriceSuffix}
+                </span>
                 <ArrowUpRightIcon className="h-4 w-4" />
               </a>
             ) : isCancelled ? (
@@ -402,9 +335,9 @@ export function ConcertDetailClient({
                 </a>
                 <p className="text-center text-[11px] text-zinc-500">
                   {venueLink.kind === 'event_page'
-                    ? 'No direct ticket link · opens the venue listing'
+                    ? `Opens this show on ${linkHost(venueLink.url)}`
                     : venueLink.kind === 'venue_website'
-                      ? 'No direct ticket link · opens the venue website'
+                      ? `Opens ${linkHost(venueLink.url)}`
                       : 'No ticket link or venue website on file'}
                 </p>
               </div>
@@ -414,37 +347,49 @@ export function ConcertDetailClient({
               </div>
             )}
 
-            <button
-              type="button"
-              onClick={() => toggleSave(event.id, headlinerName)}
-              className={`inline-flex w-full items-center justify-center gap-2 rounded-xl border px-4 py-2.5 text-xs font-semibold transition-all duration-150 ease-out active:scale-[0.97] ${
-                isSaved(event.id)
-                  ? 'shadow-2xs border-rose-200 bg-rose-50 text-rose-700'
-                  : 'border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50'
-              }`}
+            <GuestGate
+              message="Sign in to save this show to your watchlist"
+              className="w-full"
             >
-              <HeartIcon className="h-4 w-4" filled={isSaved(event.id)} />
-              <span>
-                {isSaved(event.id) ? 'Saved to Watchlist' : 'Add to Watchlist'}
-              </span>
-            </button>
+              <button
+                type="button"
+                onClick={() => toggleSave(event.id, headlinerName)}
+                className={`inline-flex w-full items-center justify-center gap-2 rounded-xl border px-4 py-2.5 text-xs font-semibold transition-all duration-150 ease-out active:scale-[0.97] ${
+                  isSaved(event.id)
+                    ? 'shadow-2xs border-rose-200 bg-rose-50 text-rose-700'
+                    : 'border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50'
+                }`}
+              >
+                <HeartIcon className="h-4 w-4" filled={isSaved(event.id)} />
+                <span>
+                  {isSaved(event.id)
+                    ? 'Saved to Watchlist'
+                    : 'Add to Watchlist'}
+                </span>
+              </button>
+            </GuestGate>
 
-            <button
-              type="button"
-              onClick={() => toggleAlert(event.id, headlinerName)}
-              className={`inline-flex w-full items-center justify-center gap-2 rounded-xl border px-4 py-2.5 text-xs font-semibold transition-all duration-150 ease-out active:scale-[0.97] ${
-                hasAlert(event.id)
-                  ? 'shadow-2xs border-violet-200 bg-violet-50 text-violet-700'
-                  : 'border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50'
-              }`}
+            <GuestGate
+              message="Sign in to get alerts when tickets change"
+              className="w-full"
             >
-              <BellIcon className="h-4 w-4" filled={hasAlert(event.id)} />
-              <span>
-                {hasAlert(event.id)
-                  ? 'Ticket Alerts Active'
-                  : 'Enable Ticket Alerts'}
-              </span>
-            </button>
+              <button
+                type="button"
+                onClick={() => toggleAlert(event.id, headlinerName)}
+                className={`inline-flex w-full items-center justify-center gap-2 rounded-xl border px-4 py-2.5 text-xs font-semibold transition-all duration-150 ease-out active:scale-[0.97] ${
+                  hasAlert(event.id)
+                    ? 'shadow-2xs border-violet-200 bg-violet-50 text-violet-700'
+                    : 'border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50'
+                }`}
+              >
+                <BellIcon className="h-4 w-4" filled={hasAlert(event.id)} />
+                <span>
+                  {hasAlert(event.id)
+                    ? 'Ticket Alerts Active'
+                    : 'Enable Ticket Alerts'}
+                </span>
+              </button>
+            </GuestGate>
 
             {event.presaleDate && (
               <div className="rounded-lg border border-violet-100 bg-violet-50/60 p-2.5 text-[11px] text-violet-800">
@@ -457,23 +402,6 @@ export function ConcertDetailClient({
                   timeZoneName: 'short',
                 })}
               </div>
-            )}
-
-            {/* Factor breakdown toggle button */}
-            {factors && (
-              <button
-                type="button"
-                aria-expanded={showFactorDrawer}
-                onClick={() => setBreakdownToggled(!showFactorDrawer)}
-                className="mt-1 inline-flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-zinc-200 px-3 py-1.5 text-xs font-medium text-zinc-600 hover:bg-zinc-50"
-              >
-                <SlidersIcon className="h-3.5 w-3.5 text-zinc-500" />
-                <span>
-                  {showFactorDrawer
-                    ? 'Hide Factor Breakdown'
-                    : 'View Factor Breakdown'}
-                </span>
-              </button>
             )}
           </div>
         </div>
@@ -534,15 +462,12 @@ export function ConcertDetailClient({
             </div>
           )}
 
-          {/* Lineup & Billing Details with Preference Modifiers */}
+          {/* Lineup with Preference Modifiers */}
           <div className="shadow-xs space-y-4 rounded-3xl border border-zinc-200/90 bg-white p-6">
-            <h2 className="text-base font-bold text-zinc-900">
-              Lineup & Billing Details
-            </h2>
+            <h2 className="text-base font-bold text-zinc-900">Lineup</h2>
             <p className="text-xs text-zinc-500">
-              Manage your artist affinity. Favoriting a headliner ensures high
-              priority; ignoring a headliner hides the show from your
-              recommendations.
+              Tell Encore who you want to see. Favorite a headliner to rank
+              their shows first; ignore one to hide their shows.
             </p>
 
             <div className="space-y-3 pt-2">
@@ -561,85 +486,92 @@ export function ConcertDetailClient({
                         <span className="text-sm font-semibold text-zinc-900">
                           {artist.name}
                         </span>
-                        <span className="rounded bg-zinc-200 px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wider text-zinc-600">
-                          {artist.billingPosition}
-                        </span>
+                        {(artist.billingPosition === 'headliner' ||
+                          artist.billingPosition === 'support') && (
+                          <span className="rounded bg-zinc-200 px-1.5 py-0.5 text-[10px] font-medium text-zinc-600">
+                            {artist.billingPosition === 'headliner'
+                              ? 'Headliner'
+                              : 'Support'}
+                          </span>
+                        )}
                         {currentPref && (
                           <span className="rounded border border-indigo-200 bg-indigo-50 px-1.5 py-0.5 text-[10px] font-medium text-indigo-700">
                             {currentPref.level}
                           </span>
                         )}
                       </div>
-                      <p className="mt-0.5 text-xs text-zinc-400">
-                        {artist.billingPosition === 'headliner'
-                          ? 'Primary performer / headliner'
-                          : artist.billingPosition === 'support'
-                            ? 'Touring support act'
-                            : 'Lineup performer'}
-                      </p>
                     </div>
 
                     {/* Quick Preference Buttons */}
-                    <div className="flex items-center gap-1.5">
-                      <button
-                        type="button"
-                        onClick={() =>
-                          handlePreferenceChange(
-                            artistId,
-                            artist.name,
-                            'favorite',
-                          )
-                        }
-                        className={`inline-flex items-center gap-1 rounded-lg border px-2 py-1 text-xs font-medium transition-colors ${
-                          currentPref?.level === 'favorite'
-                            ? 'border-amber-300 bg-amber-50 text-amber-800'
-                            : 'border-zinc-200 bg-white text-zinc-600 hover:bg-zinc-100'
-                        }`}
-                      >
-                        <StarIcon
-                          className="h-3 w-3"
-                          filled={currentPref?.level === 'favorite'}
-                        />
-                        <span>Favorite</span>
-                      </button>
+                    <GuestGate
+                      message="Sign in to save your choice"
+                      align="end"
+                    >
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            handlePreferenceChange(
+                              artistId,
+                              artist.name,
+                              'favorite',
+                            )
+                          }
+                          className={`inline-flex items-center gap-1 rounded-lg border px-2 py-1 text-xs font-medium transition-colors ${
+                            currentPref?.level === 'favorite'
+                              ? 'border-amber-300 bg-amber-50 text-amber-800'
+                              : 'border-zinc-200 bg-white text-zinc-600 hover:bg-zinc-100'
+                          }`}
+                        >
+                          <StarIcon
+                            className="h-3 w-3"
+                            filled={currentPref?.level === 'favorite'}
+                          />
+                          <span>Favorite</span>
+                        </button>
 
-                      <button
-                        type="button"
-                        onClick={() =>
-                          handlePreferenceChange(artistId, artist.name, 'like')
-                        }
-                        className={`inline-flex items-center gap-1 rounded-lg border px-2 py-1 text-xs font-medium transition-colors ${
-                          currentPref?.level === 'like'
-                            ? 'border-indigo-300 bg-indigo-50 text-indigo-800'
-                            : 'border-zinc-200 bg-white text-zinc-600 hover:bg-zinc-100'
-                        }`}
-                      >
-                        <HeartIcon
-                          className="h-3 w-3"
-                          filled={currentPref?.level === 'like'}
-                        />
-                        <span>Like</span>
-                      </button>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            handlePreferenceChange(
+                              artistId,
+                              artist.name,
+                              'like',
+                            )
+                          }
+                          className={`inline-flex items-center gap-1 rounded-lg border px-2 py-1 text-xs font-medium transition-colors ${
+                            currentPref?.level === 'like'
+                              ? 'border-indigo-300 bg-indigo-50 text-indigo-800'
+                              : 'border-zinc-200 bg-white text-zinc-600 hover:bg-zinc-100'
+                          }`}
+                        >
+                          <HeartIcon
+                            className="h-3 w-3"
+                            filled={currentPref?.level === 'like'}
+                          />
+                          <span>Like</span>
+                        </button>
 
-                      <button
-                        type="button"
-                        onClick={() =>
-                          handlePreferenceChange(
-                            artistId,
-                            artist.name,
-                            'ignore',
-                          )
-                        }
-                        className={`inline-flex items-center gap-1 rounded-lg border px-2 py-1 text-xs font-medium transition-colors ${
-                          currentPref?.level === 'ignore'
-                            ? 'border-rose-300 bg-rose-50 text-rose-800'
-                            : 'border-zinc-200 bg-white text-zinc-600 hover:bg-zinc-100'
-                        }`}
-                      >
-                        <BanIcon className="h-3 w-3" />
-                        <span>Ignore</span>
-                      </button>
-                    </div>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            handlePreferenceChange(
+                              artistId,
+                              artist.name,
+                              'ignore',
+                            )
+                          }
+                          className={`inline-flex items-center gap-1 rounded-lg border px-2 py-1 text-xs font-medium transition-colors ${
+                            currentPref?.level === 'ignore'
+                              ? 'border-rose-300 bg-rose-50 text-rose-800'
+                              : 'border-zinc-200 bg-white text-zinc-600 hover:bg-zinc-100'
+                          }`}
+                        >
+                          <BanIcon className="h-3 w-3" />
+                          <span>Ignore</span>
+                        </button>
+                      </div>
+                    </GuestGate>
                   </div>
                 );
               })}
@@ -693,17 +625,6 @@ export function ConcertDetailClient({
                 </span>
               </div>
 
-              {event.lat != null && event.lng != null && (
-                <div>
-                  <span className="font-semibold text-zinc-800">
-                    Coordinates:{' '}
-                  </span>
-                  <span className="font-mono text-[11px] text-zinc-500">
-                    {event.lat.toFixed(4)}, {event.lng.toFixed(4)}
-                  </span>
-                </div>
-              )}
-
               <div className="pt-1">
                 <a
                   href={mapSearchUrl}
@@ -743,7 +664,7 @@ export function ConcertDetailClient({
         <section className="space-y-4 border-t border-zinc-200 pt-6">
           <div className="flex items-center justify-between">
             <h2 className="text-lg font-bold text-zinc-900">
-              Similar Upcoming Concerts
+              More upcoming at {event.venueName}
             </h2>
             <Link
               href={backHref}
@@ -774,88 +695,11 @@ export function ConcertDetailClient({
   );
 }
 
-const FACTOR_ORDER = ['artist', 'distance', 'price'] as const;
-const FACTOR_LABELS: Record<(typeof FACTOR_ORDER)[number], string> = {
-  artist: 'Artist Fit',
-  distance: 'Distance Fit',
-  price: 'Price Fit',
-};
-
-function formatPoints(value: number): string {
-  return Number.isInteger(value) ? String(value) : value.toFixed(1);
-}
-
-/** Shows each factor's score, its weight, and how they add up to the match %. */
-function FactorBreakdown({
-  factors,
-  score,
-  isSuppressed,
-}: {
-  factors: NonNullable<IndexEventItem['personalScore']>['factors'];
-  score: number;
-  isSuppressed: boolean;
-}) {
-  const rows = FACTOR_ORDER.flatMap((key) => {
-    const factor = factors?.[key];
-    if (!factor) return [];
-    const weight =
-      typeof factor.weight === 'number' && Number.isFinite(factor.weight)
-        ? factor.weight
-        : null;
-    // Same rounding as the scoring engine's weighted contribution.
-    const points =
-      weight === null ? null : Math.round((factor.score * weight) / 10) / 10;
-    return [{ key, factor, weight, points }];
-  });
-  const hasWeights = rows.length > 0 && rows.every((r) => r.points !== null);
-
-  return (
-    <div>
-      <h3 className="text-sm font-bold text-zinc-900">
-        How the {formatPoints(score)}% match is calculated
-      </h3>
-      <p className="mt-0.5 text-xs text-zinc-500">
-        {hasWeights
-          ? 'Each factor is scored 0–100, multiplied by its weight from your scoring settings, then added up.'
-          : 'Deterministic scoring factors across artist affinity, distance, and price.'}
-      </p>
-
-      <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
-        {rows.map(({ key, factor, weight, points }) => (
-          <div
-            key={key}
-            className="rounded-2xl border border-zinc-200/80 bg-zinc-50/60 p-3.5"
-          >
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-semibold text-zinc-700">
-                {FACTOR_LABELS[key]}
-              </span>
-              <span className="font-mono text-xs font-bold text-zinc-900">
-                {factor.score}/100
-              </span>
-            </div>
-            {weight !== null && points !== null && (
-              <div className="mt-1 font-mono text-[11px] tabular-nums text-zinc-600">
-                × {weight}% weight = {formatPoints(points)} pts
-              </div>
-            )}
-            <p className="mt-1 text-[11px] leading-relaxed text-zinc-500">
-              {factor.explanation}
-            </p>
-          </div>
-        ))}
-      </div>
-
-      {hasWeights && (
-        <p className="mt-3 font-mono text-[11px] tabular-nums text-zinc-600">
-          {rows.map((r) => formatPoints(r.points ?? 0)).join(' + ')} ={' '}
-          <span className="font-bold text-zinc-900">
-            {isSuppressed
-              ? '0 (suppressed: disliked artist)'
-              : `${formatPoints(score)}%`}
-          </span>
-        </p>
-      )}
-    </div>
-  );
+/** "velvetelklounge.com" from a full URL, for link captions. */
+function linkHost(url: string): string {
+  try {
+    return new URL(url).hostname.replace(/^www\./, '');
+  } catch {
+    return 'the venue site';
+  }
 }

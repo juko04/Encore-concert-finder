@@ -1,5 +1,6 @@
 'use client';
 
+import { GuestGate } from '@/components/auth/GuestGate';
 import { SupportActsLine } from '@/components/index/SupportActsLine';
 import React, { useState, useRef, useEffect } from 'react';
 import Link from 'next/link';
@@ -9,14 +10,14 @@ import {
   formatIndexPrice,
   getVerifiedAvailabilityBadge,
   hasRealMatchScore,
-  formatMatchScoreLabel,
   getArtistAccent,
 } from './formatters';
 import { EventImage } from './EventImage';
+import { MatchScore } from './MatchScore';
+import { SaveHeartButton } from './SaveHeartButton';
 import { GenreBadge } from './GenreBadge';
 import { eventGenreList } from '@/lib/genres/catalog-genres';
 import {
-  HeartIcon,
   BellIcon,
   MapPinIcon,
   CalendarIcon,
@@ -74,7 +75,6 @@ export function EventCard({
   }, [calendarMenuOpen]);
 
   const isPersonalized = hasRealMatchScore(event.personalScore);
-  const score = event.personalScore?.score ?? 50;
   const isDisliked = Boolean(event.personalScore?.isDisliked);
   const isFavorite = Boolean(event.personalScore?.isFavorite);
 
@@ -127,7 +127,7 @@ export function EventCard({
               </span>
             )}
 
-            {/* Personal Match Score vs Guest Genre Pill */}
+            {/* Status labels only; the match score itself sits under the price. */}
             {isPersonalized ? (
               isDisliked ? (
                 <span className="inline-flex items-center gap-1 rounded-md border border-rose-200 bg-rose-50 px-2 py-0.5 text-[11px] font-medium text-rose-700">
@@ -137,14 +137,9 @@ export function EventCard({
               ) : isFavorite ? (
                 <span className="inline-flex items-center gap-1 rounded-md border border-amber-200 bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-800">
                   <SparklesIcon className="h-3 w-3 text-amber-600" />
-                  <span>Favorite Artist · {score}%</span>
+                  <span>Favorite Artist</span>
                 </span>
-              ) : (
-                <span className="inline-flex items-center gap-1 rounded-md border border-zinc-200 bg-zinc-50 px-2 py-0.5 text-[11px] font-medium text-zinc-600">
-                  <span className="sr-only">Personalized match: </span>
-                  <span>{score}% match</span>
-                </span>
-              )
+              ) : null
             ) : null}
 
             <GenreBadge
@@ -155,49 +150,41 @@ export function EventCard({
 
           {/* Quick Action Controls (Save, Alert, Calendar Export) */}
           <div className="-mr-1 flex items-center gap-1">
-            <button
-              type="button"
-              onClick={(e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                onToggleSave?.(event.id, headlinerName);
-              }}
-              aria-label={
-                isSaved
-                  ? `Remove ${headlinerName} from watchlist`
-                  : `Save ${headlinerName} to watchlist`
-              }
-              aria-pressed={isSaved}
-              className={`relative z-10 flex h-10 w-10 items-center justify-center rounded-lg border transition-all duration-150 ease-out active:scale-[0.92] ${
-                isSaved
-                  ? 'shadow-xs border-rose-200 bg-rose-50 text-rose-600'
-                  : 'border-transparent text-zinc-400 hover:border-zinc-200 hover:bg-zinc-50 hover:text-zinc-700'
-              }`}
-            >
-              <HeartIcon className="h-4 w-4" filled={isSaved} />
-            </button>
+            <SaveHeartButton
+              eventId={event.id}
+              title={headlinerName}
+              isSaved={isSaved}
+              onToggle={(id, title) => onToggleSave?.(id, title)}
+            />
 
-            <button
-              type="button"
-              onClick={(e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                onToggleAlert?.(event.id, headlinerName);
-              }}
-              aria-label={
-                hasAlert
-                  ? `Disable alerts for ${headlinerName}`
-                  : `Enable ticket alerts for ${headlinerName}`
-              }
-              aria-pressed={hasAlert}
-              className={`relative z-10 flex h-10 w-10 items-center justify-center rounded-lg border transition-all duration-150 ease-out active:scale-[0.92] ${
-                hasAlert
-                  ? 'shadow-xs border-violet-200 bg-violet-50 text-violet-600'
-                  : 'border-transparent text-zinc-400 hover:border-zinc-200 hover:bg-zinc-50 hover:text-zinc-700'
-              }`}
+            <GuestGate
+              message="Sign in to get ticket alerts"
+              placement="bottom"
+              align="end"
+              className="relative z-10"
             >
-              <BellIcon className="h-4 w-4" filled={hasAlert} />
-            </button>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  onToggleAlert?.(event.id, headlinerName);
+                }}
+                aria-label={
+                  hasAlert
+                    ? `Disable alerts for ${headlinerName}`
+                    : `Enable ticket alerts for ${headlinerName}`
+                }
+                aria-pressed={hasAlert}
+                className={`relative z-10 flex h-10 w-10 items-center justify-center rounded-lg border transition-all duration-150 ease-out active:scale-[0.92] ${
+                  hasAlert
+                    ? 'shadow-xs border-violet-200 bg-violet-50 text-violet-600'
+                    : 'border-transparent text-zinc-400 hover:border-zinc-200 hover:bg-zinc-50 hover:text-zinc-700'
+                }`}
+              >
+                <BellIcon className="h-4 w-4" filled={hasAlert} />
+              </button>
+            </GuestGate>
 
             {/* Calendar Export Menu */}
             <div className="relative" ref={calendarMenuRef}>
@@ -316,12 +303,12 @@ export function EventCard({
           </div>
 
           {/* Real 0-100 match score only (never fabricated for guests or suppressed shows) */}
-          {isPersonalized && !isDisliked && (
-            <div
-              data-testid="card-match-score"
-              className="font-mono text-[11px] tabular-nums text-zinc-600"
-            >
-              {formatMatchScoreLabel(score)}
+          {isPersonalized && !isDisliked && event.personalScore && (
+            <div>
+              <MatchScore
+                personalScore={event.personalScore}
+                data-testid="card-match-score"
+              />
             </div>
           )}
         </div>
@@ -345,9 +332,10 @@ export function EventCard({
           <ArrowRightIcon className="h-3.5 w-3.5 text-zinc-400 transition-transform group-hover:translate-x-0.5" />
         </Link>
 
-        {event.ticketUrl && !isCancelled && (
+        {(event.ticketUrl || event.officialUrl) && !isCancelled && (
           <a
-            href={event.ticketUrl}
+            // No ticket link: the show's page on the venue site (never a web search).
+            href={(event.ticketUrl || event.officialUrl) as string}
             target="_blank"
             rel="noopener noreferrer"
             onClick={(e) => e.stopPropagation()}
@@ -357,7 +345,11 @@ export function EventCard({
                 : 'text-zinc-400 hover:text-zinc-800'
             }`}
           >
-            {isSoldOut ? 'Sold Out ↗' : 'Tickets ↗'}
+            {isSoldOut
+              ? 'Sold Out ↗'
+              : event.ticketUrl
+                ? 'Tickets ↗'
+                : 'Venue page ↗'}
           </a>
         )}
       </div>

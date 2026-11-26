@@ -6,22 +6,31 @@ import { getHomeLocation } from './server';
 import type { HomeLocation } from './home-location';
 import type { NearScope } from './catalog-search';
 
-/** Radius used when the profile has none saved. */
-export const DEFAULT_RADIUS_MILES = 25;
+import {
+  DEFAULT_RADIUS_MILES,
+  GUEST_REGION_RADIUS_MILES,
+} from './near-context-constants';
+
+export {
+  DEFAULT_RADIUS_MILES,
+  GUEST_REGION_RADIUS_MILES,
+} from './near-context-constants';
 
 export interface NearContext {
   user: User | null;
   profile: UserProfile | null;
   home: HomeLocation | null;
   radiusMiles: number;
-  /** Present only for a signed-in user with a resolvable home location. */
+  /** Present whenever the viewer has a home location (signed-in profile or the city picker). */
   scope: NearScope | null;
 }
 
 /**
  * Derives the radius scope on the server from the SESSION user's profile and home-location
- * cookie (same rules for /search and /api/catalog/search). Guests, and users without a home
- * location, get scope = null: the radius is never applied and never guessed.
+ * cookie (same rules for /search and /api/catalog/search). A signed-in user gets their saved
+ * radius (default DEFAULT_RADIUS_MILES); a guest who picked a city gets the wider regional
+ * radius used on the home page. Without a home location scope = null: the radius is never
+ * applied and the location is never guessed.
  */
 export async function resolveNearContext(
   knownUser?: User | null,
@@ -37,8 +46,12 @@ export async function resolveNearContext(
       console.error('[near-context] profile load failed:', err);
     }
     home = await getHomeLocation(user.id);
+  } else {
+    home = await getHomeLocation();
   }
-  const radiusMiles = profile?.defaultRadiusMiles ?? DEFAULT_RADIUS_MILES;
+  const radiusMiles = user
+    ? (profile?.defaultRadiusMiles ?? DEFAULT_RADIUS_MILES)
+    : GUEST_REGION_RADIUS_MILES;
   return {
     user,
     profile,

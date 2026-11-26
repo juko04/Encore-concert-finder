@@ -4,6 +4,7 @@ import type {
   Event,
   EventStatus,
 } from '@/lib/domain/catalog';
+import { eventPageUrlFromProvenance } from '@/lib/events/official-url';
 import {
   asHttpsImageUrl,
   getCandidateGenres,
@@ -815,7 +816,8 @@ export class CanonicalizationCoordinator {
           (candidate.startsAt ? 'instant' : 'date_only'),
         doors_at: candidate.doorsOpenAt ?? null,
         is_multi_day: isMultiDay,
-        official_url: null,
+        // The show's page on the venue/promoter site; null for aggregator/ticketing sources.
+        official_url: eventPageUrlFromProvenance(candidate.provenance),
         primary_ticket_url: candidate.ticketUrl ?? null,
         min_price: candidate.price?.min ?? null,
         max_price: candidate.price?.max ?? null,
@@ -879,6 +881,7 @@ export class CanonicalizationCoordinator {
       addFieldEvidence('start_time_precision', eventData.start_time_precision);
       addFieldEvidence('doors_at', eventData.doors_at);
       addFieldEvidence('primary_ticket_url', eventData.primary_ticket_url);
+      addFieldEvidence('official_url', eventData.official_url);
       addFieldEvidence('image_url', eventData.image_url);
 
       payload = {

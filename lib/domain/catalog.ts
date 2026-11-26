@@ -244,6 +244,8 @@ export interface CanonicalEventSummary {
   }>;
   imageUrl?: string | null;
   ticketUrl?: string | null;
+  /** The show's page on the venue/promoter site (link target when there is no ticket URL). */
+  officialUrl?: string | null;
   minPrice?: number | null;
   maxPrice?: number | null;
   currency?: string | null;

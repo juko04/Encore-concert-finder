@@ -2,12 +2,25 @@ import { describe, expect, it } from 'vitest';
 import { resolveVenueLink } from '@/lib/events/venue-link';
 
 describe('resolveVenueLink', () => {
-  it('prefers the venue website', () => {
+  it("prefers the show's own page on the venue site", () => {
+    expect(
+      resolveVenueLink({
+        venueName: 'Velvet Elk Lounge',
+        officialUrl:
+          'https://www.velvetelklounge.com/event/november-27-dj-kelly-kix/',
+        venueWebsite: 'https://www.velvetelklounge.com/events/',
+      }),
+    ).toEqual({
+      url: 'https://www.velvetelklounge.com/event/november-27-dj-kelly-kix/',
+      kind: 'event_page',
+    });
+  });
+
+  it('uses the venue website when no event page is known', () => {
     expect(
       resolveVenueLink({
         venueName: 'Fox Theatre',
         venueWebsite: 'https://foxtheatre.com/',
-        sourceUrls: ['https://z2ent.com/events/detail/x'],
       }),
     ).toEqual({ url: 'https://foxtheatre.com/', kind: 'venue_website' });
   });

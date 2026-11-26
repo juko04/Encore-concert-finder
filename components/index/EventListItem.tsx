@@ -1,5 +1,6 @@
 'use client';
 
+import { GuestGate } from '@/components/auth/GuestGate';
 import { SupportActsLine } from '@/components/index/SupportActsLine';
 import React from 'react';
 import Link from 'next/link';
@@ -11,15 +12,11 @@ import {
   hasRealMatchScore,
 } from './formatters';
 import { EventImage } from './EventImage';
+import { MatchScore } from './MatchScore';
+import { SaveHeartButton } from './SaveHeartButton';
 import { GenreBadge } from './GenreBadge';
 import { eventGenreList } from '@/lib/genres/catalog-genres';
-import {
-  HeartIcon,
-  BellIcon,
-  SparklesIcon,
-  AlertCircleIcon,
-  ArrowRightIcon,
-} from './icons';
+import { BellIcon, ArrowRightIcon } from './icons';
 
 export interface EventListItemProps {
   event: IndexEventItem;
@@ -39,9 +36,7 @@ export function EventListItem({
   href,
 }: EventListItemProps) {
   const isPersonalized = hasRealMatchScore(event.personalScore);
-  const score = event.personalScore?.score ?? 50;
   const isDisliked = Boolean(event.personalScore?.isDisliked);
-  const isFavorite = Boolean(event.personalScore?.isFavorite);
 
   const headlinerName = event.headlinerName || event.title;
 
@@ -91,23 +86,9 @@ export function EventListItem({
             )}
 
             {/* Personal Match Score */}
-            {isPersonalized &&
-              (isDisliked ? (
-                <span className="inline-flex items-center gap-0.5 rounded border border-rose-200 bg-rose-50 px-1.5 py-0.5 text-[10px] font-medium text-rose-700">
-                  <AlertCircleIcon className="h-2.5 w-2.5" />
-                  <span>Suppressed</span>
-                </span>
-              ) : isFavorite ? (
-                <span className="inline-flex items-center gap-0.5 rounded border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[10px] font-semibold text-amber-800">
-                  <SparklesIcon className="h-2.5 w-2.5 text-amber-600" />
-                  <span>{score}% Match</span>
-                </span>
-              ) : (
-                <span className="rounded border border-zinc-200 bg-zinc-50 px-1.5 py-0.5 text-[10px] font-medium text-zinc-600">
-                  <span className="sr-only">Personalized match: </span>
-                  {score}%
-                </span>
-              ))}
+            {isPersonalized && event.personalScore && (
+              <MatchScore personalScore={event.personalScore} />
+            )}
           </div>
 
           <SupportActsLine
@@ -154,41 +135,32 @@ export function EventListItem({
 
         {/* Action Buttons */}
         <div className="flex items-center gap-1">
-          <button
-            type="button"
-            onClick={() => onToggleSave?.(event.id, headlinerName)}
-            aria-label={
-              isSaved
-                ? `Remove ${headlinerName} from watchlist`
-                : `Save ${headlinerName} to watchlist`
-            }
-            aria-pressed={isSaved}
-            className={`flex h-10 w-10 items-center justify-center rounded-lg border transition-all duration-150 ease-out active:scale-[0.92] ${
-              isSaved
-                ? 'border-rose-200 bg-rose-50 text-rose-600'
-                : 'border-transparent text-zinc-400 hover:border-zinc-200 hover:bg-zinc-100 hover:text-zinc-700'
-            }`}
-          >
-            <HeartIcon className="h-4 w-4" filled={isSaved} />
-          </button>
+          <SaveHeartButton
+            eventId={event.id}
+            title={headlinerName}
+            isSaved={isSaved}
+            onToggle={(id, title) => onToggleSave?.(id, title)}
+          />
 
-          <button
-            type="button"
-            onClick={() => onToggleAlert?.(event.id, headlinerName)}
-            aria-label={
-              hasAlert
-                ? `Disable alerts for ${headlinerName}`
-                : `Enable ticket alerts for ${headlinerName}`
-            }
-            aria-pressed={hasAlert}
-            className={`flex h-10 w-10 items-center justify-center rounded-lg border transition-all duration-150 ease-out active:scale-[0.92] ${
-              hasAlert
-                ? 'border-violet-200 bg-violet-50 text-violet-600'
-                : 'border-transparent text-zinc-400 hover:border-zinc-200 hover:bg-zinc-100 hover:text-zinc-700'
-            }`}
-          >
-            <BellIcon className="h-4 w-4" filled={hasAlert} />
-          </button>
+          <GuestGate message="Sign in to get ticket alerts" align="end">
+            <button
+              type="button"
+              onClick={() => onToggleAlert?.(event.id, headlinerName)}
+              aria-label={
+                hasAlert
+                  ? `Disable alerts for ${headlinerName}`
+                  : `Enable ticket alerts for ${headlinerName}`
+              }
+              aria-pressed={hasAlert}
+              className={`flex h-10 w-10 items-center justify-center rounded-lg border transition-all duration-150 ease-out active:scale-[0.92] ${
+                hasAlert
+                  ? 'border-violet-200 bg-violet-50 text-violet-600'
+                  : 'border-transparent text-zinc-400 hover:border-zinc-200 hover:bg-zinc-100 hover:text-zinc-700'
+              }`}
+            >
+              <BellIcon className="h-4 w-4" filled={hasAlert} />
+            </button>
+          </GuestGate>
 
           <Link
             href={detailUrl}

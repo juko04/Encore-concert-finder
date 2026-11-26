@@ -60,10 +60,11 @@ export function placeholderPattern(
   return PATTERNS[hashString(name || '') % PATTERNS.length];
 }
 
+// Kept modest so a card without a photo reads as "show at <venue>", not as a giant letter.
 const MONOGRAM_SIZE = {
   sm: 'text-sm',
-  md: 'text-5xl',
-  lg: 'text-8xl',
+  md: 'text-3xl',
+  lg: 'text-5xl',
 } as const;
 
 interface EventPlaceholderProps {
@@ -168,7 +169,9 @@ export function EventPlaceholder({
   venueName,
   size = 'md',
 }: EventPlaceholderProps) {
-  const accent = getArtistAccent(name);
+  // Tinted by venue so every photo-less show at one venue shares a look; the pattern and
+  // monogram still vary per show.
+  const accent = getArtistAccent(venueName?.trim() || name);
   const pattern = placeholderPattern(name);
   const seed = hashString(name || '');
   const initials = placeholderInitials(name);
@@ -193,7 +196,7 @@ export function EventPlaceholder({
       </svg>
       <span
         className={`relative select-none font-extrabold leading-none tracking-tight ${MONOGRAM_SIZE[size]}`}
-        style={{ color: accent.primary, opacity: 0.78 }}
+        style={{ color: accent.primary, opacity: 0.6 }}
       >
         {initials}
       </span>
@@ -202,8 +205,8 @@ export function EventPlaceholder({
         // the card already states the venue and this art is purely decorative.
         <span
           data-venue={venueName}
-          className="relative mt-3 block max-w-[85%] truncate text-[10px] font-semibold uppercase tracking-[0.18em] before:content-[attr(data-venue)]"
-          style={{ color: accent.primary, opacity: 0.7 }}
+          className="relative mt-2 block max-w-[85%] truncate rounded-md bg-white/70 px-2 py-0.5 text-[11px] font-bold uppercase tracking-[0.14em] before:content-[attr(data-venue)]"
+          style={{ color: accent.primary }}
         />
       )}
     </div>

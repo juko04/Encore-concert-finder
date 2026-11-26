@@ -71,7 +71,7 @@ describe('Discover homepage card match score', () => {
   it('shows the genuine personalized score for a scored event', () => {
     renderRow([scored({ score: 87 })]);
     expect(screen.getByTestId('card-match-score')).toHaveTextContent(
-      'Match 87',
+      '87% match',
     );
   });
 
@@ -87,7 +87,7 @@ describe('Discover homepage card match score', () => {
 
   it('uses the same shared formatting helper as the search cards', () => {
     expect(getCardMatchScoreLabel({ isPersonalized: true, score: 72.4 })).toBe(
-      'Match 72',
+      '72% match',
     );
     expect(getCardMatchScoreLabel({ isPersonalized: false, score: 50 })).toBe(
       null,

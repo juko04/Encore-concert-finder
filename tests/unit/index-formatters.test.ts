@@ -95,15 +95,13 @@ describe('Index Formatters Unit Tests', () => {
     });
 
     it('formats verified free events with $0 price', () => {
-      expect(formatIndexPrice(0, 0, 'USD')).toBe('Free ($0)');
-      expect(formatIndexPrice(0, null, 'USD')).toBe('Free ($0)');
+      expect(formatIndexPrice(0, 0, 'USD')).toBe('Free');
+      expect(formatIndexPrice(0, null, 'USD')).toBe('Free');
     });
 
-    it('formats explicit free_event kind as Free ($0)', () => {
-      expect(formatIndexPrice(null, null, 'USD', 'free_event')).toBe(
-        'Free ($0)',
-      );
-      expect(formatIndexPrice(0, 0, 'USD', 'free_event')).toBe('Free ($0)');
+    it('formats explicit free_event kind as Free', () => {
+      expect(formatIndexPrice(null, null, 'USD', 'free_event')).toBe('Free');
+      expect(formatIndexPrice(0, 0, 'USD', 'free_event')).toBe('Free');
     });
 
     it('detects contradictory pricing on free events', () => {
@@ -200,9 +198,9 @@ describe('Index Formatters Unit Tests', () => {
 
 describe('formatMatchScoreLabel', () => {
   it('labels and clamps 0-100 scores', () => {
-    expect(formatMatchScoreLabel(72)).toBe('Match 72');
-    expect(formatMatchScoreLabel(71.6)).toBe('Match 72');
-    expect(formatMatchScoreLabel(140)).toBe('Match 100');
-    expect(formatMatchScoreLabel(-3)).toBe('Match 0');
+    expect(formatMatchScoreLabel(72)).toBe('72% match');
+    expect(formatMatchScoreLabel(71.6)).toBe('72% match');
+    expect(formatMatchScoreLabel(140)).toBe('100% match');
+    expect(formatMatchScoreLabel(-3)).toBe('0% match');
   });
 });

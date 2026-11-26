@@ -356,12 +356,15 @@ describe('Index Components Unit Tests', () => {
       expect(screen.getByText('The Cure')).toBeInTheDocument();
       expect(screen.getByText(/Red Rocks Amphitheatre/i)).toBeInTheDocument();
       expect(screen.getByText(/\$65–\$125/)).toBeInTheDocument();
-      expect(screen.getByText('Favorite Artist · 96%')).toBeInTheDocument();
+      expect(screen.getByText('Favorite Artist')).toBeInTheDocument();
+      expect(screen.getByTestId('card-match-score')).toHaveTextContent(
+        '96% match',
+      );
       expect(screen.getByText('Tickets Available')).toBeInTheDocument();
 
       // Trigger save button
       const saveButton = screen.getByRole('button', {
-        name: /save the cure to watchlist/i,
+        name: /save the cure to saved/i,
       });
       fireEvent.click(saveButton);
       expect(onToggleSave).toHaveBeenCalledWith('event-cure-101', 'The Cure');
@@ -405,10 +408,10 @@ describe('Index Components Unit Tests', () => {
 
       expect(screen.getByText('The Cure')).toBeInTheDocument();
       expect(screen.getByText('C')).toBeInTheDocument(); // Monogram avatar ("The Cure" -> C: leading article skipped)
-      expect(screen.getByText('96% Match')).toBeInTheDocument();
+      expect(screen.getByText('96% match')).toBeInTheDocument();
 
       const saveButton = screen.getByRole('button', {
-        name: /remove the cure from watchlist/i,
+        name: /remove the cure from saved/i,
       });
       fireEvent.click(saveButton);
       expect(onToggleSave).toHaveBeenCalledWith('event-cure-101', 'The Cure');
@@ -448,7 +451,7 @@ describe('Index Components Unit Tests', () => {
         screen.getByRole('button', { name: /recommended/i }),
       ).toBeInTheDocument();
       expect(
-        screen.getByRole('button', { name: /free \(\$0\)/i }),
+        screen.getByRole('button', { name: /^free$/i }),
       ).toBeInTheDocument();
 
       // Default Grid layout check
@@ -460,8 +463,8 @@ describe('Index Components Unit Tests', () => {
       fireEvent.click(listButton);
       expect(screen.getByText('C')).toBeInTheDocument(); // Monogram avatar in list view ("The Cure" -> C)
 
-      // Filter by Free ($0) mode
-      const freeChip = screen.getByRole('button', { name: /free \(\$0\)/i });
+      // Filter by Free mode
+      const freeChip = screen.getByRole('button', { name: /^free$/i });
       fireEvent.click(freeChip);
       expect(screen.getByText('Denver Jazz Collective')).toBeInTheDocument();
       expect(screen.queryByText('The Cure')).not.toBeInTheDocument();
@@ -485,23 +488,29 @@ describe('Index Components Unit Tests', () => {
         screen.getAllByText('Red Rocks Amphitheatre').length,
       ).toBeGreaterThanOrEqual(1);
       expect(screen.getByText('Open in Google Maps ↗')).toBeInTheDocument();
-      expect(screen.getByText('Editorial Decision Guide')).toBeInTheDocument();
+      expect(screen.getByText('Know before you go')).toBeInTheDocument();
 
-      // Toggle personalized factor drawer
-      const factorButton = screen.getByRole('button', {
-        name: /view factor breakdown/i,
-      });
-      fireEvent.click(factorButton);
+      // The compact match score opens the per-factor detail on click.
+      const scoreButton = screen.getByTestId('match-score');
+      expect(scoreButton).toHaveTextContent('96% match');
+      expect(
+        screen.queryByTestId('match-score-factors'),
+      ).not.toBeInTheDocument();
+      fireEvent.click(scoreButton);
 
-      expect(screen.getByText('Artist Fit')).toBeInTheDocument();
-      expect(screen.getByText('100/100')).toBeInTheDocument();
-      expect(screen.getByText('Distance Fit')).toBeInTheDocument();
-      expect(screen.getByText('92/100')).toBeInTheDocument();
-      expect(screen.getByText('Price Fit')).toBeInTheDocument();
-      expect(screen.getByText('90/100')).toBeInTheDocument();
+      const factors = screen.getByTestId('match-score-factors');
+      expect(factors).toHaveTextContent('Artist');
+      expect(factors).toHaveTextContent('+45');
+      expect(factors).toHaveTextContent('100/100 × 45%');
+      expect(factors).toHaveTextContent('Distance');
+      expect(factors).toHaveTextContent('+18.4');
+      expect(factors).toHaveTextContent('92/100 × 20%');
+      expect(factors).toHaveTextContent('Price');
+      expect(factors).toHaveTextContent('+18');
+      expect(factors).toHaveTextContent('90/100 × 20%');
     });
 
-    it('shows factor weights and the sum, and falls back to the venue link without a ticket URL', () => {
+    it('shows factor points in the match popover, and falls back to the venue link without a ticket URL', () => {
       const scored = {
         ...MOCK_INDEX_ITEMS[0],
         ticketUrl: null,
@@ -532,13 +541,25 @@ describe('Index Components Unit Tests', () => {
       expect(link).toHaveAttribute('href', 'https://z2ent.com/events/detail/x');
       expect(link).toHaveTextContent('Tickets on Venue Site');
       expect(
+        screen.getByText('Opens this show on z2ent.com'),
+      ).toBeInTheDocument();
+      expect(
         screen.queryByText(/Ticket Link Unavailable/),
       ).not.toBeInTheDocument();
 
-      expect(screen.getByText('× 70% weight = 28 pts')).toBeInTheDocument();
-      expect(screen.getByText('× 17% weight = 17 pts')).toBeInTheDocument();
-      expect(screen.getByText('× 13% weight = 6.5 pts')).toBeInTheDocument();
-      expect(screen.getByText(/28 \+ 17 \+ 6\.5 =/)).toBeInTheDocument();
+      const scoreButton = screen.getByTestId('match-score');
+      expect(scoreButton).toHaveTextContent('52% match');
+      fireEvent.click(scoreButton);
+      // The popover keeps the exact value.
+      expect(screen.getByText('51.5%')).toBeInTheDocument();
+      const factors = screen.getByTestId('match-score-factors');
+      // Each factor's points (score × weight) add up to the match.
+      expect(factors).toHaveTextContent('+28');
+      expect(factors).toHaveTextContent('40/100 × 70%');
+      expect(factors).toHaveTextContent('+17');
+      expect(factors).toHaveTextContent('100/100 × 17%');
+      expect(factors).toHaveTextContent('+6.5');
+      expect(factors).toHaveTextContent('50/100 × 13%');
     });
 
     it('uses homeLocation (with city centroid fallback) instead of hardcoded Denver and disambiguates duplicate festival dates', () => {

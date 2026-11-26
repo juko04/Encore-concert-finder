@@ -246,7 +246,8 @@ describe('GenreBadge inferred marker', () => {
     const badge = getByTestId('genre-badge');
     expect(badge.getAttribute('data-inferred')).toBe('true');
     expect(badge.getAttribute('title')).toMatch(/inferred/i);
-    expect(badge.className).toContain('border-dashed');
+    // The dashed border is drawn on each genre pill inside the badge group.
+    expect(badge.firstElementChild?.className).toContain('border-dashed');
   });
 
   it('shows source genres plainly', () => {
@@ -254,6 +255,6 @@ describe('GenreBadge inferred marker', () => {
     const badge = getByTestId('genre-badge');
     expect(badge.getAttribute('data-inferred')).toBeNull();
     expect(badge.getAttribute('title')).toBeNull();
-    expect(badge.className).not.toContain('border-dashed');
+    expect(badge.firstElementChild?.className).not.toContain('border-dashed');
   });
 });

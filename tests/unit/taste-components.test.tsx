@@ -2,6 +2,7 @@
 import React from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { PreferenceLevelBadge } from '@/components/taste/PreferenceLevelBadge';
 import { ArtistPreferenceCard } from '@/components/taste/ArtistPreferenceCard';
 import { GuestTastePrompt } from '@/components/taste/GuestTastePrompt';
@@ -136,7 +137,7 @@ describe('Taste UI Components', () => {
       expect(screen.getByTestId('badge-interested')).toBeInTheDocument();
     });
 
-    it('triggers onUpdateLevel when preference level is changed in select', () => {
+    it('triggers onUpdateLevel when preference level is changed in select', async () => {
       const onUpdateLevel = vi.fn();
       const onDelete = vi.fn();
 
@@ -148,8 +149,11 @@ describe('Taste UI Components', () => {
         />,
       );
 
-      const select = screen.getByTestId('select-level-pref-1');
-      fireEvent.change(select, { target: { value: 'like' } });
+      const user = userEvent.setup();
+      await user.click(screen.getByTestId('select-level-pref-1'));
+      await user.click(
+        await screen.findByRole('option', { name: /Like \(Want to see\)/ }),
+      );
 
       expect(onUpdateLevel).toHaveBeenCalledWith(mockCanonicalPref, 'like');
     });

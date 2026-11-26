@@ -237,21 +237,8 @@ export function buildDecisionGuide(
       sourceUrls: [],
     });
   }
-  const headliner = event.headlinerName?.trim().toLowerCase();
-  const others = (event.artists ?? []).filter(
-    (artist) =>
-      artist.billingPosition !== 'headliner' &&
-      artist.name.trim().toLowerCase() !== headliner,
-  );
-  if (others.length > 0) {
-    const names = others.slice(0, 3).map((artist) => artist.name);
-    const extra = others.length - names.length;
-    showFacts.push({
-      text: `Also on the bill: ${names.join(', ')}${extra > 0 ? ` and ${extra} more` : ''}.`,
-      evidence: 'event',
-      sourceUrls: [],
-    });
-  }
+  // The lineup is shown in the page title and the lineup section; repeating it here as an
+  // "Also on the bill" bullet only duplicated it.
   if (
     time &&
     (time.weekday === 'Friday' || time.weekday === 'Saturday') &&
@@ -269,7 +256,12 @@ export function buildDecisionGuide(
   // Slots: supplied + personal first (max 2 together beyond supplied), one
   // show fact, then venue facts fill the rest.
   const topPersonal = [...supplied, ...personalBullets].slice(0, 2);
-  const topShow = showFacts.slice(0, 1);
+  // A show fact ("Friday-night show") is not a reason people like the venue: when the column is
+  // titled for the venue, it only appears alongside personal reasons.
+  const topShow =
+    topPersonal.length > 0 || venueWhy.length === 0
+      ? showFacts.slice(0, 1)
+      : [];
   const why = dedupe([...topPersonal, ...topShow]);
   const room = Math.max(MAX_WHY - why.length, 0);
   const whyFinal = dedupe([...why, ...venueWhy.slice(0, room)]).slice(

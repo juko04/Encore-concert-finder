@@ -329,7 +329,7 @@ describe('App Router Catalog Integration Routes', () => {
       expect(
         screen.getAllByText(/Red Rocks Amphitheatre/i).length,
       ).toBeGreaterThan(0);
-      expect(screen.getByText(/Official Tickets/i)).toBeInTheDocument();
+      expect(screen.getByText(/Get tickets/i)).toBeInTheDocument();
     });
 
     it('passes through inventoryStatus === sold_out cleanly to the client', async () => {

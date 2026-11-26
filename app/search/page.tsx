@@ -130,7 +130,13 @@ export default async function SearchPage({ searchParams }: SearchPageProps) {
   const { home, radiusMiles } = nearCtx;
   const profile = nearCtx.profile;
   const budget = profile?.maxNormalTicketPrice ?? null;
-  const nearActive = resolvedParams.near === '1' && Boolean(home);
+  // Results default to the viewer's area when we know it. ?near=0 ("Anywhere") turns it off;
+  // an explicit city or venue in the URL also means "there", so the radius is not applied
+  // unless ?near=1 asks for it too.
+  const nearActive =
+    Boolean(home) &&
+    resolvedParams.near !== '0' &&
+    (resolvedParams.near === '1' || (!resolvedParams.city && !venueParam));
   const budgetActive =
     budget !== null && maxPrice === budget && !includeUnknownPrice;
 
@@ -162,28 +168,46 @@ export default async function SearchPage({ searchParams }: SearchPageProps) {
     <div className="min-h-screen bg-[#fafaf9] text-zinc-900">
       <Header isAuthenticated={Boolean(user)} userEmail={user?.email} />
       <main className="mx-auto w-full max-w-7xl px-4 py-6 sm:px-6 sm:py-8 lg:px-8">
+        {home && (
+          <div
+            role="group"
+            aria-label="Where to search"
+            data-testid="location-scope"
+            className="mb-4 inline-flex rounded-full border border-zinc-200 bg-white p-0.5 text-xs font-semibold"
+          >
+            <Link
+              href={shortcutHref(resolvedParams, { near: '1' })}
+              data-testid="scope-near"
+              aria-pressed={nearActive}
+              className={`rounded-full px-3 py-1 transition ${
+                nearActive
+                  ? 'bg-zinc-900 text-white'
+                  : 'text-zinc-600 hover:text-zinc-900'
+              }`}
+            >
+              Within {radiusMiles} mi of {home.label}
+            </Link>
+            <Link
+              href={shortcutHref(resolvedParams, { near: '0' })}
+              data-testid="scope-anywhere"
+              aria-pressed={!nearActive}
+              className={`rounded-full px-3 py-1 transition ${
+                !nearActive
+                  ? 'bg-zinc-900 text-white'
+                  : 'text-zinc-600 hover:text-zinc-900'
+              }`}
+            >
+              Anywhere
+            </Link>
+          </div>
+        )}
         {user && (
           <div
             data-testid="preference-shortcuts"
             className="mb-4 flex flex-wrap items-center gap-2 text-xs"
           >
             <span className="font-semibold text-zinc-500">My preferences:</span>
-            {home ? (
-              <Link
-                href={shortcutHref(resolvedParams, {
-                  near: nearActive ? null : '1',
-                })}
-                data-testid="shortcut-near"
-                aria-pressed={nearActive}
-                className={`rounded-full border px-3 py-1 font-semibold transition ${
-                  nearActive
-                    ? 'border-zinc-900 bg-zinc-900 text-white'
-                    : 'border-zinc-200 bg-white text-zinc-700 hover:border-zinc-300'
-                }`}
-              >
-                Within {radiusMiles} mi of {home.label}
-              </Link>
-            ) : (
+            {!home && (
               <Link
                 href="/preferences"
                 data-testid="shortcut-set-home"

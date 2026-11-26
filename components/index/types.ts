@@ -86,6 +86,8 @@ export interface IndexEventItem {
   maxPrice?: number | null;
   currency?: string | null;
   ticketUrl?: string | null;
+  /** The show's page on the venue/promoter site, used when there is no ticket URL. */
+  officialUrl?: string | null;
   presaleDate?: string | null;
   genre?: string | null;
   /** All event-level genres (primary first). */
@@ -280,6 +282,7 @@ function mapCanonicalToIndexBase(
     maxPrice: canonical.maxPrice,
     currency: canonical.currency,
     ticketUrl: canonical.ticketUrl,
+    officialUrl: canonical.officialUrl ?? null,
     presaleDate: (canonicalAny.presaleDate as string) || null,
     genre: (canonicalAny.genre as string) || null,
     genres: Array.isArray(canonicalAny.genres)
