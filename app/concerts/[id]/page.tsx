@@ -9,6 +9,7 @@ import {
 import { getAuthenticatedUser } from '@/lib/auth/session';
 import { SupabaseCatalogRepository } from '@/lib/repositories/catalog-repository';
 import { scoreEventForUser } from '@/lib/recommendation/service';
+import { resolveVenueLink } from '@/lib/events/venue-link';
 import { isValidSpotifyArtistId } from '@/lib/spotify/embed';
 import { getHomeLocation } from '@/lib/location/server';
 import { ConcertDetailClient } from '@/components/index/ConcertDetailClient';
@@ -223,6 +224,14 @@ export default async function ConcertDetailPage({
     }
   }
 
+  const venueLink = resolveVenueLink({
+    venueName: eventDetail.venue?.name,
+    city: eventDetail.venue?.city ?? eventDetail.city,
+    region: eventDetail.venue?.region ?? eventDetail.region,
+    venueWebsite: eventDetail.venue?.website,
+    sourceUrls: eventDetail.sources.map((s) => s.sourceUrl),
+  });
+
   return (
     <div className="min-h-screen bg-[#fafaf9] text-zinc-900">
       <Header isAuthenticated={Boolean(user)} userEmail={user?.email} />
@@ -232,6 +241,7 @@ export default async function ConcertDetailPage({
           relatedEvents={relatedEvents}
           festivalDays={festivalDays}
           homeLocation={home ? { lat: home.lat, lng: home.lng } : null}
+          venueLink={venueLink}
         />
       </main>
     </div>

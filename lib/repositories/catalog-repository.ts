@@ -625,6 +625,7 @@ export class SupabaseCatalogRepository implements ICatalogRepository {
             imageUrl: venue.imageUrl ?? null,
             lat: venue.lat ?? null,
             lng: venue.lng ?? null,
+            website: venue.website ?? null,
           }
         : null,
       ticketLinks,

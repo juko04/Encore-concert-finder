@@ -3,7 +3,14 @@
 import { SupportActsLine } from '@/components/index/SupportActsLine';
 import { GenreBadge } from './GenreBadge';
 import { eventGenreList } from '@/lib/genres/catalog-genres';
-import React, { useState, useMemo } from 'react';
+import React, {
+  useState,
+  useMemo,
+  useRef,
+  useLayoutEffect,
+  useEffect,
+} from 'react';
+import type { VenueLink } from '@/lib/events/venue-link';
 import Link from 'next/link';
 import type { IndexEventItem } from './types';
 import { toIndexEventItem } from './types';
@@ -46,6 +53,8 @@ export interface ConcertDetailClientProps {
   festivalDays?: Array<{ id: string; name: string; localStartDate: string }>;
   /** Viewer's home coordinates (when configured); omit distance when null. */
   homeLocation?: { lat: number; lng: number } | null;
+  /** Fallback destination for the ticket button when no ticket URL is known. */
+  venueLink?: VenueLink | null;
   initialPreferences?: Array<{
     artistId: string;
     level: 'favorite' | 'like' | 'ignore';
@@ -64,6 +73,7 @@ export function ConcertDetailClient({
   relatedEvents: rawRelated = [],
   festivalDays = [],
   homeLocation = null,
+  venueLink = null,
   initialPreferences = [],
   onSetPreference,
   onBack,
@@ -79,7 +89,17 @@ export function ConcertDetailClient({
     useWatchlist();
 
   const [preferences, setPreferences] = useState(initialPreferences);
-  const [showFactorDrawer, setShowFactorDrawer] = useState(false);
+  // Breakdown is shown inline by default when it fits beside the action column;
+  // an explicit toggle by the viewer always wins.
+  const [breakdownToggled, setBreakdownToggled] = useState<boolean | null>(
+    null,
+  );
+  const [breakdownFits, setBreakdownFits] = useState(true);
+  const showFactorDrawer = breakdownToggled ?? breakdownFits;
+  const infoColumnRef = useRef<HTMLDivElement>(null);
+  const actionColumnRef = useRef<HTMLDivElement>(null);
+  const breakdownRef = useRef<HTMLDivElement>(null);
+  const breakdownHeightRef = useRef(0);
 
   const isPersonalized = hasRealMatchScore(event.personalScore);
   const score = event.personalScore?.score ?? 50;
@@ -114,6 +134,38 @@ export function ConcertDetailClient({
       ? Math.round(distanceDetails.distanceMiles * 10) / 10
       : null;
   const isApproxDistance = distanceDetails?.precision === 'city_centroid';
+
+  const factors = event.personalScore?.factors;
+  const hasFactors = Boolean(factors);
+
+  const useIsoLayoutEffect =
+    typeof window === 'undefined' ? useEffect : useLayoutEffect;
+  useIsoLayoutEffect(() => {
+    const info = infoColumnRef.current;
+    const action = actionColumnRef.current;
+    if (!info || !action || !hasFactors) return;
+    const measure = () => {
+      const breakdown = breakdownRef.current;
+      const visibleHeight = breakdown?.offsetHeight ?? 0;
+      if (visibleHeight > 0) breakdownHeightRef.current = visibleHeight;
+      // Columns stacked (narrow screens): no empty space beside the actions.
+      const sideBySide = action.offsetLeft > info.offsetLeft;
+      const infoWithout = info.offsetHeight - visibleHeight;
+      setBreakdownFits(
+        sideBySide &&
+          infoWithout + breakdownHeightRef.current <= action.offsetHeight + 8,
+      );
+    };
+    measure();
+    if (typeof ResizeObserver === 'undefined') {
+      window.addEventListener('resize', measure);
+      return () => window.removeEventListener('resize', measure);
+    }
+    const observer = new ResizeObserver(measure);
+    observer.observe(info);
+    observer.observe(action);
+    return () => observer.disconnect();
+  }, [hasFactors]);
 
   const handlePreferenceChange = (
     artistId: string,
@@ -172,7 +224,10 @@ export function ConcertDetailClient({
         />
 
         <div className="flex flex-col justify-between gap-6 lg:flex-row lg:items-start">
-          <div className="max-w-3xl space-y-4">
+          <div
+            ref={infoColumnRef}
+            className="min-w-0 max-w-3xl flex-1 space-y-4"
+          >
             {/* Badges */}
             <div className="flex flex-wrap items-center gap-2">
               {statusBadge && (
@@ -274,10 +329,34 @@ export function ConcertDetailClient({
                 </div>
               </div>
             </div>
+
+            {/* Personalized Factor Breakdown (inline when it fits) */}
+            {factors && (
+              <div
+                ref={breakdownRef}
+                data-testid="factor-breakdown"
+                className={`border-t border-zinc-100 pt-5 ${
+                  breakdownToggled === true
+                    ? 'block'
+                    : breakdownToggled === false || !breakdownFits
+                      ? 'hidden'
+                      : 'hidden lg:block'
+                }`}
+              >
+                <FactorBreakdown
+                  factors={factors}
+                  score={score}
+                  isSuppressed={isDisliked}
+                />
+              </div>
+            )}
           </div>
 
           {/* Action Box: Direct Ticket Link + Save + Alert */}
-          <div className="flex shrink-0 flex-col gap-2.5 border-t border-zinc-100 pt-6 sm:w-72 lg:border-l lg:border-t-0 lg:pl-8 lg:pt-0">
+          <div
+            ref={actionColumnRef}
+            className="flex shrink-0 flex-col gap-2.5 border-t border-zinc-100 pt-6 sm:w-72 lg:border-l lg:border-t-0 lg:pl-8 lg:pt-0"
+          >
             <EventImage
               event={event}
               className="aspect-[4/3] w-full rounded-xl"
@@ -304,6 +383,30 @@ export function ConcertDetailClient({
               (event.minPrice === 0 && event.maxPrice === 0) ? (
               <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-center text-xs font-semibold text-emerald-800">
                 Free Admission · No Advance Ticket Required
+              </div>
+            ) : venueLink ? (
+              <div className="space-y-1">
+                <a
+                  href={venueLink.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  data-testid="venue-link-button"
+                  className="shadow-xs inline-flex w-full items-center justify-center gap-2 rounded-xl bg-zinc-900 px-5 py-3 text-sm font-semibold text-white transition-transform duration-150 ease-out hover:bg-zinc-800 active:scale-[0.97]"
+                >
+                  <span>
+                    {venueLink.kind === 'venue_search'
+                      ? 'Find Venue Website'
+                      : 'Tickets on Venue Site'}
+                  </span>
+                  <ArrowUpRightIcon className="h-4 w-4" />
+                </a>
+                <p className="text-center text-[11px] text-zinc-500">
+                  {venueLink.kind === 'event_page'
+                    ? 'No direct ticket link · opens the venue listing'
+                    : venueLink.kind === 'venue_website'
+                      ? 'No direct ticket link · opens the venue website'
+                      : 'No ticket link or venue website on file'}
+                </p>
               </div>
             ) : (
               <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 text-center text-xs font-semibold text-zinc-600">
@@ -357,10 +460,11 @@ export function ConcertDetailClient({
             )}
 
             {/* Factor breakdown toggle button */}
-            {event.personalScore?.factors && (
+            {factors && (
               <button
                 type="button"
-                onClick={() => setShowFactorDrawer(!showFactorDrawer)}
+                aria-expanded={showFactorDrawer}
+                onClick={() => setBreakdownToggled(!showFactorDrawer)}
                 className="mt-1 inline-flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-zinc-200 px-3 py-1.5 text-xs font-medium text-zinc-600 hover:bg-zinc-50"
               >
                 <SlidersIcon className="h-3.5 w-3.5 text-zinc-500" />
@@ -373,46 +477,6 @@ export function ConcertDetailClient({
             )}
           </div>
         </div>
-
-        {/* Personalized Factor Breakdown Drawer */}
-        {showFactorDrawer && event.personalScore?.factors && (
-          <div className="animate-in fade-in slide-in-from-top-2 mt-6 border-t border-zinc-100 pt-6 duration-150">
-            <h3 className="text-sm font-bold text-zinc-900">
-              Personalized Recommendation Factor Breakdown
-            </h3>
-            <p className="mt-0.5 text-xs text-zinc-500">
-              Deterministic scoring factors across artist affinity, geographic
-              distance, price alignment, and timing.
-            </p>
-
-            <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-              {Object.entries(event.personalScore.factors).map(
-                ([factorName, factor]) => {
-                  if (!factor) return null;
-                  const factorTitle = `${factorName.charAt(0).toUpperCase()}${factorName.slice(1)} Fit`;
-                  return (
-                    <div
-                      key={factorName}
-                      className="rounded-2xl border border-zinc-200/80 bg-zinc-50/60 p-3.5"
-                    >
-                      <div className="flex items-center justify-between">
-                        <span className="text-xs font-semibold text-zinc-700">
-                          {factorTitle}
-                        </span>
-                        <span className="font-mono text-xs font-bold text-zinc-900">
-                          {factor.score}/100
-                        </span>
-                      </div>
-                      <p className="mt-1 text-[11px] leading-relaxed text-zinc-500">
-                        {factor.explanation}
-                      </p>
-                    </div>
-                  );
-                },
-              )}
-            </div>
-          </div>
-        )}
       </section>
 
       {/* Main 2-Column Section: Decision Guide (Why vs Considerations) + Lineup/Player */}
@@ -706,6 +770,92 @@ export function ConcertDetailClient({
 
       {/* Undo Toast */}
       <UndoToast undoStack={undoStack} onUndo={undo} />
+    </div>
+  );
+}
+
+const FACTOR_ORDER = ['artist', 'distance', 'price'] as const;
+const FACTOR_LABELS: Record<(typeof FACTOR_ORDER)[number], string> = {
+  artist: 'Artist Fit',
+  distance: 'Distance Fit',
+  price: 'Price Fit',
+};
+
+function formatPoints(value: number): string {
+  return Number.isInteger(value) ? String(value) : value.toFixed(1);
+}
+
+/** Shows each factor's score, its weight, and how they add up to the match %. */
+function FactorBreakdown({
+  factors,
+  score,
+  isSuppressed,
+}: {
+  factors: NonNullable<IndexEventItem['personalScore']>['factors'];
+  score: number;
+  isSuppressed: boolean;
+}) {
+  const rows = FACTOR_ORDER.flatMap((key) => {
+    const factor = factors?.[key];
+    if (!factor) return [];
+    const weight =
+      typeof factor.weight === 'number' && Number.isFinite(factor.weight)
+        ? factor.weight
+        : null;
+    // Same rounding as the scoring engine's weighted contribution.
+    const points =
+      weight === null ? null : Math.round((factor.score * weight) / 10) / 10;
+    return [{ key, factor, weight, points }];
+  });
+  const hasWeights = rows.length > 0 && rows.every((r) => r.points !== null);
+
+  return (
+    <div>
+      <h3 className="text-sm font-bold text-zinc-900">
+        How the {formatPoints(score)}% match is calculated
+      </h3>
+      <p className="mt-0.5 text-xs text-zinc-500">
+        {hasWeights
+          ? 'Each factor is scored 0–100, multiplied by its weight from your scoring settings, then added up.'
+          : 'Deterministic scoring factors across artist affinity, distance, and price.'}
+      </p>
+
+      <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
+        {rows.map(({ key, factor, weight, points }) => (
+          <div
+            key={key}
+            className="rounded-2xl border border-zinc-200/80 bg-zinc-50/60 p-3.5"
+          >
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-semibold text-zinc-700">
+                {FACTOR_LABELS[key]}
+              </span>
+              <span className="font-mono text-xs font-bold text-zinc-900">
+                {factor.score}/100
+              </span>
+            </div>
+            {weight !== null && points !== null && (
+              <div className="mt-1 font-mono text-[11px] tabular-nums text-zinc-600">
+                × {weight}% weight = {formatPoints(points)} pts
+              </div>
+            )}
+            <p className="mt-1 text-[11px] leading-relaxed text-zinc-500">
+              {factor.explanation}
+            </p>
+          </div>
+        ))}
+      </div>
+
+      {hasWeights && (
+        <p className="mt-3 font-mono text-[11px] tabular-nums text-zinc-600">
+          {rows.map((r) => formatPoints(r.points ?? 0)).join(' + ')} ={' '}
+          <span className="font-bold text-zinc-900">
+            {isSuppressed
+              ? '0 (suppressed: disliked artist)'
+              : `${formatPoints(score)}%`}
+          </span>
+        </p>
+      )}
     </div>
   );
 }

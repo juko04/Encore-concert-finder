@@ -501,6 +501,46 @@ describe('Index Components Unit Tests', () => {
       expect(screen.getByText('90/100')).toBeInTheDocument();
     });
 
+    it('shows factor weights and the sum, and falls back to the venue link without a ticket URL', () => {
+      const scored = {
+        ...MOCK_INDEX_ITEMS[0],
+        ticketUrl: null,
+        eventKind: 'concert' as const,
+        minPrice: null,
+        maxPrice: null,
+        personalScore: {
+          score: 51.5,
+          isPersonalized: true,
+          factors: {
+            artist: { score: 40, weight: 70, explanation: 'Unfamiliar' },
+            distance: { score: 100, weight: 17, explanation: 'Close' },
+            price: { score: 50, weight: 13, explanation: 'Neutral' },
+          },
+        },
+      };
+      render(
+        <ConcertDetailClient
+          event={scored}
+          venueLink={{
+            url: 'https://z2ent.com/events/detail/x',
+            kind: 'event_page',
+          }}
+        />,
+      );
+
+      const link = screen.getByTestId('venue-link-button');
+      expect(link).toHaveAttribute('href', 'https://z2ent.com/events/detail/x');
+      expect(link).toHaveTextContent('Tickets on Venue Site');
+      expect(
+        screen.queryByText(/Ticket Link Unavailable/),
+      ).not.toBeInTheDocument();
+
+      expect(screen.getByText('× 70% weight = 28 pts')).toBeInTheDocument();
+      expect(screen.getByText('× 17% weight = 17 pts')).toBeInTheDocument();
+      expect(screen.getByText('× 13% weight = 6.5 pts')).toBeInTheDocument();
+      expect(screen.getByText(/28 \+ 17 \+ 6\.5 =/)).toBeInTheDocument();
+    });
+
     it('uses homeLocation (with city centroid fallback) instead of hardcoded Denver and disambiguates duplicate festival dates', () => {
       const boulderNoCoords = {
         ...MOCK_INDEX_ITEMS[0],
