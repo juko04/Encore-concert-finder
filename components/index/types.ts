@@ -214,188 +214,32 @@ export function resolveInventoryStatus(
 }
 
 /**
- * Adapts either a CanonicalEventSummary or a ScoredEvent (or prototype object)
- * into a presentation-ready IndexEventItem.
+ * Maps the canonical event fields shared by every IndexEventItem branch (everything except
+ * scoring/personal fields). `inventoryStatus` is resolved by the caller because ScoredEvent
+ * inputs may carry their own.
  */
-export function toIndexEventItem(
-  input: CanonicalEventSummary | ScoredEvent | IndexEventItem,
-): IndexEventItem {
-  if (isIndexEventItem(input)) {
-    return input;
-  }
-
-  if (isScoredEvent(input)) {
-    const canonical = input.event;
-    const palette = getDeterministicPalette(canonical.id || canonical.title);
-    const headliner =
-      canonical.artists?.find((a) => a.billingPosition === 'headliner') ||
-      canonical.artists?.[0];
-
-    const inputAny = input as unknown as Record<string, unknown>;
-    const canonicalAny = canonical as unknown as Record<string, unknown>;
-
-    const inventoryStatus = resolveInventoryStatus(
-      (inputAny.inventoryStatus as string) ||
-        (canonicalAny.inventoryStatus as string) ||
-        (canonicalAny.ticketStatus as string),
-      canonical.status,
-    );
-
-    const personalScore: IndexPersonalScore = {
-      score: input.score,
-      isPersonalized: true,
-      isFavorite: input.matchedArtist?.isFavorite ?? false,
-      isDisliked:
-        input.isSuppressed || (input.matchedArtist?.isDisliked ?? false),
-      isExploratory: input.isExploratory ?? false,
-      matchReason: input.explanation,
-      factors: {
-        artist: {
-          score: input.factors.artist.score,
-          explanation: input.factors.artist.explanation,
-        },
-        distance: {
-          score: input.factors.distance.score,
-          explanation: input.factors.distance.explanation,
-        },
-        price: {
-          score: input.factors.price.score,
-          explanation: input.factors.price.explanation,
-        },
-      },
-    };
-
-    return {
-      id: canonical.id,
-      title: canonical.title,
-      headlinerName: headliner?.name || canonical.title,
-      artists: (canonical.artists || []).map((a) => ({
-        id: a.id,
-        name: a.name,
-        billingPosition: a.billingPosition,
-        spotifyArtistId: a.spotifyArtistId,
-        imageUrl: (a as { imageUrl?: string | null }).imageUrl ?? null,
-        genres: (a as { genres?: string[] }).genres ?? [],
-        affinity: (a as { affinity?: ArtistAffinity }).affinity,
-      })),
-      venueName: canonical.venueName,
-      venueId: canonical.venueId,
-      city: canonical.city,
-      region: canonical.region,
-      lat: canonical.lat,
-      lng: canonical.lng,
-      localStartDate: canonical.localStartDate,
-      festivalGroupEndDate: canonical.festivalGroupEndDate ?? null,
-      startsAt: canonical.startsAt,
-      doorTime: (canonicalAny.doorTime as string) || null,
-      timezone: canonical.timezone,
-      startTimePrecision: canonical.startTimePrecision,
-      status: canonical.status,
-      eventKind: canonical.eventKind,
-      inventoryStatus,
-      minPrice: canonical.minPrice,
-      maxPrice: canonical.maxPrice,
-      currency: canonical.currency,
-      ticketUrl: canonical.ticketUrl,
-      presaleDate: (canonicalAny.presaleDate as string) || null,
-      genre: (canonicalAny.genre as string) || null,
-      genres: Array.isArray(canonicalAny.genres)
-        ? (canonicalAny.genres as string[])
-        : [],
-      genresInferred: canonicalAny.genresSource === 'inferred_title',
-      subgenres: Array.isArray(canonicalAny.subgenres)
-        ? (canonicalAny.subgenres as string[])
-        : undefined,
-      ageRestriction: (canonicalAny.ageRestriction as string) || undefined,
-      imageUrl:
-        (canonicalAny.imageUrl as string) ||
-        (headliner as { imageUrl?: string | null })?.imageUrl ||
-        null,
-      venueImageUrl:
-        ((canonical.venue as { imageUrl?: string | null } | null)
-          ?.imageUrl as string) || null,
-      ticketRemainingPercent:
-        typeof canonicalAny.ticketRemainingPercent === 'number'
-          ? canonicalAny.ticketRemainingPercent
-          : null,
-      posterColor: (canonicalAny.posterColor as string) || palette.primary,
-      posterSecondaryColor:
-        (canonicalAny.posterSecondaryColor as string) || palette.secondary,
-      spotifyPreviewTrack:
-        (canonicalAny.spotifyPreviewTrack as IndexTrackPreview) || null,
-      whyItSuitsYou: Array.isArray(canonicalAny.whyItSuitsYou)
-        ? (canonicalAny.whyItSuitsYou as string[])
-        : undefined,
-      considerations: Array.isArray(canonicalAny.considerations)
-        ? (canonicalAny.considerations as string[])
-        : undefined,
-      vibeTags: Array.isArray(canonicalAny.vibeTags)
-        ? (canonicalAny.vibeTags as string[])
-        : undefined,
-      description: (canonicalAny.description as string) || null,
-      personalScore,
-      sourceName: canonical.sourceName,
-      score: input.score,
-      scoreExplanation: input.explanation,
-      isFavorite: input.matchedArtist?.isFavorite ?? false,
-      isDisliked:
-        input.isSuppressed || (input.matchedArtist?.isDisliked ?? false),
-      isSuppressed: input.isSuppressed,
-      suppressionReason: input.suppressionReason,
-      matchedArtistName: input.matchedArtist?.name,
-      isExploratory: input.isExploratory,
-      factors: {
-        artist: {
-          score: input.factors.artist.score,
-          weight: input.factors.artist.weight,
-          explanation: input.factors.artist.explanation,
-        },
-        distance: {
-          score: input.factors.distance.score,
-          weight: input.factors.distance.weight,
-          explanation: input.factors.distance.explanation,
-        },
-        price: {
-          score: input.factors.price.score,
-          weight: input.factors.price.weight,
-          explanation: input.factors.price.explanation,
-        },
-      },
-    };
-  }
-
-  // Pure CanonicalEventSummary (or enriched canonical)
-  const canonical = input;
+function mapCanonicalToIndexBase(
+  canonical: CanonicalEventSummary,
+  inventoryStatus: IndexInventoryStatus,
+): Omit<
+  IndexEventItem,
+  | 'personalScore'
+  | 'sourceName'
+  | 'score'
+  | 'scoreExplanation'
+  | 'isFavorite'
+  | 'isDisliked'
+  | 'isSuppressed'
+  | 'suppressionReason'
+  | 'matchedArtistName'
+  | 'isExploratory'
+  | 'factors'
+> {
   const palette = getDeterministicPalette(canonical.id || canonical.title);
   const headliner =
     canonical.artists?.find((a) => a.billingPosition === 'headliner') ||
     canonical.artists?.[0];
-
   const canonicalAny = canonical as unknown as Record<string, unknown>;
-
-  const inventoryStatus = resolveInventoryStatus(
-    (canonicalAny.inventoryStatus as string) ||
-      (canonicalAny.ticketStatus as string),
-    canonical.status,
-  );
-
-  let personalScore: IndexPersonalScore | undefined;
-  if (canonicalAny.samplePersonalScore) {
-    const sps = canonicalAny.samplePersonalScore as {
-      authenticatedScore?: number;
-      guestScore?: number;
-      affinityType?: string;
-      matchReason?: string;
-    };
-    personalScore = {
-      score: sps.authenticatedScore ?? sps.guestScore ?? 50,
-      isPersonalized: sps.authenticatedScore !== undefined,
-      isFavorite: sps.affinityType === 'favorite',
-      isDisliked: sps.affinityType === 'disliked',
-      isExploratory: sps.affinityType === 'exploratory',
-      matchReason: sps.matchReason,
-    };
-  }
 
   return {
     id: canonical.id,
@@ -465,6 +309,119 @@ export function toIndexEventItem(
       ? (canonicalAny.vibeTags as string[])
       : undefined,
     description: (canonicalAny.description as string) || null,
+  };
+}
+
+/**
+ * Adapts either a CanonicalEventSummary or a ScoredEvent (or prototype object)
+ * into a presentation-ready IndexEventItem.
+ */
+export function toIndexEventItem(
+  input: CanonicalEventSummary | ScoredEvent | IndexEventItem,
+): IndexEventItem {
+  if (isIndexEventItem(input)) {
+    return input;
+  }
+
+  if (isScoredEvent(input)) {
+    const canonical = input.event;
+    const inputAny = input as unknown as Record<string, unknown>;
+    const canonicalAny = canonical as unknown as Record<string, unknown>;
+
+    const inventoryStatus = resolveInventoryStatus(
+      (inputAny.inventoryStatus as string) ||
+        (canonicalAny.inventoryStatus as string) ||
+        (canonicalAny.ticketStatus as string),
+      canonical.status,
+    );
+
+    const personalScore: IndexPersonalScore = {
+      score: input.score,
+      isPersonalized: true,
+      isFavorite: input.matchedArtist?.isFavorite ?? false,
+      isDisliked:
+        input.isSuppressed || (input.matchedArtist?.isDisliked ?? false),
+      isExploratory: input.isExploratory ?? false,
+      matchReason: input.explanation,
+      factors: {
+        artist: {
+          score: input.factors.artist.score,
+          explanation: input.factors.artist.explanation,
+        },
+        distance: {
+          score: input.factors.distance.score,
+          explanation: input.factors.distance.explanation,
+        },
+        price: {
+          score: input.factors.price.score,
+          explanation: input.factors.price.explanation,
+        },
+      },
+    };
+
+    return {
+      ...mapCanonicalToIndexBase(canonical, inventoryStatus),
+      personalScore,
+      sourceName: canonical.sourceName,
+      score: input.score,
+      scoreExplanation: input.explanation,
+      isFavorite: input.matchedArtist?.isFavorite ?? false,
+      isDisliked:
+        input.isSuppressed || (input.matchedArtist?.isDisliked ?? false),
+      isSuppressed: input.isSuppressed,
+      suppressionReason: input.suppressionReason,
+      matchedArtistName: input.matchedArtist?.name,
+      isExploratory: input.isExploratory,
+      factors: {
+        artist: {
+          score: input.factors.artist.score,
+          weight: input.factors.artist.weight,
+          explanation: input.factors.artist.explanation,
+        },
+        distance: {
+          score: input.factors.distance.score,
+          weight: input.factors.distance.weight,
+          explanation: input.factors.distance.explanation,
+        },
+        price: {
+          score: input.factors.price.score,
+          weight: input.factors.price.weight,
+          explanation: input.factors.price.explanation,
+        },
+      },
+    };
+  }
+
+  // Pure CanonicalEventSummary (or enriched canonical)
+  const canonical = input;
+  const canonicalAny = canonical as unknown as Record<string, unknown>;
+
+  const inventoryStatus = resolveInventoryStatus(
+    (canonicalAny.inventoryStatus as string) ||
+      (canonicalAny.ticketStatus as string),
+    canonical.status,
+  );
+
+  let personalScore: IndexPersonalScore | undefined;
+  if (canonicalAny.samplePersonalScore) {
+    const sps = canonicalAny.samplePersonalScore as {
+      authenticatedScore?: number;
+      guestScore?: number;
+      affinityType?: string;
+      matchReason?: string;
+    };
+    personalScore = {
+      score: sps.authenticatedScore ?? sps.guestScore ?? 50,
+      isPersonalized: sps.authenticatedScore !== undefined,
+      isFavorite: sps.affinityType === 'favorite',
+      isDisliked: sps.affinityType === 'disliked',
+      isExploratory: sps.affinityType === 'exploratory',
+      matchReason: sps.matchReason,
+    };
+  }
+
+  return {
+    ...mapCanonicalToIndexBase(canonical, inventoryStatus),
     personalScore,
     sourceName: canonical.sourceName,
     score: personalScore?.score,

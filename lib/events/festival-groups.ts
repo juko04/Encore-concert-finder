@@ -27,6 +27,10 @@ export function festivalBaseName(name: string): string {
   return stripped.trim().length > 0 ? stripped : lower;
 }
 
+function compareCodePoints(a: string, b: string): number {
+  return a < b ? -1 : a > b ? 1 : 0;
+}
+
 function dayNumber(isoDate: string): number {
   return Math.floor(Date.parse(`${isoDate}T00:00:00Z`) / 86_400_000);
 }
@@ -64,10 +68,12 @@ export function groupFestivalDays<T extends GroupableEvent>(
 
   const groups: Array<{ primary: T; members: T[]; endDate: string }> = [];
   for (const list of buckets.values()) {
+    // Code-point order on ISO dates and (lower-case hex) uuids == Postgres' ORDER BY, unlike a
+    // locale-aware compare, so ties pick the same primary as refresh_festival_groups.
     list.sort(
       (a, b) =>
-        a.localStartDate.localeCompare(b.localStartDate) ||
-        a.id.localeCompare(b.id),
+        compareCodePoints(a.localStartDate, b.localStartDate) ||
+        compareCodePoints(a.id, b.id),
     );
     let current: T[] = [];
     let currentEnd = '';

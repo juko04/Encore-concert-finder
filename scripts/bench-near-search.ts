@@ -21,8 +21,6 @@
  *   reads; it never writes. The local catalog is small, so the per-batch cost is reported and
  *   larger volumes are EXTRAPOLATED (labelled as such), not measured.
  */
-import fs from 'node:fs';
-import path from 'node:path';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { assertSafeDatabaseTarget } from '@/lib/supabase/destination-guard';
 import { SupabaseCatalogRepository } from '@/lib/repositories/catalog-repository';
@@ -35,26 +33,10 @@ import {
 import { CITIES } from '@/lib/location/cities';
 import type { CanonicalEventSummary } from '@/lib/domain/catalog';
 import type { EventListFilters } from '@/lib/repositories/interfaces';
+import { loadEnvLocal } from '@/lib/utils/load-env-local';
 
 const HOME = { lat: 39.7392, lng: -104.9903 };
 const RADIUS = 25;
-
-function loadEnvLocal(): void {
-  const envPath = path.resolve(process.cwd(), '.env.local');
-  if (!fs.existsSync(envPath)) return;
-  for (const line of fs.readFileSync(envPath, 'utf-8').split('\n')) {
-    const t = line.trim();
-    if (!t || t.startsWith('#')) continue;
-    const i = t.indexOf('=');
-    if (i <= 0) continue;
-    const key = t.slice(0, i).trim();
-    const val = t
-      .slice(i + 1)
-      .trim()
-      .replace(/^["']|["']$/g, '');
-    if (!process.env[key]) process.env[key] = val;
-  }
-}
 
 const BENCH_VENUE_ID = '5ea4c4b0-0000-4000-8000-000000000001';
 const BENCH_EVENT_PREFIX = '5ea4c4b0-0000-4000-8001-';

@@ -2,8 +2,7 @@ import React from 'react';
 import { createClient } from '@/lib/supabase/server';
 import { getAuthenticatedUser } from '@/lib/auth/session';
 import { SupabaseCatalogRepository } from '@/lib/repositories/catalog-repository';
-import { loadArtistAffinityResolver } from '@/lib/recommendation/artist-affinity-server';
-import { annotateEventsWithArtistAffinity } from '@/lib/recommendation/artist-affinity';
+import { annotateEventsForUser } from '@/lib/recommendation/artist-affinity-server';
 import { Header } from '@/components/index/Header';
 import { SavedWatchlistClient } from '@/components/index/SavedWatchlistClient';
 import type { CanonicalEventSummary } from '@/lib/domain/catalog';
@@ -18,12 +17,12 @@ export default async function SavedPage() {
   let events: CanonicalEventSummary[] = [];
   try {
     events = await catalogRepo.listEvents({ limit: 300 });
-    if (user && events.length > 0) {
-      events = annotateEventsWithArtistAffinity(
-        events,
-        await loadArtistAffinityResolver(user.id, supabase, catalogRepo),
-      );
-    }
+    events = await annotateEventsForUser(
+      events,
+      user?.id,
+      supabase,
+      catalogRepo,
+    );
   } catch (err) {
     console.error('[SavedPage] Error loading catalog events:', err);
     events = [];

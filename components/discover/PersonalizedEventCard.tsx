@@ -3,6 +3,10 @@ import type { ScoredEvent } from '@/lib/recommendation/types';
 import { formatEventPriceDisplay } from '@/lib/utils/price-formatting';
 import { formatSourceBadgeName } from '@/components/catalog/EventCard';
 import { isValidHttpUrl } from '@/lib/utils/url';
+import {
+  formatEventShowTime,
+  getDisplayVenueName,
+} from '@/components/catalog/event-display';
 
 export { isValidHttpUrl };
 
@@ -34,13 +38,8 @@ export function PersonalizedEventCard({
 
   const title = event.title || 'Untitled Event';
   const rawVenueName = event.venueName;
-  const isUnknownVenue =
-    !rawVenueName ||
-    rawVenueName.trim().length === 0 ||
-    rawVenueName.trim().toLowerCase() === 'unknown venue' ||
-    rawVenueName.trim().toLowerCase() === 'venue tba' ||
-    rawVenueName.trim().toLowerCase() === 'venue tba / unknown';
-  const displayVenueName = isUnknownVenue ? null : rawVenueName.trim();
+  const displayVenueName = getDisplayVenueName(rawVenueName);
+  const isUnknownVenue = displayVenueName === null;
 
   const city = event.city;
   const region = event.region;
@@ -48,22 +47,7 @@ export function PersonalizedEventCard({
   const isPostponed = event.status === 'postponed';
 
   // Format date and time
-  const renderTime = () => {
-    if (event.startTimePrecision === 'date_only' || !event.startsAt) {
-      return 'Time TBA (Date confirmed)';
-    }
-
-    try {
-      const d = new Date(event.startsAt);
-      return d.toLocaleTimeString('en-US', {
-        timeZone: event.timezone,
-        hour: 'numeric',
-        minute: '2-digit',
-      });
-    } catch {
-      return 'Time TBA (Date confirmed)';
-    }
-  };
+  const renderTime = () => formatEventShowTime(event);
 
   // Score tier styling (Score is strictly NOT rendered as a percentage)
   const scoreTierClass =

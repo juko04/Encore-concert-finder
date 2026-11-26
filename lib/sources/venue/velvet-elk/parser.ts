@@ -1,3 +1,4 @@
+import { buildVenueProvenance } from '../adapter-helpers';
 import * as cheerio from 'cheerio';
 import type {
   CandidateArtist,
@@ -400,17 +401,10 @@ export function parseVelvetElkEvents(
           isCanceled,
           status: isCanceled ? 'cancelled' : 'scheduled',
         },
-        provenance: {
-          sourceId: context.sourceId,
-          sourceType: 'venue',
-          acquisitionMethod: 'html_http',
+        provenance: buildVenueProvenance(context, {
           sourceUrl: context.sourceUrl || baseUrl,
-          rawIngestId: context.rawIngestId,
-          fetchedAt: context.fetchedAt ?? new Date().toISOString(),
-          contentHash: context.contentHash ?? '',
-          parserVersion: context.parserVersion ?? '1.0.0',
           confidence: 0.98,
-        },
+        }),
       };
 
       candidates.push(candidate);
@@ -490,17 +484,10 @@ export function parseVelvetElkEvents(
         status: isCanceled ? 'cancelled' : 'scheduled',
         eventUrl,
       },
-      provenance: {
-        sourceId: context.sourceId,
-        sourceType: 'venue',
-        acquisitionMethod: 'html_http',
+      provenance: buildVenueProvenance(context, {
         sourceUrl: eventUrl || context.sourceUrl || baseUrl,
-        rawIngestId: context.rawIngestId,
-        fetchedAt: context.fetchedAt ?? new Date().toISOString(),
-        contentHash: context.contentHash ?? '',
-        parserVersion: context.parserVersion ?? '1.0.0',
         confidence: 0.95,
-      },
+      }),
     };
 
     candidates.push(candidate);

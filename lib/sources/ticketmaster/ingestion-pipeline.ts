@@ -11,7 +11,7 @@ import type {
   ISourceRepository,
 } from '@/lib/repositories/interfaces';
 import { fillInferredEventGenres } from '@/lib/genres/enrich-event-genres';
-import { isPlausibleCoordinate } from '@/lib/location/radius';
+import { isPlausibleCoordinate } from '@/lib/location/coordinates';
 import { getCandidateVenueCoordinates } from './venue-location';
 import { TicketmasterDiscoveryAdapter } from './adapter';
 import { overlayTicketmasterImages } from './parser';

@@ -6,6 +6,7 @@ import type { EventSourceAdapter, RawIngest } from '@/lib/domain/source';
 import { CanonicalizationCoordinator } from '@/lib/entity-resolution/canonicalization-coordinator';
 import { fillInferredEventGenres } from '@/lib/genres/enrich-event-genres';
 import type { ISourceRepository } from '@/lib/repositories/interfaces';
+import { sha256Hex } from '@/lib/utils/content-hash';
 import { CervantesVenueAdapter } from './cervantes/adapter';
 import { IndependentVenueAdapter } from './independent-venue-group/adapter';
 import { VelvetElkAdapter } from './velvet-elk/adapter';
@@ -117,10 +118,7 @@ export async function runVenueIngestion(
       rawHtml = fs.readFileSync(fixturePath, 'utf-8');
     }
 
-    const contentHash = crypto
-      .createHash('sha256')
-      .update(rawHtml)
-      .digest('hex');
+    const contentHash = sha256Hex(rawHtml);
 
     rawIngests = [
       {

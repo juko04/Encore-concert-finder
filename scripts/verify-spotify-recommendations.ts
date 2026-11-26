@@ -20,8 +20,6 @@
  *   npx vite-node --config vitest.config.ts scripts/verify-spotify-recommendations.ts -- --preset=balanced
  */
 
-import fs from 'node:fs';
-import path from 'node:path';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { assertSafeDatabaseTarget } from '@/lib/supabase/destination-guard';
 import { SupabaseCatalogRepository } from '@/lib/repositories/catalog-repository';
@@ -32,6 +30,7 @@ import { SpotifyArtistMatcher } from '@/lib/entity-resolution/spotify-artist-mat
 import { getPersonalizedDiscoverData } from '@/lib/recommendation/service';
 import type { SpotifyTopArtist } from '@/lib/domain/spotify';
 import type { ScoredEvent, ScoringPreset } from '@/lib/recommendation/types';
+import { loadEnvLocal } from '@/lib/utils/load-env-local';
 
 export const TARGET_USER_ID = '7e0a5bed-fe7f-40cf-814d-72a944df7965';
 export const REFERENCE_DATE = '2026-11-12';
@@ -40,31 +39,6 @@ interface CliOptions {
   userId?: string;
   preset?: ScoringPreset;
   referenceDate?: string;
-}
-
-function loadEnvLocal(): void {
-  const envPath = path.resolve(process.cwd(), '.env.local');
-  if (fs.existsSync(envPath)) {
-    const lines = fs.readFileSync(envPath, 'utf-8').split('\n');
-    for (const line of lines) {
-      const trimmed = line.trim();
-      if (!trimmed || trimmed.startsWith('#')) continue;
-      const eqIdx = trimmed.indexOf('=');
-      if (eqIdx > 0) {
-        const key = trimmed.slice(0, eqIdx).trim();
-        let val = trimmed.slice(eqIdx + 1).trim();
-        if (
-          (val.startsWith('"') && val.endsWith('"')) ||
-          (val.startsWith("'") && val.endsWith("'"))
-        ) {
-          val = val.slice(1, -1);
-        }
-        if (!process.env[key]) {
-          process.env[key] = val;
-        }
-      }
-    }
-  }
 }
 
 function parseCliArgs(): CliOptions {

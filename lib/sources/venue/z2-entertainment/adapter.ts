@@ -1,4 +1,3 @@
-import crypto from 'node:crypto';
 import type { EventCandidate } from '@/lib/domain/event-candidate';
 import type {
   AcquisitionMethod,
@@ -7,6 +6,11 @@ import type {
   SourceType,
 } from '@/lib/domain/source';
 import { VenueHttpClient } from '../http-client';
+import {
+  buildVenueParseContext,
+  buildVenueRawIngest,
+  dedupeBy,
+} from '../adapter-helpers';
 import type { IVenueSourceAdapter, VenueSourceConfig } from '../types';
 import { extractZ2NextPageUrl, parseZ2Events } from './parser';
 import type { Z2AdapterOptions } from './types';
@@ -56,24 +60,15 @@ export class Z2EntertainmentAdapter implements IVenueSourceAdapter {
 
       const response = await this.httpClient.get(currentUrl);
 
-      const contentHash = crypto
-        .createHash('sha256')
-        .update(response.body)
-        .digest('hex');
-
-      const ingest: RawIngest = {
-        sourceId: context.sourceId,
-        sourceUrl: currentUrl,
-        acquisitionMethod: this.acquisitionMethod,
-        fetchedAt: response.fetchedAt,
-        contentHash,
-        contentType: response.contentType,
-        rawContent: response.body,
-        httpStatus: response.status,
-        parserVersion: this.parserVersion,
-      };
-
-      rawIngests.push(ingest);
+      rawIngests.push(
+        buildVenueRawIngest({
+          context,
+          sourceUrl: currentUrl,
+          response,
+          acquisitionMethod: this.acquisitionMethod,
+          parserVersion: this.parserVersion,
+        }),
+      );
 
       // Check for next page URL if more pages allowed
       if (pageCount < this.maxPages && response.body) {
@@ -88,34 +83,24 @@ export class Z2EntertainmentAdapter implements IVenueSourceAdapter {
 
   async parse(rawIngests: RawIngest[]): Promise<EventCandidate[]> {
     const candidates: EventCandidate[] = [];
-    const seenEventKeys = new Set<string>();
 
     for (const ingest of rawIngests) {
       if (!ingest.rawContent) continue;
 
       const parsed = parseZ2Events(ingest.rawContent, {
-        sourceId: ingest.sourceId,
-        rawIngestId: ingest.id,
-        sourceUrl: ingest.sourceUrl,
-        fetchedAt: ingest.fetchedAt,
-        contentHash: ingest.contentHash,
-        parserVersion: ingest.parserVersion || this.parserVersion,
+        ...buildVenueParseContext(ingest, this.parserVersion),
         defaultVenueConfig: this.config,
       });
 
-      for (const candidate of parsed) {
-        const key =
-          candidate.sourceEventId ||
-          `${candidate.venueName}|${candidate.localStartDate}|${candidate.title.toLowerCase()}`;
-
-        if (!seenEventKeys.has(key)) {
-          seenEventKeys.add(key);
-          candidates.push(candidate);
-        }
-      }
+      candidates.push(...parsed);
     }
 
-    return candidates;
+    return dedupeBy(
+      candidates,
+      (candidate) =>
+        candidate.sourceEventId ||
+        `${candidate.venueName}|${candidate.localStartDate}|${candidate.title.toLowerCase()}`,
+    );
   }
 
   async crawl(

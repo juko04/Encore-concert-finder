@@ -3,6 +3,7 @@ import type { ICatalogRepository } from '@/lib/repositories/interfaces';
 import { SupabaseUserPreferenceRepository } from '@/lib/repositories/user-preference-repository';
 import { getActiveSpotifyTopArtistsForUser } from '@/lib/sources/spotify/affinity-service';
 import {
+  annotateEventsWithArtistAffinity,
   createArtistAffinityResolver,
   type ArtistAffinityResolver,
 } from './artist-affinity';
@@ -31,4 +32,21 @@ export async function loadArtistAffinityResolver(
     console.error('[artist-affinity] could not load user signals:', err);
     return NONE;
   }
+}
+
+/**
+ * Marks the signed-in user's liked artists on `events`. Signals are loaded fresh for this
+ * call (never cached across requests or users); guests get the events back unannotated.
+ */
+export async function annotateEventsForUser<T>(
+  events: readonly T[],
+  userId: string | null | undefined,
+  client: SupabaseClient,
+  catalogRepo: ICatalogRepository,
+): Promise<T[]> {
+  if (!userId || events.length === 0) return [...events];
+  return annotateEventsWithArtistAffinity(
+    events,
+    await loadArtistAffinityResolver(userId, client, catalogRepo),
+  );
 }

@@ -12,33 +12,12 @@
  *   npm run reprocess:name-only -- --persist
  */
 
-import fs from 'node:fs';
-import path from 'node:path';
 import { assertSafeDatabaseTarget } from '@/lib/supabase/destination-guard';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { SupabaseCatalogRepository } from '@/lib/repositories/catalog-repository';
 import { SupabaseEventCandidateRepository } from '@/lib/repositories/event-candidate-repository';
 import { CanonicalizationCoordinator } from '@/lib/entity-resolution/canonicalization-coordinator';
-
-function loadEnvLocal(): void {
-  const envPath = path.resolve(process.cwd(), '.env.local');
-  if (!fs.existsSync(envPath)) return;
-  for (const line of fs.readFileSync(envPath, 'utf-8').split('\n')) {
-    const t = line.trim();
-    if (!t || t.startsWith('#')) continue;
-    const i = t.indexOf('=');
-    if (i <= 0) continue;
-    const key = t.slice(0, i).trim();
-    let val = t.slice(i + 1).trim();
-    if (
-      (val.startsWith('"') && val.endsWith('"')) ||
-      (val.startsWith("'") && val.endsWith("'"))
-    ) {
-      val = val.slice(1, -1);
-    }
-    if (!process.env[key]) process.env[key] = val;
-  }
-}
+import { loadEnvLocal } from '@/lib/utils/load-env-local';
 
 const OLD_REASON =
   'name_only_match_against_existing_artist_requires_external_id_disambiguation';

@@ -1,4 +1,3 @@
-import crypto from 'node:crypto';
 import type { EventCandidate } from '@/lib/domain/event-candidate';
 import type {
   AcquisitionMethod,
@@ -8,6 +7,10 @@ import type {
   SourceType,
 } from '@/lib/domain/source';
 import { VenueHttpClient } from '../http-client';
+import {
+  buildVenueParseContext,
+  buildVenueRawIngest,
+} from '../adapter-helpers';
 import type { VenueSourceConfig } from '../types';
 import { parseRootsMusicProjectEvents } from './parser';
 
@@ -40,22 +43,13 @@ export class RootsMusicProjectAdapter implements EventSourceAdapter {
     const targetUrl = context.targetUrl || this.calendarUrl;
     const response = await this.httpClient.get(targetUrl);
 
-    const contentHash = crypto
-      .createHash('sha256')
-      .update(response.body)
-      .digest('hex');
-
-    const rawIngest: RawIngest = {
-      sourceId: context.sourceId,
+    const rawIngest = buildVenueRawIngest({
+      context,
       sourceUrl: targetUrl,
+      response,
       acquisitionMethod: this.acquisitionMethod,
-      fetchedAt: response.fetchedAt,
-      contentHash,
-      contentType: response.contentType,
-      rawContent: response.body,
-      httpStatus: response.status,
       parserVersion: this.parserVersion,
-    };
+    });
 
     return [rawIngest];
   }
@@ -67,12 +61,7 @@ export class RootsMusicProjectAdapter implements EventSourceAdapter {
       if (!ingest.rawContent) continue;
 
       const parsed = parseRootsMusicProjectEvents(ingest.rawContent, {
-        sourceId: ingest.sourceId,
-        rawIngestId: ingest.id,
-        sourceUrl: ingest.sourceUrl,
-        fetchedAt: ingest.fetchedAt,
-        contentHash: ingest.contentHash,
-        parserVersion: ingest.parserVersion || this.parserVersion,
+        ...buildVenueParseContext(ingest, this.parserVersion),
         defaultVenueConfig: this.config,
       });
 

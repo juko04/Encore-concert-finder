@@ -3,6 +3,7 @@
  */
 
 import { groupFestivalDays } from '@/lib/events/festival-groups';
+import { isValidCoordinatePair } from '@/lib/location/coordinates';
 import {
   eventMatchesGenre,
   genreMatchesQuery,
@@ -438,18 +439,33 @@ export class MemoryCatalogRepository implements ICatalogRepository {
     return min;
   }
 
+  /** Mirrors SupabaseCatalogRepository: artist-id filters never collapse festival days. */
+  private collapsesFestivalDays(filters?: EventListFilters): boolean {
+    return (
+      Boolean(filters?.collapseFestivalDays) &&
+      !(filters?.artistIds && filters.artistIds.length > 0) &&
+      !filters?.artistId
+    );
+  }
+
   private getFilteredEvents(filters?: EventListFilters): Event[] {
     let result = Array.from(this.events.values());
 
-    if (filters?.collapseFestivalDays) {
+    if (this.collapsesFestivalDays(filters)) {
       const hidden = this.hiddenFestivalDayIds;
       result = result.filter((e) => !hidden.has(e.id));
     }
 
+    // A collapsed festival card stays listed while its run is still going (first day past).
+    const runningToday = (e: Event, from: string): boolean =>
+      this.collapsesFestivalDays(filters) &&
+      Boolean(e.festivalGroupEndDate) &&
+      e.festivalGroupEndDate! >= from;
     if (filters?.excludePastShowtimes && filters?.fromDate) {
       const today = filters.fromDate;
       const nowIso = filters.referenceNowIso || new Date().toISOString();
       result = result.filter((e) => {
+        if (runningToday(e, today)) return true;
         if (e.localStartDate > today) return true;
         if (e.localStartDate === today) {
           if (!e.startsAt) return true;
@@ -458,7 +474,11 @@ export class MemoryCatalogRepository implements ICatalogRepository {
         return false;
       });
     } else if (filters?.fromDate) {
-      result = result.filter((e) => e.localStartDate >= filters.fromDate!);
+      result = result.filter(
+        (e) =>
+          e.localStartDate >= filters.fromDate! ||
+          runningToday(e, filters.fromDate!),
+      );
     }
     if (filters?.toDate) {
       result = result.filter((e) => e.localStartDate <= filters.toDate!);
@@ -510,7 +530,7 @@ export class MemoryCatalogRepository implements ICatalogRepository {
     if (filters?.searchQuery) {
       const q = filters.searchQuery.trim().toLowerCase();
       if (q) {
-        result = result.filter((e) => {
+        const matchesSearch = (e: Event): boolean => {
           if (e.name.toLowerCase().includes(q)) return true;
           if (resolveGenreQuery(q) && genreMatchesQuery(q, e.genre, e.genres)) {
             return true;
@@ -524,6 +544,18 @@ export class MemoryCatalogRepository implements ICatalogRepository {
             }
           }
           return false;
+        };
+        const collapsing = this.collapsesFestivalDays(filters);
+        result = result.filter((e) => {
+          if (matchesSearch(e)) return true;
+          // A collapsed card stands for the whole run: a match on a later day counts.
+          return (
+            collapsing &&
+            (this.festivalMemberIds.get(e.id) ?? []).some((id) => {
+              const m = this.events.get(id);
+              return m !== undefined && matchesSearch(m);
+            })
+          );
         });
       }
     }
@@ -636,9 +668,16 @@ export class MemoryCatalogRepository implements ICatalogRepository {
     const paged = result.slice(offset, offset + limit);
 
     const summaries: CanonicalEventSummary[] = [];
+    const collapsing = this.collapsesFestivalDays(filters);
 
     for (const event of paged) {
       const venue = event.venueId ? this.venues.get(event.venueId) : null;
+      // A collapsed festival card lists the whole run's lineup (primary day first).
+      const lineupEventIds = new Set<string>([
+        event.id,
+        ...(collapsing ? (this.festivalMemberIds.get(event.id) ?? []) : []),
+      ]);
+      const seenLineupArtists = new Set<string>();
       const artists: Array<{
         id?: string;
         name: string;
@@ -646,8 +685,11 @@ export class MemoryCatalogRepository implements ICatalogRepository {
         spotifyArtistId?: string | null;
         imageUrl?: string | null;
       }> = [];
-      for (const ea of this.eventArtists.values()) {
-        if (ea.eventId === event.id) {
+      for (const lineupEventId of lineupEventIds) {
+        for (const ea of this.eventArtists.values()) {
+          if (ea.eventId !== lineupEventId) continue;
+          if (seenLineupArtists.has(ea.artistId)) continue;
+          seenLineupArtists.add(ea.artistId);
           const a = this.artists.get(ea.artistId);
           let spotifyArtistId: string | null = null;
           for (const ext of this.artistExternalIds.values()) {
@@ -888,6 +930,8 @@ export class MemoryCatalogRepository implements ICatalogRepository {
 
   /** Event ids hidden by collapseFestivalDays (computed by refreshFestivalGroups). */
   private hiddenFestivalDayIds = new Set<string>();
+  /** Primary event id -> the group's other day ids, in date order (computed by refreshFestivalGroups). */
+  private festivalMemberIds = new Map<string, string[]>();
 
   async listFestivalDays(eventId: string) {
     const group = groupFestivalDays(Array.from(this.events.values())).find(
@@ -902,10 +946,17 @@ export class MemoryCatalogRepository implements ICatalogRepository {
 
   async refreshFestivalGroups(): Promise<number> {
     this.hiddenFestivalDayIds = new Set();
+    this.festivalMemberIds = new Map();
+    // Like the SQL refresh, start from a clean slate so events that left a group are reset.
+    for (const e of this.events.values()) e.festivalGroupEndDate = null;
     const groups = groupFestivalDays(Array.from(this.events.values()));
     let grouped = 0;
     for (const g of groups) {
       grouped += g.members.length;
+      this.festivalMemberIds.set(
+        g.primary.id,
+        g.members.filter((m) => m.id !== g.primary.id).map((m) => m.id),
+      );
       for (const e of g.members) {
         if (e.id !== g.primary.id) this.hiddenFestivalDayIds.add(e.id);
         e.festivalGroupEndDate = e.id === g.primary.id ? g.endDate : null;
@@ -919,7 +970,7 @@ export class MemoryCatalogRepository implements ICatalogRepository {
     lat: number,
     lng: number,
   ): Promise<boolean> {
-    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return false;
+    if (!isValidCoordinatePair(lat, lng)) return false;
     const ev = this.events.get(eventId);
     const venue = ev?.venueId ? this.venues.get(ev.venueId) : undefined;
     if (!venue || (venue.lat != null && venue.lng != null)) return false;

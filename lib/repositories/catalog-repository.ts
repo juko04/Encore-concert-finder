@@ -1,6 +1,7 @@
 import 'server-only';
 
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { isValidCoordinatePair } from '@/lib/location/coordinates';
 import type {
   Artist,
   ArtistExternalId,
@@ -637,7 +638,10 @@ export class SupabaseCatalogRepository implements ICatalogRepository {
     opts?: SearchOpts,
   ): Promise<CanonicalEventSummary[]> {
     if (filters?.searchQuery?.trim() && opts?.searchOr === undefined) {
-      const groups = await this.resolveSearchGroups(filters.searchQuery);
+      const groups = await this.resolveSearchGroups(
+        filters.searchQuery,
+        SupabaseCatalogRepository.collapsesFestivalDays(filters),
+      );
       if (groups.length === 1) {
         return this.listEvents(filters, { searchOr: groups[0] });
       }
@@ -730,7 +734,10 @@ export class SupabaseCatalogRepository implements ICatalogRepository {
       return [];
     }
 
-    return this.hydrateEventRows(rawRows);
+    return this.hydrateEventRows(rawRows, {
+      mergeFestivalLineup:
+        SupabaseCatalogRepository.collapsesFestivalDays(filters),
+    });
   }
 
   /**
@@ -738,6 +745,21 @@ export class SupabaseCatalogRepository implements ICatalogRepository {
    * match nothing (venue name with no venue). Shared by listEvents and the light radius scan
    * so both always agree on the matching set.
    */
+  /**
+   * True when the one-card-per-festival collapse applies. It is skipped for artist-id filters:
+   * "events featuring artist X" must return the day X actually plays, and a collapsed group's
+   * non-primary days would otherwise be hidden (the favourite artist's festival would vanish).
+   */
+  private static collapsesFestivalDays(
+    filters: EventListFilters | undefined,
+  ): boolean {
+    return (
+      Boolean(filters?.collapseFestivalDays) &&
+      !(filters?.artistIds && filters.artistIds.length > 0) &&
+      !filters?.artistId
+    );
+  }
+
   private async applyEventFilters(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     query: any,
@@ -770,19 +792,31 @@ export class SupabaseCatalogRepository implements ICatalogRepository {
       query = query.or(opts.searchOr);
     }
 
-    if (filters?.collapseFestivalDays) {
+    const collapsing = SupabaseCatalogRepository.collapsesFestivalDays(filters);
+    if (collapsing) {
       // One card per multi-day festival: hide every day but the group's first.
       query = query.eq('festival_group_primary', true);
     }
 
+    // A collapsed festival card stays listed while the run is still going (its first day may
+    // already be past), so "from today" also accepts a group that ends today or later.
     if (filters?.excludePastShowtimes && filters?.fromDate) {
       const today = filters.fromDate;
       const nowIso = filters.referenceNowIso || new Date().toISOString();
       query = query.or(
-        `local_start_date.gt.${today},and(local_start_date.eq.${today},starts_at.gte.${nowIso}),and(local_start_date.eq.${today},starts_at.is.null)`,
+        [
+          `local_start_date.gt.${today}`,
+          `and(local_start_date.eq.${today},starts_at.gte.${nowIso})`,
+          `and(local_start_date.eq.${today},starts_at.is.null)`,
+          ...(collapsing ? [`festival_group_end_date.gte.${today}`] : []),
+        ].join(','),
       );
     } else if (filters?.fromDate) {
-      query = query.gte('local_start_date', filters.fromDate);
+      query = collapsing
+        ? query.or(
+            `local_start_date.gte.${filters.fromDate},festival_group_end_date.gte.${filters.fromDate}`,
+          )
+        : query.gte('local_start_date', filters.fromDate);
     }
     if (filters?.toDate) {
       query = query.lte('local_start_date', filters.toDate);
@@ -901,6 +935,7 @@ export class SupabaseCatalogRepository implements ICatalogRepository {
   /** Hydrates event rows (artists, ticket links, sources) into summaries, preserving row order. */
   private async hydrateEventRows(
     rawRows: unknown[],
+    opts?: { mergeFestivalLineup?: boolean },
   ): Promise<CanonicalEventSummary[]> {
     // Deduplicate event rows by ID in case multi-artist matches returned duplicate rows
     const seenEventIds = new Set<string>();
@@ -968,6 +1003,69 @@ export class SupabaseCatalogRepository implements ICatalogRepository {
       if (sourceRes.data) allSourceLinks.push(...sourceRes.data);
     }
 
+    if (opts?.mergeFestivalLineup) {
+      // A collapsed festival card stands for the whole run: append the other days' artists so
+      // the lineup (and artist scoring) is not limited to day one.
+      const primaryIds = rows
+        .filter(
+          (r) =>
+            r.festival_group_primary !== false &&
+            (r.festival_group_size ?? 1) > 1,
+        )
+        .map((r) => r.id);
+      for (let i = 0; i < primaryIds.length; i += BATCH_CHUNK_SIZE) {
+        const chunk = primaryIds.slice(i, i + BATCH_CHUNK_SIZE);
+        const { data: days, error: daysErr } = await this.client
+          .from('events')
+          .select('id, festival_group_id, local_start_date')
+          .in('festival_group_id', chunk)
+          .order('local_start_date', { ascending: true })
+          .order('id', { ascending: true });
+        if (daysErr) {
+          throw new Error(
+            `Failed to load festival days for lineup: ${daysErr.message}`,
+          );
+        }
+        const otherDays = (
+          (days ?? []) as Array<{ id: string; festival_group_id: string }>
+        ).filter((d) => d.id !== d.festival_group_id);
+        const primaryOf = new Map(
+          otherDays.map((d) => [d.id, d.festival_group_id] as const),
+        );
+        for (let j = 0; j < otherDays.length; j += BATCH_CHUNK_SIZE) {
+          const dayChunk = otherDays.slice(j, j + BATCH_CHUNK_SIZE);
+          const { data: links, error: linkErr } = await this.client
+            .from('event_artists')
+            .select('*, artists(*, artist_external_ids(provider, external_id))')
+            .in(
+              'event_id',
+              dayChunk.map((d) => d.id),
+            )
+            .order('sort_order', { ascending: true });
+          if (linkErr) {
+            throw new Error(
+              `Failed to load festival day artists: ${linkErr.message}`,
+            );
+          }
+          const byDay = new Map<string, unknown[]>();
+          for (const l of (links ?? []) as Array<{ event_id: string }>) {
+            const list = byDay.get(l.event_id) ?? [];
+            list.push(l);
+            byDay.set(l.event_id, list);
+          }
+          // Keep day order (otherDays is date-ordered), then billing order within each day.
+          for (const d of dayChunk) {
+            for (const l of byDay.get(d.id) ?? []) {
+              allArtistLinks.push({
+                ...(l as object),
+                event_id: primaryOf.get(d.id),
+              });
+            }
+          }
+        }
+      }
+    }
+
     // Group relations in-memory by event_id
     interface EventArtistWithExtIds extends Omit<EventArtistRow, 'artists'> {
       artists?:
@@ -994,6 +1092,8 @@ export class SupabaseCatalogRepository implements ICatalogRepository {
     for (const aRow of (allArtistLinks as unknown as EventArtistWithExtIds[]) ||
       []) {
       const list = artistsByEventId.get(aRow.event_id) || [];
+      // Merged festival lineups can list the same artist on several days.
+      if (list.some((a) => a.id === aRow.artist_id)) continue;
       const spotifyArtistId =
         aRow.artists?.artist_external_ids?.find(
           (ext) => ext.provider === 'spotify',
@@ -1131,7 +1231,10 @@ export class SupabaseCatalogRepository implements ICatalogRepository {
    * ids so a single request stays well below URL limits. A match is the UNION of
    * all groups; callers must dedupe across groups.
    */
-  private async resolveSearchGroups(searchQuery: string): Promise<string[]> {
+  private async resolveSearchGroups(
+    searchQuery: string,
+    collapseFestivalDays = false,
+  ): Promise<string[]> {
     const escaped = escapeLikePattern(searchQuery.trim());
     const quotedEscaped = escaped.replace(/"/g, '""');
     // Genre-aware search: "hip hop", "hiphop", "rap" etc. also match events by genre column.
@@ -1198,6 +1301,39 @@ export class SupabaseCatalogRepository implements ICatalogRepository {
         }
       },
     );
+
+    if (collapseFestivalDays && eventIdSet.size > 0) {
+      // Collapsed lists only show a festival's first day, so an artist who plays a later day
+      // must surface that group's primary card (days of one group share festival_group_id =
+      // primary id). The primary still has to satisfy every other filter.
+      const matchedIds = Array.from(eventIdSet);
+      const chunks: string[][] = [];
+      for (let i = 0; i < matchedIds.length; i += SEARCH_IDS_PER_GROUP) {
+        chunks.push(matchedIds.slice(i, i + SEARCH_IDS_PER_GROUP));
+      }
+      await mapWithConcurrency(
+        chunks,
+        SEARCH_GROUP_CONCURRENCY,
+        async (chunk) => {
+          const { data, error } = await this.client
+            .from('events')
+            .select('festival_group_id')
+            .in('id', chunk)
+            .eq('festival_group_primary', false)
+            .not('festival_group_id', 'is', null);
+          if (error) {
+            throw new Error(
+              `Failed to resolve festival groups for search: ${error.message}`,
+            );
+          }
+          for (const row of (data ?? []) as Array<{
+            festival_group_id: string | null;
+          }>) {
+            if (row.festival_group_id) eventIdSet.add(row.festival_group_id);
+          }
+        },
+      );
+    }
 
     const refs: Array<{ col: 'venue_id' | 'id'; id: string }> = [
       ...venueIds.map((id) => ({ col: 'venue_id' as const, id })),
@@ -1266,7 +1402,10 @@ export class SupabaseCatalogRepository implements ICatalogRepository {
     opts?: SearchOpts,
   ): Promise<EventLocationRow[]> {
     if (filters?.searchQuery?.trim() && opts?.searchOr === undefined) {
-      const groups = await this.resolveSearchGroups(filters.searchQuery);
+      const groups = await this.resolveSearchGroups(
+        filters.searchQuery,
+        SupabaseCatalogRepository.collapsesFestivalDays(filters),
+      );
       if (groups.length === 1) {
         return this.listEventLocations(filters, { searchOr: groups[0] });
       }
@@ -1412,7 +1551,10 @@ export class SupabaseCatalogRepository implements ICatalogRepository {
     opts?: SearchOpts & { idPage?: number; out?: string[] },
   ): Promise<number> {
     if (filters?.searchQuery?.trim() && opts?.searchOr === undefined) {
-      const groups = await this.resolveSearchGroups(filters.searchQuery);
+      const groups = await this.resolveSearchGroups(
+        filters.searchQuery,
+        SupabaseCatalogRepository.collapsesFestivalDays(filters),
+      );
       if (groups.length === 1) {
         return this.countEvents(filters, { searchOr: groups[0] });
       }
@@ -1473,111 +1615,9 @@ export class SupabaseCatalogRepository implements ICatalogRepository {
           .from('events')
           .select(selectString, { count: 'exact', head: true });
 
-    if (filters?.status) {
-      if (Array.isArray(filters.status)) {
-        query = query.in('status', filters.status);
-      } else {
-        query = query.eq('status', filters.status);
-      }
-    }
-
-    if (filters?.artistIds && filters.artistIds.length > 0) {
-      query = query.in('event_artists.artist_id', filters.artistIds);
-    } else if (filters?.artistId) {
-      query = query.eq('event_artists.artist_id', filters.artistId);
-    }
-
-    if (opts?.searchOr) {
-      query = query.or(opts.searchOr);
-    }
-
-    if (filters?.collapseFestivalDays) {
-      // One card per multi-day festival: hide every day but the group's first.
-      query = query.eq('festival_group_primary', true);
-    }
-
-    if (filters?.excludePastShowtimes && filters?.fromDate) {
-      const today = filters.fromDate;
-      const nowIso = filters.referenceNowIso || new Date().toISOString();
-      query = query.or(
-        `local_start_date.gt.${today},and(local_start_date.eq.${today},starts_at.gte.${nowIso}),and(local_start_date.eq.${today},starts_at.is.null)`,
-      );
-    } else if (filters?.fromDate) {
-      query = query.gte('local_start_date', filters.fromDate);
-    }
-    if (filters?.toDate) {
-      query = query.lte('local_start_date', filters.toDate);
-    }
-    if (filters?.venueId) {
-      const UUID_PATTERN =
-        /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-      if (UUID_PATTERN.test(filters.venueId)) {
-        query = query.eq('venue_id', filters.venueId);
-      } else {
-        const escaped = escapeLikePattern(filters.venueId.trim());
-        const { data: vData, error: vErr } = await this.client
-          .from('venues')
-          .select('id')
-          .ilike('name', `%${escaped}%`);
-        if (vErr) {
-          throw new Error(`Failed to query venues by name: ${vErr.message}`);
-        }
-        const vIds = (vData || []).map((v) => v.id);
-        if (vIds.length === 0) {
-          return 0;
-        }
-        query = query.in('venue_id', vIds);
-      }
-    } else if (filters?.venueName) {
-      const escaped = escapeLikePattern(filters.venueName.trim());
-      const { data: vData, error: vErr } = await this.client
-        .from('venues')
-        .select('id')
-        .ilike('name', `%${escaped}%`);
-      if (vErr) {
-        throw new Error(`Failed to query venues by name: ${vErr.message}`);
-      }
-      const vIds = (vData || []).map((v) => v.id);
-      if (vIds.length === 0) {
-        return 0;
-      }
-      query = query.in('venue_id', vIds);
-    }
-    if (filters?.city) {
-      query = query.ilike('city', `%${filters.city}%`);
-    }
-    if (filters?.region) {
-      query = query.eq('region', filters.region);
-    }
-    if (filters?.genre) {
-      const g = filters.genre.trim().toLowerCase();
-      if (g === 'festival') {
-        query = query.or(
-          'event_kind.eq.festival,event_kind.eq.multi_day_festival,genre.ilike.festival,genres.cs.{festival}',
-        );
-      } else {
-        query = query.or(buildGenreFilterClause(filters.genre));
-      }
-    }
-
-    if (filters?.freeOnly) {
-      query = query.or('event_kind.eq.free_event,min_price.eq.0');
-    }
-    if (filters?.minPrice !== undefined) {
-      query = query.gte('min_price', filters.minPrice);
-    }
-    if (filters?.maxPrice !== undefined) {
-      const includeUnknown = filters.includeUnknownPrice ?? true;
-      if (includeUnknown) {
-        query = query.or(
-          `min_price.is.null,min_price.lte.${filters.maxPrice},event_kind.eq.free_event`,
-        );
-      } else {
-        query = query.or(
-          `min_price.lte.${filters.maxPrice},event_kind.eq.free_event`,
-        );
-      }
-    }
+    const filtered = await this.applyEventFilters(query, filters, opts);
+    if (filtered === null) return 0;
+    query = filtered.query;
 
     if (idMode) {
       const page = opts?.idPage ?? 0;
@@ -1822,14 +1862,7 @@ export class SupabaseCatalogRepository implements ICatalogRepository {
     lat: number,
     lng: number,
   ): Promise<boolean> {
-    if (
-      !Number.isFinite(lat) ||
-      !Number.isFinite(lng) ||
-      Math.abs(lat) > 90 ||
-      Math.abs(lng) > 180
-    ) {
-      return false;
-    }
+    if (!isValidCoordinatePair(lat, lng)) return false;
     const { data: ev, error: evErr } = await this.client
       .from('events')
       .select('venue_id')

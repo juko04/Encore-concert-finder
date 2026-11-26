@@ -2,8 +2,11 @@
  * Venue coordinates from a Ticketmaster venue object (pure).
  *
  * Ticketmaster supplies `location: { latitude, longitude }` as strings for nearly every venue.
- * They are validated here (finite, in range, not the null island 0/0) and never guessed.
+ * They are validated here with the shared coordinate rules (lib/location/coordinates.ts: finite,
+ * in range, not the null island 0/0) and never guessed.
  */
+
+import { isValidCoordinatePair } from '@/lib/location/coordinates';
 
 export interface VenueCoordinates {
   lat: number;
@@ -33,15 +36,7 @@ export function parseVenueCoordinates(
   }
   const lat = Number(rawLat);
   const lng = Number(rawLng);
-  if (
-    !Number.isFinite(lat) ||
-    !Number.isFinite(lng) ||
-    Math.abs(lat) > 90 ||
-    Math.abs(lng) > 180 ||
-    (lat === 0 && lng === 0)
-  ) {
-    return null;
-  }
+  if (!isValidCoordinatePair(lat, lng)) return null;
   // Keep ~1 m precision; avoids float noise (and -0) in stored values.
   return {
     lat: Math.round(lat * 1e6) / 1e6 || 0,

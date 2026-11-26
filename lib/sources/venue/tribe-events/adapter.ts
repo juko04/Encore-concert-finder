@@ -1,4 +1,3 @@
-import crypto from 'node:crypto';
 import type { EventCandidate } from '@/lib/domain/event-candidate';
 import type {
   AcquisitionMethod,
@@ -7,6 +6,11 @@ import type {
   SourceType,
 } from '@/lib/domain/source';
 import { VenueHttpClient } from '../http-client';
+import {
+  buildVenueParseContext,
+  buildVenueRawIngest,
+  dedupeBy,
+} from '../adapter-helpers';
 import type { IVenueSourceAdapter, VenueSourceConfig } from '../types';
 import { parseTribeEvents } from './parser';
 import type { TribeAdapterOptions, TribeEventsResponse } from './types';
@@ -72,20 +76,15 @@ export class TribeEventsAdapter implements IVenueSourceAdapter {
       }
       pages++;
       const response = await this.httpClient.get(currentUrl);
-      rawIngests.push({
-        sourceId: context.sourceId,
-        sourceUrl: currentUrl,
-        acquisitionMethod: this.acquisitionMethod,
-        fetchedAt: response.fetchedAt,
-        contentHash: crypto
-          .createHash('sha256')
-          .update(response.body)
-          .digest('hex'),
-        contentType: response.contentType,
-        rawContent: response.body,
-        httpStatus: response.status,
-        parserVersion: this.parserVersion,
-      });
+      rawIngests.push(
+        buildVenueRawIngest({
+          context,
+          sourceUrl: currentUrl,
+          response,
+          acquisitionMethod: this.acquisitionMethod,
+          parserVersion: this.parserVersion,
+        }),
+      );
 
       currentUrl = null;
       try {
@@ -106,28 +105,19 @@ export class TribeEventsAdapter implements IVenueSourceAdapter {
 
   async parse(rawIngests: RawIngest[]): Promise<EventCandidate[]> {
     const candidates: EventCandidate[] = [];
-    const seen = new Set<string>();
     for (const ingest of rawIngests) {
       if (!ingest.rawContent) continue;
       const parsed = parseTribeEvents(ingest.rawContent, {
-        sourceId: ingest.sourceId,
-        rawIngestId: ingest.id,
-        sourceUrl: ingest.sourceUrl,
-        fetchedAt: ingest.fetchedAt,
-        contentHash: ingest.contentHash,
-        parserVersion: ingest.parserVersion || this.parserVersion,
+        ...buildVenueParseContext(ingest, this.parserVersion),
         defaultVenueConfig: this.config,
         useConfigVenueFallback: this.options.useConfigVenueFallback,
       });
-      for (const c of parsed) {
-        const key =
-          c.provenance.sourceEventId ?? `${c.title}|${c.localStartDate}`;
-        if (seen.has(key)) continue;
-        seen.add(key);
-        candidates.push(c);
-      }
+      candidates.push(...parsed);
     }
-    return candidates;
+    return dedupeBy(
+      candidates,
+      (c) => c.provenance.sourceEventId ?? `${c.title}|${c.localStartDate}`,
+    );
   }
 
   async crawl(

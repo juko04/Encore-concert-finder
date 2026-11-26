@@ -1,4 +1,3 @@
-import crypto from 'node:crypto';
 import type { EventCandidate } from '@/lib/domain/event-candidate';
 import type {
   AcquisitionMethod,
@@ -7,6 +6,11 @@ import type {
   SourceType,
 } from '@/lib/domain/source';
 import { VenueHttpClient } from '../http-client';
+import {
+  buildVenueParseContext,
+  buildVenueRawIngest,
+  dedupeBy,
+} from '../adapter-helpers';
 import { POLITE_VENUE_USER_AGENT } from '../tribe-events/adapter';
 import type { IVenueSourceAdapter, VenueSourceConfig } from '../types';
 import { parseMishawakaEvents } from './parser';
@@ -44,47 +48,32 @@ export class MishawakaAdapter implements IVenueSourceAdapter {
       : this.calendarUrl;
     const response = await this.httpClient.get(url);
     return [
-      {
-        sourceId: context.sourceId,
+      buildVenueRawIngest({
+        context,
         sourceUrl: url,
+        response,
         acquisitionMethod: this.acquisitionMethod,
-        fetchedAt: response.fetchedAt,
-        contentHash: crypto
-          .createHash('sha256')
-          .update(response.body)
-          .digest('hex'),
-        contentType: response.contentType,
-        rawContent: response.body,
-        httpStatus: response.status,
         parserVersion: this.parserVersion,
-      },
+      }),
     ];
   }
 
   async parse(rawIngests: RawIngest[]): Promise<EventCandidate[]> {
     const candidates: EventCandidate[] = [];
-    const seen = new Set<string>();
     for (const ingest of rawIngests) {
       if (!ingest.rawContent) continue;
       const parsed = parseMishawakaEvents(ingest.rawContent, {
-        sourceId: ingest.sourceId,
-        rawIngestId: ingest.id,
-        sourceUrl: ingest.sourceUrl,
-        fetchedAt: ingest.fetchedAt,
-        contentHash: ingest.contentHash,
-        parserVersion: ingest.parserVersion || this.parserVersion,
+        ...buildVenueParseContext(ingest, this.parserVersion),
         defaultVenueConfig: this.config,
       });
-      for (const c of parsed) {
-        const key =
-          c.provenance.sourceEventId ??
-          `${c.title}|${c.localStartDate}|${c.startsAt ?? ''}`;
-        if (seen.has(key)) continue;
-        seen.add(key);
-        candidates.push(c);
-      }
+      candidates.push(...parsed);
     }
-    return candidates;
+    return dedupeBy(
+      candidates,
+      (c) =>
+        c.provenance.sourceEventId ??
+        `${c.title}|${c.localStartDate}|${c.startsAt ?? ''}`,
+    );
   }
 
   async crawl(

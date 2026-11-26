@@ -25,8 +25,6 @@
  *   npm run ingest:venue -- --venue=globehall --live --persist
  */
 
-import fs from 'node:fs';
-import path from 'node:path';
 import {
   CervantesVenueAdapter,
   IndependentVenueAdapter,
@@ -57,6 +55,7 @@ import { SupabaseRawIngestRepository } from '@/lib/repositories/raw-ingest-repos
 import { SupabaseEventCandidateRepository } from '@/lib/repositories/event-candidate-repository';
 import { SupabaseCatalogRepository } from '@/lib/repositories/catalog-repository';
 import { assertSafeDatabaseTarget } from '@/lib/supabase/destination-guard';
+import { loadEnvLocal } from '@/lib/utils/load-env-local';
 
 interface ParsedArgs {
   venue: string;
@@ -66,31 +65,6 @@ interface ParsedArgs {
   allowProductionWrite: boolean;
   reprocess: boolean;
   fixturePath?: string;
-}
-
-function loadEnvLocal(): void {
-  const envPath = path.resolve(process.cwd(), '.env.local');
-  if (fs.existsSync(envPath)) {
-    const lines = fs.readFileSync(envPath, 'utf-8').split('\n');
-    for (const line of lines) {
-      const trimmed = line.trim();
-      if (!trimmed || trimmed.startsWith('#')) continue;
-      const eqIdx = trimmed.indexOf('=');
-      if (eqIdx > 0) {
-        const key = trimmed.slice(0, eqIdx).trim();
-        let val = trimmed.slice(eqIdx + 1).trim();
-        if (
-          (val.startsWith('"') && val.endsWith('"')) ||
-          (val.startsWith("'") && val.endsWith("'"))
-        ) {
-          val = val.slice(1, -1);
-        }
-        if (!process.env[key]) {
-          process.env[key] = val;
-        }
-      }
-    }
-  }
 }
 
 function parseCliArgs(argv: string[]): ParsedArgs {

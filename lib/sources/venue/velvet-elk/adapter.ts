@@ -1,4 +1,3 @@
-import crypto from 'node:crypto';
 import type { EventCandidate } from '@/lib/domain/event-candidate';
 import type {
   AcquisitionMethod,
@@ -8,6 +7,10 @@ import type {
   SourceType,
 } from '@/lib/domain/source';
 import { VenueHttpClient } from '../http-client';
+import {
+  buildVenueParseContext,
+  buildVenueRawIngest,
+} from '../adapter-helpers';
 import type { VenueSourceConfig } from '../types';
 import {
   extractVelvetElkDetailUrls,
@@ -44,22 +47,13 @@ export class VelvetElkAdapter implements EventSourceAdapter {
     const targetUrl = context.targetUrl || this.calendarUrl;
     const response = await this.httpClient.get(targetUrl);
 
-    const contentHash = crypto
-      .createHash('sha256')
-      .update(response.body)
-      .digest('hex');
-
-    const calendarIngest: RawIngest = {
-      sourceId: context.sourceId,
+    const calendarIngest = buildVenueRawIngest({
+      context,
       sourceUrl: targetUrl,
+      response,
       acquisitionMethod: this.acquisitionMethod,
-      fetchedAt: response.fetchedAt,
-      contentHash,
-      contentType: response.contentType,
-      rawContent: response.body,
-      httpStatus: response.status,
       parserVersion: this.parserVersion,
-    };
+    });
 
     const rawIngests: RawIngest[] = [calendarIngest];
 
@@ -91,22 +85,15 @@ export class VelvetElkAdapter implements EventSourceAdapter {
               continue;
             }
 
-            const detailHash = crypto
-              .createHash('sha256')
-              .update(detailResponse.body)
-              .digest('hex');
-
-            rawIngests.push({
-              sourceId: context.sourceId,
-              sourceUrl: detailResponse.url || detailUrl,
-              acquisitionMethod: this.acquisitionMethod,
-              fetchedAt: detailResponse.fetchedAt,
-              contentHash: detailHash,
-              contentType: detailResponse.contentType,
-              rawContent: detailResponse.body,
-              httpStatus: detailResponse.status,
-              parserVersion: this.parserVersion,
-            });
+            rawIngests.push(
+              buildVenueRawIngest({
+                context,
+                sourceUrl: detailResponse.url || detailUrl,
+                response: detailResponse,
+                acquisitionMethod: this.acquisitionMethod,
+                parserVersion: this.parserVersion,
+              }),
+            );
           }
         } catch {
           // Graceful fallback: detail fetch failure retains calendar card listing
@@ -135,12 +122,7 @@ export class VelvetElkAdapter implements EventSourceAdapter {
     const detailCandidatesByUrl = new Map<string, EventCandidate>();
     for (const detailIngest of detailIngests) {
       const parsed = parseVelvetElkEvents(detailIngest.rawContent!, {
-        sourceId: detailIngest.sourceId,
-        rawIngestId: detailIngest.id,
-        sourceUrl: detailIngest.sourceUrl,
-        fetchedAt: detailIngest.fetchedAt,
-        contentHash: detailIngest.contentHash,
-        parserVersion: detailIngest.parserVersion || this.parserVersion,
+        ...buildVenueParseContext(detailIngest, this.parserVersion),
         defaultVenueConfig: this.config,
       });
 
@@ -161,12 +143,7 @@ export class VelvetElkAdapter implements EventSourceAdapter {
       const listingCandidates = parseVelvetElkEvents(
         listingIngest.rawContent!,
         {
-          sourceId: listingIngest.sourceId,
-          rawIngestId: listingIngest.id,
-          sourceUrl: listingIngest.sourceUrl,
-          fetchedAt: listingIngest.fetchedAt,
-          contentHash: listingIngest.contentHash,
-          parserVersion: listingIngest.parserVersion || this.parserVersion,
+          ...buildVenueParseContext(listingIngest, this.parserVersion),
           defaultVenueConfig: this.config,
         },
       );

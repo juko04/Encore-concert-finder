@@ -13,7 +13,6 @@
  *   npm run sync:new-venues -- --live --only=10-mile-music-hall
  */
 
-import fs from 'node:fs';
 import path from 'node:path';
 import {
   EXTRA_VENUE_SYNC_TARGETS,
@@ -30,26 +29,7 @@ import { SupabaseEventCandidateRepository } from '@/lib/repositories/event-candi
 import { SupabaseRawIngestRepository } from '@/lib/repositories/raw-ingest-repository';
 import { SupabaseSourceRepository } from '@/lib/repositories/source-repository';
 import { assertSafeDatabaseTarget } from '@/lib/supabase/destination-guard';
-
-function loadEnvLocal(): void {
-  const envPath = path.resolve(process.cwd(), '.env.local');
-  if (!fs.existsSync(envPath)) return;
-  for (const line of fs.readFileSync(envPath, 'utf-8').split('\n')) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith('#')) continue;
-    const eq = trimmed.indexOf('=');
-    if (eq <= 0) continue;
-    const key = trimmed.slice(0, eq).trim();
-    let val = trimmed.slice(eq + 1).trim();
-    if (
-      (val.startsWith('"') && val.endsWith('"')) ||
-      (val.startsWith("'") && val.endsWith("'"))
-    ) {
-      val = val.slice(1, -1);
-    }
-    if (!process.env[key]) process.env[key] = val;
-  }
-}
+import { loadEnvLocal } from '@/lib/utils/load-env-local';
 
 async function main(): Promise<void> {
   loadEnvLocal();

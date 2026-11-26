@@ -1,6 +1,5 @@
 import { getAuthenticatedUser } from '@/lib/auth/session';
-import { loadArtistAffinityResolver } from '@/lib/recommendation/artist-affinity-server';
-import { annotateEventsWithArtistAffinity } from '@/lib/recommendation/artist-affinity';
+import { annotateEventsForUser } from '@/lib/recommendation/artist-affinity-server';
 import { NextResponse } from 'next/server';
 import { createServerClient } from '@supabase/ssr';
 import { createClient } from '@/lib/supabase/server';
@@ -15,10 +14,12 @@ import {
 import { resolveNearContext } from '@/lib/location/near-context';
 import { searchCatalogPage } from '@/lib/location/catalog-search';
 import { getViewerTimeZone } from '@/lib/location/server';
-import type {
-  EventListFilters,
-  EventSortOption,
-} from '@/lib/repositories/interfaces';
+import type { EventListFilters } from '@/lib/repositories/interfaces';
+import {
+  isTruthyFlag,
+  parseEventSort,
+  parseIncludeUnknownPrice,
+} from '@/lib/discover/search-params';
 
 export const dynamic = 'force-dynamic';
 
@@ -72,7 +73,7 @@ export async function GET(request: Request) {
     // Upcoming results never include shows that already started (e.g. the
     // "Tonight" chip passes startDate=today). includePast=true is the only opt-out.
     const includePastParam = searchParams.get('includePast');
-    const includePast = includePastParam === 'true' || includePastParam === '1';
+    const includePast = isTruthyFlag(includePastParam);
     const { fromDate: startDate, excludePastShowtimes } =
       resolveCatalogFromDate({
         startDate: startDateParam || undefined,
@@ -99,13 +100,10 @@ export async function GET(request: Request) {
       return badRequest('minPrice and maxPrice must be numbers');
     }
     const freeOnlyParam = searchParams.get('freeOnly');
-    const freeOnly = freeOnlyParam === 'true' || freeOnlyParam === '1';
-    const includeUnknownPriceParam = searchParams.get('includeUnknownPrice');
-    const includeUnknownPrice =
-      includeUnknownPriceParam !== null
-        ? includeUnknownPriceParam === 'true' ||
-          includeUnknownPriceParam === '1'
-        : true;
+    const freeOnly = isTruthyFlag(freeOnlyParam);
+    const includeUnknownPrice = parseIncludeUnknownPrice(
+      searchParams.get('includeUnknownPrice'),
+    );
 
     const sort = searchParams.get('sort') || 'date_asc';
     const limitParam = searchParams.get('limit');
@@ -140,18 +138,7 @@ export async function GET(request: Request) {
     }
     const catalogRepo = new SupabaseCatalogRepository(supabase);
 
-    const validSorts: EventSortOption[] = [
-      'price_asc',
-      'price_desc',
-      'date_asc',
-      'date_desc',
-      'title_asc',
-      'score_desc',
-    ];
-    const repoSortBy: EventSortOption =
-      sort && validSorts.includes(sort as EventSortOption)
-        ? (sort as EventSortOption)
-        : 'date_asc';
+    const repoSortBy = parseEventSort(sort);
 
     const filters: EventListFilters = {
       searchQuery: q,
@@ -187,9 +174,11 @@ export async function GET(request: Request) {
     const { totalCount, hasMore, nearApplied } = result;
     // Liked-artist markers for Load More pages, derived server-side from the session user.
     const user = await getAuthenticatedUser().catch(() => null);
-    const events = annotateEventsWithArtistAffinity(
+    const events = await annotateEventsForUser(
       result.events,
-      await loadArtistAffinityResolver(user?.id, supabase, catalogRepo),
+      user?.id,
+      supabase,
+      catalogRepo,
     );
     const totalPages = Math.ceil(totalCount / limit) || 1;
     const currentPage = Math.floor(offset / limit) + 1;

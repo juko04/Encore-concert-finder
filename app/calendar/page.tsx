@@ -2,8 +2,7 @@ import React from 'react';
 import { getAuthenticatedUser } from '@/lib/auth/session';
 import { createClient } from '@/lib/supabase/server';
 import { SupabaseCatalogRepository } from '@/lib/repositories/catalog-repository';
-import { loadArtistAffinityResolver } from '@/lib/recommendation/artist-affinity-server';
-import { annotateEventsWithArtistAffinity } from '@/lib/recommendation/artist-affinity';
+import { annotateEventsForUser } from '@/lib/recommendation/artist-affinity-server';
 import { Header } from '@/components/index/Header';
 import { CalendarClient } from '@/components/calendar/CalendarClient';
 import type { CanonicalEventSummary } from '@/lib/domain/catalog';
@@ -22,12 +21,12 @@ export default async function CalendarPage() {
       sortBy: 'date_asc',
       excludePastShowtimes: true,
     });
-    if (user && events.length > 0) {
-      events = annotateEventsWithArtistAffinity(
-        events,
-        await loadArtistAffinityResolver(user.id, supabase, catalogRepo),
-      );
-    }
+    events = await annotateEventsForUser(
+      events,
+      user?.id,
+      supabase,
+      catalogRepo,
+    );
   } catch (err) {
     console.error(
       '[CalendarPage] Error loading upcoming concerts for calendar:',

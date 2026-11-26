@@ -1,3 +1,4 @@
+import { buildVenueProvenance } from '../adapter-helpers';
 import * as cheerio from 'cheerio';
 import type {
   CandidatePrice,
@@ -167,18 +168,11 @@ export function parseMishawakaEvents(
     const venueName = venueText || fallback?.name || 'Mishawaka Amphitheatre';
 
     const sourceEventId = extractSourceEventId(eventUrl, ticketUrl);
-    const provenance: SourceProvenance = {
-      sourceId: context.sourceId,
-      sourceType: 'venue',
-      acquisitionMethod: 'html_http',
+    const provenance: SourceProvenance = buildVenueProvenance(context, {
       sourceUrl: eventUrl,
       sourceEventId,
-      rawIngestId: context.rawIngestId,
-      fetchedAt: context.fetchedAt,
-      contentHash: context.contentHash,
-      parserVersion: context.parserVersion,
       confidence: 0.95,
-    };
+    });
 
     candidates.push({
       rawIngestId: context.rawIngestId,

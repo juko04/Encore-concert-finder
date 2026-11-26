@@ -6,15 +6,17 @@ import { searchCatalogPage } from '@/lib/location/catalog-search';
 import { getViewerTimeZone } from '@/lib/location/server';
 import { getAuthenticatedUser } from '@/lib/auth/session';
 import { SupabaseCatalogRepository } from '@/lib/repositories/catalog-repository';
-import { loadArtistAffinityResolver } from '@/lib/recommendation/artist-affinity-server';
-import { annotateEventsWithArtistAffinity } from '@/lib/recommendation/artist-affinity';
+import { annotateEventsForUser } from '@/lib/recommendation/artist-affinity-server';
 import { Header } from '@/components/index/Header';
 import { SearchClient } from '@/components/index/SearchClient';
 import type { CanonicalEventSummary } from '@/lib/domain/catalog';
-import type {
-  EventListFilters,
-  EventSortOption,
-} from '@/lib/repositories/interfaces';
+import type { EventListFilters } from '@/lib/repositories/interfaces';
+import {
+  isTruthyFlag,
+  isUuid,
+  parseEventSort,
+  parseIncludeUnknownPrice,
+} from '@/lib/discover/search-params';
 import type { IndexSortBy } from '@/components/index/types';
 import {
   getDiscoverDateWindows,
@@ -72,33 +74,15 @@ export default async function SearchPage({ searchParams }: SearchPageProps) {
   const maxPrice = resolvedParams.maxPrice
     ? Number(resolvedParams.maxPrice)
     : undefined;
-  const freeOnly =
-    resolvedParams.freeOnly === 'true' || resolvedParams.freeOnly === '1';
-  const includeUnknownPrice =
-    resolvedParams.includeUnknownPrice !== undefined
-      ? resolvedParams.includeUnknownPrice === 'true' ||
-        resolvedParams.includeUnknownPrice === '1'
-      : true;
+  const freeOnly = isTruthyFlag(resolvedParams.freeOnly);
+  const includeUnknownPrice = parseIncludeUnknownPrice(
+    resolvedParams.includeUnknownPrice,
+  );
+  const repoSortBy = parseEventSort(resolvedParams.sort);
 
-  const validSorts: EventSortOption[] = [
-    'price_asc',
-    'price_desc',
-    'date_asc',
-    'date_desc',
-    'title_asc',
-    'score_desc',
-  ];
-  const repoSortBy: EventSortOption =
-    resolvedParams.sort &&
-    validSorts.includes(resolvedParams.sort as EventSortOption)
-      ? (resolvedParams.sort as EventSortOption)
-      : 'date_asc';
-
-  const UUID_PATTERN =
-    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
   // Homepage chips use ?venue=<name>; the venue picker uses ?venueId=<uuid>.
   const venueParam = resolvedParams.venueId || resolvedParams.venue;
-  const isVenueUuid = venueParam ? UUID_PATTERN.test(venueParam) : false;
+  const isVenueUuid = venueParam ? isUuid(venueParam) : false;
 
   // Upcoming only: never show shows that already started, even when the URL
   // carries startDate=today (the "Tonight" chip). Malformed dates are ignored.
@@ -161,12 +145,12 @@ export default async function SearchPage({ searchParams }: SearchPageProps) {
       filters,
       nearActive ? nearCtx.scope : null,
     );
-    const affinity = await loadArtistAffinityResolver(
+    events = await annotateEventsForUser(
+      result.events,
       user?.id,
       supabase,
       catalogRepo,
     );
-    events = annotateEventsWithArtistAffinity(result.events, affinity);
     totalCount = result.totalCount;
   } catch (err) {
     console.error('[SearchPage] Error querying catalog events:', err);
